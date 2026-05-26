@@ -56,8 +56,8 @@ impl<const N: usize, T> RingBuffer<T> for StackRingBuffer<N, T> {
 
     fn push_back(&mut self, item: T) -> Option<T> {
         if self.length == N {
-            let old_value = unsafe { self.data[self.head].assume_init_read() };
-            self.data[self.head].write(item);
+            let old_slot = std::mem::replace(&mut self.data[self.head], MaybeUninit::new(item));
+            let old_value = unsafe { old_slot.assume_init() };
             self.head = (self.head + 1) % N;
             Some(old_value)
         } else {
@@ -74,7 +74,8 @@ impl<const N: usize, T> RingBuffer<T> for StackRingBuffer<N, T> {
         } else {
             // SAFETY: We have already checked that the buffer is not empty, so we know that there
             // is a valid
-            let item = unsafe { self.data[self.head].assume_init_read() };
+            let old_slot = std::mem::replace(&mut self.data[self.head], MaybeUninit::uninit());
+            let item = unsafe { old_slot.assume_init() };
             self.head = (self.head + 1) % N;
             self.length -= 1;
             Some(item)
