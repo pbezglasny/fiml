@@ -1,33 +1,39 @@
 use std::{collections::VecDeque, mem::MaybeUninit};
 
-pub(crate) trait RingBuffer<T> {
+pub trait RingBuffer {
+    /// Type of items stored in buffer
+    type Item;
     /// Return size of buffer
-    fn size(&self) -> usize;
+    fn capacity(&self) -> usize;
 
     /// Return number of items currently in buffer
     fn len(&self) -> usize;
 
     /// Push item to back of buffer. If buffer is full, the front item will be overwritten.
     /// Return previous head of buffer if it was overwritten, otherwise return None.
-    fn push_back(&mut self, item: T) -> Option<T>;
+    fn push_back(&mut self, item: Self::Item) -> Option<Self::Item>;
 
     /// Remove and return the front item of the buffer. If buffer is empty, return None.
-    fn pop_front(&mut self) -> Option<T>;
+    fn pop_front(&mut self) -> Option<Self::Item>;
     /// Return a reference to the front item of the buffer without removing it. If buffer is empty,
     /// return None.
-    fn peek_front(&self) -> Option<&T>;
+    fn peek_front(&self) -> Option<&Self::Item>;
     /// Return a reference to the back item of the buffer without removing it. If buffer is empty,
     /// return
-    fn peek_back(&self) -> Option<&T>;
+    fn peek_back(&self) -> Option<&Self::Item>;
 
     /// Return a reference to the item at the given index from the back of the buffer without
     /// removing
     /// Zero-based index, where 0 is the back item, 1 is the second to last item, and so on. If
     /// index
-    fn peek_back_at(&self, index: usize) -> Option<&T>;
+    fn peek_back_at(&self, index: usize) -> Option<&Self::Item>;
 }
 
-struct StackRingBuffer<const N: usize, T> {
+pub fn new_stack_ring_buffer<const N: usize, T>() -> StackRingBuffer<N, T> {
+    StackRingBuffer::new()
+}
+
+pub struct StackRingBuffer<const N: usize, T> {
     data: [MaybeUninit<T>; N],
     head: usize,
     length: usize,
@@ -44,8 +50,10 @@ impl<const N: usize, T> StackRingBuffer<N, T> {
     }
 }
 
-impl<const N: usize, T> RingBuffer<T> for StackRingBuffer<N, T> {
-    fn size(&self) -> usize {
+impl<const N: usize, T> RingBuffer for StackRingBuffer<N, T> {
+    type Item = T;
+
+    fn capacity(&self) -> usize {
         N
     }
 
@@ -118,7 +126,11 @@ impl<const N: usize, T> Drop for StackRingBuffer<N, T> {
     }
 }
 
-struct HeapRingBuffer<T> {
+pub fn new_heap_ring_buffer<T>(size: usize) -> HeapRingBuffer<T> {
+    HeapRingBuffer::new(size)
+}
+
+pub struct HeapRingBuffer<T> {
     data: VecDeque<T>,
     size: usize,
 }
@@ -133,9 +145,11 @@ impl<T> HeapRingBuffer<T> {
     }
 }
 
-impl<T> RingBuffer<T> for HeapRingBuffer<T> {
+impl<T> RingBuffer for HeapRingBuffer<T> {
+    type Item = T;
+
     #[inline]
-    fn size(&self) -> usize {
+    fn capacity(&self) -> usize {
         self.size
     }
 
@@ -145,7 +159,7 @@ impl<T> RingBuffer<T> for HeapRingBuffer<T> {
     }
 
     fn push_back(&mut self, item: T) -> Option<T> {
-        if self.len() == self.size() {
+        if self.len() == self.capacity() {
             let old_value = self.data.pop_front();
             self.data.push_back(item);
             old_value
@@ -187,7 +201,7 @@ mod tests {
         #[test]
         fn new_buffer_is_empty() {
             let buf: StackRingBuffer<4, i32> = StackRingBuffer::new();
-            assert_eq!(buf.size(), 4);
+            assert_eq!(buf.capacity(), 4);
             assert_eq!(buf.len(), 0);
             assert_eq!(buf.peek_front(), None);
             assert_eq!(buf.peek_back_at(0), None);
@@ -288,7 +302,7 @@ mod tests {
         #[test]
         fn new_buffer_is_empty() {
             let buf: HeapRingBuffer<i32> = HeapRingBuffer::new(4);
-            assert_eq!(buf.size(), 4);
+            assert_eq!(buf.capacity(), 4);
             assert_eq!(buf.len(), 0);
             assert_eq!(buf.peek_front(), None);
             assert_eq!(buf.peek_back(), None);
