@@ -42,3 +42,36 @@ macro_rules! impl_float {
 
 impl_float!(f32);
 impl_float!(f64);
+
+#[cfg(feature = "decimal")]
+mod decimal_impl {
+    use super::Float;
+    use rust_decimal::Decimal;
+
+    impl Float for Decimal {
+        #[inline]
+        fn zero() -> Self {
+            Decimal::ZERO
+        }
+        #[inline]
+        fn from_usize(value: usize) -> Self {
+            Decimal::from(value as u64)
+        }
+        #[inline]
+        fn add(self, other: Self) -> Self {
+            self + other
+        }
+        #[inline]
+        fn sub(self, other: Self) -> Self {
+            self - other
+        }
+        #[inline]
+        fn mul(self, other: Self) -> Self {
+            self * other
+        }
+        #[inline]
+        fn div(self, other: Self) -> Self {
+            self / other
+        }
+    }
+}
