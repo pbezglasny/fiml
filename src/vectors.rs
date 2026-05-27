@@ -41,7 +41,7 @@ where
     fn next_handler<'a>(&'a mut self) -> Handler<'a, F>;
 }
 
-struct ArrayFeatureVector<F: Float, const N: usize> {
+pub struct ArrayFeatureVector<F: Float, const N: usize> {
     data: [Cell<F>; N],
     next_idx: usize,
 }
