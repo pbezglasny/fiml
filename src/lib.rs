@@ -6,7 +6,9 @@ mod types;
 use std::{error::Error, fmt::Display};
 
 pub use indicators::averages::SimpleMovingAverage;
-pub use ring_buffer::{HeapRingBuffer, RingBuffer, StackRingBuffer};
+pub use ring_buffer::{
+    HeapRingBuffer, RingBuffer, StackRingBuffer, new_heap_ring_buffer, new_stack_ring_buffer,
+};
 pub use types::Float;
 
 pub type Result<T> = std::result::Result<T, FimlError>;
