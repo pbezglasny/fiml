@@ -9,6 +9,11 @@ pub trait RingBuffer {
     /// Return number of items currently in buffer
     fn len(&self) -> usize;
 
+    /// Return true if buffer is empty, false otherwise
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
     /// Push item to back of buffer. If buffer is full, the front item will be overwritten.
     /// Return previous head of buffer if it was overwritten, otherwise return None.
     fn push_back(&mut self, item: Self::Item) -> Option<Self::Item>;

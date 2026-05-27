@@ -1,7 +1,8 @@
 /// Generic trait for floating-point types (f32, f64).
 /// Implementations of this trait supposed to inline the operations for better performance.
 pub trait Float: Copy {
-    fn zero() -> Self;
+    const ZERO: Self;
+
     fn from_usize(value: usize) -> Self;
     fn add(self, other: Self) -> Self;
     fn sub(self, other: Self) -> Self;
@@ -12,10 +13,7 @@ pub trait Float: Copy {
 macro_rules! impl_float {
     ($t:ty) => {
         impl Float for $t {
-            #[inline]
-            fn zero() -> Self {
-                0.0
-            }
+            const ZERO: Self = 0.0;
             #[inline]
             fn from_usize(value: usize) -> Self {
                 value as $t
@@ -49,10 +47,8 @@ mod decimal_impl {
     use rust_decimal::Decimal;
 
     impl Float for Decimal {
-        #[inline]
-        fn zero() -> Self {
-            Decimal::ZERO
-        }
+        const ZERO: Self = Decimal::ZERO;
+
         #[inline]
         fn from_usize(value: usize) -> Self {
             Decimal::from(value as u64)

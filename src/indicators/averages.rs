@@ -4,17 +4,19 @@ use crate::Result;
 use crate::ring_buffer::{
     HeapRingBuffer, RingBuffer, StackRingBuffer, new_heap_ring_buffer, new_stack_ring_buffer,
 };
+use crate::vectors::Handler;
 use std::fmt::Display;
 use std::mem::MaybeUninit;
 
 /// Represents a single Simple Moving Average (SMA) window, which tracks the period
-pub struct SmaWindow<F: Float> {
+pub struct SmaWindow<'a, F: Float> {
     period: usize,
     sum: F,
     moving_avg: F,
+    handler: Option<Handler<'a, F>>,
 }
 
-impl<F> Display for SmaWindow<F>
+impl<F> Display for SmaWindow<'_, F>
 where
     F: Float + Display,
 {
@@ -33,17 +35,17 @@ where
 /// winndows is reached.
 /// You can add windows with different periods, but they must be added before any data is added to
 /// the SMA. Once data is added, you cannot add more windows.
-pub struct SimpleMovingAverage<R, T, const WINDOWS: usize>
+pub struct SimpleMovingAverage<'a, R, T, const WINDOWS: usize>
 where
     R: RingBuffer<Item = T>,
     T: Float,
 {
     data: R,
-    windows: [MaybeUninit<SmaWindow<T>>; WINDOWS],
+    windows: [MaybeUninit<SmaWindow<'a, T>>; WINDOWS],
     window_count: usize,
 }
 
-impl<R, T, const WINDOWS: usize> Display for SimpleMovingAverage<R, T, WINDOWS>
+impl<'a, R, T, const WINDOWS: usize> Display for SimpleMovingAverage<'a, R, T, WINDOWS>
 where
     R: RingBuffer<Item = T>,
     T: Float + Display,
@@ -58,12 +60,12 @@ where
     }
 }
 
-impl<R, T, const WINDOWS: usize> SimpleMovingAverage<R, T, WINDOWS>
+impl<'a, R, T, const WINDOWS: usize> SimpleMovingAverage<'a, R, T, WINDOWS>
 where
     R: RingBuffer<Item = T>,
     T: Float,
 {
-    fn new(data: R, windows: [MaybeUninit<SmaWindow<T>>; WINDOWS]) -> Self {
+    fn new(data: R, windows: [MaybeUninit<SmaWindow<'a, T>>; WINDOWS]) -> Self {
         Self {
             data,
             windows,
@@ -72,8 +74,8 @@ where
     }
 }
 
-impl<const PERIODS: usize, T, const WINDOWS: usize>
-    SimpleMovingAverage<StackRingBuffer<PERIODS, T>, T, WINDOWS>
+impl<'a, const PERIODS: usize, T, const WINDOWS: usize>
+    SimpleMovingAverage<'a, StackRingBuffer<PERIODS, T>, T, WINDOWS>
 where
     T: Float,
 {
@@ -84,7 +86,7 @@ where
     }
 }
 
-impl<T, const WINDOWS: usize> SimpleMovingAverage<HeapRingBuffer<T>, T, WINDOWS>
+impl<'a, T, const WINDOWS: usize> SimpleMovingAverage<'a, HeapRingBuffer<T>, T, WINDOWS>
 where
     T: Float,
 {
@@ -95,12 +97,12 @@ where
     }
 }
 
-impl<R, T, const WINDOWS: usize> SimpleMovingAverage<R, T, WINDOWS>
+impl<'a, R, T, const WINDOWS: usize> SimpleMovingAverage<'a, R, T, WINDOWS>
 where
     R: RingBuffer<Item = T>,
     T: Float,
 {
-    pub fn add_window(&mut self, period: usize) -> Result<()> {
+    fn add_window_inner(&mut self, period: usize, handler: Option<Handler<'a, T>>) -> Result<()> {
         if self.window_count >= WINDOWS {
             return Err(FimlError::InvalidArgument(
                 "Maximum number of windows reached".to_string(),
@@ -123,11 +125,24 @@ where
         }
         self.windows[self.window_count].write(SmaWindow {
             period,
-            sum: T::zero(),
-            moving_avg: T::zero(),
+            sum: T::ZERO,
+            moving_avg: T::ZERO,
+            handler,
         });
         self.window_count += 1;
         Ok(())
+    }
+
+    pub fn add_window(&mut self, period: usize) -> Result<()> {
+        self.add_window_inner(period, None)
+    }
+
+    pub fn add_window_with_handler(
+        &mut self,
+        period: usize,
+        handler: Handler<'a, T>,
+    ) -> Result<()> {
+        self.add_window_inner(period, Some(handler))
     }
 
     pub fn update(&mut self, value: T) {
@@ -145,13 +160,16 @@ where
             window.sum = window
                 .sum
                 .add(value)
-                .sub(prev_value.copied().unwrap_or(T::zero()));
+                .sub(prev_value.copied().unwrap_or(T::ZERO));
             let divisor = if self.data.capacity() < window.period {
                 T::from_usize(self.data.capacity())
             } else {
                 T::from_usize(window.period)
             };
             window.moving_avg = window.sum.div(divisor);
+            if let Some(handler) = &window.handler {
+                handler.set_value(window.moving_avg);
+            }
         }
     }
 
@@ -164,7 +182,7 @@ where
     }
 
     pub fn values(&self) -> [T; WINDOWS] {
-        let mut result = [T::zero(); WINDOWS];
+        let mut result = [T::ZERO; WINDOWS];
         for (i, item) in result.iter_mut().enumerate().take(self.window_count) {
             let window = unsafe { self.windows[i].assume_init_ref() };
             *item = window.moving_avg;
