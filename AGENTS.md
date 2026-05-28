@@ -7,6 +7,7 @@ This is a financial library for machine learning prediction. It is intended for 
 - minimal memory allocation
 - great performance
 - human readable code
+- minimal or none third-party dependencies
 
 ## Coding Style & Naming Conventions
 

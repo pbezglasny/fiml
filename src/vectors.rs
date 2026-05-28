@@ -5,7 +5,6 @@ use crate::Float;
 pub struct Handler<'a, F: Float> {
     cell: &'a Cell<F>,
     idx: usize,
-    name: Option<String>,
 }
 
 impl<'a, F: Float> Handler<'a, F> {
@@ -22,12 +21,9 @@ impl<F: Float + Display> Display for Handler<'_, F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "Handler{}(idx: {}, current val: {})",
+            "Handler(idx: {}, current val: {})",
             self.idx,
             self.cell.get(),
-            self.name
-                .as_ref()
-                .map_or_else(|| "".to_string(), |n| format!(" name: {}", n))
         )
     }
 }
@@ -55,6 +51,12 @@ impl<F: Float, const N: usize> ArrayFeatureVector<F, N> {
     }
 }
 
+impl<F: Float, const N: usize> Default for ArrayFeatureVector<F, N> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<F: Float, const N: usize> FeatureVector<F> for ArrayFeatureVector<F, N> {
     fn values(&self) -> &[F] {
         unsafe { std::slice::from_raw_parts(self.data.as_ptr().cast::<F>(), N) }
@@ -69,7 +71,6 @@ impl<F: Float, const N: usize> FeatureVector<F> for ArrayFeatureVector<F, N> {
         Handler {
             cell: &self.data[idx],
             idx,
-            name: None,
         }
     }
 }
