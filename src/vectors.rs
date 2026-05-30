@@ -1,3 +1,5 @@
+use crate::FimlError;
+use crate::Result;
 use std::{cell::Cell, fmt::Display};
 
 use crate::Float;
@@ -34,7 +36,7 @@ where
 {
     fn values(&self) -> &[F];
 
-    fn next_handler<'a>(&'a mut self) -> Handler<'a, F>;
+    fn next_handler<'a>(&'a mut self) -> Result<Handler<'a, F>>;
 }
 
 pub struct ArrayFeatureVector<F: Float, const N: usize> {
@@ -62,15 +64,15 @@ impl<F: Float, const N: usize> FeatureVector<F> for ArrayFeatureVector<F, N> {
         unsafe { std::slice::from_raw_parts(self.data.as_ptr().cast::<F>(), N) }
     }
 
-    fn next_handler<'a>(&'a mut self) -> Handler<'a, F> {
+    fn next_handler<'a>(&'a mut self) -> Result<Handler<'a, F>> {
         let idx = self.next_idx;
         if idx >= N {
-            panic!("Exceeded maximum number of handlers for this feature vector");
+            return Err(FimlError::FeatureVectorFull);
         }
         self.next_idx += 1;
-        Handler {
+        Ok(Handler {
             cell: &self.data[idx],
             idx,
-        }
+        })
     }
 }
