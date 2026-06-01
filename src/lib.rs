@@ -1,3 +1,4 @@
+pub mod features;
 #[allow(dead_code)]
 mod indicators;
 mod ring_buffer;
@@ -6,12 +7,13 @@ mod vectors;
 
 use std::{error::Error, fmt::Display};
 
+pub use features::{Event, EventKind, Feature, OrderBookUpdate, PriceUpdate, TimeUpdate};
 pub use indicators::averages::SimpleMovingAverage;
 pub use ring_buffer::{
     HeapRingBuffer, RingBuffer, StackRingBuffer, new_heap_ring_buffer, new_stack_ring_buffer,
 };
 pub use types::Float;
-pub use vectors::{ArrayFeatureVector, FeatureVector, Handler};
+pub use vectors::{ArrayFeatureVector, FeatureOutput, FeatureVector, Handler};
 
 pub type Result<T> = std::result::Result<T, FimlError>;
 
