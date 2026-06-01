@@ -39,6 +39,15 @@ where
     fn next_handler<'a>(&'a mut self) -> Result<Handler<'a, F>>;
 }
 
+pub trait FeatureOutput<F>: FeatureVector<F>
+where
+    F: Float,
+{
+    fn capacity(&self) -> usize;
+
+    fn set_value_at(&mut self, index: usize, value: F);
+}
+
 pub struct ArrayFeatureVector<F: Float, const N: usize> {
     data: [Cell<F>; N],
     next_idx: usize,
@@ -74,5 +83,15 @@ impl<F: Float, const N: usize> FeatureVector<F> for ArrayFeatureVector<F, N> {
             cell: &self.data[idx],
             idx,
         })
+    }
+}
+
+impl<F: Float, const N: usize> FeatureOutput<F> for ArrayFeatureVector<F, N> {
+    fn capacity(&self) -> usize {
+        N
+    }
+
+    fn set_value_at(&mut self, index: usize, value: F) {
+        self.data[index].set(value);
     }
 }

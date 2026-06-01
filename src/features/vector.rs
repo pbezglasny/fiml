@@ -1,0 +1,284 @@
+use std::marker::PhantomData;
+use std::mem::MaybeUninit;
+
+use crate::features::builtin::{BuiltinFeature, DayOfWeek, MAX_WINDOWS_PER_SMA};
+use crate::features::event::{EVENT_KIND_COUNT, Event};
+use crate::features::feature::Feature;
+use crate::features::spec::BuiltinSpec;
+use crate::vectors::FeatureOutput;
+use crate::{FimlError, Float, HeapRingBuffer, Result, SimpleMovingAverage};
+
+/// Self-contained feature vector: owns the output `cells` and the `features`
+/// that write into them, and routes each incoming [`Event`] to only the
+/// features that subscribe to its kind.
+///
+/// The cell storage is any [`FeatureOutput`] implementation `V`, so the cell
+/// count can be fixed at compile time (`ArrayFeatureVector`) or chosen at
+/// runtime by a heap-backed implementation
+/// Features are stored grouped by [`EventKind`](crate::features::EventKind):
+/// `groups[k]` is the `(start, len)` slice of `features` subscribing to kind
+/// `k`, so [`dispatch`](Self::dispatch) iterates only the relevant group.
+///
+/// Features store output cell indexes, not references into the cell storage.
+/// During dispatch, the feature receives mutable access to the output storage and
+/// writes by index. This keeps the aggregate movable without self-references.
+///
+/// - `V` — cell storage, any [`FeatureOutput<F>`].
+/// - `M` — capacity of the feature array.
+pub struct IndicatorFeatureVector<F, V, I, const M: usize>
+where
+    F: Float,
+    V: FeatureOutput<F>,
+    I: Feature<F>,
+{
+    cells: V,
+    features: [MaybeUninit<I>; M],
+    feature_count: usize,
+    groups: [(usize, usize); EVENT_KIND_COUNT],
+    names: Box<[Option<String>]>,
+    _marker: PhantomData<F>,
+}
+
+impl<F, V, I, const M: usize> IndicatorFeatureVector<F, V, I, M>
+where
+    F: Float,
+    V: FeatureOutput<F>,
+    I: Feature<F>,
+{
+    /// Route an event to the features subscribing to its kind, writing fresh
+    /// values into their cells. Features of other kinds are not touched.
+    pub fn dispatch(&mut self, event: &Event<F>) {
+        let (start, len) = self.groups[event.kind() as usize];
+        // SAFETY: every slot in `features[..feature_count]` is initialized, and
+        // each group is a sub-range of that, so this slice is initialized.
+        let features = &mut self.features[start..start + len];
+        let cells = &mut self.cells;
+        for slot in features {
+            let feature = unsafe { slot.assume_init_mut() };
+            feature.update(event, cells);
+        }
+    }
+
+    /// Current value of every cell, in cell-index order. Ready to hand to an ML
+    /// model with no copying.
+    pub fn values(&self) -> &[F] {
+        self.cells.values()
+    }
+
+    /// Cell index a named feature writes to, or `None` if no such name.
+    pub fn index_of(&self, name: &str) -> Option<usize> {
+        self.names.iter().position(|n| n.as_deref() == Some(name))
+    }
+}
+
+impl<F, V, I, const M: usize> Drop for IndicatorFeatureVector<F, V, I, M>
+where
+    F: Float,
+    V: FeatureOutput<F>,
+    I: Feature<F>,
+{
+    fn drop(&mut self) {
+        // SAFETY: the first `feature_count` entries are initialized (groups
+        // partition `0..feature_count` with no gaps).
+        for slot in &mut self.features[..self.feature_count] {
+            unsafe { slot.assume_init_drop() };
+        }
+    }
+}
+
+impl<F, V, const M: usize> IndicatorFeatureVector<F, V, BuiltinFeature<F>, M>
+where
+    F: Float + 'static,
+    V: FeatureOutput<F>,
+{
+    /// Build a feature vector from library builtins, one feature per spec
+    /// (per-spec construction: each SMA gets its own ring buffer).
+    ///
+    /// `cells` is the output storage; it is taken by value so the caller can
+    /// size it however it likes (compile-time or runtime). `specs` pairs each
+    /// output's name with its [`BuiltinSpec`]; the name is recorded against the
+    /// cell the feature writes to (cells are assigned in spec order), so
+    /// [`index_of`] and [`values`] keep the caller's order, while the features
+    /// themselves are stored grouped by event kind for routing.
+    ///
+    /// [`index_of`]: Self::index_of
+    /// [`values`]: Self::values
+    pub fn from_builtin_specs(cells: V, specs: &[(&str, BuiltinSpec)]) -> Result<Self> {
+        let cell_count = cells.capacity();
+        if specs.len() > M || specs.len() > cell_count {
+            return Err(FimlError::InvalidArgument(format!(
+                "too many features: {} (cells: {cell_count}, capacity: {M})",
+                specs.len()
+            )));
+        }
+        validate_builtin_specs(specs)?;
+
+        // Count features per kind, then turn the counts into contiguous
+        // `(start, len)` group ranges via a running offset.
+        let mut groups = [(0usize, 0usize); EVENT_KIND_COUNT];
+        for (_, spec) in specs {
+            groups[spec.event_kind() as usize].1 += 1;
+        }
+        let mut offset = 0;
+        for group in groups.iter_mut() {
+            group.0 = offset;
+            offset += group.1;
+        }
+
+        let mut features = [const { MaybeUninit::uninit() }; M];
+        let mut names = vec![None; cell_count].into_boxed_slice();
+        // Next free slot within each kind's group.
+        let mut next = groups.map(|(start, _)| start);
+        let mut feature_count = 0;
+
+        for (output_index, (name, spec)) in specs.iter().enumerate() {
+            let feature = build_builtin(spec, output_index);
+            let kind = spec.event_kind() as usize;
+            let pos = next[kind];
+            next[kind] += 1;
+
+            features[pos].write(feature);
+            names[output_index] = Some((*name).to_string());
+            feature_count += 1;
+        }
+
+        Ok(Self {
+            cells,
+            features,
+            feature_count,
+            groups,
+            names,
+            _marker: PhantomData,
+        })
+    }
+}
+
+fn validate_builtin_specs(specs: &[(&str, BuiltinSpec)]) -> Result<()> {
+    for (_, spec) in specs {
+        if let BuiltinSpec::Sma { period, .. } = spec
+            && *period < 1
+        {
+            return Err(FimlError::InvalidArgument(
+                "SMA period must be at least 1".to_string(),
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Construct a single builtin feature wired to an output cell index.
+fn build_builtin<F: Float + 'static>(spec: &BuiltinSpec, output_index: usize) -> BuiltinFeature<F> {
+    match spec {
+        BuiltinSpec::Sma { period, .. } => {
+            let mut sma =
+                SimpleMovingAverage::<HeapRingBuffer<F>, F, MAX_WINDOWS_PER_SMA>::new_heap(*period);
+            sma.add_window(*period)
+                .expect("validated SMA period should fit its ring buffer");
+            BuiltinFeature::Sma { sma, output_index }
+        }
+        BuiltinSpec::DayOfWeek => BuiltinFeature::DayOfWeek(DayOfWeek::new(output_index)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ArrayFeatureVector;
+
+    type Fv<const N: usize, const M: usize> =
+        IndicatorFeatureVector<f64, ArrayFeatureVector<f64, N>, BuiltinFeature<f64>, M>;
+
+    fn approx_eq(a: f64, b: f64) -> bool {
+        (a - b).abs() < 1e-9
+    }
+
+    fn sma(period: usize) -> BuiltinSpec {
+        BuiltinSpec::Sma { period }
+    }
+
+    #[test]
+    fn values_match_per_window_averages() {
+        let specs = [("sma_2_sec", sma(2)), ("sma_5_sec", sma(5))];
+        let mut fv: Fv<2, 2> =
+            IndicatorFeatureVector::from_builtin_specs(ArrayFeatureVector::new(), &specs).unwrap();
+
+        for v in [1.0, 2.0, 3.0, 4.0, 5.0] {
+            fv.dispatch(&Event::price(v, 0));
+        }
+
+        // sma_2: mean(4,5) = 4.5 ; sma_5: mean(1..5) = 3.0
+        assert!(approx_eq(fv.values()[0], 4.5));
+        assert!(approx_eq(fv.values()[1], 3.0));
+    }
+
+    #[test]
+    fn index_of_keeps_caller_order() {
+        let specs = [("sma_5_sec", sma(5)), ("sma_10_sec", sma(10))];
+        let fv: Fv<2, 2> =
+            IndicatorFeatureVector::from_builtin_specs(ArrayFeatureVector::new(), &specs).unwrap();
+
+        assert_eq!(fv.index_of("sma_5_sec"), Some(0));
+        assert_eq!(fv.index_of("sma_10_sec"), Some(1));
+        assert_eq!(fv.index_of("missing"), None);
+    }
+
+    #[test]
+    fn routes_each_event_to_its_own_group() {
+        // Interleave kinds so grouping has to reorder the stored features while
+        // keeping cell order (sma_3 -> cell 0, day_of_week -> cell 1).
+        let specs = [
+            ("sma_3_sec", sma(3)),
+            ("day_of_week", BuiltinSpec::DayOfWeek),
+        ];
+        let mut fv: Fv<2, 2> =
+            IndicatorFeatureVector::from_builtin_specs(ArrayFeatureVector::new(), &specs).unwrap();
+
+        // Price events touch only the SMA; the calendar cell stays zero.
+        for v in [3.0, 6.0, 9.0] {
+            fv.dispatch(&Event::price(v, 0));
+        }
+        assert!(approx_eq(fv.values()[0], 6.0)); // mean(3,6,9)
+        assert!(approx_eq(fv.values()[1], 0.0)); // untouched
+
+        // A time event touches only the calendar feature; the SMA is unchanged.
+        fv.dispatch(&Event::time(1_609_459_200)); // 2021-01-01, a Friday
+        assert!(approx_eq(fv.values()[0], 6.0)); // unchanged
+        assert!(approx_eq(fv.values()[1], 5.0)); // Friday
+
+        // An event kind with no subscribers is a no-op.
+        fv.dispatch(&Event::order_book(1.0, 2.0, 0));
+        assert!(approx_eq(fv.values()[0], 6.0));
+        assert!(approx_eq(fv.values()[1], 5.0));
+    }
+
+    #[test]
+    fn survives_being_moved_after_construction() {
+        let specs = [("sma_2_sec", sma(2))];
+        let fv: Fv<1, 1> =
+            IndicatorFeatureVector::from_builtin_specs(ArrayFeatureVector::new(), &specs).unwrap();
+
+        // Move the vector through a binding: features write by output index, so
+        // moving the aggregate cannot invalidate borrowed cell references.
+        let mut moved = fv;
+        for v in [10.0, 20.0] {
+            moved.dispatch(&Event::price(v, 0));
+        }
+        assert!(approx_eq(moved.values()[0], 15.0));
+    }
+
+    #[test]
+    fn rejects_more_features_than_capacity() {
+        let specs = [("sma_2_sec", sma(2)), ("sma_3_sec", sma(3))];
+        let built: Result<Fv<1, 1>> =
+            IndicatorFeatureVector::from_builtin_specs(ArrayFeatureVector::new(), &specs);
+        assert!(built.is_err());
+    }
+
+    #[test]
+    fn rejects_zero_sma_period_without_panicking() {
+        let specs = [("sma_0_sec", sma(0))];
+        let built: Result<Fv<1, 1>> =
+            IndicatorFeatureVector::from_builtin_specs(ArrayFeatureVector::new(), &specs);
+        assert!(built.is_err());
+    }
+}
