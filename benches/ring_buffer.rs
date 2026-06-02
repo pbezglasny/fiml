@@ -97,49 +97,5 @@ fn bench_push_back_fill(c: &mut Criterion) {
     group.finish();
 }
 
-fn bench_peek_back_at(c: &mut Criterion) {
-    let mut group = c.benchmark_group("peek_back_at");
-
-    macro_rules! stack_case {
-        ($cap:literal) => {{
-            let mut buf = new_stack_ring_buffer::<$cap, f64>();
-            // Wrap once so head != 0, exercising modular arithmetic.
-            for i in 0..($cap + $cap / 2) {
-                buf.push_back(i as f64);
-            }
-            group.bench_function(BenchmarkId::new("stack_back", $cap), |b| {
-                b.iter(|| black_box(buf.peek_back_at(black_box(0))));
-            });
-            group.bench_function(BenchmarkId::new("stack_mid", $cap), |b| {
-                b.iter(|| black_box(buf.peek_back_at(black_box($cap / 2))));
-            });
-        }};
-    }
-
-    stack_case!(8);
-    stack_case!(64);
-    stack_case!(1024);
-
-    for &cap in &[8usize, 64, 1024] {
-        let mut buf: HeapRingBuffer<f64> = new_heap_ring_buffer(cap);
-        for i in 0..(cap + cap / 2) {
-            buf.push_back(i as f64);
-        }
-        group.bench_function(BenchmarkId::new("heap_back", cap), |b| {
-            b.iter(|| black_box(buf.peek_back_at(black_box(0))));
-        });
-        group.bench_function(BenchmarkId::new("heap_mid", cap), |b| {
-            b.iter(|| black_box(buf.peek_back_at(black_box(cap / 2))));
-        });
-    }
-
-    group.finish();
-}
-
-criterion_group!(
-    benches,
-    bench_push_back_steady,
-    bench_push_back_fill,
-    bench_peek_back_at
-);
+criterion_group!(benches, bench_push_back_steady, bench_push_back_fill);
 criterion_main!(benches);
