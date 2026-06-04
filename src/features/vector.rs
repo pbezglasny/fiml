@@ -2,7 +2,7 @@ use std::marker::PhantomData;
 use std::mem::MaybeUninit;
 
 use crate::features::builtin::{BuiltinFeature, DayOfWeek, MAX_WINDOWS_PER_SMA};
-use crate::features::event::{EVENT_KIND_COUNT, Event};
+use crate::features::event::{EVENT_KIND_COUNT, Event, EventKind};
 use crate::features::feature::Feature;
 use crate::features::spec::BuiltinSpec;
 use crate::vectors::FeatureOutput;
@@ -25,6 +25,11 @@ use crate::{FimlError, Float, HeapRingBuffer, Result, SimpleMovingAverage};
 ///
 /// - `V` — cell storage, any [`FeatureOutput<F>`].
 /// - `M` — capacity of the feature array.
+pub(crate) struct BuiltinFeatureEntry<F: Float + 'static> {
+    pub(crate) feature: BuiltinFeature<F>,
+    pub(crate) kind: EventKind,
+}
+
 pub struct IndicatorFeatureVector<F, V, I, const M: usize>
 where
     F: Float,
@@ -113,11 +118,40 @@ where
         }
         validate_builtin_specs(specs)?;
 
+        let mut entries = [const { MaybeUninit::uninit() }; M];
+        let mut names = vec![None; cell_count].into_boxed_slice();
+
+        for (output_index, (name, spec)) in specs.iter().enumerate() {
+            entries[output_index].write(BuiltinFeatureEntry {
+                feature: build_builtin(spec, output_index),
+                kind: spec.event_kind(),
+            });
+            names[output_index] = Some((*name).to_string());
+        }
+
+        Ok(Self::from_builtin_entries(
+            cells,
+            entries,
+            specs.len(),
+            names,
+        ))
+    }
+
+    pub(crate) fn from_builtin_entries(
+        cells: V,
+        entries: [MaybeUninit<BuiltinFeatureEntry<F>>; M],
+        feature_count: usize,
+        names: Box<[Option<String>]>,
+    ) -> Self {
+        debug_assert!(feature_count <= M);
+        debug_assert!(names.len() <= cells.capacity());
+
         // Count features per kind, then turn the counts into contiguous
         // `(start, len)` group ranges via a running offset.
         let mut groups = [(0usize, 0usize); EVENT_KIND_COUNT];
-        for (_, spec) in specs {
-            groups[spec.event_kind() as usize].1 += 1;
+        for slot in entries.iter().take(feature_count) {
+            let entry = unsafe { slot.assume_init_ref() };
+            groups[entry.kind as usize].1 += 1;
         }
         let mut offset = 0;
         for group in groups.iter_mut() {
@@ -126,30 +160,24 @@ where
         }
 
         let mut features = [const { MaybeUninit::uninit() }; M];
-        let mut names = vec![None; cell_count].into_boxed_slice();
-        // Next free slot within each kind's group.
         let mut next = groups.map(|(start, _)| start);
-        let mut feature_count = 0;
 
-        for (output_index, (name, spec)) in specs.iter().enumerate() {
-            let feature = build_builtin(spec, output_index);
-            let kind = spec.event_kind() as usize;
+        for slot in entries.into_iter().take(feature_count) {
+            let entry = unsafe { slot.assume_init() };
+            let kind = entry.kind as usize;
             let pos = next[kind];
             next[kind] += 1;
-
-            features[pos].write(feature);
-            names[output_index] = Some((*name).to_string());
-            feature_count += 1;
+            features[pos].write(entry.feature);
         }
 
-        Ok(Self {
+        Self {
             cells,
             features,
             feature_count,
             groups,
             names,
             _marker: PhantomData,
-        })
+        }
     }
 }
 
@@ -174,7 +202,13 @@ fn build_builtin<F: Float + 'static>(spec: &BuiltinSpec, output_index: usize) ->
                 SimpleMovingAverage::<HeapRingBuffer<F>, F, MAX_WINDOWS_PER_SMA>::new_heap(*period);
             sma.add_window(*period)
                 .expect("validated SMA period should fit its ring buffer");
-            BuiltinFeature::Sma { sma, output_index }
+            let mut output_indexes = [0; MAX_WINDOWS_PER_SMA];
+            output_indexes[0] = output_index;
+            BuiltinFeature::Sma {
+                sma,
+                output_indexes,
+                output_count: 1,
+            }
         }
         BuiltinSpec::DayOfWeek => BuiltinFeature::DayOfWeek(DayOfWeek::new(output_index)),
     }

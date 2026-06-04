@@ -7,7 +7,10 @@ mod vectors;
 
 use std::{error::Error, fmt::Display};
 
-pub use features::{Event, EventKind, Feature, OrderBookUpdate, PriceUpdate, TimeUpdate};
+pub use features::{
+    Event, EventKind, Feature, IndicatorFeatureVector, IndicatorFeatureVectorBuilder,
+    OrderBookUpdate, PriceUpdate, TimeUpdate,
+};
 pub use indicators::averages::SimpleMovingAverage;
 pub use ring_buffer::{
     HeapRingBuffer, RingBuffer, StackRingBuffer, new_heap_ring_buffer, new_stack_ring_buffer,

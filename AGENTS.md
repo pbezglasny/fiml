@@ -22,3 +22,4 @@ This is a financial library for machine learning prediction. It is intended for 
 - ask for clarifications if requirements are ambiguous.
 - Apply clippy suggestions.
 - Do not suggest skipping or disabling CI checks
+- After adding new indicators, you need to update feature vector builder
