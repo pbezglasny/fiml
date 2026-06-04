@@ -35,7 +35,8 @@ impl DayOfWeek {
 pub enum BuiltinFeature<F: Float + 'static> {
     Sma {
         sma: SimpleMovingAverage<'static, HeapRingBuffer<F>, F, MAX_WINDOWS_PER_SMA>,
-        output_index: usize,
+        output_indexes: [usize; MAX_WINDOWS_PER_SMA],
+        output_count: usize,
     },
     DayOfWeek(DayOfWeek),
 }
@@ -43,11 +44,19 @@ pub enum BuiltinFeature<F: Float + 'static> {
 impl<F: Float + 'static> Feature<F> for BuiltinFeature<F> {
     fn update<O: FeatureOutput<F>>(&mut self, event: &Event<F>, output: &mut O) {
         match self {
-            BuiltinFeature::Sma { sma, output_index } => {
+            BuiltinFeature::Sma {
+                sma,
+                output_indexes,
+                output_count,
+            } => {
                 if let Event::Price(p) = event {
                     sma.update(p.value);
-                    if let Some(value) = sma.value_at(0) {
-                        output.set_value_at(*output_index, value);
+                    for (window_index, output_index) in
+                        output_indexes.iter().enumerate().take(*output_count)
+                    {
+                        if let Some(value) = sma.value_at(window_index) {
+                            output.set_value_at(*output_index, value);
+                        }
                     }
                 }
             }
@@ -75,10 +84,13 @@ mod tests {
         let mut sma: SimpleMovingAverage<HeapRingBuffer<f64>, f64, MAX_WINDOWS_PER_SMA> =
             SimpleMovingAverage::new_heap(3);
         sma.add_window(3).unwrap();
+        let mut output_indexes = [0; MAX_WINDOWS_PER_SMA];
+        output_indexes[0] = 0;
 
         let mut feat = BuiltinFeature::Sma {
             sma,
-            output_index: 0,
+            output_indexes,
+            output_count: 1,
         };
         for v in [3.0, 6.0, 9.0] {
             feat.update(&Event::price(v, 0), &mut fv);
