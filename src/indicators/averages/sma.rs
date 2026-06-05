@@ -1,12 +1,11 @@
-use crate::FimlError;
-use crate::Float;
-use crate::Result;
-use crate::ring_buffer::{
-    HeapRingBuffer, RingBuffer, StackRingBuffer, new_heap_ring_buffer, new_stack_ring_buffer,
-};
 use std::fmt::Display;
 use std::mem::MaybeUninit;
 use std::time::Duration;
+
+use crate::ring_buffer::{
+    HeapRingBuffer, RingBuffer, StackRingBuffer, new_heap_ring_buffer, new_stack_ring_buffer,
+};
+use crate::{FimlError, Float, Result};
 
 /// Represents a single Simple Moving Average (SMA) window, which tracks the period
 pub struct SmaWindow<F: Float> {
@@ -364,9 +363,7 @@ where
                 }
                 Self::update_moving_avg(window);
             }
-        }
-        // New aggregation bucket.
-        else {
+        } else {
             self.last_sum = Some(value);
             self.last_cnt = 1;
             let len_before = self.data.len();
