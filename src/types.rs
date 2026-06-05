@@ -2,6 +2,7 @@
 /// Implementations of this trait supposed to inline the operations for better performance.
 pub trait Float: Copy {
     const ZERO: Self;
+    const ONE: Self;
 
     fn from_usize(value: usize) -> Self;
     fn add(self, other: Self) -> Self;
@@ -14,6 +15,7 @@ macro_rules! impl_float {
     ($t:ty) => {
         impl Float for $t {
             const ZERO: Self = 0.0;
+            const ONE: Self = 1.0;
             #[inline]
             fn from_usize(value: usize) -> Self {
                 value as $t
@@ -48,6 +50,7 @@ mod decimal_impl {
 
     impl Float for Decimal {
         const ZERO: Self = Decimal::ZERO;
+        const ONE: Self = Decimal::ONE;
 
         #[inline]
         fn from_usize(value: usize) -> Self {

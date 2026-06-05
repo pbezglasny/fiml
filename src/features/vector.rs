@@ -5,8 +5,9 @@ use crate::features::builtin::{BuiltinFeature, DayOfWeek, MAX_WINDOWS_PER_SMA};
 use crate::features::event::{EVENT_KIND_COUNT, Event, EventKind};
 use crate::features::feature::Feature;
 use crate::features::spec::BuiltinSpec;
+use crate::indicators::{SimpleMovingAverage, SimpleMovingAverageTimed};
 use crate::vectors::FeatureOutput;
-use crate::{FimlError, Float, HeapRingBuffer, Result, SimpleMovingAverage};
+use crate::{FimlError, Float, HeapRingBuffer, Result};
 
 /// Self-contained feature vector: owns the output `cells` and the `features`
 /// that write into them, and routes each incoming [`Event`] to only the
@@ -123,7 +124,7 @@ where
 
         for (output_index, (name, spec)) in specs.iter().enumerate() {
             entries[output_index].write(BuiltinFeatureEntry {
-                feature: build_builtin(spec, output_index),
+                feature: build_builtin(spec, output_index)?,
                 kind: spec.event_kind(),
             });
             names[output_index] = Some((*name).to_string());
@@ -183,19 +184,61 @@ where
 
 fn validate_builtin_specs(specs: &[(&str, BuiltinSpec)]) -> Result<()> {
     for (_, spec) in specs {
-        if let BuiltinSpec::Sma { period, .. } = spec
-            && *period < 1
-        {
-            return Err(FimlError::InvalidArgument(
-                "SMA period must be at least 1".to_string(),
-            ));
+        match spec {
+            BuiltinSpec::Sma { period, .. } if *period < 1 => {
+                return Err(FimlError::InvalidArgument(
+                    "SMA period must be at least 1".to_string(),
+                ));
+            }
+            BuiltinSpec::SmaTimed {
+                aggregation,
+                window,
+            } => {
+                validate_sma_timed_durations(*aggregation, *window)?;
+            }
+            _ => {}
         }
     }
     Ok(())
 }
 
+fn sma_timed_periods(
+    aggregation: std::time::Duration,
+    window: std::time::Duration,
+) -> Result<usize> {
+    validate_sma_timed_durations(aggregation, window)?;
+    Ok((window.as_millis() / aggregation.as_millis()) as usize)
+}
+
+fn validate_sma_timed_durations(
+    aggregation: std::time::Duration,
+    window: std::time::Duration,
+) -> Result<()> {
+    let aggregation_millis = aggregation.as_millis();
+    let window_millis = window.as_millis();
+    if aggregation_millis == 0 {
+        return Err(FimlError::InvalidArgument(
+            "SMA timed aggregation must be at least 1 millisecond".to_string(),
+        ));
+    }
+    if window_millis < aggregation_millis {
+        return Err(FimlError::InvalidArgument(
+            "SMA timed window cannot be less than aggregation".to_string(),
+        ));
+    }
+    if !window_millis.is_multiple_of(aggregation_millis) {
+        return Err(FimlError::InvalidArgument(
+            "SMA timed window must be a multiple of aggregation".to_string(),
+        ));
+    }
+    Ok(())
+}
+
 /// Construct a single builtin feature wired to an output cell index.
-fn build_builtin<F: Float + 'static>(spec: &BuiltinSpec, output_index: usize) -> BuiltinFeature<F> {
+fn build_builtin<F: Float + 'static>(
+    spec: &BuiltinSpec,
+    output_index: usize,
+) -> Result<BuiltinFeature<F>> {
     match spec {
         BuiltinSpec::Sma { period, .. } => {
             let mut sma =
@@ -204,13 +247,36 @@ fn build_builtin<F: Float + 'static>(spec: &BuiltinSpec, output_index: usize) ->
                 .expect("validated SMA period should fit its ring buffer");
             let mut output_indexes = [0; MAX_WINDOWS_PER_SMA];
             output_indexes[0] = output_index;
-            BuiltinFeature::Sma {
+            Ok(BuiltinFeature::Sma {
                 sma,
                 output_indexes,
                 output_count: 1,
-            }
+            })
         }
-        BuiltinSpec::DayOfWeek => BuiltinFeature::DayOfWeek(DayOfWeek::new(output_index)),
+        BuiltinSpec::SmaTimed {
+            aggregation,
+            window,
+        } => {
+            let period = sma_timed_periods(*aggregation, *window)?;
+            let capacity = period.checked_add(1).ok_or_else(|| {
+                FimlError::InvalidArgument("SMA timed period is too large".to_string())
+            })?;
+            let mut sma = SimpleMovingAverageTimed::<
+                HeapRingBuffer<(i64, F)>,
+                F,
+                MAX_WINDOWS_PER_SMA,
+            >::new_heap(*aggregation, capacity)?;
+            sma.add_window_with_periods(period)
+                .expect("validated SMA timed period should fit its ring buffer");
+            let mut output_indexes = [0; MAX_WINDOWS_PER_SMA];
+            output_indexes[0] = output_index;
+            Ok(BuiltinFeature::SmaTimed {
+                sma,
+                output_indexes,
+                output_count: 1,
+            })
+        }
+        BuiltinSpec::DayOfWeek => Ok(BuiltinFeature::DayOfWeek(DayOfWeek::new(output_index))),
     }
 }
 
@@ -230,6 +296,13 @@ mod tests {
         BuiltinSpec::Sma { period }
     }
 
+    fn sma_timed(aggregation_millis: u64, window_millis: u64) -> BuiltinSpec {
+        BuiltinSpec::SmaTimed {
+            aggregation: std::time::Duration::from_millis(aggregation_millis),
+            window: std::time::Duration::from_millis(window_millis),
+        }
+    }
+
     #[test]
     fn values_match_per_window_averages() {
         let specs = [("sma_2_sec", sma(2)), ("sma_5_sec", sma(5))];
@@ -243,6 +316,26 @@ mod tests {
         // sma_2: mean(4,5) = 4.5 ; sma_5: mean(1..5) = 3.0
         assert!(approx_eq(fv.values()[0], 4.5));
         assert!(approx_eq(fv.values()[1], 3.0));
+    }
+
+    #[test]
+    fn values_match_timed_window_average() {
+        let specs = [("sma_timed_2_sec", sma_timed(1_000, 2_000))];
+        let mut fv: Fv<1, 1> =
+            IndicatorFeatureVector::from_builtin_specs(ArrayFeatureVector::new(), &specs).unwrap();
+
+        for (value, timestamp) in [
+            (10.0, 0),
+            (20.0, 1_000),
+            (30.0, 2_000),
+            (40.0, 2_500),
+            (50.0, 3_000),
+        ] {
+            fv.dispatch(&Event::price(value, timestamp));
+        }
+
+        assert!(approx_eq(fv.values()[0], 42.5));
+        assert_eq!(fv.index_of("sma_timed_2_sec"), Some(0));
     }
 
     #[test]
@@ -314,5 +407,23 @@ mod tests {
         let built: Result<Fv<1, 1>> =
             IndicatorFeatureVector::from_builtin_specs(ArrayFeatureVector::new(), &specs);
         assert!(built.is_err());
+    }
+
+    #[test]
+    fn rejects_invalid_sma_timed_spec_without_panicking() {
+        let zero_aggregation = [("sma_timed_zero", sma_timed(0, 1_000))];
+        let non_multiple_window = [("sma_timed_non_multiple", sma_timed(1_000, 1_500))];
+
+        let built_zero: Result<Fv<1, 1>> = IndicatorFeatureVector::from_builtin_specs(
+            ArrayFeatureVector::new(),
+            &zero_aggregation,
+        );
+        let built_non_multiple: Result<Fv<1, 1>> = IndicatorFeatureVector::from_builtin_specs(
+            ArrayFeatureVector::new(),
+            &non_multiple_window,
+        );
+
+        assert!(built_zero.is_err());
+        assert!(built_non_multiple.is_err());
     }
 }
