@@ -2,6 +2,7 @@ pub mod features;
 #[allow(dead_code)]
 pub mod indicators;
 mod ring_buffer;
+pub mod ticker;
 mod types;
 mod vectors;
 
@@ -14,6 +15,7 @@ pub use features::{
 pub use ring_buffer::{
     HeapRingBuffer, RingBuffer, StackRingBuffer, new_heap_ring_buffer, new_stack_ring_buffer,
 };
+pub use ticker::Ticker;
 pub use types::Float;
 pub use vectors::{ArrayFeatureVector, FeatureOutput, FeatureVector};
 

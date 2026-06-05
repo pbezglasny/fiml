@@ -1,4 +1,5 @@
 use crate::Float;
+use crate::Ticker;
 
 /// Number of [`EventKind`] variants. Used to size the per-kind feature groups in
 /// [`IndicatorFeatureVector`](crate::features::IndicatorFeatureVector).
@@ -16,12 +17,14 @@ pub enum EventKind {
 
 /// A price tick.
 pub struct PriceUpdate<F: Float> {
+    pub ticker: Ticker,
     pub value: F,
     pub timestamp: i64,
 }
 
 /// An order-book change.
 pub struct OrderBookUpdate<F: Float> {
+    pub ticker: Ticker,
     pub bid: F,
     pub ask: F,
     pub timestamp: i64,
@@ -52,12 +55,17 @@ impl<F: Float> Event<F> {
         }
     }
 
-    pub fn price(value: F, timestamp: i64) -> Self {
-        Event::Price(PriceUpdate { value, timestamp })
+    pub fn price(ticker: Ticker, value: F, timestamp: i64) -> Self {
+        Event::Price(PriceUpdate {
+            ticker,
+            value,
+            timestamp,
+        })
     }
 
-    pub fn order_book(bid: F, ask: F, timestamp: i64) -> Self {
+    pub fn order_book(ticker: Ticker, bid: F, ask: F, timestamp: i64) -> Self {
         Event::OrderBook(OrderBookUpdate {
+            ticker,
             bid,
             ask,
             timestamp,

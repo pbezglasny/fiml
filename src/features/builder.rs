@@ -4,13 +4,14 @@ use std::time::Duration;
 
 use crate::features::builtin::{BuiltinFeature, DayOfWeek, MAX_WINDOWS_PER_SMA};
 use crate::features::event::EventKind;
-use crate::features::vector::{BuiltinFeatureEntry, IndicatorFeatureVector};
+use crate::features::vector::{BuiltinFeatureEntry, FeatureKey, IndicatorFeatureVector};
 use crate::indicators::{SimpleMovingAverage, SimpleMovingAverageTimed};
 use crate::vectors::FeatureOutput;
-use crate::{FimlError, Float, HeapRingBuffer, Result};
+use crate::{FimlError, Float, HeapRingBuffer, Result, Ticker};
 
 #[derive(Clone, Copy)]
 struct PendingSmaPeriods {
+    ticker: Ticker,
     periods: [usize; MAX_WINDOWS_PER_SMA],
     window_count: usize,
     max_period: usize,
@@ -19,6 +20,7 @@ struct PendingSmaPeriods {
 
 #[derive(Clone, Copy)]
 struct PendingSmaTimedPeriods {
+    ticker: Ticker,
     aggregation: Duration,
     periods: [usize; MAX_WINDOWS_PER_SMA],
     window_count: usize,
@@ -30,7 +32,7 @@ struct PendingSmaTimedPeriods {
 enum PendingFeature {
     SmaPeriods(PendingSmaPeriods),
     SmaTimedPeriods(PendingSmaTimedPeriods),
-    DayOfWeek { output_index: usize },
+    DayOfWeek { ticker: Ticker, output_index: usize },
 }
 
 /// Fixed-capacity builder for [`IndicatorFeatureVector`] instances backed by
@@ -67,9 +69,10 @@ where
     }
 
     /// Configure a sample-period SMA indicator.
-    pub fn sma_periods(self) -> SmaPeriodsBuilder<F, V, M, false> {
+    pub fn sma_periods(self, ticker: Ticker) -> SmaPeriodsBuilder<F, V, M, false> {
         SmaPeriodsBuilder {
             parent: self,
+            ticker,
             periods: [0; MAX_WINDOWS_PER_SMA],
             window_count: 0,
             max_period: 0,
@@ -80,9 +83,14 @@ where
     ///
     /// Price event timestamps are passed directly to the timed SMA and must be
     /// milliseconds, matching the indicator's `Duration::as_millis()` windows.
-    pub fn sma_timed(self, aggregation: Duration) -> SmaTimedPeriodsBuilder<F, V, M, false> {
+    pub fn sma_timed(
+        self,
+        ticker: Ticker,
+        aggregation: Duration,
+    ) -> SmaTimedPeriodsBuilder<F, V, M, false> {
         SmaTimedPeriodsBuilder {
             parent: self,
+            ticker,
             aggregation,
             periods: [0; MAX_WINDOWS_PER_SMA],
             window_count: 0,
@@ -91,9 +99,12 @@ where
     }
 
     /// Add a day-of-week output cell.
-    pub fn day_of_week(mut self) -> Result<Self> {
+    pub fn day_of_week(mut self, ticker: Ticker) -> Result<Self> {
         let output_index = self.reserve_outputs(1)?;
-        self.push_entry(PendingFeature::DayOfWeek { output_index });
+        self.push_entry(PendingFeature::DayOfWeek {
+            ticker,
+            output_index,
+        });
         Ok(self)
     }
 
@@ -108,8 +119,14 @@ where
                 PendingFeature::SmaTimedPeriods(config) => {
                     build_sma_timed_periods_entry(config, &mut names)?
                 }
-                PendingFeature::DayOfWeek { output_index } => {
-                    names[*output_index] = Some("day_of_week".to_string());
+                PendingFeature::DayOfWeek {
+                    ticker,
+                    output_index,
+                } => {
+                    names[*output_index] = Some(FeatureKey {
+                        ticker: *ticker,
+                        name: "day_of_week".to_string(),
+                    });
                     BuiltinFeatureEntry {
                         feature: BuiltinFeature::DayOfWeek(DayOfWeek::new(*output_index)),
                         kind: EventKind::Time,
@@ -176,6 +193,7 @@ where
     V: FeatureOutput<F>,
 {
     parent: IndicatorFeatureVectorBuilder<F, V, M>,
+    ticker: Ticker,
     periods: [usize; MAX_WINDOWS_PER_SMA],
     window_count: usize,
     max_period: usize,
@@ -188,6 +206,7 @@ where
     V: FeatureOutput<F>,
 {
     parent: IndicatorFeatureVectorBuilder<F, V, M>,
+    ticker: Ticker,
     aggregation: Duration,
     periods: [usize; MAX_WINDOWS_PER_SMA],
     window_count: usize,
@@ -240,6 +259,7 @@ where
         self.push_window(period)?;
         Ok(SmaPeriodsBuilder {
             parent: self.parent,
+            ticker: self.ticker,
             periods: self.periods,
             window_count: self.window_count,
             max_period: self.max_period,
@@ -264,6 +284,7 @@ where
         self.parent
             .push_entry(PendingFeature::SmaPeriods(PendingSmaPeriods {
                 periods: self.periods,
+                ticker: self.ticker,
                 window_count: self.window_count,
                 max_period: self.max_period,
                 output_start,
@@ -323,6 +344,7 @@ where
         self.push_window(period)?;
         Ok(SmaTimedPeriodsBuilder {
             parent: self.parent,
+            ticker: self.ticker,
             aggregation: self.aggregation,
             periods: self.periods,
             window_count: self.window_count,
@@ -348,6 +370,7 @@ where
         self.parent
             .push_entry(PendingFeature::SmaTimedPeriods(PendingSmaTimedPeriods {
                 aggregation: self.aggregation,
+                ticker: self.ticker,
                 periods: self.periods,
                 window_count: self.window_count,
                 max_period: self.max_period,
@@ -359,7 +382,7 @@ where
 
 fn build_sma_periods_entry<F: Float + 'static>(
     config: &PendingSmaPeriods,
-    names: &mut [Option<String>],
+    names: &mut [Option<FeatureKey>],
 ) -> BuiltinFeatureEntry<F> {
     let mut sma = SimpleMovingAverage::<HeapRingBuffer<F>, F, MAX_WINDOWS_PER_SMA>::new_heap(
         config.max_period,
@@ -377,11 +400,15 @@ fn build_sma_periods_entry<F: Float + 'static>(
             .expect("validated SMA period should fit its ring buffer");
         let output_index = config.output_start + window_index;
         output_indexes[window_index] = output_index;
-        names[output_index] = Some(format!("sma_periods_{period}"));
+        names[output_index] = Some(FeatureKey {
+            ticker: config.ticker,
+            name: format!("sma_periods_{period}"),
+        });
     }
 
     BuiltinFeatureEntry {
         feature: BuiltinFeature::Sma {
+            ticker: config.ticker,
             sma,
             output_indexes,
             output_count: config.window_count,
@@ -392,7 +419,7 @@ fn build_sma_periods_entry<F: Float + 'static>(
 
 fn build_sma_timed_periods_entry<F: Float + 'static>(
     config: &PendingSmaTimedPeriods,
-    names: &mut [Option<String>],
+    names: &mut [Option<FeatureKey>],
 ) -> Result<BuiltinFeatureEntry<F>> {
     let capacity = config
         .max_period
@@ -416,11 +443,15 @@ fn build_sma_timed_periods_entry<F: Float + 'static>(
             .expect("validated SMA timed period should fit its ring buffer");
         let output_index = config.output_start + window_index;
         output_indexes[window_index] = output_index;
-        names[output_index] = Some(format!("sma_timed_periods_{period}"));
+        names[output_index] = Some(FeatureKey {
+            ticker: config.ticker,
+            name: format!("sma_timed_periods_{period}"),
+        });
     }
 
     Ok(BuiltinFeatureEntry {
         feature: BuiltinFeature::SmaTimed {
+            ticker: config.ticker,
             sma,
             output_indexes,
             output_count: config.window_count,
@@ -432,7 +463,7 @@ fn build_sma_timed_periods_entry<F: Float + 'static>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{ArrayFeatureVector, Event};
+    use crate::{ArrayFeatureVector, Event, ticker};
 
     fn approx_eq(a: f64, b: f64) -> bool {
         (a - b).abs() < 1e-9
@@ -440,47 +471,50 @@ mod tests {
 
     #[test]
     fn builds_single_sma_period_window() -> Result<()> {
+        let aapl = ticker::intern("AAPL");
         let mut fv =
             IndicatorFeatureVectorBuilder::<f64, _, 1>::new(ArrayFeatureVector::<f64, 1>::new())
-                .sma_periods()
+                .sma_periods(aapl)
                 .window(2)?
                 .done()?
                 .build()?;
 
-        fv.dispatch(&Event::price(10.0, 0));
-        fv.dispatch(&Event::price(20.0, 0));
+        fv.dispatch(&Event::price(aapl, 10.0, 0));
+        fv.dispatch(&Event::price(aapl, 20.0, 0));
 
         assert!(approx_eq(fv.values()[0], 15.0));
-        assert_eq!(fv.index_of("sma_periods_2"), Some(0));
+        assert_eq!(fv.index_of(aapl, "sma_periods_2"), Some(0));
         Ok(())
     }
 
     #[test]
     fn one_sma_feature_writes_multiple_period_windows() -> Result<()> {
+        let aapl = ticker::intern("AAPL");
         let mut fv =
             IndicatorFeatureVectorBuilder::<f64, _, 1>::new(ArrayFeatureVector::<f64, 2>::new())
-                .sma_periods()
+                .sma_periods(aapl)
                 .window(2)?
                 .window(5)?
                 .done()?
                 .build()?;
 
         for v in [1.0, 2.0, 3.0, 4.0, 5.0] {
-            fv.dispatch(&Event::price(v, 0));
+            fv.dispatch(&Event::price(aapl, v, 0));
         }
 
         assert!(approx_eq(fv.values()[0], 4.5));
         assert!(approx_eq(fv.values()[1], 3.0));
-        assert_eq!(fv.index_of("sma_periods_2"), Some(0));
-        assert_eq!(fv.index_of("sma_periods_5"), Some(1));
+        assert_eq!(fv.index_of(aapl, "sma_periods_2"), Some(0));
+        assert_eq!(fv.index_of(aapl, "sma_periods_5"), Some(1));
         Ok(())
     }
 
     #[test]
     fn one_sma_timed_feature_writes_multiple_period_windows() -> Result<()> {
+        let aapl = ticker::intern("AAPL");
         let mut fv =
             IndicatorFeatureVectorBuilder::<f64, _, 1>::new(ArrayFeatureVector::<f64, 2>::new())
-                .sma_timed(Duration::from_millis(1_000))
+                .sma_timed(aapl, Duration::from_millis(1_000))
                 .window(2)?
                 .window(3)?
                 .done()?
@@ -493,21 +527,22 @@ mod tests {
             (40.0, 2_500),
             (50.0, 3_000),
         ] {
-            fv.dispatch(&Event::price(value, timestamp));
+            fv.dispatch(&Event::price(aapl, value, timestamp));
         }
 
         assert!(approx_eq(fv.values()[0], 42.5));
         assert!(approx_eq(fv.values()[1], 35.0));
-        assert_eq!(fv.index_of("sma_timed_periods_2"), Some(0));
-        assert_eq!(fv.index_of("sma_timed_periods_3"), Some(1));
+        assert_eq!(fv.index_of(aapl, "sma_timed_periods_2"), Some(0));
+        assert_eq!(fv.index_of(aapl, "sma_timed_periods_3"), Some(1));
         Ok(())
     }
 
     #[test]
     fn rejects_zero_sma_timed_period() {
+        let aapl = ticker::intern("AAPL");
         let built =
             IndicatorFeatureVectorBuilder::<f64, _, 1>::new(ArrayFeatureVector::<f64, 1>::new())
-                .sma_timed(Duration::from_millis(1_000))
+                .sma_timed(aapl, Duration::from_millis(1_000))
                 .window(0);
 
         assert!(built.is_err());
@@ -515,9 +550,10 @@ mod tests {
 
     #[test]
     fn rejects_zero_sma_timed_aggregation() {
+        let aapl = ticker::intern("AAPL");
         let built =
             IndicatorFeatureVectorBuilder::<f64, _, 1>::new(ArrayFeatureVector::<f64, 1>::new())
-                .sma_timed(Duration::ZERO)
+                .sma_timed(aapl, Duration::ZERO)
                 .window(1);
 
         assert!(built.is_err());
@@ -525,30 +561,32 @@ mod tests {
 
     #[test]
     fn chains_day_of_week_after_sma_periods() -> Result<()> {
+        let aapl = ticker::intern("AAPL");
         let mut fv =
             IndicatorFeatureVectorBuilder::<f64, _, 2>::new(ArrayFeatureVector::<f64, 2>::new())
-                .sma_periods()
+                .sma_periods(aapl)
                 .window(3)?
                 .done()?
-                .day_of_week()?
+                .day_of_week(aapl)?
                 .build()?;
 
         for v in [3.0, 6.0, 9.0] {
-            fv.dispatch(&Event::price(v, 0));
+            fv.dispatch(&Event::price(aapl, v, 0));
         }
         fv.dispatch(&Event::time(1_609_459_200));
 
         assert!(approx_eq(fv.values()[0], 6.0));
         assert!(approx_eq(fv.values()[1], 5.0));
-        assert_eq!(fv.index_of("day_of_week"), Some(1));
+        assert_eq!(fv.index_of(aapl, "day_of_week"), Some(1));
         Ok(())
     }
 
     #[test]
     fn rejects_zero_sma_period() {
+        let aapl = ticker::intern("AAPL");
         let built =
             IndicatorFeatureVectorBuilder::<f64, _, 1>::new(ArrayFeatureVector::<f64, 1>::new())
-                .sma_periods()
+                .sma_periods(aapl)
                 .window(0);
 
         assert!(built.is_err());
@@ -556,9 +594,10 @@ mod tests {
 
     #[test]
     fn rejects_more_output_cells_than_capacity() {
+        let aapl = ticker::intern("AAPL");
         let built =
             IndicatorFeatureVectorBuilder::<f64, _, 1>::new(ArrayFeatureVector::<f64, 1>::new())
-                .sma_periods()
+                .sma_periods(aapl)
                 .window(2)
                 .unwrap()
                 .window(5);
@@ -568,10 +607,11 @@ mod tests {
 
     #[test]
     fn rejects_more_feature_instances_than_capacity() -> Result<()> {
+        let aapl = ticker::intern("AAPL");
         let built =
             IndicatorFeatureVectorBuilder::<f64, _, 1>::new(ArrayFeatureVector::<f64, 2>::new())
-                .day_of_week()?
-                .day_of_week();
+                .day_of_week(aapl)?
+                .day_of_week(aapl);
 
         assert!(built.is_err());
         Ok(())
@@ -579,11 +619,12 @@ mod tests {
 
     #[test]
     fn rejects_more_sma_windows_than_capacity() {
+        let aapl = ticker::intern("AAPL");
         let mut builder = IndicatorFeatureVectorBuilder::<f64, _, 1>::new(ArrayFeatureVector::<
             f64,
             { MAX_WINDOWS_PER_SMA + 1 },
         >::new())
-        .sma_periods()
+        .sma_periods(aapl)
         .window(1)
         .unwrap();
 
@@ -598,14 +639,15 @@ mod tests {
     fn root_reexports_are_usable() -> crate::Result<()> {
         use crate::{IndicatorFeatureVector, IndicatorFeatureVectorBuilder};
 
+        let aapl = ticker::intern("AAPL");
         let fv: IndicatorFeatureVector<_, _, BuiltinFeature<f64>, 1> =
             IndicatorFeatureVectorBuilder::<f64, _, 1>::new(ArrayFeatureVector::<f64, 1>::new())
-                .sma_periods()
+                .sma_periods(aapl)
                 .window(2)?
                 .done()?
                 .build()?;
 
-        assert_eq!(fv.index_of("sma_periods_2"), Some(0));
+        assert_eq!(fv.index_of(aapl, "sma_periods_2"), Some(0));
         Ok(())
     }
 }
