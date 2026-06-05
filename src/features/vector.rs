@@ -6,8 +6,15 @@ use crate::features::event::{EVENT_KIND_COUNT, Event, EventKind};
 use crate::features::feature::Feature;
 use crate::features::spec::BuiltinSpec;
 use crate::indicators::{SimpleMovingAverage, SimpleMovingAverageTimed};
+use crate::ticker::resolve;
 use crate::vectors::FeatureOutput;
-use crate::{FimlError, Float, HeapRingBuffer, Result};
+use crate::{FimlError, Float, HeapRingBuffer, Result, Ticker};
+
+#[derive(Clone)]
+pub(crate) struct FeatureKey {
+    pub(crate) ticker: Ticker,
+    pub(crate) name: String,
+}
 
 /// Self-contained feature vector: owns the output `cells` and the `features`
 /// that write into them, and routes each incoming [`Event`] to only the
@@ -41,7 +48,7 @@ where
     features: [MaybeUninit<I>; M],
     feature_count: usize,
     groups: [(usize, usize); EVENT_KIND_COUNT],
-    names: Box<[Option<String>]>,
+    names: Box<[Option<FeatureKey>]>,
     _marker: PhantomData<F>,
 }
 
@@ -71,9 +78,11 @@ where
         self.cells.values()
     }
 
-    /// Cell index a named feature writes to, or `None` if no such name.
-    pub fn index_of(&self, name: &str) -> Option<usize> {
-        self.names.iter().position(|n| n.as_deref() == Some(name))
+    /// Cell index a named feature for `ticker` writes to, or `None` if no such key.
+    pub fn index_of(&self, ticker: Ticker, name: &str) -> Option<usize> {
+        self.names
+            .iter()
+            .position(|n| matches!(n, Some(n) if n.ticker == ticker && n.name == name))
     }
 }
 
@@ -102,14 +111,15 @@ where
     ///
     /// `cells` is the output storage; it is taken by value so the caller can
     /// size it however it likes (compile-time or runtime). `specs` pairs each
-    /// output's name with its [`BuiltinSpec`]; the name is recorded against the
-    /// cell the feature writes to (cells are assigned in spec order), so
+    /// output's name and ticker with its [`BuiltinSpec`]. The `(ticker, name)`
+    /// key is recorded against the cell the feature writes to (cells are
+    /// assigned in spec order), so
     /// [`index_of`] and [`values`] keep the caller's order, while the features
     /// themselves are stored grouped by event kind for routing.
     ///
     /// [`index_of`]: Self::index_of
     /// [`values`]: Self::values
-    pub fn from_builtin_specs(cells: V, specs: &[(&str, BuiltinSpec)]) -> Result<Self> {
+    pub fn from_builtin_specs(cells: V, specs: &[(&str, Ticker, BuiltinSpec)]) -> Result<Self> {
         let cell_count = cells.capacity();
         if specs.len() > M || specs.len() > cell_count {
             return Err(FimlError::InvalidArgument(format!(
@@ -122,12 +132,15 @@ where
         let mut entries = [const { MaybeUninit::uninit() }; M];
         let mut names = vec![None; cell_count].into_boxed_slice();
 
-        for (output_index, (name, spec)) in specs.iter().enumerate() {
+        for (output_index, (name, ticker, spec)) in specs.iter().enumerate() {
             entries[output_index].write(BuiltinFeatureEntry {
-                feature: build_builtin(spec, output_index)?,
+                feature: build_builtin(*ticker, spec, output_index)?,
                 kind: spec.event_kind(),
             });
-            names[output_index] = Some((*name).to_string());
+            names[output_index] = Some(FeatureKey {
+                ticker: *ticker,
+                name: (*name).to_string(),
+            });
         }
 
         Ok(Self::from_builtin_entries(
@@ -142,7 +155,7 @@ where
         cells: V,
         entries: [MaybeUninit<BuiltinFeatureEntry<F>>; M],
         feature_count: usize,
-        names: Box<[Option<String>]>,
+        names: Box<[Option<FeatureKey>]>,
     ) -> Self {
         debug_assert!(feature_count <= M);
         debug_assert!(names.len() <= cells.capacity());
@@ -182,13 +195,14 @@ where
     }
 }
 
-fn validate_builtin_specs(specs: &[(&str, BuiltinSpec)]) -> Result<()> {
-    for (_, spec) in specs {
+fn validate_builtin_specs(specs: &[(&str, Ticker, BuiltinSpec)]) -> Result<()> {
+    for (i, (name, ticker, spec)) in specs.iter().enumerate() {
         match spec {
             BuiltinSpec::Sma { period, .. } if *period < 1 => {
-                return Err(FimlError::InvalidArgument(
-                    "SMA period must be at least 1".to_string(),
-                ));
+                return Err(FimlError::InvalidArgument(format!(
+                    "SMA period must be at least 1 for {}",
+                    feature_label(*ticker, name)
+                )));
             }
             BuiltinSpec::SmaTimed {
                 aggregation,
@@ -197,6 +211,16 @@ fn validate_builtin_specs(specs: &[(&str, BuiltinSpec)]) -> Result<()> {
                 validate_sma_timed_durations(*aggregation, *window)?;
             }
             _ => {}
+        }
+
+        if specs[i + 1..]
+            .iter()
+            .any(|(other_name, other_ticker, _)| name == other_name && ticker == other_ticker)
+        {
+            return Err(FimlError::InvalidArgument(format!(
+                "duplicate feature key: {}",
+                feature_label(*ticker, name)
+            )));
         }
     }
     Ok(())
@@ -236,6 +260,7 @@ fn validate_sma_timed_durations(
 
 /// Construct a single builtin feature wired to an output cell index.
 fn build_builtin<F: Float + 'static>(
+    ticker: Ticker,
     spec: &BuiltinSpec,
     output_index: usize,
 ) -> Result<BuiltinFeature<F>> {
@@ -248,6 +273,7 @@ fn build_builtin<F: Float + 'static>(
             let mut output_indexes = [0; MAX_WINDOWS_PER_SMA];
             output_indexes[0] = output_index;
             Ok(BuiltinFeature::Sma {
+                ticker,
                 sma,
                 output_indexes,
                 output_count: 1,
@@ -271,6 +297,7 @@ fn build_builtin<F: Float + 'static>(
             let mut output_indexes = [0; MAX_WINDOWS_PER_SMA];
             output_indexes[0] = output_index;
             Ok(BuiltinFeature::SmaTimed {
+                ticker,
                 sma,
                 output_indexes,
                 output_count: 1,
@@ -280,10 +307,17 @@ fn build_builtin<F: Float + 'static>(
     }
 }
 
+fn feature_label(ticker: Ticker, name: &str) -> String {
+    match resolve(ticker) {
+        Some(ticker_name) => format!("{ticker_name}:{name}"),
+        None => format!("{ticker:?}:{name}"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ArrayFeatureVector;
+    use crate::{ArrayFeatureVector, ticker};
 
     type Fv<const N: usize, const M: usize> =
         IndicatorFeatureVector<f64, ArrayFeatureVector<f64, N>, BuiltinFeature<f64>, M>;
@@ -305,12 +339,13 @@ mod tests {
 
     #[test]
     fn values_match_per_window_averages() {
-        let specs = [("sma_2_sec", sma(2)), ("sma_5_sec", sma(5))];
+        let aapl = ticker::intern("AAPL");
+        let specs = [("sma_2_sec", aapl, sma(2)), ("sma_5_sec", aapl, sma(5))];
         let mut fv: Fv<2, 2> =
             IndicatorFeatureVector::from_builtin_specs(ArrayFeatureVector::new(), &specs).unwrap();
 
         for v in [1.0, 2.0, 3.0, 4.0, 5.0] {
-            fv.dispatch(&Event::price(v, 0));
+            fv.dispatch(&Event::price(aapl, v, 0));
         }
 
         // sma_2: mean(4,5) = 4.5 ; sma_5: mean(1..5) = 3.0
@@ -320,7 +355,8 @@ mod tests {
 
     #[test]
     fn values_match_timed_window_average() {
-        let specs = [("sma_timed_2_sec", sma_timed(1_000, 2_000))];
+        let aapl = ticker::intern("AAPL");
+        let specs = [("sma_timed_2_sec", aapl, sma_timed(1_000, 2_000))];
         let mut fv: Fv<1, 1> =
             IndicatorFeatureVector::from_builtin_specs(ArrayFeatureVector::new(), &specs).unwrap();
 
@@ -331,38 +367,71 @@ mod tests {
             (40.0, 2_500),
             (50.0, 3_000),
         ] {
-            fv.dispatch(&Event::price(value, timestamp));
+            fv.dispatch(&Event::price(aapl, value, timestamp));
         }
 
         assert!(approx_eq(fv.values()[0], 42.5));
-        assert_eq!(fv.index_of("sma_timed_2_sec"), Some(0));
+        assert_eq!(fv.index_of(aapl, "sma_timed_2_sec"), Some(0));
     }
 
     #[test]
     fn index_of_keeps_caller_order() {
-        let specs = [("sma_5_sec", sma(5)), ("sma_10_sec", sma(10))];
+        let aapl = ticker::intern("AAPL");
+        let specs = [("sma_5_sec", aapl, sma(5)), ("sma_10_sec", aapl, sma(10))];
         let fv: Fv<2, 2> =
             IndicatorFeatureVector::from_builtin_specs(ArrayFeatureVector::new(), &specs).unwrap();
 
-        assert_eq!(fv.index_of("sma_5_sec"), Some(0));
-        assert_eq!(fv.index_of("sma_10_sec"), Some(1));
-        assert_eq!(fv.index_of("missing"), None);
+        assert_eq!(fv.index_of(aapl, "sma_5_sec"), Some(0));
+        assert_eq!(fv.index_of(aapl, "sma_10_sec"), Some(1));
+        assert_eq!(fv.index_of(aapl, "missing"), None);
+    }
+
+    #[test]
+    fn index_of_distinguishes_tickers() {
+        let aapl = ticker::intern("AAPL");
+        let googl = ticker::intern("GOOGL");
+        let specs = [("sma_5_sec", aapl, sma(5)), ("sma_5_sec", googl, sma(5))];
+        let fv: Fv<2, 2> =
+            IndicatorFeatureVector::from_builtin_specs(ArrayFeatureVector::new(), &specs).unwrap();
+
+        assert_eq!(fv.index_of(aapl, "sma_5_sec"), Some(0));
+        assert_eq!(fv.index_of(googl, "sma_5_sec"), Some(1));
+    }
+
+    #[test]
+    fn dispatch_distinguishes_tickers() {
+        let aapl = ticker::intern("AAPL");
+        let googl = ticker::intern("GOOGL");
+        let specs = [("sma_2_sec", aapl, sma(2)), ("sma_2_sec", googl, sma(2))];
+        let mut fv: Fv<2, 2> =
+            IndicatorFeatureVector::from_builtin_specs(ArrayFeatureVector::new(), &specs).unwrap();
+
+        for v in [10.0, 20.0] {
+            fv.dispatch(&Event::price(aapl, v, 0));
+        }
+        for v in [100.0, 200.0] {
+            fv.dispatch(&Event::price(googl, v, 0));
+        }
+
+        assert!(approx_eq(fv.values()[0], 15.0));
+        assert!(approx_eq(fv.values()[1], 150.0));
     }
 
     #[test]
     fn routes_each_event_to_its_own_group() {
+        let aapl = ticker::intern("AAPL");
         // Interleave kinds so grouping has to reorder the stored features while
         // keeping cell order (sma_3 -> cell 0, day_of_week -> cell 1).
         let specs = [
-            ("sma_3_sec", sma(3)),
-            ("day_of_week", BuiltinSpec::DayOfWeek),
+            ("sma_3_sec", aapl, sma(3)),
+            ("day_of_week", aapl, BuiltinSpec::DayOfWeek),
         ];
         let mut fv: Fv<2, 2> =
             IndicatorFeatureVector::from_builtin_specs(ArrayFeatureVector::new(), &specs).unwrap();
 
         // Price events touch only the SMA; the calendar cell stays zero.
         for v in [3.0, 6.0, 9.0] {
-            fv.dispatch(&Event::price(v, 0));
+            fv.dispatch(&Event::price(aapl, v, 0));
         }
         assert!(approx_eq(fv.values()[0], 6.0)); // mean(3,6,9)
         assert!(approx_eq(fv.values()[1], 0.0)); // untouched
@@ -373,14 +442,15 @@ mod tests {
         assert!(approx_eq(fv.values()[1], 5.0)); // Friday
 
         // An event kind with no subscribers is a no-op.
-        fv.dispatch(&Event::order_book(1.0, 2.0, 0));
+        fv.dispatch(&Event::order_book(aapl, 1.0, 2.0, 0));
         assert!(approx_eq(fv.values()[0], 6.0));
         assert!(approx_eq(fv.values()[1], 5.0));
     }
 
     #[test]
     fn survives_being_moved_after_construction() {
-        let specs = [("sma_2_sec", sma(2))];
+        let aapl = ticker::intern("AAPL");
+        let specs = [("sma_2_sec", aapl, sma(2))];
         let fv: Fv<1, 1> =
             IndicatorFeatureVector::from_builtin_specs(ArrayFeatureVector::new(), &specs).unwrap();
 
@@ -388,14 +458,15 @@ mod tests {
         // moving the aggregate cannot invalidate borrowed cell references.
         let mut moved = fv;
         for v in [10.0, 20.0] {
-            moved.dispatch(&Event::price(v, 0));
+            moved.dispatch(&Event::price(aapl, v, 0));
         }
         assert!(approx_eq(moved.values()[0], 15.0));
     }
 
     #[test]
     fn rejects_more_features_than_capacity() {
-        let specs = [("sma_2_sec", sma(2)), ("sma_3_sec", sma(3))];
+        let aapl = ticker::intern("AAPL");
+        let specs = [("sma_2_sec", aapl, sma(2)), ("sma_3_sec", aapl, sma(3))];
         let built: Result<Fv<1, 1>> =
             IndicatorFeatureVector::from_builtin_specs(ArrayFeatureVector::new(), &specs);
         assert!(built.is_err());
@@ -403,7 +474,8 @@ mod tests {
 
     #[test]
     fn rejects_zero_sma_period_without_panicking() {
-        let specs = [("sma_0_sec", sma(0))];
+        let aapl = ticker::intern("AAPL");
+        let specs = [("sma_0_sec", aapl, sma(0))];
         let built: Result<Fv<1, 1>> =
             IndicatorFeatureVector::from_builtin_specs(ArrayFeatureVector::new(), &specs);
         assert!(built.is_err());
@@ -411,8 +483,9 @@ mod tests {
 
     #[test]
     fn rejects_invalid_sma_timed_spec_without_panicking() {
-        let zero_aggregation = [("sma_timed_zero", sma_timed(0, 1_000))];
-        let non_multiple_window = [("sma_timed_non_multiple", sma_timed(1_000, 1_500))];
+        let aapl = ticker::intern("AAPL");
+        let zero_aggregation = [("sma_timed_zero", aapl, sma_timed(0, 1_000))];
+        let non_multiple_window = [("sma_timed_non_multiple", aapl, sma_timed(1_000, 1_500))];
 
         let built_zero: Result<Fv<1, 1>> = IndicatorFeatureVector::from_builtin_specs(
             ArrayFeatureVector::new(),
@@ -425,5 +498,14 @@ mod tests {
 
         assert!(built_zero.is_err());
         assert!(built_non_multiple.is_err());
+    }
+
+    #[test]
+    fn rejects_duplicate_feature_key() {
+        let aapl = ticker::intern("AAPL");
+        let specs = [("sma_2_sec", aapl, sma(2)), ("sma_2_sec", aapl, sma(3))];
+        let built: Result<Fv<2, 2>> =
+            IndicatorFeatureVector::from_builtin_specs(ArrayFeatureVector::new(), &specs);
+        assert!(built.is_err());
     }
 }

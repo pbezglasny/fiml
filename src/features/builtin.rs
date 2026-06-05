@@ -2,7 +2,7 @@ use crate::features::event::{Event, TimeUpdate};
 use crate::features::feature::Feature;
 use crate::indicators::{SimpleMovingAverage, SimpleMovingAverageTimed};
 use crate::vectors::FeatureOutput;
-use crate::{Float, HeapRingBuffer};
+use crate::{Float, HeapRingBuffer, Ticker};
 
 /// Maximum number of SMA windows that can share a single indicator instance.
 /// Exceeding it during construction is an error.
@@ -35,11 +35,13 @@ impl DayOfWeek {
 /// this in their own enum (see the module docs).
 pub enum BuiltinFeature<F: Float + 'static> {
     Sma {
+        ticker: Ticker,
         sma: SimpleMovingAverage<HeapRingBuffer<F>, F, MAX_WINDOWS_PER_SMA>,
         output_indexes: [usize; MAX_WINDOWS_PER_SMA],
         output_count: usize,
     },
     SmaTimed {
+        ticker: Ticker,
         sma: SimpleMovingAverageTimed<HeapRingBuffer<(i64, F)>, F, MAX_WINDOWS_PER_SMA>,
         output_indexes: [usize; MAX_WINDOWS_PER_SMA],
         output_count: usize,
@@ -51,11 +53,14 @@ impl<F: Float + 'static> Feature<F> for BuiltinFeature<F> {
     fn update<O: FeatureOutput<F>>(&mut self, event: &Event<F>, output: &mut O) {
         match self {
             BuiltinFeature::Sma {
+                ticker,
                 sma,
                 output_indexes,
                 output_count,
             } => {
-                if let Event::Price(p) = event {
+                if let Event::Price(p) = event
+                    && p.ticker == *ticker
+                {
                     sma.update(p.value);
                     for (window_index, output_index) in
                         output_indexes.iter().enumerate().take(*output_count)
@@ -67,11 +72,14 @@ impl<F: Float + 'static> Feature<F> for BuiltinFeature<F> {
                 }
             }
             BuiltinFeature::SmaTimed {
+                ticker,
                 sma,
                 output_indexes,
                 output_count,
             } => {
-                if let Event::Price(p) = event {
+                if let Event::Price(p) = event
+                    && p.ticker == *ticker
+                {
                     sma.update_inner(p.value, p.timestamp);
                     for (window_index, output_index) in
                         output_indexes.iter().enumerate().take(*output_count)
@@ -94,7 +102,7 @@ impl<F: Float + 'static> Feature<F> for BuiltinFeature<F> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{ArrayFeatureVector, FeatureVector};
+    use crate::{ArrayFeatureVector, FeatureVector, ticker};
 
     fn approx_eq(a: f64, b: f64) -> bool {
         (a - b).abs() < 1e-9
@@ -102,6 +110,8 @@ mod tests {
 
     #[test]
     fn sma_reacts_to_price_events() {
+        let aapl = ticker::intern("AAPL");
+        let googl = ticker::intern("GOOGL");
         let mut fv: ArrayFeatureVector<f64, 1> = ArrayFeatureVector::new();
         let mut sma: SimpleMovingAverage<HeapRingBuffer<f64>, f64, MAX_WINDOWS_PER_SMA> =
             SimpleMovingAverage::new_heap(3);
@@ -110,14 +120,16 @@ mod tests {
         output_indexes[0] = 0;
 
         let mut feat = BuiltinFeature::Sma {
+            ticker: aapl,
             sma,
             output_indexes,
             output_count: 1,
         };
         for v in [3.0, 6.0, 9.0] {
-            feat.update(&Event::price(v, 0), &mut fv);
+            feat.update(&Event::price(aapl, v, 0), &mut fv);
         }
-        // A non-price event is ignored.
+        // Another ticker and a non-price event are ignored.
+        feat.update(&Event::price(googl, 30.0, 0), &mut fv);
         feat.update(&Event::time(123), &mut fv);
 
         // (3 + 6 + 9) / 3 = 6.0
@@ -126,11 +138,12 @@ mod tests {
 
     #[test]
     fn day_of_week_reacts_to_time_events() {
+        let aapl = ticker::intern("AAPL");
         let mut fv: ArrayFeatureVector<f64, 1> = ArrayFeatureVector::new();
         let mut feat = BuiltinFeature::<f64>::DayOfWeek(DayOfWeek::new(0));
 
         // A price event is ignored; only the time event sets the value.
-        feat.update(&Event::price(42.0, 0), &mut fv);
+        feat.update(&Event::price(aapl, 42.0, 0), &mut fv);
         // 2021-01-01 00:00:00 UTC was a Friday (index 5, Sunday-based).
         feat.update(&Event::time(1_609_459_200), &mut fv);
 
