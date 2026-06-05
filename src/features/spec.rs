@@ -18,6 +18,8 @@ pub enum TimeUnit {
 pub enum BuiltinSpec {
     /// Simple moving average over `period`
     Sma { period: usize },
+    /// Exponential moving average over `period`
+    Ema { period: usize },
     /// Time-bucketed simple moving average over `window`, using `aggregation`
     /// as the bucket size. Price event timestamps must be milliseconds.
     SmaTimed {
@@ -34,6 +36,7 @@ impl BuiltinSpec {
     pub fn event_kind(&self) -> EventKind {
         match self {
             BuiltinSpec::Sma { .. } => EventKind::Price,
+            BuiltinSpec::Ema { .. } => EventKind::Price,
             BuiltinSpec::SmaTimed { .. } => EventKind::Price,
             BuiltinSpec::DayOfWeek => EventKind::Time,
         }
