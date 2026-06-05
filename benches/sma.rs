@@ -1,5 +1,6 @@
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
-use fiml::{HeapRingBuffer, SimpleMovingAverage, StackRingBuffer};
+use fiml::indicators::SimpleMovingAverage;
+use fiml::{HeapRingBuffer, StackRingBuffer};
 use std::hint::black_box;
 
 const N_POINTS: usize = 10_000;

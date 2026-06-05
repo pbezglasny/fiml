@@ -20,6 +20,10 @@ pub trait RingBuffer {
 
     /// Remove and return the front item of the buffer. If buffer is empty, return None.
     fn pop_front(&mut self) -> Option<Self::Item>;
+
+    /// Remove and return the back item of the buffer. If buffer is empty, return None.
+    fn pop_back(&mut self) -> Option<Self::Item>;
+
     /// Return a reference to the front item of the buffer without removing it. If buffer is empty,
     /// return None.
     fn peek_front(&self) -> Option<&Self::Item>;
@@ -32,9 +36,11 @@ pub trait RingBuffer {
     /// Zero-based index, where 0 is the back item, 1 is the second to last item, and so on. If
     /// index
     fn peek_back_at(&self, index: usize) -> Option<&Self::Item>;
+
+    fn peek_at(&self, index: usize) -> Option<&Self::Item>;
 }
 
-pub fn new_stack_ring_buffer<const N: usize, T>() -> StackRingBuffer<N, T> {
+pub const fn new_stack_ring_buffer<const N: usize, T>() -> StackRingBuffer<N, T> {
     StackRingBuffer::new()
 }
 
@@ -45,7 +51,7 @@ pub struct StackRingBuffer<const N: usize, T> {
 }
 
 impl<const N: usize, T> StackRingBuffer<N, T> {
-    fn new() -> Self {
+    const fn new() -> Self {
         assert!(N > 0, "Ring buffer size must be greater than 0");
         Self {
             data: [const { MaybeUninit::<T>::uninit() }; N],
@@ -58,6 +64,7 @@ impl<const N: usize, T> StackRingBuffer<N, T> {
 impl<const N: usize, T> RingBuffer for StackRingBuffer<N, T> {
     type Item = T;
 
+    #[inline]
     fn capacity(&self) -> usize {
         N
     }
@@ -78,6 +85,18 @@ impl<const N: usize, T> RingBuffer for StackRingBuffer<N, T> {
             self.data[back_index].write(item);
             self.length += 1;
             None
+        }
+    }
+
+    fn pop_back(&mut self) -> Option<T> {
+        if self.length == 0 {
+            None
+        } else {
+            let back_index = (self.head + self.length - 1) % N;
+            let old_slot = std::mem::replace(&mut self.data[back_index], MaybeUninit::uninit());
+            let item = unsafe { old_slot.assume_init() };
+            self.length -= 1;
+            Some(item)
         }
     }
 
@@ -118,6 +137,15 @@ impl<const N: usize, T> RingBuffer for StackRingBuffer<N, T> {
         } else {
             let back_index = (self.head + self.length - 1 - index) % N;
             Some(unsafe { self.data[back_index].assume_init_ref() })
+        }
+    }
+
+    fn peek_at(&self, index: usize) -> Option<&T> {
+        if index >= self.len() {
+            None
+        } else {
+            let index = (self.head + index) % N;
+            Some(unsafe { self.data[index].assume_init_ref() })
         }
     }
 }
@@ -178,6 +206,10 @@ impl<T> RingBuffer for HeapRingBuffer<T> {
         self.data.pop_front()
     }
 
+    fn pop_back(&mut self) -> Option<Self::Item> {
+        self.data.pop_back()
+    }
+
     fn peek_front(&self) -> Option<&T> {
         self.data.front()
     }
@@ -193,6 +225,10 @@ impl<T> RingBuffer for HeapRingBuffer<T> {
             let back_index = self.len() - 1 - index;
             self.data.get(back_index)
         }
+    }
+
+    fn peek_at(&self, index: usize) -> Option<&T> {
+        self.data.get(index)
     }
 }
 

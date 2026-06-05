@@ -1,7 +1,8 @@
 use crate::features::event::{Event, TimeUpdate};
 use crate::features::feature::Feature;
+use crate::indicators::{SimpleMovingAverage, SimpleMovingAverageTimed};
 use crate::vectors::FeatureOutput;
-use crate::{Float, HeapRingBuffer, SimpleMovingAverage};
+use crate::{Float, HeapRingBuffer};
 
 /// Maximum number of SMA windows that can share a single indicator instance.
 /// Exceeding it during construction is an error.
@@ -34,7 +35,12 @@ impl DayOfWeek {
 /// this in their own enum (see the module docs).
 pub enum BuiltinFeature<F: Float + 'static> {
     Sma {
-        sma: SimpleMovingAverage<'static, HeapRingBuffer<F>, F, MAX_WINDOWS_PER_SMA>,
+        sma: SimpleMovingAverage<HeapRingBuffer<F>, F, MAX_WINDOWS_PER_SMA>,
+        output_indexes: [usize; MAX_WINDOWS_PER_SMA],
+        output_count: usize,
+    },
+    SmaTimed {
+        sma: SimpleMovingAverageTimed<HeapRingBuffer<(i64, F)>, F, MAX_WINDOWS_PER_SMA>,
         output_indexes: [usize; MAX_WINDOWS_PER_SMA],
         output_count: usize,
     },
@@ -51,6 +57,22 @@ impl<F: Float + 'static> Feature<F> for BuiltinFeature<F> {
             } => {
                 if let Event::Price(p) = event {
                     sma.update(p.value);
+                    for (window_index, output_index) in
+                        output_indexes.iter().enumerate().take(*output_count)
+                    {
+                        if let Some(value) = sma.value_at(window_index) {
+                            output.set_value_at(*output_index, value);
+                        }
+                    }
+                }
+            }
+            BuiltinFeature::SmaTimed {
+                sma,
+                output_indexes,
+                output_count,
+            } => {
+                if let Event::Price(p) = event {
+                    sma.update_inner(p.value, p.timestamp);
                     for (window_index, output_index) in
                         output_indexes.iter().enumerate().take(*output_count)
                     {
