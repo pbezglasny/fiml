@@ -16,6 +16,12 @@ where
     fn capacity(&self) -> usize;
 
     fn set_value_at(&mut self, index: usize, value: F);
+
+    fn set_values(&mut self, indexes: &[usize], values: &[F]) {
+        for (index, value) in indexes.iter().zip(values.iter()) {
+            self.set_value_at(*index, *value);
+        }
+    }
 }
 
 pub struct ArrayFeatureVector<F: Float, const N: usize> {
@@ -26,6 +32,14 @@ impl<F: Float, const N: usize> ArrayFeatureVector<F, N> {
     pub fn new() -> Self {
         Self {
             data: [const { Cell::new(F::ZERO) }; N],
+        }
+    }
+
+    pub fn value_at(&self, index: usize) -> Option<F> {
+        if index < N {
+            Some(self.data[index].get())
+        } else {
+            None
         }
     }
 }

@@ -4,6 +4,7 @@ mod event;
 mod feature;
 mod indicators;
 mod spec;
+pub mod transformers;
 mod vector;
 
 pub use builder::IndicatorFeatureVectorBuilder;
