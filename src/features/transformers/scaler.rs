@@ -27,9 +27,9 @@ impl<F: Float, const SIZE: usize> StandardScaler<F, SIZE> {
 }
 
 impl<F: Float, const SIZE: usize> Transformation<F> for StandardScaler<F, SIZE> {
-    fn update<I, O>(&mut self, input: &I, output: &mut O)
+    fn transform<I, O>(&mut self, input: &I, output: &mut O)
     where
-        I: TransformInput<F>,
+        I: TransformInput<F> + ?Sized,
         O: TransformOutput<F>,
     {
         for (i, o) in self.input_idxes.iter().zip(self.output_idxes.iter()) {
@@ -57,7 +57,7 @@ mod tests {
         input.set_value_at(0, 10.0);
 
         let mut scaler = StandardScaler::new([0], [0], 2.0, 4.0);
-        scaler.update(&input, &mut output);
+        scaler.transform(&input, &mut output);
 
         assert!(approx_eq(FeatureVector::values(&output)[0], 2.0));
     }
@@ -70,7 +70,7 @@ mod tests {
         input.set_value_at(2, 10.0);
 
         let mut scaler = StandardScaler::new([0, 2], [1, 0], 2.0, 2.0);
-        scaler.update(&input, &mut output);
+        scaler.transform(&input, &mut output);
 
         assert!(approx_eq(FeatureVector::values(&output)[0], 4.0));
         assert!(approx_eq(FeatureVector::values(&output)[1], 2.0));
@@ -83,7 +83,7 @@ mod tests {
         output.set_value_at(0, 42.0);
 
         let mut scaler = StandardScaler::new([1], [0], 2.0, 4.0);
-        scaler.update(&input, &mut output);
+        scaler.transform(&input, &mut output);
 
         assert!(approx_eq(FeatureVector::values(&output)[0], 42.0));
     }
@@ -97,7 +97,7 @@ mod tests {
 
         let mut transformer =
             BuiltinTransfomers::StandardScaler2(StandardScaler::new([0, 1], [0, 1], 2.0, 2.0));
-        transformer.update(&input, &mut output);
+        transformer.transform(&input, &mut output);
 
         assert!(approx_eq(FeatureVector::values(&output)[0], 2.0));
         assert!(approx_eq(FeatureVector::values(&output)[1], 3.0));

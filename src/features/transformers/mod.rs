@@ -23,12 +23,18 @@ pub trait TransformInput<F: Float> {
     }
 }
 
+impl<F: Float> TransformInput<F> for [F] {
+    fn value_at(&self, index: usize) -> Option<F> {
+        self.get(index).copied()
+    }
+}
+
 pub trait TransformOutput<F: Float>: FeatureVector<Float = F> {}
 
 pub trait Transformation<F: Float> {
-    fn update<I, O>(&mut self, input: &I, output: &mut O)
+    fn transform<I, O>(&mut self, input: &I, output: &mut O)
     where
-        I: TransformInput<F>,
+        I: TransformInput<F> + ?Sized,
         O: TransformOutput<F>;
 }
 
@@ -47,15 +53,15 @@ pub enum BuiltinTransfomers<F: Float> {
 }
 
 impl<F: Float> Transformation<F> for BuiltinTransfomers<F> {
-    fn update<I, O>(&mut self, input: &I, output: &mut O)
+    fn transform<I, O>(&mut self, input: &I, output: &mut O)
     where
-        I: TransformInput<F>,
+        I: TransformInput<F> + ?Sized,
         O: TransformOutput<F>,
     {
         match self {
-            BuiltinTransfomers::StandardScaler1(s) => s.update(input, output),
-            BuiltinTransfomers::StandardScaler2(s) => s.update(input, output),
-            BuiltinTransfomers::StandardScaler3(s) => s.update(input, output),
+            BuiltinTransfomers::StandardScaler1(s) => s.transform(input, output),
+            BuiltinTransfomers::StandardScaler2(s) => s.transform(input, output),
+            BuiltinTransfomers::StandardScaler3(s) => s.transform(input, output),
         }
     }
 }
