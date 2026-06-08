@@ -1,6 +1,6 @@
 pub(crate) mod builtin;
 mod event;
-mod feature;
+mod pipeline;
 mod spec;
 pub mod transformers;
 pub(crate) mod vector;
@@ -12,6 +12,5 @@ pub use builtin::{
     SmaTimedPeriodsBuilder,
 };
 pub use event::{EVENT_KIND_COUNT, Event, EventKind, OrderBookUpdate, PriceUpdate, TimeUpdate};
-pub use feature::Feature;
 pub use spec::{BuiltinSpec, TimeUnit};
-pub use vector::IndicatorFeatureVector;
+pub use vector::{Feature, IndicatorFeatureVector};
