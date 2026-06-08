@@ -2,16 +2,21 @@ use std::marker::PhantomData;
 use std::mem::MaybeUninit;
 use std::time::Duration;
 
+mod ema;
+mod sma;
+
 use crate::features::builtin::BuiltinFeature;
-use crate::features::indicators::{day_of_week, ema, sma};
+use crate::features::builtin::{day_of_week, ema as ema_indicator, sma as sma_indicator};
 use crate::features::vector::IndicatorFeatureVector;
 use crate::vectors::FeatureOutput;
 use crate::{FimlError, Float, Result, Ticker};
 
-pub(in crate::features) use ema::PendingEmaPeriods;
-pub(in crate::features) use sma::{PendingSmaPeriods, PendingSmaTimedPeriods};
+pub use ema::EmaPeriodsBuilder;
+pub(crate) use ema::PendingEmaPeriods;
+pub(crate) use sma::{PendingSmaPeriods, PendingSmaTimedPeriods};
+pub use sma::{SmaPeriodsBuilder, SmaTimedPeriodsBuilder};
 
-pub(in crate::features) enum PendingFeature {
+pub(crate) enum PendingFeature {
     SmaPeriods(PendingSmaPeriods),
     EmaPeriods(PendingEmaPeriods),
     SmaTimedPeriods(PendingSmaTimedPeriods),
@@ -52,13 +57,13 @@ where
     }
 
     /// Configure a sample-period SMA indicator.
-    pub fn sma_periods(self, ticker: Ticker) -> sma::SmaPeriodsBuilder<F, V, M, false> {
-        sma::SmaPeriodsBuilder::new(self, ticker)
+    pub fn sma_periods(self, ticker: Ticker) -> SmaPeriodsBuilder<F, V, M, false> {
+        SmaPeriodsBuilder::new(self, ticker)
     }
 
     /// Configure a sample-period EMA indicator.
-    pub fn ema_periods(self, ticker: Ticker) -> ema::EmaPeriodsBuilder<F, V, M, false> {
-        ema::EmaPeriodsBuilder::new(self, ticker)
+    pub fn ema_periods(self, ticker: Ticker) -> EmaPeriodsBuilder<F, V, M, false> {
+        EmaPeriodsBuilder::new(self, ticker)
     }
 
     /// Configure a time-bucketed SMA indicator.
@@ -69,8 +74,8 @@ where
         self,
         ticker: Ticker,
         aggregation: Duration,
-    ) -> sma::SmaTimedPeriodsBuilder<F, V, M, false> {
-        sma::SmaTimedPeriodsBuilder::new(self, ticker, aggregation)
+    ) -> SmaTimedPeriodsBuilder<F, V, M, false> {
+        SmaTimedPeriodsBuilder::new(self, ticker, aggregation)
     }
 
     /// Add a day-of-week output cell.
@@ -91,13 +96,13 @@ where
         for (entry_index, pending) in self.pending_entries().enumerate() {
             let entry = match pending {
                 PendingFeature::SmaPeriods(config) => {
-                    sma::build_sma_periods_entry(config, &mut names)
+                    sma_indicator::build_sma_periods_entry(config, &mut names)
                 }
                 PendingFeature::EmaPeriods(config) => {
-                    ema::build_ema_periods_entry(config, &mut names)
+                    ema_indicator::build_ema_periods_entry(config, &mut names)
                 }
                 PendingFeature::SmaTimedPeriods(config) => {
-                    sma::build_sma_timed_periods_entry(config, &mut names)?
+                    sma_indicator::build_sma_timed_periods_entry(config, &mut names)?
                 }
                 PendingFeature::DayOfWeek {
                     ticker,
@@ -122,7 +127,7 @@ where
             .map(|entry| unsafe { entry.assume_init_ref() })
     }
 
-    pub(in crate::features) fn ensure_can_push_window(
+    pub(crate) fn ensure_can_push_window(
         &self,
         window_count: usize,
         max_windows: usize,
@@ -149,7 +154,7 @@ where
         Ok(())
     }
 
-    pub(in crate::features) fn reserve_outputs(&mut self, count: usize) -> Result<usize> {
+    pub(crate) fn reserve_outputs(&mut self, count: usize) -> Result<usize> {
         if self.entry_count >= M {
             return Err(FimlError::InvalidArgument(format!(
                 "too many feature instances: capacity is {M}"
@@ -168,7 +173,7 @@ where
         Ok(output_start)
     }
 
-    pub(in crate::features) fn push_entry(&mut self, entry: PendingFeature) {
+    pub(crate) fn push_entry(&mut self, entry: PendingFeature) {
         self.entries[self.entry_count].write(entry);
         self.entry_count += 1;
     }
