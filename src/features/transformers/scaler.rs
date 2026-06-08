@@ -44,7 +44,7 @@ impl<F: Float, const SIZE: usize> Transformation<F> for StandardScaler<F, SIZE> 
 mod tests {
     use super::*;
     use crate::features::transformers::BuiltinTransfomers;
-    use crate::{ArrayFeatureVector, FeatureOutput, FeatureVector};
+    use crate::{ArrayFeatureVector, FeatureVector};
 
     fn approx_eq(a: f64, b: f64) -> bool {
         (a - b).abs() < 1e-9

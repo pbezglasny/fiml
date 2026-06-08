@@ -5,7 +5,7 @@ use crate::features::BuiltinFeature;
 use crate::features::event::{Event, EventKind};
 use crate::features::vector::{BuiltinFeatureEntry, FeatureKey};
 use crate::indicators::{SimpleMovingAverage, SimpleMovingAverageTimed};
-use crate::vectors::FeatureOutput;
+use crate::vectors::FeatureVector;
 use crate::{FimlError, Float, HeapRingBuffer, Result, Ticker};
 
 /// Maximum number of SMA windows that can share a single indicator instance.
@@ -34,7 +34,7 @@ impl<F: Float> SmaFeature<F> {
         }
     }
 
-    pub(in crate::features) fn update<O: FeatureOutput<F>>(
+    pub(in crate::features) fn update<O: FeatureVector<F>>(
         &mut self,
         event: &Event<F>,
         output: &mut O,
@@ -79,7 +79,7 @@ impl<F: Float> SmaTimedFeature<F> {
         }
     }
 
-    pub(in crate::features) fn update<O: FeatureOutput<F>>(
+    pub(in crate::features) fn update<O: FeatureVector<F>>(
         &mut self,
         event: &Event<F>,
         output: &mut O,

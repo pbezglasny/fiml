@@ -8,7 +8,7 @@ mod sma;
 use crate::features::builtin::BuiltinFeature;
 use crate::features::builtin::{day_of_week, ema as ema_indicator, sma as sma_indicator};
 use crate::features::vector::IndicatorFeatureVector;
-use crate::vectors::FeatureOutput;
+use crate::vectors::FeatureVector;
 use crate::{FimlError, Float, Result, Ticker};
 
 pub use ema::EmaPeriodsBuilder;
@@ -28,7 +28,7 @@ pub(crate) enum PendingFeature {
 pub struct IndicatorFeatureVectorBuilder<F, V, const M: usize>
 where
     F: Float,
-    V: FeatureOutput<F>,
+    V: FeatureVector<F>,
 {
     cells: V,
     cell_capacity: usize,
@@ -41,7 +41,7 @@ where
 impl<F, V, const M: usize> IndicatorFeatureVectorBuilder<F, V, M>
 where
     F: Float,
-    V: FeatureOutput<F>,
+    V: FeatureVector<F>,
 {
     /// Start building a feature vector that writes into `cells`.
     pub fn new(cells: V) -> Self {
@@ -182,7 +182,7 @@ where
 impl<F, V, const M: usize> Default for IndicatorFeatureVectorBuilder<F, V, M>
 where
     F: Float,
-    V: FeatureOutput<F> + Default,
+    V: FeatureVector<F> + Default,
 {
     fn default() -> Self {
         Self::new(V::default())

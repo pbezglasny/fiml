@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use crate::builder::{IndicatorFeatureVectorBuilder, PendingFeature};
 use crate::features::builtin::sma::{self, MAX_WINDOWS_PER_SMA};
-use crate::vectors::FeatureOutput;
+use crate::vectors::FeatureVector;
 use crate::{FimlError, Float, Result, Ticker};
 
 #[derive(Clone, Copy)]
@@ -28,7 +28,7 @@ pub(crate) struct PendingSmaTimedPeriods {
 pub struct SmaPeriodsBuilder<F, V, const M: usize, const HAS_WINDOWS: bool>
 where
     F: Float,
-    V: FeatureOutput<F>,
+    V: FeatureVector<F>,
 {
     parent: IndicatorFeatureVectorBuilder<F, V, M>,
     ticker: Ticker,
@@ -41,7 +41,7 @@ where
 pub struct SmaTimedPeriodsBuilder<F, V, const M: usize, const HAS_WINDOWS: bool>
 where
     F: Float,
-    V: FeatureOutput<F>,
+    V: FeatureVector<F>,
 {
     parent: IndicatorFeatureVectorBuilder<F, V, M>,
     ticker: Ticker,
@@ -54,7 +54,7 @@ where
 impl<F, V, const M: usize> SmaPeriodsBuilder<F, V, M, false>
 where
     F: Float,
-    V: FeatureOutput<F>,
+    V: FeatureVector<F>,
 {
     pub(crate) fn new(parent: IndicatorFeatureVectorBuilder<F, V, M>, ticker: Ticker) -> Self {
         Self {
@@ -82,7 +82,7 @@ where
 impl<F, V, const M: usize> SmaPeriodsBuilder<F, V, M, true>
 where
     F: Float,
-    V: FeatureOutput<F>,
+    V: FeatureVector<F>,
 {
     /// Add another sample-period SMA window.
     pub fn window(mut self, period: usize) -> Result<Self> {
@@ -108,7 +108,7 @@ where
 impl<F, V, const M: usize, const HAS_WINDOWS: bool> SmaPeriodsBuilder<F, V, M, HAS_WINDOWS>
 where
     F: Float,
-    V: FeatureOutput<F>,
+    V: FeatureVector<F>,
 {
     fn push_window(&mut self, period: usize) -> Result<()> {
         sma::validate_period(period)?;
@@ -125,7 +125,7 @@ where
 impl<F, V, const M: usize> SmaTimedPeriodsBuilder<F, V, M, false>
 where
     F: Float,
-    V: FeatureOutput<F>,
+    V: FeatureVector<F>,
 {
     pub(crate) fn new(
         parent: IndicatorFeatureVectorBuilder<F, V, M>,
@@ -159,7 +159,7 @@ where
 impl<F, V, const M: usize> SmaTimedPeriodsBuilder<F, V, M, true>
 where
     F: Float,
-    V: FeatureOutput<F>,
+    V: FeatureVector<F>,
 {
     /// Add another timed SMA window, measured in aggregation buckets.
     pub fn window(mut self, period: usize) -> Result<Self> {
@@ -186,7 +186,7 @@ where
 impl<F, V, const M: usize, const HAS_WINDOWS: bool> SmaTimedPeriodsBuilder<F, V, M, HAS_WINDOWS>
 where
     F: Float,
-    V: FeatureOutput<F>,
+    V: FeatureVector<F>,
 {
     fn push_window(&mut self, period: usize) -> Result<()> {
         if self.aggregation.as_millis() == 0 {

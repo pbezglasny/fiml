@@ -7,7 +7,7 @@ use crate::features::event::{EVENT_KIND_COUNT, Event, EventKind};
 use crate::features::feature::Feature;
 use crate::features::spec::BuiltinSpec;
 use crate::ticker::resolve;
-use crate::vectors::FeatureOutput;
+use crate::vectors::FeatureVector;
 use crate::{FimlError, Float, Result, Ticker};
 
 #[derive(Clone)]
@@ -20,7 +20,7 @@ pub(crate) struct FeatureKey {
 /// that write into them, and routes each incoming [`Event`] to only the
 /// features that subscribe to its kind.
 ///
-/// The cell storage is any [`FeatureOutput`] implementation `V`, so the cell
+/// The cell storage is any [`FeatureVector`] implementation `V`, so the cell
 /// count can be fixed at compile time (`ArrayFeatureVector`) or chosen at
 /// runtime by a heap-backed implementation
 /// Features are stored grouped by [`EventKind`](crate::features::EventKind):
@@ -31,7 +31,7 @@ pub(crate) struct FeatureKey {
 /// During dispatch, the feature receives mutable access to the output storage and
 /// writes by index. This keeps the aggregate movable without self-references.
 ///
-/// - `V` — cell storage, any [`FeatureOutput<F>`].
+/// - `V` — cell storage, any [`FeatureVector<F>`].
 /// - `M` — capacity of the feature array.
 pub(crate) struct BuiltinFeatureEntry<F: Float> {
     pub(crate) feature: BuiltinFeature<F>,
@@ -41,7 +41,7 @@ pub(crate) struct BuiltinFeatureEntry<F: Float> {
 pub struct IndicatorFeatureVector<F, V, I, const M: usize>
 where
     F: Float,
-    V: FeatureOutput<F>,
+    V: FeatureVector<F>,
     I: Feature<F>,
 {
     cells: V,
@@ -55,7 +55,7 @@ where
 impl<F, V, I, const M: usize> IndicatorFeatureVector<F, V, I, M>
 where
     F: Float,
-    V: FeatureOutput<F>,
+    V: FeatureVector<F>,
     I: Feature<F>,
 {
     /// Route an event to the features subscribing to its kind, writing fresh
@@ -89,7 +89,7 @@ where
 impl<F, V, I, const M: usize> Drop for IndicatorFeatureVector<F, V, I, M>
 where
     F: Float,
-    V: FeatureOutput<F>,
+    V: FeatureVector<F>,
     I: Feature<F>,
 {
     fn drop(&mut self) {
@@ -104,7 +104,7 @@ where
 impl<F, V, const M: usize> IndicatorFeatureVector<F, V, BuiltinFeature<F>, M>
 where
     F: Float,
-    V: FeatureOutput<F>,
+    V: FeatureVector<F>,
 {
     /// Build a feature vector from library builtins, one feature per spec
     /// (per-spec construction: each SMA gets its own ring buffer).
