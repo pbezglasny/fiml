@@ -1,17 +1,17 @@
 use std::mem::MaybeUninit;
 
-use crate::features::IndicatorFeatureVector;
-
+use crate::FeatureVector;
+use crate::features::IndicatorFeatures;
 use crate::features::transformers::Transformation;
-use crate::{Feature, FeatureVector, Float};
 
-pub struct Pipeline<F, I, V, T, const INDICATOR_SIZE: usize, const TRANSFORMER_SIZE: usize>
+pub struct Pipeline<I, T, O, const TRANSFORMER_SIZE: usize = 10>
 where
-    F: Float,
-    I: Feature<F>,
-    V: FeatureVector<F>,
-    T: Transformation<F>,
+    I: IndicatorFeatures,
+    T: Transformation<I::Float>,
+    O: FeatureVector<I::Float>,
 {
-    indicators: IndicatorFeatureVector<F, V, I, INDICATOR_SIZE>,
+    indicators: I,
     transformers: [MaybeUninit<T>; TRANSFORMER_SIZE],
+    num_transformers: usize,
+    transform_output: O,
 }
