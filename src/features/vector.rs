@@ -33,7 +33,7 @@ pub(crate) struct FeatureKey {
 ///
 /// - `V` — cell storage, any [`FeatureOutput<F>`].
 /// - `M` — capacity of the feature array.
-pub(crate) struct BuiltinFeatureEntry<F: Float + 'static> {
+pub(crate) struct BuiltinFeatureEntry<F: Float> {
     pub(crate) feature: BuiltinFeature<F>,
     pub(crate) kind: EventKind,
 }
@@ -103,7 +103,7 @@ where
 
 impl<F, V, const M: usize> IndicatorFeatureVector<F, V, BuiltinFeature<F>, M>
 where
-    F: Float + 'static,
+    F: Float,
     V: FeatureOutput<F>,
 {
     /// Build a feature vector from library builtins, one feature per spec
@@ -227,7 +227,7 @@ fn validate_builtin_specs(specs: &[(&str, Ticker, BuiltinSpec)]) -> Result<()> {
 }
 
 /// Construct a single builtin feature wired to an output cell index.
-fn build_builtin<F: Float + 'static>(
+fn build_builtin<F: Float>(
     ticker: Ticker,
     spec: &BuiltinSpec,
     output_index: usize,
