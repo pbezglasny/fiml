@@ -1,6 +1,6 @@
 use crate::Float;
 use crate::features::event::Event;
-use crate::features::feature::Feature;
+use crate::features::vector::Feature;
 use crate::vectors::FeatureVector;
 
 pub(crate) mod day_of_week;

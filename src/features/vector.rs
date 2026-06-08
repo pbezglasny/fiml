@@ -4,11 +4,22 @@ use std::mem::MaybeUninit;
 use crate::features::builtin::BuiltinFeature;
 use crate::features::builtin::{day_of_week, ema, sma};
 use crate::features::event::{EVENT_KIND_COUNT, Event, EventKind};
-use crate::features::feature::Feature;
 use crate::features::spec::BuiltinSpec;
 use crate::ticker::resolve;
 use crate::vectors::FeatureVector;
 use crate::{FimlError, Float, Result, Ticker};
+
+/// Contract every feature implements.
+///
+/// A feature subscribes to exactly one [`EventKind`](crate::features::EventKind)
+/// and the feature vector only hands it events of that kind, so `update` reacts
+/// to its own variant and ignores the rest. Computed values are written by
+/// output index through the feature vector passed to `update`.
+/// Implementations are dispatched statically (via enums), so every call
+/// monomorphizes to a direct function call.
+pub trait Feature<F: Float> {
+    fn update<O: FeatureVector<F>>(&mut self, event: &Event<F>, output: &mut O);
+}
 
 #[derive(Clone)]
 pub(crate) struct FeatureKey {
