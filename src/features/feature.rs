@@ -1,6 +1,6 @@
 use crate::Float;
 use crate::features::event::Event;
-use crate::vectors::FeatureOutput;
+use crate::vectors::FeatureVector;
 
 /// Contract every feature implements.
 ///
@@ -11,5 +11,5 @@ use crate::vectors::FeatureOutput;
 /// Implementations are dispatched statically (via enums), so every call
 /// monomorphizes to a direct function call.
 pub trait Feature<F: Float> {
-    fn update<O: FeatureOutput<F>>(&mut self, event: &Event<F>, output: &mut O);
+    fn update<O: FeatureVector<F>>(&mut self, event: &Event<F>, output: &mut O);
 }

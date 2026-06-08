@@ -4,7 +4,7 @@ use crate::features::event::Event;
 use crate::features::event::EventKind;
 use crate::features::vector::{BuiltinFeatureEntry, FeatureKey};
 use crate::indicators::ExponentialMovingAverage;
-use crate::vectors::FeatureOutput;
+use crate::vectors::FeatureVector;
 use crate::{FimlError, Float, Result, Ticker};
 
 pub const MAX_WINDOWS_PER_EMA: usize = super::sma::MAX_WINDOWS_PER_SMA;
@@ -31,7 +31,7 @@ impl<F: Float> EmaFeature<F> {
         }
     }
 
-    pub(in crate::features) fn update<O: FeatureOutput<F>>(
+    pub(in crate::features) fn update<O: FeatureVector<F>>(
         &mut self,
         event: &Event<F>,
         output: &mut O,

@@ -7,12 +7,7 @@ where
     F: Float,
 {
     fn values(&self) -> &[F];
-}
 
-pub trait FeatureOutput<F>: FeatureVector<F>
-where
-    F: Float,
-{
     fn capacity(&self) -> usize;
 
     fn set_value_at(&mut self, index: usize, value: F);
@@ -54,9 +49,7 @@ impl<F: Float, const N: usize> FeatureVector<F> for ArrayFeatureVector<F, N> {
     fn values(&self) -> &[F] {
         unsafe { std::slice::from_raw_parts(self.data.as_ptr().cast::<F>(), N) }
     }
-}
 
-impl<F: Float, const N: usize> FeatureOutput<F> for ArrayFeatureVector<F, N> {
     fn capacity(&self) -> usize {
         N
     }

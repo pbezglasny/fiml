@@ -18,7 +18,7 @@ pub use ring_buffer::{
 };
 pub use ticker::Ticker;
 pub use types::Float;
-pub use vectors::{ArrayFeatureVector, FeatureOutput, FeatureVector};
+pub use vectors::{ArrayFeatureVector, FeatureVector};
 
 pub type Result<T> = std::result::Result<T, FimlError>;
 

@@ -1,6 +1,6 @@
 use crate::builder::{IndicatorFeatureVectorBuilder, PendingFeature};
 use crate::features::builtin::ema::{self, MAX_WINDOWS_PER_EMA};
-use crate::vectors::FeatureOutput;
+use crate::vectors::FeatureVector;
 use crate::{Float, Result, Ticker};
 
 #[derive(Clone, Copy)]
@@ -15,7 +15,7 @@ pub(crate) struct PendingEmaPeriods {
 pub struct EmaPeriodsBuilder<F, V, const M: usize, const HAS_WINDOWS: bool>
 where
     F: Float,
-    V: FeatureOutput<F>,
+    V: FeatureVector<F>,
 {
     parent: IndicatorFeatureVectorBuilder<F, V, M>,
     ticker: Ticker,
@@ -26,7 +26,7 @@ where
 impl<F, V, const M: usize> EmaPeriodsBuilder<F, V, M, false>
 where
     F: Float,
-    V: FeatureOutput<F>,
+    V: FeatureVector<F>,
 {
     pub(crate) fn new(parent: IndicatorFeatureVectorBuilder<F, V, M>, ticker: Ticker) -> Self {
         Self {
@@ -52,7 +52,7 @@ where
 impl<F, V, const M: usize> EmaPeriodsBuilder<F, V, M, true>
 where
     F: Float,
-    V: FeatureOutput<F>,
+    V: FeatureVector<F>,
 {
     /// Add another sample-period EMA window.
     pub fn window(mut self, period: usize) -> Result<Self> {
@@ -77,7 +77,7 @@ where
 impl<F, V, const M: usize, const HAS_WINDOWS: bool> EmaPeriodsBuilder<F, V, M, HAS_WINDOWS>
 where
     F: Float,
-    V: FeatureOutput<F>,
+    V: FeatureVector<F>,
 {
     fn push_window(&mut self, period: usize) -> Result<()> {
         ema::validate_period(period)?;
