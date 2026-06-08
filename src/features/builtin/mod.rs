@@ -17,14 +17,14 @@ pub use sma::{MAX_WINDOWS_PER_SMA, SmaFeature, SmaTimedFeature};
 /// Dispatched statically: each [`update`](Feature::update) is a `match` of
 /// direct calls, no `Box` and no vtable. Users needing custom features wrap
 /// this in their own enum (see the module docs).
-pub enum BuiltinFeature<F: Float + 'static> {
+pub enum BuiltinFeature<F: Float> {
     Sma(SmaFeature<F>),
     Ema(EmaFeature<F>),
     SmaTimed(SmaTimedFeature<F>),
     DayOfWeek(DayOfWeek),
 }
 
-impl<F: Float + 'static> Feature<F> for BuiltinFeature<F> {
+impl<F: Float> Feature<F> for BuiltinFeature<F> {
     fn update<O: FeatureOutput<F>>(&mut self, event: &Event<F>, output: &mut O) {
         match self {
             BuiltinFeature::Sma(sma) => sma.update(event, output),

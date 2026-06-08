@@ -12,14 +12,14 @@ use crate::{FimlError, Float, HeapRingBuffer, Result, Ticker};
 /// Exceeding it during construction is an error.
 pub const MAX_WINDOWS_PER_SMA: usize = 16;
 
-pub struct SmaFeature<F: Float + 'static> {
+pub struct SmaFeature<F: Float> {
     ticker: Ticker,
     sma: SimpleMovingAverage<HeapRingBuffer<F>, F, MAX_WINDOWS_PER_SMA>,
     output_indexes: [usize; MAX_WINDOWS_PER_SMA],
     output_count: usize,
 }
 
-impl<F: Float + 'static> SmaFeature<F> {
+impl<F: Float> SmaFeature<F> {
     pub(crate) fn new(
         ticker: Ticker,
         sma: SimpleMovingAverage<HeapRingBuffer<F>, F, MAX_WINDOWS_PER_SMA>,
@@ -57,14 +57,14 @@ impl<F: Float + 'static> SmaFeature<F> {
     }
 }
 
-pub struct SmaTimedFeature<F: Float + 'static> {
+pub struct SmaTimedFeature<F: Float> {
     ticker: Ticker,
     sma: SimpleMovingAverageTimed<HeapRingBuffer<(i64, F)>, F, MAX_WINDOWS_PER_SMA>,
     output_indexes: [usize; MAX_WINDOWS_PER_SMA],
     output_count: usize,
 }
 
-impl<F: Float + 'static> SmaTimedFeature<F> {
+impl<F: Float> SmaTimedFeature<F> {
     pub(crate) fn new(
         ticker: Ticker,
         sma: SimpleMovingAverageTimed<HeapRingBuffer<(i64, F)>, F, MAX_WINDOWS_PER_SMA>,
@@ -140,7 +140,7 @@ pub(in crate::features) fn validate_timed_durations(
     Ok(())
 }
 
-pub(in crate::features) fn build_builtin<F: Float + 'static>(
+pub(in crate::features) fn build_builtin<F: Float>(
     ticker: Ticker,
     period: usize,
     output_index: usize,
@@ -159,7 +159,7 @@ pub(in crate::features) fn build_builtin<F: Float + 'static>(
     )))
 }
 
-pub(in crate::features) fn build_timed_builtin<F: Float + 'static>(
+pub(in crate::features) fn build_timed_builtin<F: Float>(
     ticker: Ticker,
     aggregation: Duration,
     window: Duration,
@@ -186,7 +186,7 @@ pub(in crate::features) fn build_timed_builtin<F: Float + 'static>(
     )))
 }
 
-pub(crate) fn build_sma_periods_entry<F: Float + 'static>(
+pub(crate) fn build_sma_periods_entry<F: Float>(
     config: &PendingSmaPeriods,
     names: &mut [Option<FeatureKey>],
 ) -> BuiltinFeatureEntry<F> {
@@ -223,7 +223,7 @@ pub(crate) fn build_sma_periods_entry<F: Float + 'static>(
     }
 }
 
-pub(crate) fn build_sma_timed_periods_entry<F: Float + 'static>(
+pub(crate) fn build_sma_timed_periods_entry<F: Float>(
     config: &PendingSmaTimedPeriods,
     names: &mut [Option<FeatureKey>],
 ) -> Result<BuiltinFeatureEntry<F>> {

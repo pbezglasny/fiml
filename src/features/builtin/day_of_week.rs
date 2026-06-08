@@ -34,7 +34,7 @@ impl DayOfWeek {
     }
 }
 
-pub(crate) fn build_entry<F: Float + 'static>(
+pub(crate) fn build_entry<F: Float>(
     ticker: Ticker,
     output_index: usize,
     names: &mut [Option<FeatureKey>],

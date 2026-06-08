@@ -9,14 +9,14 @@ use crate::{FimlError, Float, Result, Ticker};
 
 pub const MAX_WINDOWS_PER_EMA: usize = super::sma::MAX_WINDOWS_PER_SMA;
 
-pub struct EmaFeature<F: Float + 'static> {
+pub struct EmaFeature<F: Float> {
     ticker: Ticker,
     ema: ExponentialMovingAverage<F, MAX_WINDOWS_PER_EMA>,
     output_indexes: [usize; MAX_WINDOWS_PER_EMA],
     output_count: usize,
 }
 
-impl<F: Float + 'static> EmaFeature<F> {
+impl<F: Float> EmaFeature<F> {
     pub(crate) fn new(
         ticker: Ticker,
         ema: ExponentialMovingAverage<F, MAX_WINDOWS_PER_EMA>,
@@ -63,7 +63,7 @@ pub(crate) fn validate_period(period: usize) -> Result<()> {
     Ok(())
 }
 
-pub(in crate::features) fn build_builtin<F: Float + 'static>(
+pub(in crate::features) fn build_builtin<F: Float>(
     ticker: Ticker,
     period: usize,
     output_index: usize,
@@ -81,7 +81,7 @@ pub(in crate::features) fn build_builtin<F: Float + 'static>(
     )))
 }
 
-pub(crate) fn build_ema_periods_entry<F: Float + 'static>(
+pub(crate) fn build_ema_periods_entry<F: Float>(
     config: &PendingEmaPeriods,
     names: &mut [Option<FeatureKey>],
 ) -> BuiltinFeatureEntry<F> {

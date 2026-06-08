@@ -27,7 +27,7 @@ pub(crate) struct PendingSmaTimedPeriods {
 /// Nested builder for a sample-period SMA indicator.
 pub struct SmaPeriodsBuilder<F, V, const M: usize, const HAS_WINDOWS: bool>
 where
-    F: Float + 'static,
+    F: Float,
     V: FeatureOutput<F>,
 {
     parent: IndicatorFeatureVectorBuilder<F, V, M>,
@@ -40,7 +40,7 @@ where
 /// Nested builder for a time-bucketed SMA indicator.
 pub struct SmaTimedPeriodsBuilder<F, V, const M: usize, const HAS_WINDOWS: bool>
 where
-    F: Float + 'static,
+    F: Float,
     V: FeatureOutput<F>,
 {
     parent: IndicatorFeatureVectorBuilder<F, V, M>,
@@ -53,7 +53,7 @@ where
 
 impl<F, V, const M: usize> SmaPeriodsBuilder<F, V, M, false>
 where
-    F: Float + 'static,
+    F: Float,
     V: FeatureOutput<F>,
 {
     pub(crate) fn new(parent: IndicatorFeatureVectorBuilder<F, V, M>, ticker: Ticker) -> Self {
@@ -81,7 +81,7 @@ where
 
 impl<F, V, const M: usize> SmaPeriodsBuilder<F, V, M, true>
 where
-    F: Float + 'static,
+    F: Float,
     V: FeatureOutput<F>,
 {
     /// Add another sample-period SMA window.
@@ -107,7 +107,7 @@ where
 
 impl<F, V, const M: usize, const HAS_WINDOWS: bool> SmaPeriodsBuilder<F, V, M, HAS_WINDOWS>
 where
-    F: Float + 'static,
+    F: Float,
     V: FeatureOutput<F>,
 {
     fn push_window(&mut self, period: usize) -> Result<()> {
@@ -124,7 +124,7 @@ where
 
 impl<F, V, const M: usize> SmaTimedPeriodsBuilder<F, V, M, false>
 where
-    F: Float + 'static,
+    F: Float,
     V: FeatureOutput<F>,
 {
     pub(crate) fn new(
@@ -158,7 +158,7 @@ where
 
 impl<F, V, const M: usize> SmaTimedPeriodsBuilder<F, V, M, true>
 where
-    F: Float + 'static,
+    F: Float,
     V: FeatureOutput<F>,
 {
     /// Add another timed SMA window, measured in aggregation buckets.
@@ -185,7 +185,7 @@ where
 
 impl<F, V, const M: usize, const HAS_WINDOWS: bool> SmaTimedPeriodsBuilder<F, V, M, HAS_WINDOWS>
 where
-    F: Float + 'static,
+    F: Float,
     V: FeatureOutput<F>,
 {
     fn push_window(&mut self, period: usize) -> Result<()> {

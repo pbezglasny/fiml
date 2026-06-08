@@ -14,7 +14,7 @@ pub(crate) struct PendingEmaPeriods {
 /// Nested builder for a sample-period EMA indicator.
 pub struct EmaPeriodsBuilder<F, V, const M: usize, const HAS_WINDOWS: bool>
 where
-    F: Float + 'static,
+    F: Float,
     V: FeatureOutput<F>,
 {
     parent: IndicatorFeatureVectorBuilder<F, V, M>,
@@ -25,7 +25,7 @@ where
 
 impl<F, V, const M: usize> EmaPeriodsBuilder<F, V, M, false>
 where
-    F: Float + 'static,
+    F: Float,
     V: FeatureOutput<F>,
 {
     pub(crate) fn new(parent: IndicatorFeatureVectorBuilder<F, V, M>, ticker: Ticker) -> Self {
@@ -51,7 +51,7 @@ where
 
 impl<F, V, const M: usize> EmaPeriodsBuilder<F, V, M, true>
 where
-    F: Float + 'static,
+    F: Float,
     V: FeatureOutput<F>,
 {
     /// Add another sample-period EMA window.
@@ -76,7 +76,7 @@ where
 
 impl<F, V, const M: usize, const HAS_WINDOWS: bool> EmaPeriodsBuilder<F, V, M, HAS_WINDOWS>
 where
-    F: Float + 'static,
+    F: Float,
     V: FeatureOutput<F>,
 {
     fn push_window(&mut self, period: usize) -> Result<()> {

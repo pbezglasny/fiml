@@ -27,7 +27,7 @@ pub(crate) enum PendingFeature {
 /// library-provided builtin features.
 pub struct IndicatorFeatureVectorBuilder<F, V, const M: usize>
 where
-    F: Float + 'static,
+    F: Float,
     V: FeatureOutput<F>,
 {
     cells: V,
@@ -40,7 +40,7 @@ where
 
 impl<F, V, const M: usize> IndicatorFeatureVectorBuilder<F, V, M>
 where
-    F: Float + 'static,
+    F: Float,
     V: FeatureOutput<F>,
 {
     /// Start building a feature vector that writes into `cells`.
@@ -181,7 +181,7 @@ where
 
 impl<F, V, const M: usize> Default for IndicatorFeatureVectorBuilder<F, V, M>
 where
-    F: Float + 'static,
+    F: Float,
     V: FeatureOutput<F> + Default,
 {
     fn default() -> Self {
