@@ -3,7 +3,7 @@ use std::time::Duration;
 use crate::builder::{PendingSmaPeriods, PendingSmaTimedPeriods};
 use crate::features::BuiltinFeature;
 use crate::features::event::{Event, EventKind};
-use crate::features::vector::{BuiltinFeatureEntry, FeatureKey};
+use crate::features::indicator_vector::{BuiltinFeatureEntry, FeatureKey};
 use crate::indicators::{SimpleMovingAverage, SimpleMovingAverageTimed};
 use crate::vectors::FeatureVector;
 use crate::{FimlError, Float, HeapRingBuffer, Result, Ticker};
@@ -34,7 +34,7 @@ impl<F: Float> SmaFeature<F> {
         }
     }
 
-    pub(in crate::features) fn update<O: FeatureVector<F>>(
+    pub(in crate::features) fn update<O: FeatureVector<Float = F>>(
         &mut self,
         event: &Event<F>,
         output: &mut O,
@@ -79,7 +79,7 @@ impl<F: Float> SmaTimedFeature<F> {
         }
     }
 
-    pub(in crate::features) fn update<O: FeatureVector<F>>(
+    pub(in crate::features) fn update<O: FeatureVector<Float = F>>(
         &mut self,
         event: &Event<F>,
         output: &mut O,

@@ -23,7 +23,7 @@ pub trait TransformInput<F: Float> {
     }
 }
 
-pub trait TransformOutput<F: Float>: FeatureVector<F> {}
+pub trait TransformOutput<F: Float>: FeatureVector<Float = F> {}
 
 pub trait Transformation<F: Float> {
     fn update<I, O>(&mut self, input: &I, output: &mut O)
@@ -38,7 +38,7 @@ impl<F: Float, const N: usize> TransformInput<F> for ArrayFeatureVector<F, N> {
     }
 }
 
-impl<T: FeatureVector<F>, F: Float> TransformOutput<F> for T {}
+impl<T: FeatureVector<Float = F>, F: Float> TransformOutput<F> for T {}
 
 pub enum BuiltinTransfomers<F: Float> {
     StandardScaler1(StandardScaler<F, 1>),

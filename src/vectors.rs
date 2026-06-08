@@ -2,17 +2,16 @@ use std::cell::Cell;
 
 use crate::Float;
 
-pub trait FeatureVector<F>
-where
-    F: Float,
-{
-    fn values(&self) -> &[F];
+pub trait FeatureVector {
+    type Float: Float;
+
+    fn values(&self) -> &[Self::Float];
 
     fn capacity(&self) -> usize;
 
-    fn set_value_at(&mut self, index: usize, value: F);
+    fn set_value_at(&mut self, index: usize, value: Self::Float);
 
-    fn set_values(&mut self, indexes: &[usize], values: &[F]) {
+    fn set_values(&mut self, indexes: &[usize], values: &[Self::Float]) {
         for (index, value) in indexes.iter().zip(values.iter()) {
             self.set_value_at(*index, *value);
         }
@@ -45,7 +44,9 @@ impl<F: Float, const N: usize> Default for ArrayFeatureVector<F, N> {
     }
 }
 
-impl<F: Float, const N: usize> FeatureVector<F> for ArrayFeatureVector<F, N> {
+impl<F: Float, const N: usize> FeatureVector for ArrayFeatureVector<F, N> {
+    type Float = F;
+
     fn values(&self) -> &[F] {
         unsafe { std::slice::from_raw_parts(self.data.as_ptr().cast::<F>(), N) }
     }
