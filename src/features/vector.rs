@@ -21,6 +21,16 @@ pub trait Feature<F: Float> {
     fn update<O: FeatureVector<F>>(&mut self, event: &Event<F>, output: &mut O);
 }
 
+pub trait IndicatorFeatures {
+    type Float: Float;
+
+    fn dispatch(&mut self, event: &Event<Self::Float>);
+
+    fn values(&self) -> &[Self::Float];
+
+    fn index_of(&self, ticker: Ticker, name: &str) -> Option<usize>;
+}
+
 #[derive(Clone)]
 pub(crate) struct FeatureKey {
     pub(crate) ticker: Ticker,
@@ -94,6 +104,27 @@ where
         self.names
             .iter()
             .position(|n| matches!(n, Some(n) if n.ticker == ticker && n.name == name))
+    }
+}
+
+impl<F, V, I, const M: usize> IndicatorFeatures for IndicatorFeatureVector<F, V, I, M>
+where
+    F: Float,
+    V: FeatureVector<F>,
+    I: Feature<F>,
+{
+    type Float = F;
+
+    fn dispatch(&mut self, event: &Event<Self::Float>) {
+        Self::dispatch(self, event);
+    }
+
+    fn values(&self) -> &[Self::Float] {
+        Self::values(self)
+    }
+
+    fn index_of(&self, ticker: Ticker, name: &str) -> Option<usize> {
+        Self::index_of(self, ticker, name)
     }
 }
 
