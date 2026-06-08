@@ -18,7 +18,7 @@ use crate::{FimlError, Float, Result, Ticker};
 /// Implementations are dispatched statically (via enums), so every call
 /// monomorphizes to a direct function call.
 pub trait Feature<F: Float> {
-    fn update<O: FeatureVector<F>>(&mut self, event: &Event<F>, output: &mut O);
+    fn update<O: FeatureVector<Float = F>>(&mut self, event: &Event<F>, output: &mut O);
 }
 
 pub trait IndicatorFeatures {
@@ -52,7 +52,7 @@ pub(crate) struct FeatureKey {
 /// During dispatch, the feature receives mutable access to the output storage and
 /// writes by index. This keeps the aggregate movable without self-references.
 ///
-/// - `V` — cell storage, any [`FeatureVector<F>`].
+/// - `V` — cell storage, any [`FeatureVector<Float = F>`].
 /// - `M` — capacity of the feature array.
 pub(crate) struct BuiltinFeatureEntry<F: Float> {
     pub(crate) feature: BuiltinFeature<F>,
@@ -62,7 +62,7 @@ pub(crate) struct BuiltinFeatureEntry<F: Float> {
 pub struct IndicatorFeatureVector<F, V, I, const M: usize>
 where
     F: Float,
-    V: FeatureVector<F>,
+    V: FeatureVector<Float = F>,
     I: Feature<F>,
 {
     cells: V,
@@ -76,7 +76,7 @@ where
 impl<F, V, I, const M: usize> IndicatorFeatureVector<F, V, I, M>
 where
     F: Float,
-    V: FeatureVector<F>,
+    V: FeatureVector<Float = F>,
     I: Feature<F>,
 {
     /// Route an event to the features subscribing to its kind, writing fresh
@@ -110,7 +110,7 @@ where
 impl<F, V, I, const M: usize> IndicatorFeatures for IndicatorFeatureVector<F, V, I, M>
 where
     F: Float,
-    V: FeatureVector<F>,
+    V: FeatureVector<Float = F>,
     I: Feature<F>,
 {
     type Float = F;
@@ -131,7 +131,7 @@ where
 impl<F, V, I, const M: usize> Drop for IndicatorFeatureVector<F, V, I, M>
 where
     F: Float,
-    V: FeatureVector<F>,
+    V: FeatureVector<Float = F>,
     I: Feature<F>,
 {
     fn drop(&mut self) {
@@ -146,7 +146,7 @@ where
 impl<F, V, const M: usize> IndicatorFeatureVector<F, V, BuiltinFeature<F>, M>
 where
     F: Float,
-    V: FeatureVector<F>,
+    V: FeatureVector<Float = F>,
 {
     /// Build a feature vector from library builtins, one feature per spec
     /// (per-spec construction: each SMA gets its own ring buffer).
