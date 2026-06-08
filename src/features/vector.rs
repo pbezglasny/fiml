@@ -2,9 +2,9 @@ use std::marker::PhantomData;
 use std::mem::MaybeUninit;
 
 use crate::features::builtin::BuiltinFeature;
+use crate::features::builtin::{day_of_week, ema, sma};
 use crate::features::event::{EVENT_KIND_COUNT, Event, EventKind};
 use crate::features::feature::Feature;
-use crate::features::indicators::{day_of_week, ema, sma};
 use crate::features::spec::BuiltinSpec;
 use crate::ticker::resolve;
 use crate::vectors::FeatureOutput;

@@ -1,8 +1,16 @@
 use crate::Float;
 use crate::features::event::Event;
 use crate::features::feature::Feature;
-use crate::features::indicators::{DayOfWeek, EmaFeature, SmaFeature, SmaTimedFeature};
 use crate::vectors::FeatureOutput;
+
+pub(crate) mod day_of_week;
+pub(crate) mod ema;
+pub(crate) mod sma;
+
+pub use crate::builder::{EmaPeriodsBuilder, SmaPeriodsBuilder, SmaTimedPeriodsBuilder};
+pub use day_of_week::DayOfWeek;
+pub use ema::{EmaFeature, MAX_WINDOWS_PER_EMA};
+pub use sma::{MAX_WINDOWS_PER_SMA, SmaFeature, SmaTimedFeature};
 
 /// Closed enum of features shipped by the library.
 ///

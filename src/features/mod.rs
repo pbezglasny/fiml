@@ -1,19 +1,17 @@
-mod builder;
-mod builtin;
+pub(crate) mod builtin;
 mod event;
 mod feature;
-mod indicators;
 mod spec;
 pub mod transformers;
-mod vector;
+pub(crate) mod vector;
 
-pub use builder::IndicatorFeatureVectorBuilder;
+pub use crate::builder::IndicatorFeatureVectorBuilder;
 pub use builtin::BuiltinFeature;
-pub use event::{EVENT_KIND_COUNT, Event, EventKind, OrderBookUpdate, PriceUpdate, TimeUpdate};
-pub use feature::Feature;
-pub use indicators::{
+pub use builtin::{
     DayOfWeek, EmaPeriodsBuilder, MAX_WINDOWS_PER_EMA, MAX_WINDOWS_PER_SMA, SmaPeriodsBuilder,
     SmaTimedPeriodsBuilder,
 };
+pub use event::{EVENT_KIND_COUNT, Event, EventKind, OrderBookUpdate, PriceUpdate, TimeUpdate};
+pub use feature::Feature;
 pub use spec::{BuiltinSpec, TimeUnit};
 pub use vector::IndicatorFeatureVector;

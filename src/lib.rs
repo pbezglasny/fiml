@@ -1,3 +1,4 @@
+pub mod builder;
 pub mod features;
 #[allow(dead_code)]
 pub mod indicators;
@@ -8,9 +9,9 @@ mod vectors;
 
 use std::{error::Error, fmt::Display};
 
+pub use builder::IndicatorFeatureVectorBuilder;
 pub use features::{
-    Event, EventKind, Feature, IndicatorFeatureVector, IndicatorFeatureVectorBuilder,
-    OrderBookUpdate, PriceUpdate, TimeUpdate,
+    Event, EventKind, Feature, IndicatorFeatureVector, OrderBookUpdate, PriceUpdate, TimeUpdate,
 };
 pub use ring_buffer::{
     HeapRingBuffer, RingBuffer, StackRingBuffer, new_heap_ring_buffer, new_stack_ring_buffer,
