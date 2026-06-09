@@ -13,4 +13,5 @@ pub use builtin::{
 };
 pub use event::{EVENT_KIND_COUNT, Event, EventKind, OrderBookUpdate, PriceUpdate, TimeUpdate};
 pub use indicator_vector::{Feature, IndicatorFeatureVector, IndicatorFeatures};
+pub use pipeline::Pipeline;
 pub use spec::{BuiltinSpec, TimeUnit};

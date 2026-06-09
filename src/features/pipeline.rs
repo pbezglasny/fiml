@@ -73,4 +73,8 @@ where
             transformer.transform(self.indicators.values(), &mut self.transform_output);
         }
     }
+
+    pub fn values(&self) -> &[I::Float] {
+        self.transform_output.values()
+    }
 }
