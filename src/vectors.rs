@@ -3,15 +3,17 @@ use std::cell::Cell;
 use crate::Float;
 
 pub trait FeatureVector {
-    type Float: Float;
+    type F: Float;
 
-    fn values(&self) -> &[Self::Float];
+    fn value_at(&self, index: usize) -> Option<Self::F>;
+
+    fn values(&self) -> &[Self::F];
 
     fn capacity(&self) -> usize;
 
-    fn set_value_at(&mut self, index: usize, value: Self::Float);
+    fn set_value_at(&mut self, index: usize, value: Self::F);
 
-    fn set_values(&mut self, indexes: &[usize], values: &[Self::Float]) {
+    fn set_values(&mut self, indexes: &[usize], values: &[Self::F]) {
         for (index, value) in indexes.iter().zip(values.iter()) {
             self.set_value_at(*index, *value);
         }
@@ -28,14 +30,6 @@ impl<F: Float, const N: usize> ArrayFeatureVector<F, N> {
             data: [const { Cell::new(F::ZERO) }; N],
         }
     }
-
-    pub fn value_at(&self, index: usize) -> Option<F> {
-        if index < N {
-            Some(self.data[index].get())
-        } else {
-            None
-        }
-    }
 }
 
 impl<F: Float, const N: usize> Default for ArrayFeatureVector<F, N> {
@@ -45,8 +39,15 @@ impl<F: Float, const N: usize> Default for ArrayFeatureVector<F, N> {
 }
 
 impl<F: Float, const N: usize> FeatureVector for ArrayFeatureVector<F, N> {
-    type Float = F;
+    type F = F;
 
+    fn value_at(&self, index: usize) -> Option<F> {
+        if index < N {
+            Some(self.data[index].get())
+        } else {
+            None
+        }
+    }
     fn values(&self) -> &[F] {
         unsafe { std::slice::from_raw_parts(self.data.as_ptr().cast::<F>(), N) }
     }

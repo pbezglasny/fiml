@@ -31,7 +31,7 @@ impl<F: Float> EmaFeature<F> {
         }
     }
 
-    pub(in crate::features) fn update<O: FeatureVector<Float = F>>(
+    pub(in crate::features) fn update<O: FeatureVector<F = F>>(
         &mut self,
         event: &Event<F>,
         output: &mut O,

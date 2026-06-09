@@ -28,7 +28,7 @@ pub(crate) enum PendingFeature {
 pub struct IndicatorFeatureVectorBuilder<F, V, const M: usize>
 where
     F: Float,
-    V: FeatureVector<Float = F>,
+    V: FeatureVector<F = F>,
 {
     cells: V,
     cell_capacity: usize,
@@ -41,7 +41,7 @@ where
 impl<F, V, const M: usize> IndicatorFeatureVectorBuilder<F, V, M>
 where
     F: Float,
-    V: FeatureVector<Float = F>,
+    V: FeatureVector<F = F>,
 {
     /// Start building a feature vector that writes into `cells`.
     pub fn new(cells: V) -> Self {
@@ -182,7 +182,7 @@ where
 impl<F, V, const M: usize> Default for IndicatorFeatureVectorBuilder<F, V, M>
 where
     F: Float,
-    V: FeatureVector<Float = F> + Default,
+    V: FeatureVector<F = F> + Default,
 {
     fn default() -> Self {
         Self::new(V::default())
@@ -192,7 +192,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::features::{MAX_WINDOWS_PER_SMA, SmaPeriodsBuilder};
+    use crate::features::{IndicatorFeatures, MAX_WINDOWS_PER_SMA, SmaPeriodsBuilder};
     use crate::{ArrayFeatureVector, Event, ticker};
 
     fn approx_eq(a: f64, b: f64) -> bool {
