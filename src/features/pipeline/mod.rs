@@ -1,41 +1,49 @@
+mod stage;
+use std::marker::PhantomData;
 use std::mem::MaybeUninit;
 
 use crate::features::IndicatorFeatures;
 use crate::features::transformers::Transformation;
-use crate::{Event, FimlError};
+use crate::{Event, FeatureVector, FimlError, Float};
 
-pub struct Pipeline<I, T, const TRANSFORMER_SIZE: usize>
+pub struct Pipeline<I, T, F, V, const TRANSFORMER_SIZE: usize>
 where
-    I: IndicatorFeatures,
-    T: Transformation<I::Float>,
+    F: Float,
+    V: FeatureVector<F = F>,
+    I: IndicatorFeatures<F = F>,
+    T: Transformation<F = F, OutputVector = V>,
 {
     indicators: I,
     transformers: [MaybeUninit<T>; TRANSFORMER_SIZE],
     num_transformers: usize,
+    _phantom: PhantomData<V>,
 }
 
-impl<I, T, const TRANSFORMER_SIZE: usize> Pipeline<I, T, TRANSFORMER_SIZE>
+impl<I, T, F, V, const NUM_TRANSFORMERS_SIZE: usize> Pipeline<I, T, F, V, NUM_TRANSFORMERS_SIZE>
 where
-    I: IndicatorFeatures,
-    T: Transformation<I::Float>,
+    F: Float,
+    V: FeatureVector<F = F>,
+    I: IndicatorFeatures<F = F>,
+    T: Transformation<F = F, OutputVector = V>,
 {
     pub fn new(indicators: I) -> Self {
         Self {
             indicators,
-            transformers: [const { MaybeUninit::uninit() }; TRANSFORMER_SIZE],
+            transformers: [const { MaybeUninit::uninit() }; NUM_TRANSFORMERS_SIZE],
             num_transformers: 0,
+            _phantom: PhantomData::<V>,
         }
     }
 
     pub fn add_transformer(&mut self, transformer: T) -> Result<(), FimlError> {
-        if self.num_transformers < TRANSFORMER_SIZE {
+        if self.num_transformers < NUM_TRANSFORMERS_SIZE {
             self.transformers[self.num_transformers].write(transformer);
             self.num_transformers += 1;
             #[cfg(feature = "tracing")]
             tracing::debug!(
                 transformer_index = self.num_transformers - 1,
                 transformer_count = self.num_transformers,
-                transformer_capacity = TRANSFORMER_SIZE,
+                transformer_capacity = NUM_TRANSFORMERS_SIZE,
                 transformer_type = std::any::type_name::<T>(),
                 "added pipeline transformer"
             );
@@ -47,50 +55,47 @@ where
             )))
         }
     }
-}
 
-impl<I, T, const TRANSFORMER_SIZE: usize> Drop for Pipeline<I, T, TRANSFORMER_SIZE>
-where
-    I: IndicatorFeatures,
-    T: Transformation<I::Float>,
-{
-    fn drop(&mut self) {
-        // SAFETY: the first `num_transformers` entries are initialized by
-        // `add_transformer`.
-        for slot in &mut self.transformers[..self.num_transformers] {
-            unsafe { slot.assume_init_drop() };
-        }
-    }
-}
-
-impl<I, T, const TRANSFORMER_SIZE: usize> Pipeline<I, T, TRANSFORMER_SIZE>
-where
-    I: IndicatorFeatures,
-    T: Transformation<I::Float>,
-{
-    pub fn dispatch(&mut self, event: &Event<I::Float>) {
+    pub fn dispatch(&mut self, event: &Event<I::F>) {
         self.indicators.dispatch(event);
         if self.num_transformers == 0 {
             return;
         }
 
         let first = unsafe { self.transformers[0].assume_init_mut() };
-        first.transform(self.indicators.values());
+        first.transform(&self.indicators);
 
         for i in 1..self.num_transformers {
             let (previous, current) = self.transformers.split_at_mut(i);
-            let input = unsafe { previous[i - 1].assume_init_ref() };
-            let output = unsafe { current[0].assume_init_mut() };
-            output.transform(input);
+            let prev_transformation = unsafe { previous[i - 1].assume_init_ref() };
+            let current_transformation = unsafe { current[0].assume_init_mut() };
+            current_transformation.transform(prev_transformation.output_values());
         }
     }
 
-    pub fn values(&self) -> &[I::Float] {
+    pub fn values(&self) -> &[F] {
         if self.num_transformers == 0 {
             self.indicators.values()
         } else {
-            unsafe { self.transformers[self.num_transformers - 1].assume_init_ref() }
-                .output_values()
+            let last = unsafe { self.transformers[self.num_transformers - 1].assume_init_ref() };
+            last.output_values().values()
+        }
+    }
+}
+
+impl<I, T, F, V, const NUM_TRANSFORMERS_SIZE: usize> Drop
+    for Pipeline<I, T, F, V, NUM_TRANSFORMERS_SIZE>
+where
+    F: Float,
+    V: FeatureVector<F = F>,
+    I: IndicatorFeatures<F = F>,
+    T: Transformation<F = F, OutputVector = V>,
+{
+    fn drop(&mut self) {
+        // SAFETY: the first `num_transformers` entries are initialized by
+        // `add_transformer`.
+        for slot in &mut self.transformers[..self.num_transformers] {
+            unsafe { slot.assume_init_drop() };
         }
     }
 }
@@ -113,14 +118,28 @@ mod tests {
         }
     }
 
-    impl IndicatorFeatures for TestIndicators {
-        type Float = f64;
+    impl FeatureVector for TestIndicators {
+        type F = f64;
 
-        fn dispatch(&mut self, _event: &Event<Self::Float>) {}
+        fn value_at(&self, index: usize) -> Option<Self::F> {
+            self.cells.value_at(index)
+        }
 
-        fn values(&self) -> &[Self::Float] {
+        fn values(&self) -> &[Self::F] {
             self.cells.values()
         }
+
+        fn capacity(&self) -> usize {
+            self.cells.capacity()
+        }
+
+        fn set_value_at(&mut self, index: usize, value: Self::F) {
+            self.cells.set_value_at(index, value);
+        }
+    }
+
+    impl IndicatorFeatures for TestIndicators {
+        fn dispatch(&mut self, _event: &Event<Self::F>) {}
 
         fn index_of(&self, _ticker: Ticker, _name: &str) -> Option<usize> {
             None
@@ -133,16 +152,26 @@ mod tests {
 
     #[test]
     fn values_returns_indicator_output_without_transformers() {
-        let pipeline: Pipeline<_, StandardScaler<f64, ArrayFeatureVector<f64, 1>, 1>, 0> =
-            Pipeline::new(TestIndicators::new(10.0));
+        let pipeline: Pipeline<
+            _,
+            StandardScaler<f64, ArrayFeatureVector<f64, 1>, 1>,
+            f64,
+            ArrayFeatureVector<f64, 1>,
+            0,
+        > = Pipeline::new(TestIndicators::new(10.0));
 
         assert!(approx_eq(pipeline.values()[0], 10.0));
     }
 
     #[test]
     fn dispatch_chains_transformers_and_exposes_last_output() {
-        let mut pipeline: Pipeline<_, StandardScaler<f64, ArrayFeatureVector<f64, 1>, 1>, 2> =
-            Pipeline::new(TestIndicators::new(10.0));
+        let mut pipeline: Pipeline<
+            _,
+            StandardScaler<f64, ArrayFeatureVector<f64, 1>, 1>,
+            f64,
+            ArrayFeatureVector<f64, 1>,
+            2,
+        > = Pipeline::new(TestIndicators::new(10.0));
         pipeline
             .add_transformer(StandardScaler::new(
                 [0],

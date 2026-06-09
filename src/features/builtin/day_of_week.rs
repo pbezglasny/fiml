@@ -16,18 +16,14 @@ impl DayOfWeek {
         Self { output_index }
     }
 
-    pub fn update<F: Float, O: FeatureVector<Float = F>>(
-        &mut self,
-        ev: &TimeUpdate,
-        output: &mut O,
-    ) {
+    pub fn update<F: Float, O: FeatureVector<F = F>>(&mut self, ev: &TimeUpdate, output: &mut O) {
         // Unix epoch (1970-01-01) was a Thursday, index 4 in a Sunday-based week.
         let days = ev.timestamp.div_euclid(86_400);
         let dow = (days + 4).rem_euclid(7);
         output.set_value_at(self.output_index, F::from_usize(dow as usize));
     }
 
-    pub(in crate::features) fn update_event<F: Float, O: FeatureVector<Float = F>>(
+    pub(in crate::features) fn update_event<F: Float, O: FeatureVector<F = F>>(
         &mut self,
         event: &Event<F>,
         output: &mut O,

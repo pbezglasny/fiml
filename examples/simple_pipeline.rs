@@ -51,8 +51,13 @@ fn main() -> anyhow::Result<()> {
             .done()?
             .build()?;
 
-    let mut pipeline: Pipeline<_, StandardScaler<f64, ArrayFeatureVector<f64, 1>, 1>, 1> =
-        Pipeline::<_, _, 1>::new(indicators);
+    let mut pipeline: Pipeline<
+        _,
+        StandardScaler<f64, ArrayFeatureVector<f64, 1>, 1>,
+        f64,
+        ArrayFeatureVector<f64, 1>,
+        1,
+    > = Pipeline::new(indicators);
     pipeline.add_transformer(StandardScaler::new(
         [0],
         [0],

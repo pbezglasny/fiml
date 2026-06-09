@@ -18,12 +18,15 @@ use crate::{FimlError, Float, Result, Ticker};
 /// Implementations are dispatched statically (via enums), so every call
 /// monomorphizes to a direct function call.
 pub trait Feature<F: Float> {
-    fn update<O: FeatureVector<Float = F>>(&mut self, event: &Event<F>, output: &mut O);
+    fn update<O: FeatureVector<F = F>>(&mut self, event: &Event<F>, output: &mut O);
 }
 
 pub trait IndicatorFeatures: FeatureVector {
-    fn dispatch(&mut self, event: &Event<Self::Float>);
+    /// Route an event to the features subscribing to its kind, writing fresh
+    /// values into their cells. Features of other kinds are not touched.
+    fn dispatch(&mut self, event: &Event<Self::F>);
 
+    /// Cell index a named feature for `ticker` writes to, or `None` if no such key.
     fn index_of(&self, ticker: Ticker, name: &str) -> Option<usize>;
 }
 
@@ -58,7 +61,7 @@ pub(crate) struct BuiltinFeatureEntry<F: Float> {
 pub struct IndicatorFeatureVector<F, V, I, const M: usize>
 where
     F: Float,
-    V: FeatureVector<Float = F>,
+    V: FeatureVector<F = F>,
     I: Feature<F>,
 {
     cells: V,
@@ -68,16 +71,38 @@ where
     names: Box<[Option<FeatureKey>]>,
     _marker: PhantomData<F>,
 }
-
-impl<F, V, I, const M: usize> IndicatorFeatureVector<F, V, I, M>
+impl<F, V, I, const M: usize> FeatureVector for IndicatorFeatureVector<F, V, I, M>
 where
     F: Float,
-    V: FeatureVector<Float = F>,
+    V: FeatureVector<F = F>,
     I: Feature<F>,
 {
-    /// Route an event to the features subscribing to its kind, writing fresh
-    /// values into their cells. Features of other kinds are not touched.
-    pub fn dispatch(&mut self, event: &Event<F>) {
+    type F = F;
+
+    fn value_at(&self, index: usize) -> Option<Self::F> {
+        self.cells.value_at(index)
+    }
+
+    fn values(&self) -> &[Self::F] {
+        self.cells.values()
+    }
+
+    fn capacity(&self) -> usize {
+        self.cells.capacity()
+    }
+
+    fn set_value_at(&mut self, index: usize, value: Self::F) {
+        self.cells.set_value_at(index, value);
+    }
+}
+
+impl<F, V, I, const M: usize> IndicatorFeatures for IndicatorFeatureVector<F, V, I, M>
+where
+    F: Float,
+    V: FeatureVector<F = F>,
+    I: Feature<F>,
+{
+    fn dispatch(&mut self, event: &Event<F>) {
         let (start, len) = self.groups[event.kind() as usize];
         // SAFETY: every slot in `features[..feature_count]` is initialized, and
         // each group is a sub-range of that, so this slice is initialized.
@@ -88,61 +113,17 @@ where
             feature.update(event, cells);
         }
     }
-
-    /// Current value of every cell, in cell-index order. Ready to hand to an ML
-    /// model with no copying.
-    pub fn values(&self) -> &[F] {
-        self.cells.values()
-    }
-
-    /// Cell index a named feature for `ticker` writes to, or `None` if no such key.
-    pub fn index_of(&self, ticker: Ticker, name: &str) -> Option<usize> {
+    fn index_of(&self, ticker: Ticker, name: &str) -> Option<usize> {
         self.names
             .iter()
             .position(|n| matches!(n, Some(n) if n.ticker == ticker && n.name == name))
     }
 }
 
-impl<F, V, I, const M: usize> FeatureVector for IndicatorFeatureVector<F, V, I, M>
-where
-    F: Float,
-    V: FeatureVector<Float = F>,
-    I: Feature<F>,
-{
-    type Float = F;
-
-    fn values(&self) -> &[Self::Float] {
-        self.cells.values()
-    }
-
-    fn capacity(&self) -> usize {
-        self.cells.capacity()
-    }
-
-    fn set_value_at(&mut self, index: usize, value: Self::Float) {
-        self.cells.set_value_at(index, value);
-    }
-}
-
-impl<F, V, I, const M: usize> IndicatorFeatures for IndicatorFeatureVector<F, V, I, M>
-where
-    F: Float,
-    V: FeatureVector<Float = F>,
-    I: Feature<F>,
-{
-    fn dispatch(&mut self, event: &Event<Self::Float>) {
-        Self::dispatch(self, event);
-    }
-
-    fn index_of(&self, ticker: Ticker, name: &str) -> Option<usize> {
-        Self::index_of(self, ticker, name)
-    }
-}
-
 impl<F, V, I, const M: usize> Drop for IndicatorFeatureVector<F, V, I, M>
 where
     F: Float,
-    V: FeatureVector<Float = F>,
+    V: FeatureVector<F = F>,
     I: Feature<F>,
 {
     fn drop(&mut self) {
@@ -157,7 +138,7 @@ where
 impl<F, V, const M: usize> IndicatorFeatureVector<F, V, BuiltinFeature<F>, M>
 where
     F: Float,
-    V: FeatureVector<Float = F>,
+    V: FeatureVector<F = F>,
 {
     /// Build a feature vector from library builtins, one feature per spec
     /// (per-spec construction: each SMA gets its own ring buffer).

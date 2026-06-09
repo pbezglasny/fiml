@@ -25,7 +25,7 @@ pub enum BuiltinFeature<F: Float> {
 }
 
 impl<F: Float> Feature<F> for BuiltinFeature<F> {
-    fn update<O: FeatureVector<Float = F>>(&mut self, event: &Event<F>, output: &mut O) {
+    fn update<O: FeatureVector<F = F>>(&mut self, event: &Event<F>, output: &mut O) {
         match self {
             BuiltinFeature::Sma(sma) => sma.update(event, output),
             BuiltinFeature::Ema(ema) => ema.update(event, output),
