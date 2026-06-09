@@ -60,6 +60,21 @@ where
     }
 }
 
+impl<I, T, O, const TRANSFORMER_SIZE: usize> Drop for Pipeline<I, T, O, TRANSFORMER_SIZE>
+where
+    I: IndicatorFeatures,
+    T: Transformation<I::Float>,
+    O: FeatureVector<Float = I::Float>,
+{
+    fn drop(&mut self) {
+        // SAFETY: the first `num_transformers` entries are initialized by
+        // `add_transformer`.
+        for slot in &mut self.transformers[..self.num_transformers] {
+            unsafe { slot.assume_init_drop() };
+        }
+    }
+}
+
 impl<I, T, O, const TRANSFORMER_SIZE: usize> Pipeline<I, T, O, TRANSFORMER_SIZE>
 where
     I: IndicatorFeatures,
