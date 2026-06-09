@@ -127,6 +127,15 @@ where
             moving_avg: T::ZERO,
         });
         self.window_count += 1;
+        #[cfg(feature = "tracing")]
+        tracing::debug!(
+            indicator = "SMA",
+            window_index = self.window_count - 1,
+            window_count = self.window_count,
+            window_capacity = WINDOWS,
+            period,
+            "added indicator window"
+        );
         Ok(())
     }
 
@@ -285,6 +294,16 @@ where
             moving_avg: T::ZERO,
         });
         self.window_count += 1;
+        #[cfg(feature = "tracing")]
+        tracing::debug!(
+            indicator = "SMA timed",
+            window_index = self.window_count - 1,
+            window_count = self.window_count,
+            window_capacity = WINDOWS,
+            periods,
+            duration_millis = periods as i64 * self.millis_aggregation,
+            "added indicator window"
+        );
         Ok(())
     }
 
