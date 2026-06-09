@@ -96,6 +96,15 @@ where
             moving_avg: None,
         });
         self.window_count += 1;
+        #[cfg(feature = "tracing")]
+        tracing::debug!(
+            indicator = "EMA",
+            window_index = self.window_count - 1,
+            window_count = self.window_count,
+            window_capacity = WINDOWS,
+            period,
+            "added indicator window"
+        );
         Ok(())
     }
 

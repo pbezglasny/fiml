@@ -50,6 +50,14 @@ where
         if self.num_transformers < TRANSFORMER_SIZE {
             self.transformers[self.num_transformers].write(transformer);
             self.num_transformers += 1;
+            #[cfg(feature = "tracing")]
+            tracing::debug!(
+                transformer_index = self.num_transformers - 1,
+                transformer_count = self.num_transformers,
+                transformer_capacity = TRANSFORMER_SIZE,
+                transformer_type = std::any::type_name::<T>(),
+                "added pipeline transformer"
+            );
             Ok(())
         } else {
             Err(FimlError::InvalidArgument(format!(
