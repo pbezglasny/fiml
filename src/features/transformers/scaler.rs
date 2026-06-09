@@ -3,40 +3,57 @@ use crate::{
     features::transformers::{TransformInput, TransformOutput, Transformation},
 };
 
-pub struct StandardScaler<F: Float, const SIZE: usize> {
+pub struct StandardScaler<F: Float, O: TransformOutput<F>, const SIZE: usize> {
     input_idxes: [usize; SIZE],
     output_idxes: [usize; SIZE],
     mean: F,
     deviation: F,
+    output: O,
 }
 
-impl<F: Float, const SIZE: usize> StandardScaler<F, SIZE> {
+impl<F: Float, O: TransformOutput<F>, const SIZE: usize> StandardScaler<F, O, SIZE> {
     pub fn new(
         input_idxes: [usize; SIZE],
         output_idxes: [usize; SIZE],
         mean: F,
         deviation: F,
+        output: O,
     ) -> Self {
         Self {
             input_idxes,
             output_idxes,
             mean,
             deviation,
+            output,
         }
     }
 }
 
-impl<F: Float, const SIZE: usize> Transformation<F> for StandardScaler<F, SIZE> {
-    fn transform<I, O>(&mut self, input: &I, output: &mut O)
+impl<F: Float, O: TransformOutput<F>, const SIZE: usize> TransformInput<F>
+    for StandardScaler<F, O, SIZE>
+{
+    fn value_at(&self, index: usize) -> Option<F> {
+        self.output.values().get(index).copied()
+    }
+}
+
+impl<F: Float, O: TransformOutput<F>, const SIZE: usize> Transformation<F>
+    for StandardScaler<F, O, SIZE>
+{
+    fn transform<I>(&mut self, input: &I)
     where
         I: TransformInput<F> + ?Sized,
-        O: TransformOutput<F>,
     {
         for (i, o) in self.input_idxes.iter().zip(self.output_idxes.iter()) {
             if let Some(value) = input.value_at(*i) {
-                output.set_value_at(*o, value.sub(self.mean).div(self.deviation));
+                self.output
+                    .set_value_at(*o, value.sub(self.mean).div(self.deviation));
             }
         }
+    }
+
+    fn output_values(&self) -> &[F] {
+        self.output.values()
     }
 }
 
@@ -53,27 +70,32 @@ mod tests {
     #[test]
     fn standard_scaler_scales_single_value() {
         let mut input = ArrayFeatureVector::<f64, 1>::new();
-        let mut output = ArrayFeatureVector::<f64, 1>::new();
         input.set_value_at(0, 10.0);
 
-        let mut scaler = StandardScaler::new([0], [0], 2.0, 4.0);
-        scaler.transform(&input, &mut output);
+        let mut scaler =
+            StandardScaler::new([0], [0], 2.0, 4.0, ArrayFeatureVector::<f64, 1>::new());
+        scaler.transform(&input);
 
-        assert!(approx_eq(FeatureVector::values(&output)[0], 2.0));
+        assert!(approx_eq(Transformation::output_values(&scaler)[0], 2.0));
     }
 
     #[test]
     fn standard_scaler_scales_multiple_values_with_index_remapping() {
         let mut input = ArrayFeatureVector::<f64, 3>::new();
-        let mut output = ArrayFeatureVector::<f64, 2>::new();
         input.set_value_at(0, 6.0);
         input.set_value_at(2, 10.0);
 
-        let mut scaler = StandardScaler::new([0, 2], [1, 0], 2.0, 2.0);
-        scaler.transform(&input, &mut output);
+        let mut scaler = StandardScaler::new(
+            [0, 2],
+            [1, 0],
+            2.0,
+            2.0,
+            ArrayFeatureVector::<f64, 2>::new(),
+        );
+        scaler.transform(&input);
 
-        assert!(approx_eq(FeatureVector::values(&output)[0], 4.0));
-        assert!(approx_eq(FeatureVector::values(&output)[1], 2.0));
+        assert!(approx_eq(Transformation::output_values(&scaler)[0], 4.0));
+        assert!(approx_eq(Transformation::output_values(&scaler)[1], 2.0));
     }
 
     #[test]
@@ -82,24 +104,34 @@ mod tests {
         let mut output = ArrayFeatureVector::<f64, 1>::new();
         output.set_value_at(0, 42.0);
 
-        let mut scaler = StandardScaler::new([1], [0], 2.0, 4.0);
-        scaler.transform(&input, &mut output);
+        let mut scaler = StandardScaler::new([1], [0], 2.0, 4.0, output);
+        scaler.transform(&input);
 
-        assert!(approx_eq(FeatureVector::values(&output)[0], 42.0));
+        assert!(approx_eq(Transformation::output_values(&scaler)[0], 42.0));
     }
 
     #[test]
     fn builtin_transformer_dispatches_standard_scaler() {
         let mut input = ArrayFeatureVector::<f64, 2>::new();
-        let mut output = ArrayFeatureVector::<f64, 2>::new();
         input.set_value_at(0, 6.0);
         input.set_value_at(1, 8.0);
 
-        let mut transformer =
-            BuiltinTransfomers::StandardScaler2(StandardScaler::new([0, 1], [0, 1], 2.0, 2.0));
-        transformer.transform(&input, &mut output);
+        let mut transformer = BuiltinTransfomers::StandardScaler2(StandardScaler::new(
+            [0, 1],
+            [0, 1],
+            2.0,
+            2.0,
+            ArrayFeatureVector::<f64, 2>::new(),
+        ));
+        transformer.transform(&input);
 
-        assert!(approx_eq(FeatureVector::values(&output)[0], 2.0));
-        assert!(approx_eq(FeatureVector::values(&output)[1], 3.0));
+        assert!(approx_eq(
+            Transformation::output_values(&transformer)[0],
+            2.0
+        ));
+        assert!(approx_eq(
+            Transformation::output_values(&transformer)[1],
+            3.0
+        ));
     }
 }

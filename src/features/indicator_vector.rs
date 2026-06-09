@@ -21,12 +21,8 @@ pub trait Feature<F: Float> {
     fn update<O: FeatureVector<Float = F>>(&mut self, event: &Event<F>, output: &mut O);
 }
 
-pub trait IndicatorFeatures {
-    type Float: Float;
-
+pub trait IndicatorFeatures: FeatureVector {
     fn dispatch(&mut self, event: &Event<Self::Float>);
-
-    fn values(&self) -> &[Self::Float];
 
     fn index_of(&self, ticker: Ticker, name: &str) -> Option<usize>;
 }
@@ -107,7 +103,7 @@ where
     }
 }
 
-impl<F, V, I, const M: usize> IndicatorFeatures for IndicatorFeatureVector<F, V, I, M>
+impl<F, V, I, const M: usize> FeatureVector for IndicatorFeatureVector<F, V, I, M>
 where
     F: Float,
     V: FeatureVector<Float = F>,
@@ -115,12 +111,27 @@ where
 {
     type Float = F;
 
-    fn dispatch(&mut self, event: &Event<Self::Float>) {
-        Self::dispatch(self, event);
+    fn values(&self) -> &[Self::Float] {
+        self.cells.values()
     }
 
-    fn values(&self) -> &[Self::Float] {
-        Self::values(self)
+    fn capacity(&self) -> usize {
+        self.cells.capacity()
+    }
+
+    fn set_value_at(&mut self, index: usize, value: Self::Float) {
+        self.cells.set_value_at(index, value);
+    }
+}
+
+impl<F, V, I, const M: usize> IndicatorFeatures for IndicatorFeatureVector<F, V, I, M>
+where
+    F: Float,
+    V: FeatureVector<Float = F>,
+    I: Feature<F>,
+{
+    fn dispatch(&mut self, event: &Event<Self::Float>) {
+        Self::dispatch(self, event);
     }
 
     fn index_of(&self, ticker: Ticker, name: &str) -> Option<usize> {
