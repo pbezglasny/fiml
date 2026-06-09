@@ -51,10 +51,15 @@ fn main() -> anyhow::Result<()> {
             .done()?
             .build()?;
 
-    let output = ArrayFeatureVector::<f64, 1>::new();
-    let mut pipeline: Pipeline<_, StandardScaler<f64, 1>, _, 1> =
-        Pipeline::<_, _, _, 1>::new(indicators, output);
-    pipeline.add_transformer(StandardScaler::new([0], [0], 100.0, 5.0))?;
+    let mut pipeline: Pipeline<_, StandardScaler<f64, ArrayFeatureVector<f64, 1>, 1>, 1> =
+        Pipeline::<_, _, 1>::new(indicators);
+    pipeline.add_transformer(StandardScaler::new(
+        [0],
+        [0],
+        100.0,
+        5.0,
+        ArrayFeatureVector::<f64, 1>::new(),
+    ))?;
 
     let mut producer = StubPriceProducer::new(ticker, 0x5EED);
 

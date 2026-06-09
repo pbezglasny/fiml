@@ -31,11 +31,12 @@ impl<F: Float> TransformInput<F> for [F] {
 
 pub trait TransformOutput<F: Float>: FeatureVector<Float = F> {}
 
-pub trait Transformation<F: Float> {
-    fn transform<I, O>(&mut self, input: &I, output: &mut O)
+pub trait Transformation<F: Float>: TransformInput<F> {
+    fn transform<I>(&mut self, input: &I)
     where
-        I: TransformInput<F> + ?Sized,
-        O: TransformOutput<F>;
+        I: TransformInput<F> + ?Sized;
+
+    fn output_values(&self) -> &[F];
 }
 
 impl<F: Float, const N: usize> TransformInput<F> for ArrayFeatureVector<F, N> {
@@ -47,21 +48,38 @@ impl<F: Float, const N: usize> TransformInput<F> for ArrayFeatureVector<F, N> {
 impl<T: FeatureVector<Float = F>, F: Float> TransformOutput<F> for T {}
 
 pub enum BuiltinTransfomers<F: Float> {
-    StandardScaler1(StandardScaler<F, 1>),
-    StandardScaler2(StandardScaler<F, 2>),
-    StandardScaler3(StandardScaler<F, 3>),
+    StandardScaler1(StandardScaler<F, ArrayFeatureVector<F, 1>, 1>),
+    StandardScaler2(StandardScaler<F, ArrayFeatureVector<F, 2>, 2>),
+    StandardScaler3(StandardScaler<F, ArrayFeatureVector<F, 3>, 3>),
+}
+
+impl<F: Float> TransformInput<F> for BuiltinTransfomers<F> {
+    fn value_at(&self, index: usize) -> Option<F> {
+        match self {
+            BuiltinTransfomers::StandardScaler1(s) => s.value_at(index),
+            BuiltinTransfomers::StandardScaler2(s) => s.value_at(index),
+            BuiltinTransfomers::StandardScaler3(s) => s.value_at(index),
+        }
+    }
 }
 
 impl<F: Float> Transformation<F> for BuiltinTransfomers<F> {
-    fn transform<I, O>(&mut self, input: &I, output: &mut O)
+    fn transform<I>(&mut self, input: &I)
     where
         I: TransformInput<F> + ?Sized,
-        O: TransformOutput<F>,
     {
         match self {
-            BuiltinTransfomers::StandardScaler1(s) => s.transform(input, output),
-            BuiltinTransfomers::StandardScaler2(s) => s.transform(input, output),
-            BuiltinTransfomers::StandardScaler3(s) => s.transform(input, output),
+            BuiltinTransfomers::StandardScaler1(s) => s.transform(input),
+            BuiltinTransfomers::StandardScaler2(s) => s.transform(input),
+            BuiltinTransfomers::StandardScaler3(s) => s.transform(input),
+        }
+    }
+
+    fn output_values(&self) -> &[F] {
+        match self {
+            BuiltinTransfomers::StandardScaler1(s) => s.output_values(),
+            BuiltinTransfomers::StandardScaler2(s) => s.output_values(),
+            BuiltinTransfomers::StandardScaler3(s) => s.output_values(),
         }
     }
 }
