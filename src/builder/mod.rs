@@ -45,7 +45,7 @@ where
 {
     /// Start building a feature vector that writes into `cells`.
     pub fn new(cells: V) -> Self {
-        let cell_capacity = cells.capacity();
+        let cell_capacity = cells.len();
         Self {
             cells,
             cell_capacity,

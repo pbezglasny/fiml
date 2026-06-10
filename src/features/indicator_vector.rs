@@ -87,12 +87,12 @@ where
         self.cells.values()
     }
 
-    fn capacity(&self) -> usize {
-        self.cells.capacity()
+    fn len(&self) -> usize {
+        self.cells.len()
     }
 
     fn set_value_at(&mut self, index: usize, value: Self::F) {
-        self.cells.set_value_at(index, value);
+        self.cells.set_value_at(index, value)
     }
 }
 
@@ -154,7 +154,7 @@ where
     /// [`index_of`]: Self::index_of
     /// [`values`]: Self::values
     pub fn from_builtin_specs(cells: V, specs: &[(&str, Ticker, BuiltinSpec)]) -> Result<Self> {
-        let cell_count = cells.capacity();
+        let cell_count = cells.len();
         if specs.len() > M || specs.len() > cell_count {
             return Err(FimlError::InvalidArgument(format!(
                 "too many features: {} (cells: {cell_count}, capacity: {M})",
@@ -192,7 +192,7 @@ where
         names: Box<[Option<FeatureKey>]>,
     ) -> Self {
         debug_assert!(feature_count <= M);
-        debug_assert!(names.len() <= cells.capacity());
+        debug_assert!(names.len() <= cells.len());
 
         // Count features per kind, then turn the counts into contiguous
         // `(start, len)` group ranges via a running offset.
