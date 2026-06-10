@@ -47,6 +47,10 @@ impl<F: Float, V: FeatureVector<F = F>, const SIZE: usize> Transformation
     fn output_values(&self) -> &Self::OutputVector {
         &self.output
     }
+
+    fn output_values_mut(&mut self) -> &mut Self::OutputVector {
+        &mut self.output
+    }
 }
 
 #[cfg(test)]

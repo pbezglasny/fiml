@@ -1,4 +1,3 @@
-mod stage;
 use std::marker::PhantomData;
 use std::mem::MaybeUninit;
 
@@ -129,12 +128,12 @@ mod tests {
             self.cells.values()
         }
 
-        fn capacity(&self) -> usize {
-            self.cells.capacity()
+        fn len(&self) -> usize {
+            self.cells.len()
         }
 
         fn set_value_at(&mut self, index: usize, value: Self::F) {
-            self.cells.set_value_at(index, value);
+            self.cells.set_value_at(index, value)
         }
     }
 
