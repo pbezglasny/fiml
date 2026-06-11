@@ -1,5 +1,3 @@
-use std::cell::Cell;
-
 use crate::{FimlError, Float, Result};
 
 pub trait FeatureVector {
@@ -68,14 +66,12 @@ pub trait FeatureVector {
 }
 
 pub struct ArrayFeatureVector<F: Float, const N: usize> {
-    data: [Cell<F>; N],
+    data: [F; N],
 }
 
 impl<F: Float, const N: usize> ArrayFeatureVector<F, N> {
     pub fn new() -> Self {
-        Self {
-            data: [const { Cell::new(F::ZERO) }; N],
-        }
+        Self { data: [F::ZERO; N] }
     }
 }
 
@@ -90,13 +86,13 @@ impl<F: Float, const N: usize> FeatureVector for ArrayFeatureVector<F, N> {
 
     fn value_at(&self, index: usize) -> Option<F> {
         if index < N {
-            Some(self.data[index].get())
+            Some(self.data[index])
         } else {
             None
         }
     }
     fn values(&self) -> &[F] {
-        unsafe { std::slice::from_raw_parts(self.data.as_ptr().cast::<F>(), N) }
+        &self.data
     }
 
     fn len(&self) -> usize {
@@ -104,7 +100,7 @@ impl<F: Float, const N: usize> FeatureVector for ArrayFeatureVector<F, N> {
     }
 
     fn set_value_at(&mut self, index: usize, value: F) {
-        self.data[index].set(value);
+        self.data[index] = value;
     }
 }
 
