@@ -21,7 +21,12 @@ pub trait Feature<F: Float> {
     fn update<O: FeatureVector<F = F>>(&mut self, event: &Event<F>, output: &mut O);
 }
 
-pub trait IndicatorFeatures: FeatureVector {
+pub trait IndicatorFeatures {
+    type F: Float;
+    type FeatureVector: FeatureVector<F = Self::F>;
+
+    fn feature_vector(&self) -> &Self::FeatureVector;
+
     /// Route an event to the features subscribing to its kind, writing fresh
     /// values into their cells. Features of other kinds are not touched.
     fn dispatch(&mut self, event: &Event<Self::F>);
@@ -64,35 +69,34 @@ where
     V: FeatureVector<F = F>,
     I: Feature<F>,
 {
-    cells: V,
+    feature_vector: V,
     features: [MaybeUninit<I>; M],
     feature_count: usize,
     groups: [(usize, usize); EVENT_KIND_COUNT],
     names: Box<[Option<FeatureKey>]>,
     _marker: PhantomData<F>,
 }
-impl<F, V, I, const M: usize> FeatureVector for IndicatorFeatureVector<F, V, I, M>
+
+impl<F, V, I, const M: usize> IndicatorFeatureVector<F, V, I, M>
 where
     F: Float,
     V: FeatureVector<F = F>,
     I: Feature<F>,
 {
-    type F = F;
-
-    fn value_at(&self, index: usize) -> Option<Self::F> {
-        self.cells.value_at(index)
+    pub fn value_at(&self, index: usize) -> Option<F> {
+        self.feature_vector.value_at(index)
     }
 
-    fn values(&self) -> &[Self::F] {
-        self.cells.values()
+    pub fn values(&self) -> &[F] {
+        self.feature_vector.values()
     }
 
-    fn len(&self) -> usize {
-        self.cells.len()
+    pub fn len(&self) -> usize {
+        self.feature_vector.len()
     }
 
-    fn set_value_at(&mut self, index: usize, value: Self::F) {
-        self.cells.set_value_at(index, value)
+    pub fn is_empty(&self) -> bool {
+        self.feature_vector.is_empty()
     }
 }
 
@@ -102,17 +106,25 @@ where
     V: FeatureVector<F = F>,
     I: Feature<F>,
 {
+    type F = F;
+    type FeatureVector = V;
+
+    fn feature_vector(&self) -> &Self::FeatureVector {
+        &self.feature_vector
+    }
+
     fn dispatch(&mut self, event: &Event<F>) {
         let (start, len) = self.groups[event.kind() as usize];
         // SAFETY: every slot in `features[..feature_count]` is initialized, and
         // each group is a sub-range of that, so this slice is initialized.
         let features = &mut self.features[start..start + len];
-        let cells = &mut self.cells;
+        let cells = &mut self.feature_vector;
         for slot in features {
             let feature = unsafe { slot.assume_init_mut() };
             feature.update(event, cells);
         }
     }
+
     fn index_of(&self, ticker: Ticker, name: &str) -> Option<usize> {
         self.names
             .iter()
@@ -219,7 +231,7 @@ where
         }
 
         Self {
-            cells,
+            feature_vector: cells,
             features,
             feature_count,
             groups,

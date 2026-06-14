@@ -62,7 +62,7 @@ where
         }
 
         let first = unsafe { self.transformers[0].assume_init_mut() };
-        first.transform(&self.indicators);
+        first.transform(self.indicators.feature_vector());
 
         for i in 1..self.num_transformers {
             let (previous, current) = self.transformers.split_at_mut(i);
@@ -74,7 +74,7 @@ where
 
     pub fn values(&self) -> &[F] {
         if self.num_transformers == 0 {
-            self.indicators.values()
+            self.indicators.feature_vector().values()
         } else {
             let last = unsafe { self.transformers[self.num_transformers - 1].assume_init_ref() };
             last.output_values().values()
@@ -117,27 +117,14 @@ mod tests {
         }
     }
 
-    impl FeatureVector for TestIndicators {
-        type F = f64;
-
-        fn value_at(&self, index: usize) -> Option<Self::F> {
-            self.cells.value_at(index)
-        }
-
-        fn values(&self) -> &[Self::F] {
-            self.cells.values()
-        }
-
-        fn len(&self) -> usize {
-            self.cells.len()
-        }
-
-        fn set_value_at(&mut self, index: usize, value: Self::F) {
-            self.cells.set_value_at(index, value)
-        }
-    }
-
     impl IndicatorFeatures for TestIndicators {
+        type F = f64;
+        type FeatureVector = ArrayFeatureVector<f64, 1>;
+
+        fn feature_vector(&self) -> &Self::FeatureVector {
+            &self.cells
+        }
+
         fn dispatch(&mut self, _event: &Event<Self::F>) {}
 
         fn index_of(&self, _ticker: Ticker, _name: &str) -> Option<usize> {
