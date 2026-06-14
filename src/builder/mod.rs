@@ -212,7 +212,7 @@ mod tests {
         fv.dispatch(&Event::price(aapl, 10.0, 0));
         fv.dispatch(&Event::price(aapl, 20.0, 0));
 
-        assert!(approx_eq(fv.values()[0], 15.0));
+        assert!(approx_eq(fv.feature_vector().values()[0], 15.0));
         assert_eq!(fv.index_of(aapl, "sma_periods_2"), Some(0));
         Ok(())
     }
@@ -232,8 +232,8 @@ mod tests {
             fv.dispatch(&Event::price(aapl, v, 0));
         }
 
-        assert!(approx_eq(fv.values()[0], 4.5));
-        assert!(approx_eq(fv.values()[1], 3.0));
+        assert!(approx_eq(fv.feature_vector().values()[0], 4.5));
+        assert!(approx_eq(fv.feature_vector().values()[1], 3.0));
         assert_eq!(fv.index_of(aapl, "sma_periods_2"), Some(0));
         assert_eq!(fv.index_of(aapl, "sma_periods_5"), Some(1));
         Ok(())
@@ -254,8 +254,11 @@ mod tests {
             fv.dispatch(&Event::price(aapl, v, 0));
         }
 
-        assert!(approx_eq(fv.values()[0], 22.5));
-        assert!(approx_eq(fv.values()[1], 18.888888888888886));
+        assert!(approx_eq(fv.feature_vector().values()[0], 22.5));
+        assert!(approx_eq(
+            fv.feature_vector().values()[1],
+            18.888888888888886
+        ));
         assert_eq!(fv.index_of(aapl, "ema_periods_3"), Some(0));
         assert_eq!(fv.index_of(aapl, "ema_periods_5"), Some(1));
         Ok(())
@@ -282,8 +285,8 @@ mod tests {
             fv.dispatch(&Event::price(aapl, value, timestamp));
         }
 
-        assert!(approx_eq(fv.values()[0], 42.5));
-        assert!(approx_eq(fv.values()[1], 35.0));
+        assert!(approx_eq(fv.feature_vector().values()[0], 42.5));
+        assert!(approx_eq(fv.feature_vector().values()[1], 35.0));
         assert_eq!(fv.index_of(aapl, "sma_timed_periods_2"), Some(0));
         assert_eq!(fv.index_of(aapl, "sma_timed_periods_3"), Some(1));
         Ok(())
@@ -327,8 +330,8 @@ mod tests {
         }
         fv.dispatch(&Event::time(1_609_459_200));
 
-        assert!(approx_eq(fv.values()[0], 6.0));
-        assert!(approx_eq(fv.values()[1], 5.0));
+        assert!(approx_eq(fv.feature_vector().values()[0], 6.0));
+        assert!(approx_eq(fv.feature_vector().values()[1], 5.0));
         assert_eq!(fv.index_of(aapl, "day_of_week"), Some(1));
         Ok(())
     }
