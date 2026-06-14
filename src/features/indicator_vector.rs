@@ -21,7 +21,12 @@ pub trait Feature<F: Float> {
     fn update<O: FeatureVector<F = F>>(&mut self, event: &Event<F>, output: &mut O);
 }
 
-pub trait IndicatorFeatures: FeatureVector {
+pub trait IndicatorFeatures {
+    type F: Float;
+    type FeatureVector: FeatureVector<F = Self::F>;
+
+    fn feature_vector(&self) -> &Self::FeatureVector;
+
     /// Route an event to the features subscribing to its kind, writing fresh
     /// values into their cells. Features of other kinds are not touched.
     fn dispatch(&mut self, event: &Event<Self::F>);
@@ -64,35 +69,22 @@ where
     V: FeatureVector<F = F>,
     I: Feature<F>,
 {
-    cells: V,
+    feature_vector: V,
     features: [MaybeUninit<I>; M],
     feature_count: usize,
     groups: [(usize, usize); EVENT_KIND_COUNT],
     names: Box<[Option<FeatureKey>]>,
     _marker: PhantomData<F>,
 }
-impl<F, V, I, const M: usize> FeatureVector for IndicatorFeatureVector<F, V, I, M>
+
+impl<F, V, I, const M: usize> IndicatorFeatureVector<F, V, I, M>
 where
     F: Float,
     V: FeatureVector<F = F>,
     I: Feature<F>,
 {
-    type F = F;
-
-    fn value_at(&self, index: usize) -> Option<Self::F> {
-        self.cells.value_at(index)
-    }
-
-    fn values(&self) -> &[Self::F] {
-        self.cells.values()
-    }
-
-    fn len(&self) -> usize {
-        self.cells.len()
-    }
-
-    fn set_value_at(&mut self, index: usize, value: Self::F) {
-        self.cells.set_value_at(index, value)
+    pub fn feature_vector(&self) -> &V {
+        &self.feature_vector
     }
 }
 
@@ -102,17 +94,25 @@ where
     V: FeatureVector<F = F>,
     I: Feature<F>,
 {
+    type F = F;
+    type FeatureVector = V;
+
+    fn feature_vector(&self) -> &Self::FeatureVector {
+        &self.feature_vector
+    }
+
     fn dispatch(&mut self, event: &Event<F>) {
         let (start, len) = self.groups[event.kind() as usize];
         // SAFETY: every slot in `features[..feature_count]` is initialized, and
         // each group is a sub-range of that, so this slice is initialized.
         let features = &mut self.features[start..start + len];
-        let cells = &mut self.cells;
+        let cells = &mut self.feature_vector;
         for slot in features {
             let feature = unsafe { slot.assume_init_mut() };
             feature.update(event, cells);
         }
     }
+
     fn index_of(&self, ticker: Ticker, name: &str) -> Option<usize> {
         self.names
             .iter()
@@ -219,7 +219,7 @@ where
         }
 
         Self {
-            cells,
+            feature_vector: cells,
             features,
             feature_count,
             groups,
@@ -332,8 +332,8 @@ mod tests {
         }
 
         // sma_2: mean(4,5) = 4.5 ; sma_5: mean(1..5) = 3.0
-        assert!(approx_eq(fv.values()[0], 4.5));
-        assert!(approx_eq(fv.values()[1], 3.0));
+        assert!(approx_eq(fv.feature_vector().values()[0], 4.5));
+        assert!(approx_eq(fv.feature_vector().values()[1], 3.0));
     }
 
     #[test]
@@ -347,7 +347,7 @@ mod tests {
             fv.dispatch(&Event::price(aapl, v, 0));
         }
 
-        assert!(approx_eq(fv.values()[0], 22.5));
+        assert!(approx_eq(fv.feature_vector().values()[0], 22.5));
         assert_eq!(fv.index_of(aapl, "ema_3"), Some(0));
     }
 
@@ -368,7 +368,7 @@ mod tests {
             fv.dispatch(&Event::price(aapl, value, timestamp));
         }
 
-        assert!(approx_eq(fv.values()[0], 42.5));
+        assert!(approx_eq(fv.feature_vector().values()[0], 42.5));
         assert_eq!(fv.index_of(aapl, "sma_timed_2_sec"), Some(0));
     }
 
@@ -411,8 +411,8 @@ mod tests {
             fv.dispatch(&Event::price(googl, v, 0));
         }
 
-        assert!(approx_eq(fv.values()[0], 15.0));
-        assert!(approx_eq(fv.values()[1], 150.0));
+        assert!(approx_eq(fv.feature_vector().values()[0], 15.0));
+        assert!(approx_eq(fv.feature_vector().values()[1], 150.0));
     }
 
     #[test]
@@ -431,18 +431,18 @@ mod tests {
         for v in [3.0, 6.0, 9.0] {
             fv.dispatch(&Event::price(aapl, v, 0));
         }
-        assert!(approx_eq(fv.values()[0], 6.0)); // mean(3,6,9)
-        assert!(approx_eq(fv.values()[1], 0.0)); // untouched
+        assert!(approx_eq(fv.feature_vector().values()[0], 6.0)); // mean(3,6,9)
+        assert!(approx_eq(fv.feature_vector().values()[1], 0.0)); // untouched
 
         // A time event touches only the calendar feature; the SMA is unchanged.
         fv.dispatch(&Event::time(1_609_459_200)); // 2021-01-01, a Friday
-        assert!(approx_eq(fv.values()[0], 6.0)); // unchanged
-        assert!(approx_eq(fv.values()[1], 5.0)); // Friday
+        assert!(approx_eq(fv.feature_vector().values()[0], 6.0)); // unchanged
+        assert!(approx_eq(fv.feature_vector().values()[1], 5.0)); // Friday
 
         // An event kind with no subscribers is a no-op.
         fv.dispatch(&Event::order_book(aapl, 1.0, 2.0, 0));
-        assert!(approx_eq(fv.values()[0], 6.0));
-        assert!(approx_eq(fv.values()[1], 5.0));
+        assert!(approx_eq(fv.feature_vector().values()[0], 6.0));
+        assert!(approx_eq(fv.feature_vector().values()[1], 5.0));
     }
 
     #[test]
@@ -458,7 +458,7 @@ mod tests {
         for v in [10.0, 20.0] {
             moved.dispatch(&Event::price(aapl, v, 0));
         }
-        assert!(approx_eq(moved.values()[0], 15.0));
+        assert!(approx_eq(moved.feature_vector().values()[0], 15.0));
     }
 
     #[test]
