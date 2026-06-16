@@ -9,7 +9,7 @@ use std::{error::Error, fmt::Display};
 
 pub use features::{
     Event, EventKind, Feature, IndicatorFeatureVector, IndicatorFeatures, OrderBookUpdate,
-    PriceUpdate, TimeUpdate,
+    PriceUpdate, TimeUpdate, VolumeUpdate,
 };
 pub use indicators::IndicatorFeatureVectorBuilder;
 pub use ring_buffer::{

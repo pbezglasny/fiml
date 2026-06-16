@@ -11,7 +11,9 @@ pub use builtin::{
     DayOfWeek, EmaPeriodsBuilder, MAX_WINDOWS_PER_EMA, MAX_WINDOWS_PER_SMA, SmaPeriodsBuilder,
     SmaTimedPeriodsBuilder,
 };
-pub use event::{EVENT_KIND_COUNT, Event, EventKind, OrderBookUpdate, PriceUpdate, TimeUpdate};
+pub use event::{
+    EVENT_KIND_COUNT, Event, EventKind, OrderBookUpdate, PriceUpdate, TimeUpdate, VolumeUpdate,
+};
 pub use indicator_vector::{Feature, IndicatorFeatureVector, IndicatorFeatures};
 pub use pipeline::Pipeline;
 pub use spec::{BuiltinSpec, TimeUnit};

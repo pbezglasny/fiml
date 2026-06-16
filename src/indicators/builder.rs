@@ -189,7 +189,7 @@ where
 mod tests {
     use super::*;
     use crate::features::{IndicatorFeatures, MAX_WINDOWS_PER_SMA, SmaPeriodsBuilder};
-    use crate::{ArrayFeatureVector, Event, ticker};
+    use crate::{ArrayFeatureVector, Event, EventKind, ticker};
 
     fn approx_eq(a: f64, b: f64) -> bool {
         (a - b).abs() < 1e-9
@@ -236,6 +236,45 @@ mod tests {
     }
 
     #[test]
+    fn sma_periods_can_subscribe_to_volume_events() -> Result<()> {
+        let aapl = ticker::intern("AAPL");
+        let mut fv =
+            IndicatorFeatureVectorBuilder::<f64, _, 2>::new(ArrayFeatureVector::<f64, 2>::new())
+                .sma_periods(aapl)
+                .window(3)?
+                .done()?
+                .sma_periods(aapl)
+                .event_kind(EventKind::Volume)?
+                .window(3)?
+                .done()?
+                .build()?;
+
+        for v in [3.0, 6.0, 9.0] {
+            fv.dispatch(&Event::price(aapl, v, 0));
+        }
+        for v in [100.0, 200.0, 300.0] {
+            fv.dispatch(&Event::volume(aapl, v, 0));
+        }
+
+        assert!(approx_eq(fv.feature_vector().values()[0], 6.0));
+        assert!(approx_eq(fv.feature_vector().values()[1], 200.0));
+        assert_eq!(fv.index_of(aapl, "sma_periods_3"), Some(0));
+        assert_eq!(fv.index_of(aapl, "volume_sma_periods_3"), Some(1));
+        Ok(())
+    }
+
+    #[test]
+    fn rejects_unsupported_sma_event_kind() {
+        let aapl = ticker::intern("AAPL");
+        let built =
+            IndicatorFeatureVectorBuilder::<f64, _, 1>::new(ArrayFeatureVector::<f64, 1>::new())
+                .sma_periods(aapl)
+                .event_kind(EventKind::OrderBook);
+
+        assert!(built.is_err());
+    }
+
+    #[test]
     fn one_ema_feature_writes_multiple_period_windows() -> Result<()> {
         let aapl = ticker::intern("AAPL");
         let mut fv =
@@ -258,6 +297,45 @@ mod tests {
         assert_eq!(fv.index_of(aapl, "ema_periods_3"), Some(0));
         assert_eq!(fv.index_of(aapl, "ema_periods_5"), Some(1));
         Ok(())
+    }
+
+    #[test]
+    fn ema_periods_can_subscribe_to_volume_events() -> Result<()> {
+        let aapl = ticker::intern("AAPL");
+        let mut fv =
+            IndicatorFeatureVectorBuilder::<f64, _, 2>::new(ArrayFeatureVector::<f64, 2>::new())
+                .ema_periods(aapl)
+                .window(3)?
+                .done()?
+                .ema_periods(aapl)
+                .event_kind(EventKind::Volume)?
+                .window(3)?
+                .done()?
+                .build()?;
+
+        for v in [10.0, 20.0, 30.0] {
+            fv.dispatch(&Event::price(aapl, v, 0));
+        }
+        for v in [100.0, 200.0, 300.0] {
+            fv.dispatch(&Event::volume(aapl, v, 0));
+        }
+
+        assert!(approx_eq(fv.feature_vector().values()[0], 22.5));
+        assert!(approx_eq(fv.feature_vector().values()[1], 225.0));
+        assert_eq!(fv.index_of(aapl, "ema_periods_3"), Some(0));
+        assert_eq!(fv.index_of(aapl, "volume_ema_periods_3"), Some(1));
+        Ok(())
+    }
+
+    #[test]
+    fn rejects_unsupported_ema_event_kind() {
+        let aapl = ticker::intern("AAPL");
+        let built =
+            IndicatorFeatureVectorBuilder::<f64, _, 1>::new(ArrayFeatureVector::<f64, 1>::new())
+                .ema_periods(aapl)
+                .event_kind(EventKind::Time);
+
+        assert!(built.is_err());
     }
 
     #[test]

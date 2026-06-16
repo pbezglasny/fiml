@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use crate::features::BuiltinFeature;
-use crate::features::event::{Event, EventKind};
+use crate::features::event::{Event, EventKind, market_value_for_kind};
 use crate::features::indicator_vector::{BuiltinFeatureEntry, FeatureKey};
 use crate::indicators::{
     PendingSmaPeriods, PendingSmaTimedPeriods, SimpleMovingAverage, SimpleMovingAverageTimed,
@@ -15,6 +15,7 @@ pub const MAX_WINDOWS_PER_SMA: usize = 16;
 
 pub struct SmaFeature<F: Float> {
     ticker: Ticker,
+    event_kind: EventKind,
     sma: SimpleMovingAverage<HeapRingBuffer<F>, F, MAX_WINDOWS_PER_SMA>,
     output_indexes: [usize; MAX_WINDOWS_PER_SMA],
     output_count: usize,
@@ -23,12 +24,14 @@ pub struct SmaFeature<F: Float> {
 impl<F: Float> SmaFeature<F> {
     pub(crate) fn new(
         ticker: Ticker,
+        event_kind: EventKind,
         sma: SimpleMovingAverage<HeapRingBuffer<F>, F, MAX_WINDOWS_PER_SMA>,
         output_indexes: [usize; MAX_WINDOWS_PER_SMA],
         output_count: usize,
     ) -> Self {
         Self {
             ticker,
+            event_kind,
             sma,
             output_indexes,
             output_count,
@@ -40,10 +43,8 @@ impl<F: Float> SmaFeature<F> {
         event: &Event<F>,
         output: &mut O,
     ) {
-        if let Event::Price(p) = event
-            && p.ticker == self.ticker
-        {
-            self.sma.update(p.value);
+        if let Some(value) = market_value_for_kind(event, self.event_kind, self.ticker) {
+            self.sma.update(value);
             for (window_index, output_index) in self
                 .output_indexes
                 .iter()
@@ -112,6 +113,15 @@ pub(crate) fn validate_period(period: usize) -> Result<()> {
     Ok(())
 }
 
+pub(crate) fn validate_event_kind(event_kind: EventKind) -> Result<()> {
+    match event_kind {
+        EventKind::Price | EventKind::Volume => Ok(()),
+        EventKind::OrderBook | EventKind::Time => Err(FimlError::InvalidArgument(
+            "SMA event kind must be price or volume".to_string(),
+        )),
+    }
+}
+
 pub(in crate::features) fn timed_periods(aggregation: Duration, window: Duration) -> Result<usize> {
     validate_timed_durations(aggregation, window)?;
     Ok((window.as_millis() / aggregation.as_millis()) as usize)
@@ -154,6 +164,7 @@ pub(in crate::features) fn build_builtin<F: Float>(
     output_indexes[0] = output_index;
     Ok(BuiltinFeature::Sma(SmaFeature::new(
         ticker,
+        EventKind::Price,
         sma,
         output_indexes,
         1,
@@ -209,18 +220,29 @@ pub(crate) fn build_sma_periods_entry<F: Float>(
         output_indexes[window_index] = output_index;
         names[output_index] = Some(FeatureKey {
             ticker: config.ticker,
-            name: format!("sma_periods_{period}"),
+            name: feature_name(config.event_kind, period),
         });
     }
 
     BuiltinFeatureEntry {
         feature: BuiltinFeature::Sma(SmaFeature::new(
             config.ticker,
+            config.event_kind,
             sma,
             output_indexes,
             config.window_count,
         )),
-        kind: EventKind::Price,
+        kind: config.event_kind,
+    }
+}
+
+fn feature_name(event_kind: EventKind, period: usize) -> String {
+    match event_kind {
+        EventKind::Price => format!("sma_periods_{period}"),
+        EventKind::Volume => format!("volume_sma_periods_{period}"),
+        EventKind::OrderBook | EventKind::Time => {
+            unreachable!("validated SMA event kind should be price or volume")
+        }
     }
 }
 
@@ -287,13 +309,36 @@ mod tests {
         let mut output_indexes = [0; MAX_WINDOWS_PER_SMA];
         output_indexes[0] = 0;
 
-        let mut feat = SmaFeature::new(aapl, sma, output_indexes, 1);
+        let mut feat = SmaFeature::new(aapl, EventKind::Price, sma, output_indexes, 1);
         for v in [3.0, 6.0, 9.0] {
             feat.update(&Event::price(aapl, v, 0), &mut fv);
         }
+        feat.update(&Event::volume(aapl, 90.0, 0), &mut fv);
         feat.update(&Event::price(googl, 30.0, 0), &mut fv);
         feat.update(&Event::time(123), &mut fv);
 
         assert!(approx_eq(fv.values()[0], 6.0));
+    }
+
+    #[test]
+    fn sma_reacts_to_volume_events() {
+        let aapl = ticker::intern("AAPL");
+        let googl = ticker::intern("GOOGL");
+        let mut fv: ArrayFeatureVector<f64, 1> = ArrayFeatureVector::new();
+        let mut sma: SimpleMovingAverage<HeapRingBuffer<f64>, f64, MAX_WINDOWS_PER_SMA> =
+            SimpleMovingAverage::new_heap(3);
+        sma.add_window(3).unwrap();
+        let mut output_indexes = [0; MAX_WINDOWS_PER_SMA];
+        output_indexes[0] = 0;
+
+        let mut feat = SmaFeature::new(aapl, EventKind::Volume, sma, output_indexes, 1);
+        feat.update(&Event::price(aapl, 1_000.0, 0), &mut fv);
+        for v in [100.0, 200.0, 300.0] {
+            feat.update(&Event::volume(aapl, v, 0), &mut fv);
+        }
+        feat.update(&Event::volume(googl, 3_000.0, 0), &mut fv);
+        feat.update(&Event::time(123), &mut fv);
+
+        assert!(approx_eq(fv.values()[0], 200.0));
     }
 }

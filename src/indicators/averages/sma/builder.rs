@@ -1,5 +1,6 @@
 use std::time::Duration;
 
+use crate::features::EventKind;
 use crate::features::builtin::sma::{self, MAX_WINDOWS_PER_SMA};
 use crate::indicators::builder::{IndicatorFeatureVectorBuilder, PendingFeature};
 use crate::vectors::FeatureVector;
@@ -8,6 +9,7 @@ use crate::{FimlError, Float, Result, Ticker};
 #[derive(Clone, Copy)]
 pub(crate) struct PendingSmaPeriods {
     pub(crate) ticker: Ticker,
+    pub(crate) event_kind: EventKind,
     pub(crate) periods: [usize; MAX_WINDOWS_PER_SMA],
     pub(crate) window_count: usize,
     pub(crate) max_period: usize,
@@ -32,6 +34,7 @@ where
 {
     parent: IndicatorFeatureVectorBuilder<F, V, M>,
     ticker: Ticker,
+    event_kind: EventKind,
     periods: [usize; MAX_WINDOWS_PER_SMA],
     window_count: usize,
     max_period: usize,
@@ -60,6 +63,7 @@ where
         Self {
             parent,
             ticker,
+            event_kind: EventKind::Price,
             periods: [0; MAX_WINDOWS_PER_SMA],
             window_count: 0,
             max_period: 0,
@@ -72,6 +76,7 @@ where
         Ok(SmaPeriodsBuilder {
             parent: self.parent,
             ticker: self.ticker,
+            event_kind: self.event_kind,
             periods: self.periods,
             window_count: self.window_count,
             max_period: self.max_period,
@@ -97,6 +102,7 @@ where
             .push_entry(PendingFeature::SmaPeriods(PendingSmaPeriods {
                 periods: self.periods,
                 ticker: self.ticker,
+                event_kind: self.event_kind,
                 window_count: self.window_count,
                 max_period: self.max_period,
                 output_start,
@@ -110,6 +116,13 @@ where
     F: Float,
     V: FeatureVector<F = F>,
 {
+    /// Set the event kind this SMA consumes. Defaults to [`EventKind::Price`].
+    pub fn event_kind(mut self, event_kind: EventKind) -> Result<Self> {
+        sma::validate_event_kind(event_kind)?;
+        self.event_kind = event_kind;
+        Ok(self)
+    }
+
     fn push_window(&mut self, period: usize) -> Result<()> {
         sma::validate_period(period)?;
         self.parent
