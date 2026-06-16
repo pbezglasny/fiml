@@ -1,9 +1,8 @@
-use crate::builder::PendingEmaPeriods;
 use crate::features::BuiltinFeature;
 use crate::features::event::Event;
 use crate::features::event::EventKind;
 use crate::features::indicator_vector::{BuiltinFeatureEntry, FeatureKey};
-use crate::indicators::ExponentialMovingAverage;
+use crate::indicators::{ExponentialMovingAverage, PendingEmaPeriods};
 use crate::vectors::FeatureVector;
 use crate::{FimlError, Float, Result, Ticker};
 

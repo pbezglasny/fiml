@@ -5,7 +5,7 @@ mod pipeline;
 mod spec;
 pub mod transformers;
 
-pub use crate::builder::IndicatorFeatureVectorBuilder;
+pub use crate::indicators::IndicatorFeatureVectorBuilder;
 pub use builtin::BuiltinFeature;
 pub use builtin::{
     DayOfWeek, EmaPeriodsBuilder, MAX_WINDOWS_PER_EMA, MAX_WINDOWS_PER_SMA, SmaPeriodsBuilder,

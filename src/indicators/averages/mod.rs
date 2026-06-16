@@ -1,6 +1,9 @@
 mod ema;
 mod sma;
 
-pub use ema::ExponentialMovingAverage;
-pub use sma::SimpleMovingAverage;
-pub use sma::SimpleMovingAverageTimed;
+pub(crate) use ema::PendingEmaPeriods;
+pub use ema::{EmaPeriodsBuilder, ExponentialMovingAverage};
+pub(crate) use sma::{PendingSmaPeriods, PendingSmaTimedPeriods};
+pub use sma::{
+    SimpleMovingAverage, SimpleMovingAverageTimed, SmaPeriodsBuilder, SmaTimedPeriodsBuilder,
+};

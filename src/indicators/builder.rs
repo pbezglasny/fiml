@@ -2,19 +2,15 @@ use std::marker::PhantomData;
 use std::mem::MaybeUninit;
 use std::time::Duration;
 
-mod ema;
-mod sma;
-
 use crate::features::builtin::BuiltinFeature;
 use crate::features::builtin::{day_of_week, ema as ema_indicator, sma as sma_indicator};
 use crate::features::indicator_vector::IndicatorFeatureVector;
+use crate::indicators::averages::{
+    EmaPeriodsBuilder, PendingEmaPeriods, PendingSmaPeriods, PendingSmaTimedPeriods,
+    SmaPeriodsBuilder, SmaTimedPeriodsBuilder,
+};
 use crate::vectors::FeatureVector;
 use crate::{FimlError, Float, Result, Ticker};
-
-pub use ema::EmaPeriodsBuilder;
-pub(crate) use ema::PendingEmaPeriods;
-pub(crate) use sma::{PendingSmaPeriods, PendingSmaTimedPeriods};
-pub use sma::{SmaPeriodsBuilder, SmaTimedPeriodsBuilder};
 
 pub(crate) enum PendingFeature {
     SmaPeriods(PendingSmaPeriods),

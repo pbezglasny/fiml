@@ -1,7 +1,7 @@
 use std::time::Duration;
 
-use crate::builder::{IndicatorFeatureVectorBuilder, PendingFeature};
 use crate::features::builtin::sma::{self, MAX_WINDOWS_PER_SMA};
+use crate::indicators::builder::{IndicatorFeatureVectorBuilder, PendingFeature};
 use crate::vectors::FeatureVector;
 use crate::{FimlError, Float, Result, Ticker};
 

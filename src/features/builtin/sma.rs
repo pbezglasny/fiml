@@ -1,10 +1,11 @@
 use std::time::Duration;
 
-use crate::builder::{PendingSmaPeriods, PendingSmaTimedPeriods};
 use crate::features::BuiltinFeature;
 use crate::features::event::{Event, EventKind};
 use crate::features::indicator_vector::{BuiltinFeatureEntry, FeatureKey};
-use crate::indicators::{SimpleMovingAverage, SimpleMovingAverageTimed};
+use crate::indicators::{
+    PendingSmaPeriods, PendingSmaTimedPeriods, SimpleMovingAverage, SimpleMovingAverageTimed,
+};
 use crate::vectors::FeatureVector;
 use crate::{FimlError, Float, HeapRingBuffer, Result, Ticker};
 
