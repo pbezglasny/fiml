@@ -1,3 +1,4 @@
+use crate::features::EventKind;
 use crate::features::builtin::ema::{self, MAX_WINDOWS_PER_EMA};
 use crate::indicators::builder::{IndicatorFeatureVectorBuilder, PendingFeature};
 use crate::vectors::FeatureVector;
@@ -6,6 +7,7 @@ use crate::{Float, Result, Ticker};
 #[derive(Clone, Copy)]
 pub(crate) struct PendingEmaPeriods {
     pub(crate) ticker: Ticker,
+    pub(crate) event_kind: EventKind,
     pub(crate) periods: [usize; MAX_WINDOWS_PER_EMA],
     pub(crate) window_count: usize,
     pub(crate) output_start: usize,
@@ -19,6 +21,7 @@ where
 {
     parent: IndicatorFeatureVectorBuilder<F, V, M>,
     ticker: Ticker,
+    event_kind: EventKind,
     periods: [usize; MAX_WINDOWS_PER_EMA],
     window_count: usize,
 }
@@ -32,6 +35,7 @@ where
         Self {
             parent,
             ticker,
+            event_kind: EventKind::Price,
             periods: [0; MAX_WINDOWS_PER_EMA],
             window_count: 0,
         }
@@ -43,6 +47,7 @@ where
         Ok(EmaPeriodsBuilder {
             parent: self.parent,
             ticker: self.ticker,
+            event_kind: self.event_kind,
             periods: self.periods,
             window_count: self.window_count,
         })
@@ -67,6 +72,7 @@ where
             .push_entry(PendingFeature::EmaPeriods(PendingEmaPeriods {
                 periods: self.periods,
                 ticker: self.ticker,
+                event_kind: self.event_kind,
                 window_count: self.window_count,
                 output_start,
             }));
@@ -79,6 +85,13 @@ where
     F: Float,
     V: FeatureVector<F = F>,
 {
+    /// Set the event kind this EMA consumes. Defaults to [`EventKind::Price`].
+    pub fn event_kind(mut self, event_kind: EventKind) -> Result<Self> {
+        ema::validate_event_kind(event_kind)?;
+        self.event_kind = event_kind;
+        Ok(self)
+    }
+
     fn push_window(&mut self, period: usize) -> Result<()> {
         ema::validate_period(period)?;
         self.parent
