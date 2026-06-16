@@ -1,5 +1,5 @@
-use crate::builder::{IndicatorFeatureVectorBuilder, PendingFeature};
 use crate::features::builtin::ema::{self, MAX_WINDOWS_PER_EMA};
+use crate::indicators::builder::{IndicatorFeatureVectorBuilder, PendingFeature};
 use crate::vectors::FeatureVector;
 use crate::{Float, Result, Ticker};
 

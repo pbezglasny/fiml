@@ -202,7 +202,6 @@ where
 {
     data: R,
     millis_aggregation: i64,
-    buffer_duration: i64,
     last_sum: Option<T>,
     last_cnt: usize,
     windows: [MaybeUninit<SmaWindowTimed<T>>; WINDOWS],
@@ -259,10 +258,8 @@ where
             ));
         }
         let millis_aggregation = aggeregation.as_millis() as i64;
-        let buffer_duration = capacity as i64 * millis_aggregation;
         Ok(Self {
             data,
-            buffer_duration,
             millis_aggregation,
             last_sum: None,
             last_cnt: 0,
