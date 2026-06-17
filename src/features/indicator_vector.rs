@@ -5,7 +5,7 @@ use crate::features::builtin::BuiltinFeature;
 use crate::features::builtin::{day_of_week, ema, sma};
 use crate::features::event::{EVENT_KIND_COUNT, Event, EventKind};
 use crate::features::spec::BuiltinSpec;
-use crate::ticker::resolve;
+use crate::symbols::resolve;
 use crate::vectors::FeatureVector;
 use crate::{FimlError, Float, Result, Symbol};
 
@@ -296,7 +296,7 @@ fn feature_label(ticker: Symbol, name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{ArrayFeatureVector, ticker};
+    use crate::{ArrayFeatureVector, symbols};
 
     type Fv<const N: usize, const M: usize> =
         IndicatorFeatureVector<f64, ArrayFeatureVector<f64, N>, BuiltinFeature<f64>, M>;
@@ -322,7 +322,7 @@ mod tests {
 
     #[test]
     fn values_match_per_window_averages() {
-        let aapl = ticker::intern("AAPL");
+        let aapl = symbols::intern("AAPL");
         let specs = [("sma_2_sec", aapl, sma(2)), ("sma_5_sec", aapl, sma(5))];
         let mut fv: Fv<2, 2> =
             IndicatorFeatureVector::from_builtin_specs(ArrayFeatureVector::new(), &specs).unwrap();
@@ -338,7 +338,7 @@ mod tests {
 
     #[test]
     fn values_match_ema_average() {
-        let aapl = ticker::intern("AAPL");
+        let aapl = symbols::intern("AAPL");
         let specs = [("ema_3", aapl, ema(3))];
         let mut fv: Fv<1, 1> =
             IndicatorFeatureVector::from_builtin_specs(ArrayFeatureVector::new(), &specs).unwrap();
@@ -353,7 +353,7 @@ mod tests {
 
     #[test]
     fn values_match_timed_window_average() {
-        let aapl = ticker::intern("AAPL");
+        let aapl = symbols::intern("AAPL");
         let specs = [("sma_timed_2_sec", aapl, sma_timed(1_000, 2_000))];
         let mut fv: Fv<1, 1> =
             IndicatorFeatureVector::from_builtin_specs(ArrayFeatureVector::new(), &specs).unwrap();
@@ -374,7 +374,7 @@ mod tests {
 
     #[test]
     fn index_of_keeps_caller_order() {
-        let aapl = ticker::intern("AAPL");
+        let aapl = symbols::intern("AAPL");
         let specs = [("sma_5_sec", aapl, sma(5)), ("sma_10_sec", aapl, sma(10))];
         let fv: Fv<2, 2> =
             IndicatorFeatureVector::from_builtin_specs(ArrayFeatureVector::new(), &specs).unwrap();
@@ -386,8 +386,8 @@ mod tests {
 
     #[test]
     fn index_of_distinguishes_tickers() {
-        let aapl = ticker::intern("AAPL");
-        let googl = ticker::intern("GOOGL");
+        let aapl = symbols::intern("AAPL");
+        let googl = symbols::intern("GOOGL");
         let specs = [("sma_5_sec", aapl, sma(5)), ("sma_5_sec", googl, sma(5))];
         let fv: Fv<2, 2> =
             IndicatorFeatureVector::from_builtin_specs(ArrayFeatureVector::new(), &specs).unwrap();
@@ -398,8 +398,8 @@ mod tests {
 
     #[test]
     fn dispatch_distinguishes_tickers() {
-        let aapl = ticker::intern("AAPL");
-        let googl = ticker::intern("GOOGL");
+        let aapl = symbols::intern("AAPL");
+        let googl = symbols::intern("GOOGL");
         let specs = [("sma_2_sec", aapl, sma(2)), ("sma_2_sec", googl, sma(2))];
         let mut fv: Fv<2, 2> =
             IndicatorFeatureVector::from_builtin_specs(ArrayFeatureVector::new(), &specs).unwrap();
@@ -417,7 +417,7 @@ mod tests {
 
     #[test]
     fn routes_each_event_to_its_own_group() {
-        let aapl = ticker::intern("AAPL");
+        let aapl = symbols::intern("AAPL");
         // Interleave kinds so grouping has to reorder the stored features while
         // keeping cell order (sma_3 -> cell 0, day_of_week -> cell 1).
         let specs = [
@@ -447,7 +447,7 @@ mod tests {
 
     #[test]
     fn survives_being_moved_after_construction() {
-        let aapl = ticker::intern("AAPL");
+        let aapl = symbols::intern("AAPL");
         let specs = [("sma_2_sec", aapl, sma(2))];
         let fv: Fv<1, 1> =
             IndicatorFeatureVector::from_builtin_specs(ArrayFeatureVector::new(), &specs).unwrap();
@@ -463,7 +463,7 @@ mod tests {
 
     #[test]
     fn rejects_more_features_than_capacity() {
-        let aapl = ticker::intern("AAPL");
+        let aapl = symbols::intern("AAPL");
         let specs = [("sma_2_sec", aapl, sma(2)), ("sma_3_sec", aapl, sma(3))];
         let built: Result<Fv<1, 1>> =
             IndicatorFeatureVector::from_builtin_specs(ArrayFeatureVector::new(), &specs);
@@ -472,7 +472,7 @@ mod tests {
 
     #[test]
     fn rejects_zero_sma_period_without_panicking() {
-        let aapl = ticker::intern("AAPL");
+        let aapl = symbols::intern("AAPL");
         let specs = [("sma_0_sec", aapl, sma(0))];
         let built: Result<Fv<1, 1>> =
             IndicatorFeatureVector::from_builtin_specs(ArrayFeatureVector::new(), &specs);
@@ -481,7 +481,7 @@ mod tests {
 
     #[test]
     fn rejects_zero_ema_period_without_panicking() {
-        let aapl = ticker::intern("AAPL");
+        let aapl = symbols::intern("AAPL");
         let specs = [("ema_0", aapl, ema(0))];
         let built: Result<Fv<1, 1>> =
             IndicatorFeatureVector::from_builtin_specs(ArrayFeatureVector::new(), &specs);
@@ -490,7 +490,7 @@ mod tests {
 
     #[test]
     fn rejects_invalid_sma_timed_spec_without_panicking() {
-        let aapl = ticker::intern("AAPL");
+        let aapl = symbols::intern("AAPL");
         let zero_aggregation = [("sma_timed_zero", aapl, sma_timed(0, 1_000))];
         let non_multiple_window = [("sma_timed_non_multiple", aapl, sma_timed(1_000, 1_500))];
 
@@ -509,7 +509,7 @@ mod tests {
 
     #[test]
     fn rejects_duplicate_feature_key() {
-        let aapl = ticker::intern("AAPL");
+        let aapl = symbols::intern("AAPL");
         let specs = [("sma_2_sec", aapl, sma(2)), ("sma_2_sec", aapl, sma(3))];
         let built: Result<Fv<2, 2>> =
             IndicatorFeatureVector::from_builtin_specs(ArrayFeatureVector::new(), &specs);

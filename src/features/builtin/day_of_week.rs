@@ -52,7 +52,7 @@ pub(crate) fn build_entry<F: Float>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{ArrayFeatureVector, FeatureVector, ticker};
+    use crate::{ArrayFeatureVector, FeatureVector, symbols};
 
     fn approx_eq(a: f64, b: f64) -> bool {
         (a - b).abs() < 1e-9
@@ -60,7 +60,7 @@ mod tests {
 
     #[test]
     fn day_of_week_reacts_to_time_events() {
-        let aapl = ticker::intern("AAPL");
+        let aapl = symbols::intern("AAPL");
         let mut fv: ArrayFeatureVector<f64, 1> = ArrayFeatureVector::new();
         let mut feat = DayOfWeek::new(0);
 

@@ -189,7 +189,7 @@ where
 mod tests {
     use super::*;
     use crate::features::{IndicatorFeatures, MAX_WINDOWS_PER_SMA, SmaPeriodsBuilder};
-    use crate::{ArrayFeatureVector, Event, EventKind, ticker};
+    use crate::{ArrayFeatureVector, Event, EventKind, symbols};
 
     fn approx_eq(a: f64, b: f64) -> bool {
         (a - b).abs() < 1e-9
@@ -197,7 +197,7 @@ mod tests {
 
     #[test]
     fn builds_single_sma_period_window() -> Result<()> {
-        let aapl = ticker::intern("AAPL");
+        let aapl = symbols::intern("AAPL");
         let mut fv =
             IndicatorFeatureVectorBuilder::<f64, _, 1>::new(ArrayFeatureVector::<f64, 1>::new())
                 .sma_periods(aapl)
@@ -215,7 +215,7 @@ mod tests {
 
     #[test]
     fn one_sma_feature_writes_multiple_period_windows() -> Result<()> {
-        let aapl = ticker::intern("AAPL");
+        let aapl = symbols::intern("AAPL");
         let mut fv =
             IndicatorFeatureVectorBuilder::<f64, _, 1>::new(ArrayFeatureVector::<f64, 2>::new())
                 .sma_periods(aapl)
@@ -237,7 +237,7 @@ mod tests {
 
     #[test]
     fn sma_periods_can_subscribe_to_volume_events() -> Result<()> {
-        let aapl = ticker::intern("AAPL");
+        let aapl = symbols::intern("AAPL");
         let mut fv =
             IndicatorFeatureVectorBuilder::<f64, _, 2>::new(ArrayFeatureVector::<f64, 2>::new())
                 .sma_periods(aapl)
@@ -265,7 +265,7 @@ mod tests {
 
     #[test]
     fn sma_periods_can_subscribe_to_trade_events() -> Result<()> {
-        let aapl = ticker::intern("AAPL");
+        let aapl = symbols::intern("AAPL");
         let mut fv =
             IndicatorFeatureVectorBuilder::<f64, _, 2>::new(ArrayFeatureVector::<f64, 2>::new())
                 .sma_periods(aapl)
@@ -293,7 +293,7 @@ mod tests {
 
     #[test]
     fn rejects_unsupported_sma_event_kind() {
-        let aapl = ticker::intern("AAPL");
+        let aapl = symbols::intern("AAPL");
         let built =
             IndicatorFeatureVectorBuilder::<f64, _, 1>::new(ArrayFeatureVector::<f64, 1>::new())
                 .sma_periods(aapl)
@@ -304,7 +304,7 @@ mod tests {
 
     #[test]
     fn one_ema_feature_writes_multiple_period_windows() -> Result<()> {
-        let aapl = ticker::intern("AAPL");
+        let aapl = symbols::intern("AAPL");
         let mut fv =
             IndicatorFeatureVectorBuilder::<f64, _, 1>::new(ArrayFeatureVector::<f64, 2>::new())
                 .ema_periods(aapl)
@@ -329,7 +329,7 @@ mod tests {
 
     #[test]
     fn ema_periods_can_subscribe_to_volume_events() -> Result<()> {
-        let aapl = ticker::intern("AAPL");
+        let aapl = symbols::intern("AAPL");
         let mut fv =
             IndicatorFeatureVectorBuilder::<f64, _, 2>::new(ArrayFeatureVector::<f64, 2>::new())
                 .ema_periods(aapl)
@@ -357,7 +357,7 @@ mod tests {
 
     #[test]
     fn ema_periods_can_subscribe_to_trade_events() -> Result<()> {
-        let aapl = ticker::intern("AAPL");
+        let aapl = symbols::intern("AAPL");
         let mut fv =
             IndicatorFeatureVectorBuilder::<f64, _, 2>::new(ArrayFeatureVector::<f64, 2>::new())
                 .ema_periods(aapl)
@@ -385,7 +385,7 @@ mod tests {
 
     #[test]
     fn rejects_unsupported_ema_event_kind() {
-        let aapl = ticker::intern("AAPL");
+        let aapl = symbols::intern("AAPL");
         let built =
             IndicatorFeatureVectorBuilder::<f64, _, 1>::new(ArrayFeatureVector::<f64, 1>::new())
                 .ema_periods(aapl)
@@ -396,7 +396,7 @@ mod tests {
 
     #[test]
     fn one_sma_timed_feature_writes_multiple_period_windows() -> Result<()> {
-        let aapl = ticker::intern("AAPL");
+        let aapl = symbols::intern("AAPL");
         let mut fv =
             IndicatorFeatureVectorBuilder::<f64, _, 1>::new(ArrayFeatureVector::<f64, 2>::new())
                 .sma_timed(aapl, Duration::from_millis(1_000))
@@ -424,7 +424,7 @@ mod tests {
 
     #[test]
     fn rejects_zero_sma_timed_period() {
-        let aapl = ticker::intern("AAPL");
+        let aapl = symbols::intern("AAPL");
         let built =
             IndicatorFeatureVectorBuilder::<f64, _, 1>::new(ArrayFeatureVector::<f64, 1>::new())
                 .sma_timed(aapl, Duration::from_millis(1_000))
@@ -435,7 +435,7 @@ mod tests {
 
     #[test]
     fn rejects_zero_sma_timed_aggregation() {
-        let aapl = ticker::intern("AAPL");
+        let aapl = symbols::intern("AAPL");
         let built =
             IndicatorFeatureVectorBuilder::<f64, _, 1>::new(ArrayFeatureVector::<f64, 1>::new())
                 .sma_timed(aapl, Duration::ZERO)
@@ -446,7 +446,7 @@ mod tests {
 
     #[test]
     fn chains_day_of_week_after_sma_periods() -> Result<()> {
-        let aapl = ticker::intern("AAPL");
+        let aapl = symbols::intern("AAPL");
         let mut fv =
             IndicatorFeatureVectorBuilder::<f64, _, 2>::new(ArrayFeatureVector::<f64, 2>::new())
                 .sma_periods(aapl)
@@ -468,7 +468,7 @@ mod tests {
 
     #[test]
     fn rejects_zero_sma_period() {
-        let aapl = ticker::intern("AAPL");
+        let aapl = symbols::intern("AAPL");
         let built =
             IndicatorFeatureVectorBuilder::<f64, _, 1>::new(ArrayFeatureVector::<f64, 1>::new())
                 .sma_periods(aapl)
@@ -479,7 +479,7 @@ mod tests {
 
     #[test]
     fn rejects_zero_ema_period() {
-        let aapl = ticker::intern("AAPL");
+        let aapl = symbols::intern("AAPL");
         let built =
             IndicatorFeatureVectorBuilder::<f64, _, 1>::new(ArrayFeatureVector::<f64, 1>::new())
                 .ema_periods(aapl)
@@ -490,7 +490,7 @@ mod tests {
 
     #[test]
     fn rejects_more_output_cells_than_capacity() {
-        let aapl = ticker::intern("AAPL");
+        let aapl = symbols::intern("AAPL");
         let built =
             IndicatorFeatureVectorBuilder::<f64, _, 1>::new(ArrayFeatureVector::<f64, 1>::new())
                 .sma_periods(aapl)
@@ -503,7 +503,7 @@ mod tests {
 
     #[test]
     fn rejects_more_feature_instances_than_capacity() -> Result<()> {
-        let aapl = ticker::intern("AAPL");
+        let aapl = symbols::intern("AAPL");
         let built =
             IndicatorFeatureVectorBuilder::<f64, _, 1>::new(ArrayFeatureVector::<f64, 2>::new())
                 .day_of_week(aapl)?
@@ -515,7 +515,7 @@ mod tests {
 
     #[test]
     fn rejects_more_sma_windows_than_capacity() {
-        let aapl = ticker::intern("AAPL");
+        let aapl = symbols::intern("AAPL");
         let mut builder = IndicatorFeatureVectorBuilder::<f64, _, 1>::new(ArrayFeatureVector::<
             f64,
             { MAX_WINDOWS_PER_SMA + 1 },
@@ -535,7 +535,7 @@ mod tests {
     fn root_reexports_are_usable() -> crate::Result<()> {
         use crate::{IndicatorFeatureVector, IndicatorFeatureVectorBuilder, TradeUpdate};
 
-        let aapl = ticker::intern("AAPL");
+        let aapl = symbols::intern("AAPL");
         let fv: IndicatorFeatureVector<_, _, BuiltinFeature<f64>, 1> =
             IndicatorFeatureVectorBuilder::<f64, _, 1>::new(ArrayFeatureVector::<f64, 1>::new())
                 .sma_periods(aapl)

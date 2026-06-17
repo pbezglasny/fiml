@@ -131,11 +131,11 @@ pub(crate) fn market_value_for_kind<F: Float>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ticker;
+    use crate::symbols;
 
     #[test]
     fn volume_event_has_volume_kind() {
-        let aapl = ticker::intern("AAPL");
+        let aapl = symbols::intern("AAPL");
         let event = Event::volume(aapl, 42.0, 123);
 
         assert_eq!(event.kind(), EventKind::Volume);
@@ -143,7 +143,7 @@ mod tests {
 
     #[test]
     fn trade_event_has_trade_kind_and_payload() {
-        let aapl = ticker::intern("AAPL");
+        let aapl = symbols::intern("AAPL");
         let event = Event::trade(aapl, 42.0, 100.0, 123);
 
         assert_eq!(event.kind(), EventKind::Trade);

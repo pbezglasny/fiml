@@ -177,7 +177,7 @@ mod tests {
             ))
             .unwrap();
 
-        pipeline.dispatch(&Event::price(crate::ticker::intern("TEST"), 0.0, 0));
+        pipeline.dispatch(&Event::price(crate::symbols::intern("TEST"), 0.0, 0));
 
         assert!(approx_eq(pipeline.values()[0], 1.5));
     }
