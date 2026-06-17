@@ -7,7 +7,7 @@ use crate::features::event::{EVENT_KIND_COUNT, Event, EventKind};
 use crate::features::spec::BuiltinSpec;
 use crate::ticker::resolve;
 use crate::vectors::FeatureVector;
-use crate::{FimlError, Float, Result, Ticker};
+use crate::{FimlError, Float, Result, Symbol};
 
 /// Contract every feature implements.
 ///
@@ -32,12 +32,12 @@ pub trait IndicatorFeatures {
     fn dispatch(&mut self, event: &Event<Self::F>);
 
     /// Cell index a named feature for `ticker` writes to, or `None` if no such key.
-    fn index_of(&self, ticker: Ticker, name: &str) -> Option<usize>;
+    fn index_of(&self, ticker: Symbol, name: &str) -> Option<usize>;
 }
 
 #[derive(Clone)]
 pub(crate) struct FeatureKey {
-    pub(crate) ticker: Ticker,
+    pub(crate) ticker: Symbol,
     pub(crate) name: String,
 }
 
@@ -113,7 +113,7 @@ where
         }
     }
 
-    fn index_of(&self, ticker: Ticker, name: &str) -> Option<usize> {
+    fn index_of(&self, ticker: Symbol, name: &str) -> Option<usize> {
         self.names
             .iter()
             .position(|n| matches!(n, Some(n) if n.ticker == ticker && n.name == name))
@@ -153,7 +153,7 @@ where
     ///
     /// [`index_of`]: Self::index_of
     /// [`values`]: Self::values
-    pub fn from_builtin_specs(cells: V, specs: &[(&str, Ticker, BuiltinSpec)]) -> Result<Self> {
+    pub fn from_builtin_specs(cells: V, specs: &[(&str, Symbol, BuiltinSpec)]) -> Result<Self> {
         let cell_count = cells.len();
         if specs.len() > M || specs.len() > cell_count {
             return Err(FimlError::InvalidArgument(format!(
@@ -229,7 +229,7 @@ where
     }
 }
 
-fn validate_builtin_specs(specs: &[(&str, Ticker, BuiltinSpec)]) -> Result<()> {
+fn validate_builtin_specs(specs: &[(&str, Symbol, BuiltinSpec)]) -> Result<()> {
     for (i, (name, ticker, spec)) in specs.iter().enumerate() {
         match spec {
             BuiltinSpec::Sma { period, .. } if *period < 1 => {
@@ -262,7 +262,7 @@ fn validate_builtin_specs(specs: &[(&str, Ticker, BuiltinSpec)]) -> Result<()> {
 
 /// Construct a single builtin feature wired to an output cell index.
 fn build_builtin<F: Float>(
-    ticker: Ticker,
+    ticker: Symbol,
     spec: &BuiltinSpec,
     output_index: usize,
 ) -> Result<BuiltinFeature<F>> {
@@ -279,14 +279,14 @@ fn build_builtin<F: Float>(
     }
 }
 
-fn invalid_period<T>(indicator_name: &str, ticker: Ticker, name: &str) -> Result<T> {
+fn invalid_period<T>(indicator_name: &str, ticker: Symbol, name: &str) -> Result<T> {
     Err(FimlError::InvalidArgument(format!(
         "{indicator_name} period must be at least 1 for {}",
         feature_label(ticker, name)
     )))
 }
 
-fn feature_label(ticker: Ticker, name: &str) -> String {
+fn feature_label(ticker: Symbol, name: &str) -> String {
     match resolve(ticker) {
         Some(ticker_name) => format!("{ticker_name}:{name}"),
         None => format!("{ticker:?}:{name}"),

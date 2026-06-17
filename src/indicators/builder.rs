@@ -10,13 +10,13 @@ use crate::indicators::averages::{
     SmaPeriodsBuilder, SmaTimedPeriodsBuilder,
 };
 use crate::vectors::FeatureVector;
-use crate::{FimlError, Float, Result, Ticker};
+use crate::{FimlError, Float, Result, Symbol};
 
 pub(crate) enum PendingFeature {
     SmaPeriods(PendingSmaPeriods),
     EmaPeriods(PendingEmaPeriods),
     SmaTimedPeriods(PendingSmaTimedPeriods),
-    DayOfWeek { ticker: Ticker, output_index: usize },
+    DayOfWeek { ticker: Symbol, output_index: usize },
 }
 
 /// Fixed-capacity builder for [`IndicatorFeatureVector`] instances backed by
@@ -53,12 +53,12 @@ where
     }
 
     /// Configure a sample-period SMA indicator.
-    pub fn sma_periods(self, ticker: Ticker) -> SmaPeriodsBuilder<F, V, M, false> {
+    pub fn sma_periods(self, ticker: Symbol) -> SmaPeriodsBuilder<F, V, M, false> {
         SmaPeriodsBuilder::new(self, ticker)
     }
 
     /// Configure a sample-period EMA indicator.
-    pub fn ema_periods(self, ticker: Ticker) -> EmaPeriodsBuilder<F, V, M, false> {
+    pub fn ema_periods(self, ticker: Symbol) -> EmaPeriodsBuilder<F, V, M, false> {
         EmaPeriodsBuilder::new(self, ticker)
     }
 
@@ -68,14 +68,14 @@ where
     /// milliseconds, matching the indicator's `Duration::as_millis()` windows.
     pub fn sma_timed(
         self,
-        ticker: Ticker,
+        ticker: Symbol,
         aggregation: Duration,
     ) -> SmaTimedPeriodsBuilder<F, V, M, false> {
         SmaTimedPeriodsBuilder::new(self, ticker, aggregation)
     }
 
     /// Add a day-of-week output cell.
-    pub fn day_of_week(mut self, ticker: Ticker) -> Result<Self> {
+    pub fn day_of_week(mut self, ticker: Symbol) -> Result<Self> {
         let output_index = self.reserve_outputs(1)?;
         self.push_entry(PendingFeature::DayOfWeek {
             ticker,

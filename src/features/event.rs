@@ -1,5 +1,5 @@
 use crate::Float;
-use crate::Ticker;
+use crate::Symbol;
 
 /// Number of [`EventKind`] variants. Used to size the per-kind feature groups in
 /// [`IndicatorFeatureVector`](crate::features::IndicatorFeatureVector).
@@ -18,21 +18,21 @@ pub enum EventKind {
 
 /// A price tick.
 pub struct PriceUpdate<F: Float> {
-    pub ticker: Ticker,
+    pub ticker: Symbol,
     pub value: F,
     pub timestamp: i64,
 }
 
 /// A volume tick.
 pub struct VolumeUpdate<F: Float> {
-    pub ticker: Ticker,
+    pub ticker: Symbol,
     pub value: F,
     pub timestamp: i64,
 }
 
 /// An order-book change.
 pub struct OrderBookUpdate<F: Float> {
-    pub ticker: Ticker,
+    pub ticker: Symbol,
     pub bid: F,
     pub ask: F,
     pub timestamp: i64,
@@ -65,7 +65,7 @@ impl<F: Float> Event<F> {
         }
     }
 
-    pub fn price(ticker: Ticker, value: F, timestamp: i64) -> Self {
+    pub fn price(ticker: Symbol, value: F, timestamp: i64) -> Self {
         Event::Price(PriceUpdate {
             ticker,
             value,
@@ -73,7 +73,7 @@ impl<F: Float> Event<F> {
         })
     }
 
-    pub fn volume(ticker: Ticker, value: F, timestamp: i64) -> Self {
+    pub fn volume(ticker: Symbol, value: F, timestamp: i64) -> Self {
         Event::Volume(VolumeUpdate {
             ticker,
             value,
@@ -81,7 +81,7 @@ impl<F: Float> Event<F> {
         })
     }
 
-    pub fn order_book(ticker: Ticker, bid: F, ask: F, timestamp: i64) -> Self {
+    pub fn order_book(ticker: Symbol, bid: F, ask: F, timestamp: i64) -> Self {
         Event::OrderBook(OrderBookUpdate {
             ticker,
             bid,
@@ -98,7 +98,7 @@ impl<F: Float> Event<F> {
 pub(crate) fn market_value_for_kind<F: Float>(
     event: &Event<F>,
     event_kind: EventKind,
-    ticker: Ticker,
+    ticker: Symbol,
 ) -> Option<F> {
     match (event_kind, event) {
         (EventKind::Price, Event::Price(p)) if p.ticker == ticker => Some(p.value),

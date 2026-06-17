@@ -5,24 +5,24 @@ use std::{
 };
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct Ticker(u64);
+pub struct Symbol(u64);
 
-impl fmt::Debug for Ticker {
+impl fmt::Debug for Symbol {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let interner = INTERNER.lock().unwrap();
-        match interner.resolve(*self) {
-            Some(name) => f.debug_tuple("Ticker").field(&name).finish(),
-            None => f.debug_tuple("Ticker").field(&self.0).finish(),
+        let symbol_interner = SYMBOL_INTERNER.lock().unwrap();
+        match symbol_interner.resolve(*self) {
+            Some(name) => f.debug_tuple("Symbol").field(&name).finish(),
+            None => f.debug_tuple("Symbol").field(&self.0).finish(),
         }
     }
 }
 
-struct TickerInterner {
-    name_to_id: HashMap<Arc<str>, Ticker>,
+struct SymbolInterner {
+    name_to_id: HashMap<Arc<str>, Symbol>,
     id_to_name: Vec<Arc<str>>,
 }
 
-impl TickerInterner {
+impl SymbolInterner {
     fn new() -> Self {
         Self {
             name_to_id: HashMap::new(),
@@ -30,34 +30,34 @@ impl TickerInterner {
         }
     }
 
-    fn intern(&mut self, name: &str) -> Ticker {
-        if let Some(&ticker) = self.name_to_id.get(name) {
-            return ticker;
+    fn intern(&mut self, name: &str) -> Symbol {
+        if let Some(&symbol) = self.name_to_id.get(name) {
+            return symbol;
         }
         let id = self.id_to_name.len() as u64;
-        let ticker = Ticker(id);
+        let symbol = Symbol(id);
         let name_arc: Arc<str> = Arc::from(name);
-        self.name_to_id.insert(name_arc.clone(), ticker);
+        self.name_to_id.insert(name_arc.clone(), symbol);
         self.id_to_name.push(name_arc);
-        ticker
+        symbol
     }
 
-    fn resolve(&self, ticker: Ticker) -> Option<&str> {
-        self.id_to_name.get(ticker.0 as usize).map(|s| s.as_ref())
+    fn resolve(&self, symbol: Symbol) -> Option<&str> {
+        self.id_to_name.get(symbol.0 as usize).map(|s| s.as_ref())
     }
 }
 
-static INTERNER: LazyLock<Mutex<TickerInterner>> =
-    LazyLock::new(|| Mutex::new(TickerInterner::new()));
+static SYMBOL_INTERNER: LazyLock<Mutex<SymbolInterner>> =
+    LazyLock::new(|| Mutex::new(SymbolInterner::new()));
 
-pub fn intern(ticker_name: &str) -> Ticker {
-    INTERNER.lock().unwrap().intern(ticker_name)
+pub fn intern(symbol_name: &str) -> Symbol {
+    SYMBOL_INTERNER.lock().unwrap().intern(symbol_name)
 }
 
-pub fn resolve(ticker: Ticker) -> Option<String> {
-    INTERNER
+pub fn resolve(symbol: Symbol) -> Option<String> {
+    SYMBOL_INTERNER
         .lock()
         .unwrap()
-        .resolve(ticker)
+        .resolve(symbol)
         .map(|s| s.to_string())
 }

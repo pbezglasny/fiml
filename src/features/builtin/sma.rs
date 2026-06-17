@@ -7,14 +7,14 @@ use crate::indicators::{
     PendingSmaPeriods, PendingSmaTimedPeriods, SimpleMovingAverage, SimpleMovingAverageTimed,
 };
 use crate::vectors::FeatureVector;
-use crate::{FimlError, Float, HeapRingBuffer, Result, Ticker};
+use crate::{FimlError, Float, HeapRingBuffer, Result, Symbol};
 
 /// Maximum number of SMA windows that can share a single indicator instance.
 /// Exceeding it during construction is an error.
 pub const MAX_WINDOWS_PER_SMA: usize = 16;
 
 pub struct SmaFeature<F: Float> {
-    ticker: Ticker,
+    ticker: Symbol,
     event_kind: EventKind,
     sma: SimpleMovingAverage<HeapRingBuffer<F>, F, MAX_WINDOWS_PER_SMA>,
     output_indexes: [usize; MAX_WINDOWS_PER_SMA],
@@ -23,7 +23,7 @@ pub struct SmaFeature<F: Float> {
 
 impl<F: Float> SmaFeature<F> {
     pub(crate) fn new(
-        ticker: Ticker,
+        ticker: Symbol,
         event_kind: EventKind,
         sma: SimpleMovingAverage<HeapRingBuffer<F>, F, MAX_WINDOWS_PER_SMA>,
         output_indexes: [usize; MAX_WINDOWS_PER_SMA],
@@ -60,7 +60,7 @@ impl<F: Float> SmaFeature<F> {
 }
 
 pub struct SmaTimedFeature<F: Float> {
-    ticker: Ticker,
+    ticker: Symbol,
     sma: SimpleMovingAverageTimed<HeapRingBuffer<(i64, F)>, F, MAX_WINDOWS_PER_SMA>,
     output_indexes: [usize; MAX_WINDOWS_PER_SMA],
     output_count: usize,
@@ -68,7 +68,7 @@ pub struct SmaTimedFeature<F: Float> {
 
 impl<F: Float> SmaTimedFeature<F> {
     pub(crate) fn new(
-        ticker: Ticker,
+        ticker: Symbol,
         sma: SimpleMovingAverageTimed<HeapRingBuffer<(i64, F)>, F, MAX_WINDOWS_PER_SMA>,
         output_indexes: [usize; MAX_WINDOWS_PER_SMA],
         output_count: usize,
@@ -152,7 +152,7 @@ pub(in crate::features) fn validate_timed_durations(
 }
 
 pub(in crate::features) fn build_builtin<F: Float>(
-    ticker: Ticker,
+    ticker: Symbol,
     period: usize,
     output_index: usize,
 ) -> Result<BuiltinFeature<F>> {
@@ -172,7 +172,7 @@ pub(in crate::features) fn build_builtin<F: Float>(
 }
 
 pub(in crate::features) fn build_timed_builtin<F: Float>(
-    ticker: Ticker,
+    ticker: Symbol,
     aggregation: Duration,
     window: Duration,
     output_index: usize,
