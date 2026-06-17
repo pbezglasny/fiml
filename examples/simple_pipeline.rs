@@ -1,6 +1,6 @@
 use fiml::features::Pipeline;
 use fiml::features::transformers::StandardScaler;
-use fiml::{ArrayFeatureVector, Event, IndicatorFeatureVectorBuilder, Symbol, ticker};
+use fiml::{ArrayFeatureVector, Event, IndicatorFeatureVectorBuilder, Symbol, symbols};
 use rand::rngs::StdRng;
 use rand::{RngExt, SeedableRng};
 
@@ -42,7 +42,7 @@ impl StubPriceProducer {
 }
 
 fn main() -> anyhow::Result<()> {
-    let ticker = ticker::intern("STUB");
+    let ticker = symbols::intern("STUB");
 
     let indicators =
         IndicatorFeatureVectorBuilder::<f64, _, 1>::new(ArrayFeatureVector::<f64, 1>::new())

@@ -293,7 +293,7 @@ pub(crate) fn build_sma_timed_periods_entry<F: Float>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{ArrayFeatureVector, FeatureVector, ticker};
+    use crate::{ArrayFeatureVector, FeatureVector, symbols};
 
     fn approx_eq(a: f64, b: f64) -> bool {
         (a - b).abs() < 1e-9
@@ -301,8 +301,8 @@ mod tests {
 
     #[test]
     fn sma_reacts_to_price_events() {
-        let aapl = ticker::intern("AAPL");
-        let googl = ticker::intern("GOOGL");
+        let aapl = symbols::intern("AAPL");
+        let googl = symbols::intern("GOOGL");
         let mut fv: ArrayFeatureVector<f64, 1> = ArrayFeatureVector::new();
         let mut sma: SimpleMovingAverage<HeapRingBuffer<f64>, f64, MAX_WINDOWS_PER_SMA> =
             SimpleMovingAverage::new_heap(3);
@@ -323,8 +323,8 @@ mod tests {
 
     #[test]
     fn sma_reacts_to_volume_events() {
-        let aapl = ticker::intern("AAPL");
-        let googl = ticker::intern("GOOGL");
+        let aapl = symbols::intern("AAPL");
+        let googl = symbols::intern("GOOGL");
         let mut fv: ArrayFeatureVector<f64, 1> = ArrayFeatureVector::new();
         let mut sma: SimpleMovingAverage<HeapRingBuffer<f64>, f64, MAX_WINDOWS_PER_SMA> =
             SimpleMovingAverage::new_heap(3);
@@ -345,8 +345,8 @@ mod tests {
 
     #[test]
     fn sma_reacts_to_trade_price_events() {
-        let aapl = ticker::intern("AAPL");
-        let googl = ticker::intern("GOOGL");
+        let aapl = symbols::intern("AAPL");
+        let googl = symbols::intern("GOOGL");
         let mut fv: ArrayFeatureVector<f64, 1> = ArrayFeatureVector::new();
         let mut sma: SimpleMovingAverage<HeapRingBuffer<f64>, f64, MAX_WINDOWS_PER_SMA> =
             SimpleMovingAverage::new_heap(3);
