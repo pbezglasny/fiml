@@ -2,11 +2,11 @@ use crate::features::EventKind;
 use crate::features::builtin::ema::{self, MAX_WINDOWS_PER_EMA};
 use crate::indicators::builder::{IndicatorFeatureVectorBuilder, PendingFeature};
 use crate::vectors::FeatureVector;
-use crate::{Float, Result, Ticker};
+use crate::{Float, Result, Symbol};
 
 #[derive(Clone, Copy)]
 pub(crate) struct PendingEmaPeriods {
-    pub(crate) ticker: Ticker,
+    pub(crate) ticker: Symbol,
     pub(crate) event_kind: EventKind,
     pub(crate) periods: [usize; MAX_WINDOWS_PER_EMA],
     pub(crate) window_count: usize,
@@ -20,7 +20,7 @@ where
     V: FeatureVector<F = F>,
 {
     parent: IndicatorFeatureVectorBuilder<F, V, M>,
-    ticker: Ticker,
+    ticker: Symbol,
     event_kind: EventKind,
     periods: [usize; MAX_WINDOWS_PER_EMA],
     window_count: usize,
@@ -31,7 +31,7 @@ where
     F: Float,
     V: FeatureVector<F = F>,
 {
-    pub(crate) fn new(parent: IndicatorFeatureVectorBuilder<F, V, M>, ticker: Ticker) -> Self {
+    pub(crate) fn new(parent: IndicatorFeatureVectorBuilder<F, V, M>, ticker: Symbol) -> Self {
         Self {
             parent,
             ticker,

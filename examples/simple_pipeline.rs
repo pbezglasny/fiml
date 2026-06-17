@@ -1,11 +1,11 @@
 use fiml::features::Pipeline;
 use fiml::features::transformers::StandardScaler;
-use fiml::{ArrayFeatureVector, Event, IndicatorFeatureVectorBuilder, Ticker, ticker};
+use fiml::{ArrayFeatureVector, Event, IndicatorFeatureVectorBuilder, Symbol, ticker};
 use rand::rngs::StdRng;
 use rand::{RngExt, SeedableRng};
 
 struct StubPriceProducer {
-    ticker: Ticker,
+    ticker: Symbol,
     rng: StdRng,
     timestamp: i64,
 }
@@ -16,7 +16,7 @@ struct PriceTick {
 }
 
 impl StubPriceProducer {
-    fn new(ticker: Ticker, seed: u64) -> Self {
+    fn new(ticker: Symbol, seed: u64) -> Self {
         Self {
             ticker,
             rng: StdRng::seed_from_u64(seed),

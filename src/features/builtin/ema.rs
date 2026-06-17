@@ -5,12 +5,12 @@ use crate::features::event::market_value_for_kind;
 use crate::features::indicator_vector::{BuiltinFeatureEntry, FeatureKey};
 use crate::indicators::{ExponentialMovingAverage, PendingEmaPeriods};
 use crate::vectors::FeatureVector;
-use crate::{FimlError, Float, Result, Ticker};
+use crate::{FimlError, Float, Result, Symbol};
 
 pub const MAX_WINDOWS_PER_EMA: usize = super::sma::MAX_WINDOWS_PER_SMA;
 
 pub struct EmaFeature<F: Float> {
-    ticker: Ticker,
+    ticker: Symbol,
     event_kind: EventKind,
     ema: ExponentialMovingAverage<F, MAX_WINDOWS_PER_EMA>,
     output_indexes: [usize; MAX_WINDOWS_PER_EMA],
@@ -19,7 +19,7 @@ pub struct EmaFeature<F: Float> {
 
 impl<F: Float> EmaFeature<F> {
     pub(crate) fn new(
-        ticker: Ticker,
+        ticker: Symbol,
         event_kind: EventKind,
         ema: ExponentialMovingAverage<F, MAX_WINDOWS_PER_EMA>,
         output_indexes: [usize; MAX_WINDOWS_PER_EMA],
@@ -74,7 +74,7 @@ pub(crate) fn validate_event_kind(event_kind: EventKind) -> Result<()> {
 }
 
 pub(in crate::features) fn build_builtin<F: Float>(
-    ticker: Ticker,
+    ticker: Symbol,
     period: usize,
     output_index: usize,
 ) -> Result<BuiltinFeature<F>> {

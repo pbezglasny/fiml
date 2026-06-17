@@ -2,7 +2,7 @@ use crate::features::BuiltinFeature;
 use crate::features::event::{Event, EventKind, TimeUpdate};
 use crate::features::indicator_vector::{BuiltinFeatureEntry, FeatureKey};
 use crate::vectors::FeatureVector;
-use crate::{Float, Ticker};
+use crate::{Float, Symbol};
 
 /// Day-of-week feature. Writes `0 = Sunday ..= 6 = Saturday` derived from the
 /// tick timestamp to its output cell. A non-price builtin: it reacts to
@@ -35,7 +35,7 @@ impl DayOfWeek {
 }
 
 pub(crate) fn build_entry<F: Float>(
-    ticker: Ticker,
+    ticker: Symbol,
     output_index: usize,
     names: &mut [Option<FeatureKey>],
 ) -> BuiltinFeatureEntry<F> {
