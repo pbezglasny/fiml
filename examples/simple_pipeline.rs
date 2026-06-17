@@ -5,7 +5,7 @@ use rand::rngs::StdRng;
 use rand::{RngExt, SeedableRng};
 
 struct StubPriceProducer {
-    ticker: Symbol,
+    symbol: Symbol,
     rng: StdRng,
     timestamp: i64,
 }
@@ -16,9 +16,9 @@ struct PriceTick {
 }
 
 impl StubPriceProducer {
-    fn new(ticker: Symbol, seed: u64) -> Self {
+    fn new(symbol: Symbol, seed: u64) -> Self {
         Self {
-            ticker,
+            symbol,
             rng: StdRng::seed_from_u64(seed),
             timestamp: 0,
         }
@@ -36,17 +36,17 @@ impl StubPriceProducer {
 
     fn next_event(&mut self) -> (PriceTick, Event<f64>) {
         let tick = self.next_tick();
-        let event = Event::price(self.ticker, tick.value, tick.timestamp);
+        let event = Event::price(self.symbol, tick.value, tick.timestamp);
         (tick, event)
     }
 }
 
 fn main() -> anyhow::Result<()> {
-    let ticker = symbols::intern("STUB");
+    let symbol = symbols::intern("STUB");
 
     let indicators =
         IndicatorFeatureVectorBuilder::<f64, _, 1>::new(ArrayFeatureVector::<f64, 1>::new())
-            .ema_periods(ticker)
+            .ema_periods(symbol)
             .window(5)?
             .done()?
             .build()?;
@@ -66,7 +66,7 @@ fn main() -> anyhow::Result<()> {
         ArrayFeatureVector::<f64, 1>::new(),
     ))?;
 
-    let mut producer = StubPriceProducer::new(ticker, 0x5EED);
+    let mut producer = StubPriceProducer::new(symbol, 0x5EED);
 
     println!("timestamp,price,scaled_ema_5");
     for _ in 0..20 {

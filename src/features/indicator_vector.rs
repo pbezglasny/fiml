@@ -31,13 +31,13 @@ pub trait IndicatorFeatures {
     /// values into their cells. Features of other kinds are not touched.
     fn dispatch(&mut self, event: &Event<Self::F>);
 
-    /// Cell index a named feature for `ticker` writes to, or `None` if no such key.
-    fn index_of(&self, ticker: Symbol, name: &str) -> Option<usize>;
+    /// Cell index a named feature for `symbol` writes to, or `None` if no such key.
+    fn index_of(&self, symbol: Symbol, name: &str) -> Option<usize>;
 }
 
 #[derive(Clone)]
 pub(crate) struct FeatureKey {
-    pub(crate) ticker: Symbol,
+    pub(crate) symbol: Symbol,
     pub(crate) name: String,
 }
 
@@ -113,10 +113,10 @@ where
         }
     }
 
-    fn index_of(&self, ticker: Symbol, name: &str) -> Option<usize> {
+    fn index_of(&self, symbol: Symbol, name: &str) -> Option<usize> {
         self.names
             .iter()
-            .position(|n| matches!(n, Some(n) if n.ticker == ticker && n.name == name))
+            .position(|n| matches!(n, Some(n) if n.symbol == symbol && n.name == name))
     }
 }
 
@@ -145,7 +145,7 @@ where
     ///
     /// `cells` is the output storage; it is taken by value so the caller can
     /// size it however it likes (compile-time or runtime). `specs` pairs each
-    /// output's name and ticker with its [`BuiltinSpec`]. The `(ticker, name)`
+    /// output's name and symbol with its [`BuiltinSpec`]. The `(symbol, name)`
     /// key is recorded against the cell the feature writes to (cells are
     /// assigned in spec order), so
     /// [`index_of`] and [`values`] keep the caller's order, while the features
@@ -166,13 +166,13 @@ where
         let mut entries = [const { MaybeUninit::uninit() }; M];
         let mut names = vec![None; cell_count].into_boxed_slice();
 
-        for (output_index, (name, ticker, spec)) in specs.iter().enumerate() {
+        for (output_index, (name, symbol, spec)) in specs.iter().enumerate() {
             entries[output_index].write(BuiltinFeatureEntry {
-                feature: build_builtin(*ticker, spec, output_index)?,
+                feature: build_builtin(*symbol, spec, output_index)?,
                 kind: spec.event_kind(),
             });
             names[output_index] = Some(FeatureKey {
-                ticker: *ticker,
+                symbol: *symbol,
                 name: (*name).to_string(),
             });
         }
@@ -230,13 +230,13 @@ where
 }
 
 fn validate_builtin_specs(specs: &[(&str, Symbol, BuiltinSpec)]) -> Result<()> {
-    for (i, (name, ticker, spec)) in specs.iter().enumerate() {
+    for (i, (name, symbol, spec)) in specs.iter().enumerate() {
         match spec {
             BuiltinSpec::Sma { period, .. } if *period < 1 => {
-                return invalid_period("SMA", *ticker, name);
+                return invalid_period("SMA", *symbol, name);
             }
             BuiltinSpec::Ema { period, .. } if *period < 1 => {
-                return invalid_period("EMA", *ticker, name);
+                return invalid_period("EMA", *symbol, name);
             }
             BuiltinSpec::SmaTimed {
                 aggregation,
@@ -249,11 +249,11 @@ fn validate_builtin_specs(specs: &[(&str, Symbol, BuiltinSpec)]) -> Result<()> {
 
         if specs[i + 1..]
             .iter()
-            .any(|(other_name, other_ticker, _)| name == other_name && ticker == other_ticker)
+            .any(|(other_name, other_symbol, _)| name == other_name && symbol == other_symbol)
         {
             return Err(FimlError::InvalidArgument(format!(
                 "duplicate feature key: {}",
-                feature_label(*ticker, name)
+                feature_label(*symbol, name)
             )));
         }
     }
@@ -262,34 +262,34 @@ fn validate_builtin_specs(specs: &[(&str, Symbol, BuiltinSpec)]) -> Result<()> {
 
 /// Construct a single builtin feature wired to an output cell index.
 fn build_builtin<F: Float>(
-    ticker: Symbol,
+    symbol: Symbol,
     spec: &BuiltinSpec,
     output_index: usize,
 ) -> Result<BuiltinFeature<F>> {
     match spec {
-        BuiltinSpec::Sma { period, .. } => sma::build_builtin(ticker, *period, output_index),
-        BuiltinSpec::Ema { period, .. } => ema::build_builtin(ticker, *period, output_index),
+        BuiltinSpec::Sma { period, .. } => sma::build_builtin(symbol, *period, output_index),
+        BuiltinSpec::Ema { period, .. } => ema::build_builtin(symbol, *period, output_index),
         BuiltinSpec::SmaTimed {
             aggregation,
             window,
-        } => sma::build_timed_builtin(ticker, *aggregation, *window, output_index),
+        } => sma::build_timed_builtin(symbol, *aggregation, *window, output_index),
         BuiltinSpec::DayOfWeek => Ok(BuiltinFeature::DayOfWeek(day_of_week::DayOfWeek::new(
             output_index,
         ))),
     }
 }
 
-fn invalid_period<T>(indicator_name: &str, ticker: Symbol, name: &str) -> Result<T> {
+fn invalid_period<T>(indicator_name: &str, symbol: Symbol, name: &str) -> Result<T> {
     Err(FimlError::InvalidArgument(format!(
         "{indicator_name} period must be at least 1 for {}",
-        feature_label(ticker, name)
+        feature_label(symbol, name)
     )))
 }
 
-fn feature_label(ticker: Symbol, name: &str) -> String {
-    match resolve(ticker) {
-        Some(ticker_name) => format!("{ticker_name}:{name}"),
-        None => format!("{ticker:?}:{name}"),
+fn feature_label(symbol: Symbol, name: &str) -> String {
+    match resolve(symbol) {
+        Some(symbol_name) => format!("{symbol_name}:{name}"),
+        None => format!("{symbol:?}:{name}"),
     }
 }
 
@@ -385,7 +385,7 @@ mod tests {
     }
 
     #[test]
-    fn index_of_distinguishes_tickers() {
+    fn index_of_distinguishes_symbols() {
         let aapl = symbols::intern("AAPL");
         let googl = symbols::intern("GOOGL");
         let specs = [("sma_5_sec", aapl, sma(5)), ("sma_5_sec", googl, sma(5))];
@@ -397,7 +397,7 @@ mod tests {
     }
 
     #[test]
-    fn dispatch_distinguishes_tickers() {
+    fn dispatch_distinguishes_symbols() {
         let aapl = symbols::intern("AAPL");
         let googl = symbols::intern("GOOGL");
         let specs = [("sma_2_sec", aapl, sma(2)), ("sma_2_sec", googl, sma(2))];

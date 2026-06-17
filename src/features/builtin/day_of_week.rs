@@ -35,12 +35,12 @@ impl DayOfWeek {
 }
 
 pub(crate) fn build_entry<F: Float>(
-    ticker: Symbol,
+    symbol: Symbol,
     output_index: usize,
     names: &mut [Option<FeatureKey>],
 ) -> BuiltinFeatureEntry<F> {
     names[output_index] = Some(FeatureKey {
-        ticker,
+        symbol,
         name: "day_of_week".to_string(),
     });
     BuiltinFeatureEntry {

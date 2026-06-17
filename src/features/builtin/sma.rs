@@ -14,7 +14,7 @@ use crate::{FimlError, Float, HeapRingBuffer, Result, Symbol};
 pub const MAX_WINDOWS_PER_SMA: usize = 16;
 
 pub struct SmaFeature<F: Float> {
-    ticker: Symbol,
+    symbol: Symbol,
     event_kind: EventKind,
     sma: SimpleMovingAverage<HeapRingBuffer<F>, F, MAX_WINDOWS_PER_SMA>,
     output_indexes: [usize; MAX_WINDOWS_PER_SMA],
@@ -23,14 +23,14 @@ pub struct SmaFeature<F: Float> {
 
 impl<F: Float> SmaFeature<F> {
     pub(crate) fn new(
-        ticker: Symbol,
+        symbol: Symbol,
         event_kind: EventKind,
         sma: SimpleMovingAverage<HeapRingBuffer<F>, F, MAX_WINDOWS_PER_SMA>,
         output_indexes: [usize; MAX_WINDOWS_PER_SMA],
         output_count: usize,
     ) -> Self {
         Self {
-            ticker,
+            symbol,
             event_kind,
             sma,
             output_indexes,
@@ -43,7 +43,7 @@ impl<F: Float> SmaFeature<F> {
         event: &Event<F>,
         output: &mut O,
     ) {
-        if let Some(value) = market_value_for_kind(event, self.event_kind, self.ticker) {
+        if let Some(value) = market_value_for_kind(event, self.event_kind, self.symbol) {
             self.sma.update(value);
             for (window_index, output_index) in self
                 .output_indexes
@@ -60,7 +60,7 @@ impl<F: Float> SmaFeature<F> {
 }
 
 pub struct SmaTimedFeature<F: Float> {
-    ticker: Symbol,
+    symbol: Symbol,
     sma: SimpleMovingAverageTimed<HeapRingBuffer<(i64, F)>, F, MAX_WINDOWS_PER_SMA>,
     output_indexes: [usize; MAX_WINDOWS_PER_SMA],
     output_count: usize,
@@ -68,13 +68,13 @@ pub struct SmaTimedFeature<F: Float> {
 
 impl<F: Float> SmaTimedFeature<F> {
     pub(crate) fn new(
-        ticker: Symbol,
+        symbol: Symbol,
         sma: SimpleMovingAverageTimed<HeapRingBuffer<(i64, F)>, F, MAX_WINDOWS_PER_SMA>,
         output_indexes: [usize; MAX_WINDOWS_PER_SMA],
         output_count: usize,
     ) -> Self {
         Self {
-            ticker,
+            symbol,
             sma,
             output_indexes,
             output_count,
@@ -87,7 +87,7 @@ impl<F: Float> SmaTimedFeature<F> {
         output: &mut O,
     ) {
         if let Event::Price(p) = event
-            && p.ticker == self.ticker
+            && p.symbol == self.symbol
         {
             self.sma.update_inner(p.value, p.timestamp);
             for (window_index, output_index) in self
@@ -152,7 +152,7 @@ pub(in crate::features) fn validate_timed_durations(
 }
 
 pub(in crate::features) fn build_builtin<F: Float>(
-    ticker: Symbol,
+    symbol: Symbol,
     period: usize,
     output_index: usize,
 ) -> Result<BuiltinFeature<F>> {
@@ -163,7 +163,7 @@ pub(in crate::features) fn build_builtin<F: Float>(
     let mut output_indexes = [0; MAX_WINDOWS_PER_SMA];
     output_indexes[0] = output_index;
     Ok(BuiltinFeature::Sma(SmaFeature::new(
-        ticker,
+        symbol,
         EventKind::Price,
         sma,
         output_indexes,
@@ -172,7 +172,7 @@ pub(in crate::features) fn build_builtin<F: Float>(
 }
 
 pub(in crate::features) fn build_timed_builtin<F: Float>(
-    ticker: Symbol,
+    symbol: Symbol,
     aggregation: Duration,
     window: Duration,
     output_index: usize,
@@ -191,7 +191,7 @@ pub(in crate::features) fn build_timed_builtin<F: Float>(
     let mut output_indexes = [0; MAX_WINDOWS_PER_SMA];
     output_indexes[0] = output_index;
     Ok(BuiltinFeature::SmaTimed(SmaTimedFeature::new(
-        ticker,
+        symbol,
         sma,
         output_indexes,
         1,
@@ -219,14 +219,14 @@ pub(crate) fn build_sma_periods_entry<F: Float>(
         let output_index = config.output_start + window_index;
         output_indexes[window_index] = output_index;
         names[output_index] = Some(FeatureKey {
-            ticker: config.ticker,
+            symbol: config.symbol,
             name: feature_name(config.event_kind, period),
         });
     }
 
     BuiltinFeatureEntry {
         feature: BuiltinFeature::Sma(SmaFeature::new(
-            config.ticker,
+            config.symbol,
             config.event_kind,
             sma,
             output_indexes,
@@ -274,14 +274,14 @@ pub(crate) fn build_sma_timed_periods_entry<F: Float>(
         let output_index = config.output_start + window_index;
         output_indexes[window_index] = output_index;
         names[output_index] = Some(FeatureKey {
-            ticker: config.ticker,
+            symbol: config.symbol,
             name: format!("sma_timed_periods_{period}"),
         });
     }
 
     Ok(BuiltinFeatureEntry {
         feature: BuiltinFeature::SmaTimed(SmaTimedFeature::new(
-            config.ticker,
+            config.symbol,
             sma,
             output_indexes,
             config.window_count,

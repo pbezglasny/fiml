@@ -8,7 +8,7 @@ use crate::{FimlError, Float, Result, Symbol};
 
 #[derive(Clone, Copy)]
 pub(crate) struct PendingSmaPeriods {
-    pub(crate) ticker: Symbol,
+    pub(crate) symbol: Symbol,
     pub(crate) event_kind: EventKind,
     pub(crate) periods: [usize; MAX_WINDOWS_PER_SMA],
     pub(crate) window_count: usize,
@@ -18,7 +18,7 @@ pub(crate) struct PendingSmaPeriods {
 
 #[derive(Clone, Copy)]
 pub(crate) struct PendingSmaTimedPeriods {
-    pub(crate) ticker: Symbol,
+    pub(crate) symbol: Symbol,
     pub(crate) aggregation: Duration,
     pub(crate) periods: [usize; MAX_WINDOWS_PER_SMA],
     pub(crate) window_count: usize,
@@ -33,7 +33,7 @@ where
     V: FeatureVector<F = F>,
 {
     parent: IndicatorFeatureVectorBuilder<F, V, M>,
-    ticker: Symbol,
+    symbol: Symbol,
     event_kind: EventKind,
     periods: [usize; MAX_WINDOWS_PER_SMA],
     window_count: usize,
@@ -47,7 +47,7 @@ where
     V: FeatureVector<F = F>,
 {
     parent: IndicatorFeatureVectorBuilder<F, V, M>,
-    ticker: Symbol,
+    symbol: Symbol,
     aggregation: Duration,
     periods: [usize; MAX_WINDOWS_PER_SMA],
     window_count: usize,
@@ -59,10 +59,10 @@ where
     F: Float,
     V: FeatureVector<F = F>,
 {
-    pub(crate) fn new(parent: IndicatorFeatureVectorBuilder<F, V, M>, ticker: Symbol) -> Self {
+    pub(crate) fn new(parent: IndicatorFeatureVectorBuilder<F, V, M>, symbol: Symbol) -> Self {
         Self {
             parent,
-            ticker,
+            symbol,
             event_kind: EventKind::Price,
             periods: [0; MAX_WINDOWS_PER_SMA],
             window_count: 0,
@@ -75,7 +75,7 @@ where
         self.push_window(period)?;
         Ok(SmaPeriodsBuilder {
             parent: self.parent,
-            ticker: self.ticker,
+            symbol: self.symbol,
             event_kind: self.event_kind,
             periods: self.periods,
             window_count: self.window_count,
@@ -101,7 +101,7 @@ where
         self.parent
             .push_entry(PendingFeature::SmaPeriods(PendingSmaPeriods {
                 periods: self.periods,
-                ticker: self.ticker,
+                symbol: self.symbol,
                 event_kind: self.event_kind,
                 window_count: self.window_count,
                 max_period: self.max_period,
@@ -142,12 +142,12 @@ where
 {
     pub(crate) fn new(
         parent: IndicatorFeatureVectorBuilder<F, V, M>,
-        ticker: Symbol,
+        symbol: Symbol,
         aggregation: Duration,
     ) -> Self {
         Self {
             parent,
-            ticker,
+            symbol,
             aggregation,
             periods: [0; MAX_WINDOWS_PER_SMA],
             window_count: 0,
@@ -160,7 +160,7 @@ where
         self.push_window(period)?;
         Ok(SmaTimedPeriodsBuilder {
             parent: self.parent,
-            ticker: self.ticker,
+            symbol: self.symbol,
             aggregation: self.aggregation,
             periods: self.periods,
             window_count: self.window_count,
@@ -186,7 +186,7 @@ where
         self.parent
             .push_entry(PendingFeature::SmaTimedPeriods(PendingSmaTimedPeriods {
                 aggregation: self.aggregation,
-                ticker: self.ticker,
+                symbol: self.symbol,
                 periods: self.periods,
                 window_count: self.window_count,
                 max_period: self.max_period,
