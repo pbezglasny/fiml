@@ -19,21 +19,21 @@ pub enum EventKind {
 
 /// A price tick.
 pub struct PriceUpdate<F: Float> {
-    pub ticker: Symbol,
+    pub symbol: Symbol,
     pub value: F,
     pub timestamp: i64,
 }
 
 /// A volume tick.
 pub struct VolumeUpdate<F: Float> {
-    pub ticker: Symbol,
+    pub symbol: Symbol,
     pub value: F,
     pub timestamp: i64,
 }
 
 /// A trade tick carrying price and volume.
 pub struct TradeUpdate<F: Float> {
-    pub ticker: Symbol,
+    pub symbol: Symbol,
     pub price: F,
     pub volume: F,
     pub timestamp: i64,
@@ -41,7 +41,7 @@ pub struct TradeUpdate<F: Float> {
 
 /// An order-book change.
 pub struct OrderBookUpdate<F: Float> {
-    pub ticker: Symbol,
+    pub symbol: Symbol,
     pub bid: F,
     pub ask: F,
     pub timestamp: i64,
@@ -76,34 +76,34 @@ impl<F: Float> Event<F> {
         }
     }
 
-    pub fn price(ticker: Symbol, value: F, timestamp: i64) -> Self {
+    pub fn price(symbol: Symbol, value: F, timestamp: i64) -> Self {
         Event::Price(PriceUpdate {
-            ticker,
+            symbol,
             value,
             timestamp,
         })
     }
 
-    pub fn volume(ticker: Symbol, value: F, timestamp: i64) -> Self {
+    pub fn volume(symbol: Symbol, value: F, timestamp: i64) -> Self {
         Event::Volume(VolumeUpdate {
-            ticker,
+            symbol,
             value,
             timestamp,
         })
     }
 
-    pub fn trade(ticker: Symbol, price: F, volume: F, timestamp: i64) -> Self {
+    pub fn trade(symbol: Symbol, price: F, volume: F, timestamp: i64) -> Self {
         Event::Trade(TradeUpdate {
-            ticker,
+            symbol,
             price,
             volume,
             timestamp,
         })
     }
 
-    pub fn order_book(ticker: Symbol, bid: F, ask: F, timestamp: i64) -> Self {
+    pub fn order_book(symbol: Symbol, bid: F, ask: F, timestamp: i64) -> Self {
         Event::OrderBook(OrderBookUpdate {
-            ticker,
+            symbol,
             bid,
             ask,
             timestamp,
@@ -118,12 +118,12 @@ impl<F: Float> Event<F> {
 pub(crate) fn market_value_for_kind<F: Float>(
     event: &Event<F>,
     event_kind: EventKind,
-    ticker: Symbol,
+    symbol: Symbol,
 ) -> Option<F> {
     match (event_kind, event) {
-        (EventKind::Price, Event::Price(p)) if p.ticker == ticker => Some(p.value),
-        (EventKind::Volume, Event::Volume(v)) if v.ticker == ticker => Some(v.value),
-        (EventKind::Trade, Event::Trade(t)) if t.ticker == ticker => Some(t.price),
+        (EventKind::Price, Event::Price(p)) if p.symbol == symbol => Some(p.value),
+        (EventKind::Volume, Event::Volume(v)) if v.symbol == symbol => Some(v.value),
+        (EventKind::Trade, Event::Trade(t)) if t.symbol == symbol => Some(t.price),
         _ => None,
     }
 }
@@ -148,7 +148,7 @@ mod tests {
 
         assert_eq!(event.kind(), EventKind::Trade);
         if let Event::Trade(trade) = event {
-            assert_eq!(trade.ticker, aapl);
+            assert_eq!(trade.symbol, aapl);
             assert_eq!(trade.price, 42.0);
             assert_eq!(trade.volume, 100.0);
             assert_eq!(trade.timestamp, 123);

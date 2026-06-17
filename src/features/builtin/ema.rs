@@ -10,7 +10,7 @@ use crate::{FimlError, Float, Result, Symbol};
 pub const MAX_WINDOWS_PER_EMA: usize = super::sma::MAX_WINDOWS_PER_SMA;
 
 pub struct EmaFeature<F: Float> {
-    ticker: Symbol,
+    symbol: Symbol,
     event_kind: EventKind,
     ema: ExponentialMovingAverage<F, MAX_WINDOWS_PER_EMA>,
     output_indexes: [usize; MAX_WINDOWS_PER_EMA],
@@ -19,14 +19,14 @@ pub struct EmaFeature<F: Float> {
 
 impl<F: Float> EmaFeature<F> {
     pub(crate) fn new(
-        ticker: Symbol,
+        symbol: Symbol,
         event_kind: EventKind,
         ema: ExponentialMovingAverage<F, MAX_WINDOWS_PER_EMA>,
         output_indexes: [usize; MAX_WINDOWS_PER_EMA],
         output_count: usize,
     ) -> Self {
         Self {
-            ticker,
+            symbol,
             event_kind,
             ema,
             output_indexes,
@@ -39,7 +39,7 @@ impl<F: Float> EmaFeature<F> {
         event: &Event<F>,
         output: &mut O,
     ) {
-        if let Some(value) = market_value_for_kind(event, self.event_kind, self.ticker) {
+        if let Some(value) = market_value_for_kind(event, self.event_kind, self.symbol) {
             self.ema.update(value);
             for (window_index, output_index) in self
                 .output_indexes
@@ -74,7 +74,7 @@ pub(crate) fn validate_event_kind(event_kind: EventKind) -> Result<()> {
 }
 
 pub(in crate::features) fn build_builtin<F: Float>(
-    ticker: Symbol,
+    symbol: Symbol,
     period: usize,
     output_index: usize,
 ) -> Result<BuiltinFeature<F>> {
@@ -84,7 +84,7 @@ pub(in crate::features) fn build_builtin<F: Float>(
     let mut output_indexes = [0; MAX_WINDOWS_PER_EMA];
     output_indexes[0] = output_index;
     Ok(BuiltinFeature::Ema(EmaFeature::new(
-        ticker,
+        symbol,
         EventKind::Price,
         ema,
         output_indexes,
@@ -111,14 +111,14 @@ pub(crate) fn build_ema_periods_entry<F: Float>(
         let output_index = config.output_start + window_index;
         output_indexes[window_index] = output_index;
         names[output_index] = Some(FeatureKey {
-            ticker: config.ticker,
+            symbol: config.symbol,
             name: feature_name(config.event_kind, period),
         });
     }
 
     BuiltinFeatureEntry {
         feature: BuiltinFeature::Ema(EmaFeature::new(
-            config.ticker,
+            config.symbol,
             config.event_kind,
             ema,
             output_indexes,

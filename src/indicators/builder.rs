@@ -16,7 +16,7 @@ pub(crate) enum PendingFeature {
     SmaPeriods(PendingSmaPeriods),
     EmaPeriods(PendingEmaPeriods),
     SmaTimedPeriods(PendingSmaTimedPeriods),
-    DayOfWeek { ticker: Symbol, output_index: usize },
+    DayOfWeek { symbol: Symbol, output_index: usize },
 }
 
 /// Fixed-capacity builder for [`IndicatorFeatureVector`] instances backed by
@@ -53,13 +53,13 @@ where
     }
 
     /// Configure a sample-period SMA indicator.
-    pub fn sma_periods(self, ticker: Symbol) -> SmaPeriodsBuilder<F, V, M, false> {
-        SmaPeriodsBuilder::new(self, ticker)
+    pub fn sma_periods(self, symbol: Symbol) -> SmaPeriodsBuilder<F, V, M, false> {
+        SmaPeriodsBuilder::new(self, symbol)
     }
 
     /// Configure a sample-period EMA indicator.
-    pub fn ema_periods(self, ticker: Symbol) -> EmaPeriodsBuilder<F, V, M, false> {
-        EmaPeriodsBuilder::new(self, ticker)
+    pub fn ema_periods(self, symbol: Symbol) -> EmaPeriodsBuilder<F, V, M, false> {
+        EmaPeriodsBuilder::new(self, symbol)
     }
 
     /// Configure a time-bucketed SMA indicator.
@@ -68,17 +68,17 @@ where
     /// milliseconds, matching the indicator's `Duration::as_millis()` windows.
     pub fn sma_timed(
         self,
-        ticker: Symbol,
+        symbol: Symbol,
         aggregation: Duration,
     ) -> SmaTimedPeriodsBuilder<F, V, M, false> {
-        SmaTimedPeriodsBuilder::new(self, ticker, aggregation)
+        SmaTimedPeriodsBuilder::new(self, symbol, aggregation)
     }
 
     /// Add a day-of-week output cell.
-    pub fn day_of_week(mut self, ticker: Symbol) -> Result<Self> {
+    pub fn day_of_week(mut self, symbol: Symbol) -> Result<Self> {
         let output_index = self.reserve_outputs(1)?;
         self.push_entry(PendingFeature::DayOfWeek {
-            ticker,
+            symbol,
             output_index,
         });
         Ok(self)
@@ -101,9 +101,9 @@ where
                     sma_indicator::build_sma_timed_periods_entry(config, &mut names)?
                 }
                 PendingFeature::DayOfWeek {
-                    ticker,
+                    symbol,
                     output_index,
-                } => day_of_week::build_entry(*ticker, *output_index, &mut names),
+                } => day_of_week::build_entry(*symbol, *output_index, &mut names),
             };
             entries[entry_index].write(entry);
         }

@@ -127,7 +127,7 @@ mod tests {
 
         fn dispatch(&mut self, _event: &Event<Self::F>) {}
 
-        fn index_of(&self, _ticker: Symbol, _name: &str) -> Option<usize> {
+        fn index_of(&self, _symbol: Symbol, _name: &str) -> Option<usize> {
             None
         }
     }
