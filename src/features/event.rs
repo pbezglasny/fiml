@@ -3,7 +3,7 @@ use crate::Symbol;
 
 /// Number of [`EventKind`] variants. Used to size the per-kind feature groups in
 /// [`IndicatorFeatureVector`](crate::features::IndicatorFeatureVector).
-pub const EVENT_KIND_COUNT: usize = 4;
+pub const EVENT_KIND_COUNT: usize = 5;
 
 /// Kind tag of an [`Event`], used to route an event to the features that
 /// subscribe to it. Discriminants must stay `0..EVENT_KIND_COUNT` and match the
@@ -12,6 +12,7 @@ pub const EVENT_KIND_COUNT: usize = 4;
 pub enum EventKind {
     Price,
     Volume,
+    Trade,
     OrderBook,
     Time,
 }
@@ -27,6 +28,14 @@ pub struct PriceUpdate<F: Float> {
 pub struct VolumeUpdate<F: Float> {
     pub ticker: Symbol,
     pub value: F,
+    pub timestamp: i64,
+}
+
+/// A trade tick carrying price and volume.
+pub struct TradeUpdate<F: Float> {
+    pub ticker: Symbol,
+    pub price: F,
+    pub volume: F,
     pub timestamp: i64,
 }
 
@@ -50,6 +59,7 @@ pub struct TimeUpdate {
 pub enum Event<F: Float> {
     Price(PriceUpdate<F>),
     Volume(VolumeUpdate<F>),
+    Trade(TradeUpdate<F>),
     OrderBook(OrderBookUpdate<F>),
     Time(TimeUpdate),
 }
@@ -60,6 +70,7 @@ impl<F: Float> Event<F> {
         match self {
             Event::Price(_) => EventKind::Price,
             Event::Volume(_) => EventKind::Volume,
+            Event::Trade(_) => EventKind::Trade,
             Event::OrderBook(_) => EventKind::OrderBook,
             Event::Time(_) => EventKind::Time,
         }
@@ -77,6 +88,15 @@ impl<F: Float> Event<F> {
         Event::Volume(VolumeUpdate {
             ticker,
             value,
+            timestamp,
+        })
+    }
+
+    pub fn trade(ticker: Symbol, price: F, volume: F, timestamp: i64) -> Self {
+        Event::Trade(TradeUpdate {
+            ticker,
+            price,
+            volume,
             timestamp,
         })
     }
@@ -103,6 +123,7 @@ pub(crate) fn market_value_for_kind<F: Float>(
     match (event_kind, event) {
         (EventKind::Price, Event::Price(p)) if p.ticker == ticker => Some(p.value),
         (EventKind::Volume, Event::Volume(v)) if v.ticker == ticker => Some(v.value),
+        (EventKind::Trade, Event::Trade(t)) if t.ticker == ticker => Some(t.price),
         _ => None,
     }
 }
@@ -118,5 +139,21 @@ mod tests {
         let event = Event::volume(aapl, 42.0, 123);
 
         assert_eq!(event.kind(), EventKind::Volume);
+    }
+
+    #[test]
+    fn trade_event_has_trade_kind_and_payload() {
+        let aapl = ticker::intern("AAPL");
+        let event = Event::trade(aapl, 42.0, 100.0, 123);
+
+        assert_eq!(event.kind(), EventKind::Trade);
+        if let Event::Trade(trade) = event {
+            assert_eq!(trade.ticker, aapl);
+            assert_eq!(trade.price, 42.0);
+            assert_eq!(trade.volume, 100.0);
+            assert_eq!(trade.timestamp, 123);
+        } else {
+            unreachable!("trade constructor should return Event::Trade");
+        }
     }
 }

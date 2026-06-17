@@ -264,6 +264,34 @@ mod tests {
     }
 
     #[test]
+    fn sma_periods_can_subscribe_to_trade_events() -> Result<()> {
+        let aapl = ticker::intern("AAPL");
+        let mut fv =
+            IndicatorFeatureVectorBuilder::<f64, _, 2>::new(ArrayFeatureVector::<f64, 2>::new())
+                .sma_periods(aapl)
+                .window(3)?
+                .done()?
+                .sma_periods(aapl)
+                .event_kind(EventKind::Trade)?
+                .window(3)?
+                .done()?
+                .build()?;
+
+        for v in [3.0, 6.0, 9.0] {
+            fv.dispatch(&Event::price(aapl, v, 0));
+        }
+        for price in [100.0, 200.0, 300.0] {
+            fv.dispatch(&Event::trade(aapl, price, 10.0, 0));
+        }
+
+        assert!(approx_eq(fv.feature_vector().values()[0], 6.0));
+        assert!(approx_eq(fv.feature_vector().values()[1], 200.0));
+        assert_eq!(fv.index_of(aapl, "sma_periods_3"), Some(0));
+        assert_eq!(fv.index_of(aapl, "trade_sma_periods_3"), Some(1));
+        Ok(())
+    }
+
+    #[test]
     fn rejects_unsupported_sma_event_kind() {
         let aapl = ticker::intern("AAPL");
         let built =
@@ -324,6 +352,34 @@ mod tests {
         assert!(approx_eq(fv.feature_vector().values()[1], 225.0));
         assert_eq!(fv.index_of(aapl, "ema_periods_3"), Some(0));
         assert_eq!(fv.index_of(aapl, "volume_ema_periods_3"), Some(1));
+        Ok(())
+    }
+
+    #[test]
+    fn ema_periods_can_subscribe_to_trade_events() -> Result<()> {
+        let aapl = ticker::intern("AAPL");
+        let mut fv =
+            IndicatorFeatureVectorBuilder::<f64, _, 2>::new(ArrayFeatureVector::<f64, 2>::new())
+                .ema_periods(aapl)
+                .window(3)?
+                .done()?
+                .ema_periods(aapl)
+                .event_kind(EventKind::Trade)?
+                .window(3)?
+                .done()?
+                .build()?;
+
+        for v in [10.0, 20.0, 30.0] {
+            fv.dispatch(&Event::price(aapl, v, 0));
+        }
+        for price in [100.0, 200.0, 300.0] {
+            fv.dispatch(&Event::trade(aapl, price, 10.0, 0));
+        }
+
+        assert!(approx_eq(fv.feature_vector().values()[0], 22.5));
+        assert!(approx_eq(fv.feature_vector().values()[1], 225.0));
+        assert_eq!(fv.index_of(aapl, "ema_periods_3"), Some(0));
+        assert_eq!(fv.index_of(aapl, "trade_ema_periods_3"), Some(1));
         Ok(())
     }
 
@@ -477,7 +533,7 @@ mod tests {
 
     #[test]
     fn root_reexports_are_usable() -> crate::Result<()> {
-        use crate::{IndicatorFeatureVector, IndicatorFeatureVectorBuilder};
+        use crate::{IndicatorFeatureVector, IndicatorFeatureVectorBuilder, TradeUpdate};
 
         let aapl = ticker::intern("AAPL");
         let fv: IndicatorFeatureVector<_, _, BuiltinFeature<f64>, 1> =
@@ -490,6 +546,7 @@ mod tests {
         assert_eq!(fv.index_of(aapl, "sma_periods_2"), Some(0));
 
         let _: Option<SmaPeriodsBuilder<f64, ArrayFeatureVector<f64, 1>, 1, false>> = None;
+        let _: Option<TradeUpdate<f64>> = None;
         Ok(())
     }
 }

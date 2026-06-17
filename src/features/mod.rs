@@ -12,7 +12,8 @@ pub use builtin::{
     SmaTimedPeriodsBuilder,
 };
 pub use event::{
-    EVENT_KIND_COUNT, Event, EventKind, OrderBookUpdate, PriceUpdate, TimeUpdate, VolumeUpdate,
+    EVENT_KIND_COUNT, Event, EventKind, OrderBookUpdate, PriceUpdate, TimeUpdate, TradeUpdate,
+    VolumeUpdate,
 };
 pub use indicator_vector::{Feature, IndicatorFeatureVector, IndicatorFeatures};
 pub use pipeline::Pipeline;
