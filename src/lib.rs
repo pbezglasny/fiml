@@ -11,7 +11,9 @@ pub use features::{
     Event, EventKind, Feature, IndicatorFeatureVector, IndicatorFeatures, OrderBookUpdate,
     PriceUpdate, TimeUpdate, TradeUpdate, VolumeUpdate,
 };
-pub use indicators::IndicatorFeatureVectorBuilder;
+pub use indicators::{
+    IndicatorFeatureVectorBuilder, ObvBucket, ObvTimedPeriodsBuilder, OnBalanceVolumeTimed,
+};
 pub use ring_buffer::{
     HeapRingBuffer, RingBuffer, StackRingBuffer, new_heap_ring_buffer, new_stack_ring_buffer,
 };

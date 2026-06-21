@@ -8,8 +8,8 @@ pub mod transformers;
 pub use crate::indicators::IndicatorFeatureVectorBuilder;
 pub use builtin::BuiltinFeature;
 pub use builtin::{
-    DayOfWeek, EmaPeriodsBuilder, MAX_WINDOWS_PER_EMA, MAX_WINDOWS_PER_SMA, SmaPeriodsBuilder,
-    SmaTimedPeriodsBuilder,
+    DayOfWeek, EmaPeriodsBuilder, MAX_WINDOWS_PER_EMA, MAX_WINDOWS_PER_OBV, MAX_WINDOWS_PER_SMA,
+    ObvTimedPeriodsBuilder, SmaPeriodsBuilder, SmaTimedPeriodsBuilder,
 };
 pub use event::{
     EVENT_KIND_COUNT, Event, EventKind, OrderBookUpdate, PriceUpdate, TimeUpdate, TradeUpdate,

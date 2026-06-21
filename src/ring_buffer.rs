@@ -37,7 +37,8 @@ pub trait RingBuffer {
     /// index
     fn peek_back_at(&self, index: usize) -> Option<&Self::Item>;
 
-    fn peek_at(&self, index: usize) -> Option<&Self::Item>;
+    /// Return a reference to the item at the given index from the front of the buffer without
+    fn peek_front_at(&self, index: usize) -> Option<&Self::Item>;
 }
 
 pub const fn new_stack_ring_buffer<const N: usize, T>() -> StackRingBuffer<N, T> {
@@ -140,7 +141,7 @@ impl<const N: usize, T> RingBuffer for StackRingBuffer<N, T> {
         }
     }
 
-    fn peek_at(&self, index: usize) -> Option<&T> {
+    fn peek_front_at(&self, index: usize) -> Option<&T> {
         if index >= self.len() {
             None
         } else {
@@ -227,7 +228,7 @@ impl<T> RingBuffer for HeapRingBuffer<T> {
         }
     }
 
-    fn peek_at(&self, index: usize) -> Option<&T> {
+    fn peek_front_at(&self, index: usize) -> Option<&T> {
         self.data.get(index)
     }
 }

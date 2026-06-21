@@ -1,6 +1,6 @@
 /// Generic trait for floating-point types (f32, f64).
 /// Implementations of this trait supposed to inline the operations for better performance.
-pub trait Float: Copy {
+pub trait Float: Copy + PartialOrd {
     const ZERO: Self;
     const ONE: Self;
 
@@ -9,6 +9,7 @@ pub trait Float: Copy {
     fn sub(self, other: Self) -> Self;
     fn mul(self, other: Self) -> Self;
     fn div(self, other: Self) -> Self;
+    fn abs(self) -> Self;
 }
 
 macro_rules! impl_float {
@@ -35,6 +36,10 @@ macro_rules! impl_float {
             #[inline]
             fn div(self, other: Self) -> Self {
                 self / other
+            }
+            #[inline]
+            fn abs(self) -> Self {
+                Self::abs(self)
             }
         }
     };
@@ -71,6 +76,10 @@ mod decimal_impl {
         #[inline]
         fn div(self, other: Self) -> Self {
             self / other
+        }
+        #[inline]
+        fn abs(self) -> Self {
+            Self::abs(&self)
         }
     }
 }

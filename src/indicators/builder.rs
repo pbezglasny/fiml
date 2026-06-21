@@ -3,12 +3,15 @@ use std::mem::MaybeUninit;
 use std::time::Duration;
 
 use crate::features::builtin::BuiltinFeature;
-use crate::features::builtin::{day_of_week, ema as ema_indicator, sma as sma_indicator};
+use crate::features::builtin::{
+    day_of_week, ema as ema_indicator, obv as obv_indicator, sma as sma_indicator,
+};
 use crate::features::indicator_vector::IndicatorFeatureVector;
 use crate::indicators::averages::{
     EmaPeriodsBuilder, PendingEmaPeriods, PendingSmaPeriods, PendingSmaTimedPeriods,
     SmaPeriodsBuilder, SmaTimedPeriodsBuilder,
 };
+use crate::indicators::volume::{ObvTimedPeriodsBuilder, PendingObvTimedPeriods};
 use crate::vectors::FeatureVector;
 use crate::{FimlError, Float, Result, Symbol};
 
@@ -16,6 +19,7 @@ pub(crate) enum PendingFeature {
     SmaPeriods(PendingSmaPeriods),
     EmaPeriods(PendingEmaPeriods),
     SmaTimedPeriods(PendingSmaTimedPeriods),
+    ObvTimedPeriods(PendingObvTimedPeriods),
     DayOfWeek { symbol: Symbol, output_index: usize },
 }
 
@@ -74,6 +78,18 @@ where
         SmaTimedPeriodsBuilder::new(self, symbol, aggregation)
     }
 
+    /// Configure a time-bucketed OBV indicator.
+    ///
+    /// Trade event timestamps are passed directly to the timed OBV and must be
+    /// milliseconds, matching the indicator's `Duration::as_millis()` windows.
+    pub fn obv_timed(
+        self,
+        symbol: Symbol,
+        aggregation: Duration,
+    ) -> ObvTimedPeriodsBuilder<F, V, M, false> {
+        ObvTimedPeriodsBuilder::new(self, symbol, aggregation)
+    }
+
     /// Add a day-of-week output cell.
     pub fn day_of_week(mut self, symbol: Symbol) -> Result<Self> {
         let output_index = self.reserve_outputs(1)?;
@@ -99,6 +115,9 @@ where
                 }
                 PendingFeature::SmaTimedPeriods(config) => {
                     sma_indicator::build_sma_timed_periods_entry(config, &mut names)?
+                }
+                PendingFeature::ObvTimedPeriods(config) => {
+                    obv_indicator::build_obv_timed_periods_entry(config, &mut names)?
                 }
                 PendingFeature::DayOfWeek {
                     symbol,
@@ -188,7 +207,9 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::features::{IndicatorFeatures, MAX_WINDOWS_PER_SMA, SmaPeriodsBuilder};
+    use crate::features::{
+        IndicatorFeatures, MAX_WINDOWS_PER_SMA, ObvTimedPeriodsBuilder, SmaPeriodsBuilder,
+    };
     use crate::{ArrayFeatureVector, Event, EventKind, symbols};
 
     fn approx_eq(a: f64, b: f64) -> bool {
@@ -423,12 +444,64 @@ mod tests {
     }
 
     #[test]
+    fn one_obv_timed_feature_writes_multiple_period_windows() -> Result<()> {
+        let aapl = symbols::intern("AAPL");
+        let googl = symbols::intern("GOOGL");
+        let mut fv =
+            IndicatorFeatureVectorBuilder::<f64, _, 1>::new(ArrayFeatureVector::<f64, 2>::new())
+                .obv_timed(aapl, Duration::from_millis(1_000))
+                .window(2)?
+                .window(3)?
+                .done()?
+                .build()?;
+
+        for (price, volume, timestamp) in [
+            (100.0, 10.0, 0),
+            (101.0, 7.0, 1_000),
+            (102.0, 5.0, 2_000),
+            (99.0, 2.0, 3_000),
+        ] {
+            fv.dispatch(&Event::trade(aapl, price, volume, timestamp));
+        }
+        fv.dispatch(&Event::trade(googl, 120.0, 100.0, 3_000));
+        fv.dispatch(&Event::price(aapl, 120.0, 4_000));
+
+        assert!(approx_eq(fv.feature_vector().values()[0], 3.0));
+        assert!(approx_eq(fv.feature_vector().values()[1], 10.0));
+        assert_eq!(fv.index_of(aapl, "obv_timed_periods_2"), Some(0));
+        assert_eq!(fv.index_of(aapl, "obv_timed_periods_3"), Some(1));
+        Ok(())
+    }
+
+    #[test]
     fn rejects_zero_sma_timed_period() {
         let aapl = symbols::intern("AAPL");
         let built =
             IndicatorFeatureVectorBuilder::<f64, _, 1>::new(ArrayFeatureVector::<f64, 1>::new())
                 .sma_timed(aapl, Duration::from_millis(1_000))
                 .window(0);
+
+        assert!(built.is_err());
+    }
+
+    #[test]
+    fn rejects_zero_obv_timed_period() {
+        let aapl = symbols::intern("AAPL");
+        let built =
+            IndicatorFeatureVectorBuilder::<f64, _, 1>::new(ArrayFeatureVector::<f64, 1>::new())
+                .obv_timed(aapl, Duration::from_millis(1_000))
+                .window(0);
+
+        assert!(built.is_err());
+    }
+
+    #[test]
+    fn rejects_zero_obv_timed_aggregation() {
+        let aapl = symbols::intern("AAPL");
+        let built =
+            IndicatorFeatureVectorBuilder::<f64, _, 1>::new(ArrayFeatureVector::<f64, 1>::new())
+                .obv_timed(aapl, Duration::ZERO)
+                .window(1);
 
         assert!(built.is_err());
     }
@@ -546,6 +619,7 @@ mod tests {
         assert_eq!(fv.index_of(aapl, "sma_periods_2"), Some(0));
 
         let _: Option<SmaPeriodsBuilder<f64, ArrayFeatureVector<f64, 1>, 1, false>> = None;
+        let _: Option<ObvTimedPeriodsBuilder<f64, ArrayFeatureVector<f64, 1>, 1, false>> = None;
         let _: Option<TradeUpdate<f64>> = None;
         Ok(())
     }
