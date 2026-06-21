@@ -26,6 +26,12 @@ pub enum BuiltinSpec {
         aggregation: Duration,
         window: Duration,
     },
+    /// Time-bucketed on-balance volume over `window`, using `aggregation` as
+    /// the bucket size. Trade event timestamps must be milliseconds.
+    ObvTimed {
+        aggregation: Duration,
+        window: Duration,
+    },
     /// Day-of-week non-price feature.
     DayOfWeek,
 }
@@ -38,6 +44,7 @@ impl BuiltinSpec {
             BuiltinSpec::Sma { .. } => EventKind::Price,
             BuiltinSpec::Ema { .. } => EventKind::Price,
             BuiltinSpec::SmaTimed { .. } => EventKind::Price,
+            BuiltinSpec::ObvTimed { .. } => EventKind::Trade,
             BuiltinSpec::DayOfWeek => EventKind::Time,
         }
     }

@@ -2,7 +2,7 @@ use std::marker::PhantomData;
 use std::mem::MaybeUninit;
 
 use crate::features::builtin::BuiltinFeature;
-use crate::features::builtin::{day_of_week, ema, sma};
+use crate::features::builtin::{day_of_week, ema, obv, sma};
 use crate::features::event::{EVENT_KIND_COUNT, Event, EventKind};
 use crate::features::spec::BuiltinSpec;
 use crate::symbols::resolve;
@@ -244,6 +244,12 @@ fn validate_builtin_specs(specs: &[(&str, Symbol, BuiltinSpec)]) -> Result<()> {
             } => {
                 sma::validate_timed_durations(*aggregation, *window)?;
             }
+            BuiltinSpec::ObvTimed {
+                aggregation,
+                window,
+            } => {
+                obv::validate_timed_durations(*aggregation, *window)?;
+            }
             _ => {}
         }
 
@@ -273,6 +279,10 @@ fn build_builtin<F: Float>(
             aggregation,
             window,
         } => sma::build_timed_builtin(symbol, *aggregation, *window, output_index),
+        BuiltinSpec::ObvTimed {
+            aggregation,
+            window,
+        } => obv::build_timed_builtin(symbol, *aggregation, *window, output_index),
         BuiltinSpec::DayOfWeek => Ok(BuiltinFeature::DayOfWeek(day_of_week::DayOfWeek::new(
             output_index,
         ))),
@@ -315,6 +325,13 @@ mod tests {
 
     fn sma_timed(aggregation_millis: u64, window_millis: u64) -> BuiltinSpec {
         BuiltinSpec::SmaTimed {
+            aggregation: std::time::Duration::from_millis(aggregation_millis),
+            window: std::time::Duration::from_millis(window_millis),
+        }
+    }
+
+    fn obv_timed(aggregation_millis: u64, window_millis: u64) -> BuiltinSpec {
+        BuiltinSpec::ObvTimed {
             aggregation: std::time::Duration::from_millis(aggregation_millis),
             window: std::time::Duration::from_millis(window_millis),
         }
@@ -370,6 +387,26 @@ mod tests {
 
         assert!(approx_eq(fv.feature_vector().values()[0], 42.5));
         assert_eq!(fv.index_of(aapl, "sma_timed_2_sec"), Some(0));
+    }
+
+    #[test]
+    fn values_match_timed_obv_window_sum() {
+        let aapl = symbols::intern("AAPL");
+        let specs = [("obv_timed_2_sec", aapl, obv_timed(1_000, 2_000))];
+        let mut fv: Fv<1, 1> =
+            IndicatorFeatureVector::from_builtin_specs(ArrayFeatureVector::new(), &specs).unwrap();
+
+        for (price, volume, timestamp) in [
+            (100.0, 10.0, 0),
+            (101.0, 7.0, 1_000),
+            (102.0, 5.0, 2_000),
+            (99.0, 2.0, 3_000),
+        ] {
+            fv.dispatch(&Event::trade(aapl, price, volume, timestamp));
+        }
+
+        assert!(approx_eq(fv.feature_vector().values()[0], 3.0));
+        assert_eq!(fv.index_of(aapl, "obv_timed_2_sec"), Some(0));
     }
 
     #[test]

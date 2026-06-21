@@ -5,11 +5,15 @@ use crate::vectors::FeatureVector;
 
 pub(crate) mod day_of_week;
 pub(crate) mod ema;
+pub(crate) mod obv;
 pub(crate) mod sma;
 
-pub use crate::indicators::{EmaPeriodsBuilder, SmaPeriodsBuilder, SmaTimedPeriodsBuilder};
+pub use crate::indicators::{
+    EmaPeriodsBuilder, ObvTimedPeriodsBuilder, SmaPeriodsBuilder, SmaTimedPeriodsBuilder,
+};
 pub use day_of_week::DayOfWeek;
 pub use ema::{EmaFeature, MAX_WINDOWS_PER_EMA};
+pub use obv::{MAX_WINDOWS_PER_OBV, ObvTimedFeature};
 pub use sma::{MAX_WINDOWS_PER_SMA, SmaFeature, SmaTimedFeature};
 
 /// Closed enum of features shipped by the library.
@@ -21,6 +25,7 @@ pub enum BuiltinFeature<F: Float> {
     Sma(SmaFeature<F>),
     Ema(EmaFeature<F>),
     SmaTimed(SmaTimedFeature<F>),
+    ObvTimed(ObvTimedFeature<F>),
     DayOfWeek(DayOfWeek),
 }
 
@@ -30,6 +35,7 @@ impl<F: Float> Feature<F> for BuiltinFeature<F> {
             BuiltinFeature::Sma(sma) => sma.update(event, output),
             BuiltinFeature::Ema(ema) => ema.update(event, output),
             BuiltinFeature::SmaTimed(sma) => sma.update(event, output),
+            BuiltinFeature::ObvTimed(obv) => obv.update(event, output),
             BuiltinFeature::DayOfWeek(day_of_week) => day_of_week.update_event(event, output),
         }
     }

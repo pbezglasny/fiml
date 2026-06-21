@@ -323,7 +323,7 @@ where
     fn expire_old_buckets(data: &R, window: &mut SmaWindowTimed<T>, now: i64) {
         while window.bucket_count > 0 {
             let index = data.len() - window.bucket_count;
-            let (date, value) = data.peek_at(index).unwrap();
+            let (date, value) = data.peek_front_at(index).unwrap();
             if *date + window.duration > now {
                 break;
             }
