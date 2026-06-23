@@ -1,0 +1,22 @@
+[build-system]
+requires = ["maturin>=1.5,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "fiml"
+description = "Python bindings for the fiml indicator engine (runs the exact Rust feature extractor)."
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = ["numpy>=1.21"]
+classifiers = [
+    "Programming Language :: Rust",
+    "Programming Language :: Python :: Implementation :: CPython",
+]
+dynamic = ["version"]
+
+[tool.maturin]
+# Mixed layout: the compiled module is `fiml._fiml`, re-exported by the pure
+# Python package in `python/fiml/__init__.py`.
+python-source = "python"
+module-name = "fiml._fiml"
+features = ["pyo3/extension-module"]

@@ -6,3 +6,12 @@ Cargo.lock
 #Coding agents
 .claude/settings.local.json
 .claude/worktrees/
+
+
+#python
+__pycache__/
+*.py[codz]
+*$py.class
+# compiled extension built by `maturin develop` into the package source tree
+*.so
+

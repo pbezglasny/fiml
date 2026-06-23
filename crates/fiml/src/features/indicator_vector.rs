@@ -2,9 +2,9 @@ use std::marker::PhantomData;
 use std::mem::MaybeUninit;
 
 use crate::features::builtin::BuiltinFeature;
-use crate::features::builtin::{day_of_week, ema, obv, sma};
-use crate::features::event::{EVENT_KIND_COUNT, Event, EventKind};
-use crate::features::spec::BuiltinSpec;
+use crate::features::builtin::{day_of_week, ema, obv, session, sma, trade_count};
+use crate::features::event::{EVERY_EVENT_GROUP, Event, FEATURE_GROUP_COUNT, FeatureRoute};
+use crate::features::feature_set::IndicatorSpec;
 use crate::symbols::resolve;
 use crate::vectors::FeatureVector;
 use crate::{FimlError, Float, Result, Symbol};
@@ -60,7 +60,7 @@ pub(crate) struct FeatureKey {
 /// - `M` — capacity of the feature array.
 pub(crate) struct BuiltinFeatureEntry<F: Float> {
     pub(crate) feature: BuiltinFeature<F>,
-    pub(crate) kind: EventKind,
+    pub(crate) route: FeatureRoute,
 }
 
 pub struct IndicatorFeatureVector<F, V, I, const M: usize>
@@ -72,7 +72,7 @@ where
     feature_vector: V,
     features: [MaybeUninit<I>; M],
     feature_count: usize,
-    groups: [(usize, usize); EVENT_KIND_COUNT],
+    groups: [(usize, usize); FEATURE_GROUP_COUNT],
     names: Box<[Option<FeatureKey>]>,
     _marker: PhantomData<F>,
 }
@@ -85,6 +85,32 @@ where
 {
     pub fn feature_vector(&self) -> &V {
         &self.feature_vector
+    }
+
+    /// Feature names in output-cell order, so callers can label each column of
+    /// [`feature_vector().values()`](Self::feature_vector). Cells without a
+    /// registered feature yield an empty string.
+    pub fn feature_names(&self) -> Vec<String> {
+        self.names
+            .iter()
+            .map(|key| match key {
+                Some(key) => key.name.clone(),
+                None => String::new(),
+            })
+            .collect()
+    }
+
+    /// Run one `(start, len)` group of features against `event`, writing fresh
+    /// values into their cells.
+    fn run_group(&mut self, (start, len): (usize, usize), event: &Event<F>) {
+        // SAFETY: every slot in `features[..feature_count]` is initialized, and
+        // each group is a sub-range of that, so this slice is initialized.
+        let features = &mut self.features[start..start + len];
+        let cells = &mut self.feature_vector;
+        for slot in features {
+            let feature = unsafe { slot.assume_init_mut() };
+            feature.update(event, cells);
+        }
     }
 }
 
@@ -102,15 +128,11 @@ where
     }
 
     fn dispatch(&mut self, event: &Event<F>) {
-        let (start, len) = self.groups[event.kind() as usize];
-        // SAFETY: every slot in `features[..feature_count]` is initialized, and
-        // each group is a sub-range of that, so this slice is initialized.
-        let features = &mut self.features[start..start + len];
-        let cells = &mut self.feature_vector;
-        for slot in features {
-            let feature = unsafe { slot.assume_init_mut() };
-            feature.update(event, cells);
-        }
+        // Features subscribing to this event's kind, then the every-event group
+        // (clock features) which refresh on every dispatch. The two ranges are
+        // disjoint, so each feature runs at most once.
+        self.run_group(self.groups[event.kind() as usize], event);
+        self.run_group(self.groups[EVERY_EVENT_GROUP], event);
     }
 
     fn index_of(&self, symbol: Symbol, name: &str) -> Option<usize> {
@@ -145,7 +167,7 @@ where
     ///
     /// `cells` is the output storage; it is taken by value so the caller can
     /// size it however it likes (compile-time or runtime). `specs` pairs each
-    /// output's name and symbol with its [`BuiltinSpec`]. The `(symbol, name)`
+    /// output's name and symbol with its [`IndicatorSpec`]. The `(symbol, name)`
     /// key is recorded against the cell the feature writes to (cells are
     /// assigned in spec order), so
     /// [`index_of`] and [`values`] keep the caller's order, while the features
@@ -153,7 +175,7 @@ where
     ///
     /// [`index_of`]: Self::index_of
     /// [`values`]: Self::values
-    pub fn from_builtin_specs(cells: V, specs: &[(&str, Symbol, BuiltinSpec)]) -> Result<Self> {
+    pub fn from_builtin_specs(cells: V, specs: &[(&str, Symbol, IndicatorSpec)]) -> Result<Self> {
         let cell_count = cells.len();
         if specs.len() > M || specs.len() > cell_count {
             return Err(FimlError::InvalidArgument(format!(
@@ -169,7 +191,7 @@ where
         for (output_index, (name, symbol, spec)) in specs.iter().enumerate() {
             entries[output_index].write(BuiltinFeatureEntry {
                 feature: build_builtin(*symbol, spec, output_index)?,
-                kind: spec.event_kind(),
+                route: spec.route(),
             });
             names[output_index] = Some(FeatureKey {
                 symbol: *symbol,
@@ -194,12 +216,13 @@ where
         debug_assert!(feature_count <= M);
         debug_assert!(names.len() <= cells.len());
 
-        // Count features per kind, then turn the counts into contiguous
-        // `(start, len)` group ranges via a running offset.
-        let mut groups = [(0usize, 0usize); EVENT_KIND_COUNT];
+        // Count features per dispatch group, then turn the counts into contiguous
+        // `(start, len)` group ranges via a running offset. The last group is the
+        // every-event group (clock features), which runs on every dispatch.
+        let mut groups = [(0usize, 0usize); FEATURE_GROUP_COUNT];
         for slot in entries.iter().take(feature_count) {
             let entry = unsafe { slot.assume_init_ref() };
-            groups[entry.kind as usize].1 += 1;
+            groups[entry.route.group_index()].1 += 1;
         }
         let mut offset = 0;
         for group in groups.iter_mut() {
@@ -212,9 +235,9 @@ where
 
         for slot in entries.into_iter().take(feature_count) {
             let entry = unsafe { slot.assume_init() };
-            let kind = entry.kind as usize;
-            let pos = next[kind];
-            next[kind] += 1;
+            let group = entry.route.group_index();
+            let pos = next[group];
+            next[group] += 1;
             features[pos].write(entry.feature);
         }
 
@@ -229,26 +252,32 @@ where
     }
 }
 
-fn validate_builtin_specs(specs: &[(&str, Symbol, BuiltinSpec)]) -> Result<()> {
+fn validate_builtin_specs(specs: &[(&str, Symbol, IndicatorSpec)]) -> Result<()> {
     for (i, (name, symbol, spec)) in specs.iter().enumerate() {
         match spec {
-            BuiltinSpec::Sma { period, .. } if *period < 1 => {
+            IndicatorSpec::Sma { period, .. } if *period < 1 => {
                 return invalid_period("SMA", *symbol, name);
             }
-            BuiltinSpec::Ema { period, .. } if *period < 1 => {
+            IndicatorSpec::Ema { period, .. } if *period < 1 => {
                 return invalid_period("EMA", *symbol, name);
             }
-            BuiltinSpec::SmaTimed {
+            IndicatorSpec::SmaTimed {
                 aggregation,
                 window,
             } => {
                 sma::validate_timed_durations(*aggregation, *window)?;
             }
-            BuiltinSpec::ObvTimed {
+            IndicatorSpec::ObvTimed {
                 aggregation,
                 window,
             } => {
                 obv::validate_timed_durations(*aggregation, *window)?;
+            }
+            IndicatorSpec::TradeCountTimed {
+                aggregation,
+                window,
+            } => {
+                crate::indicators::counts::validate_durations(*aggregation, *window)?;
             }
             _ => {}
         }
@@ -269,23 +298,30 @@ fn validate_builtin_specs(specs: &[(&str, Symbol, BuiltinSpec)]) -> Result<()> {
 /// Construct a single builtin feature wired to an output cell index.
 fn build_builtin<F: Float>(
     symbol: Symbol,
-    spec: &BuiltinSpec,
+    spec: &IndicatorSpec,
     output_index: usize,
 ) -> Result<BuiltinFeature<F>> {
     match spec {
-        BuiltinSpec::Sma { period, .. } => sma::build_builtin(symbol, *period, output_index),
-        BuiltinSpec::Ema { period, .. } => ema::build_builtin(symbol, *period, output_index),
-        BuiltinSpec::SmaTimed {
+        IndicatorSpec::Sma { period, .. } => sma::build_builtin(symbol, *period, output_index),
+        IndicatorSpec::Ema { period, .. } => ema::build_builtin(symbol, *period, output_index),
+        IndicatorSpec::SmaTimed {
             aggregation,
             window,
         } => sma::build_timed_builtin(symbol, *aggregation, *window, output_index),
-        BuiltinSpec::ObvTimed {
+        IndicatorSpec::ObvTimed {
             aggregation,
             window,
         } => obv::build_timed_builtin(symbol, *aggregation, *window, output_index),
-        BuiltinSpec::DayOfWeek => Ok(BuiltinFeature::DayOfWeek(day_of_week::DayOfWeek::new(
+        IndicatorSpec::TradeCountTimed {
+            aggregation,
+            window,
+        } => trade_count::build_builtin(symbol, *aggregation, *window, output_index),
+        IndicatorSpec::DayOfWeek => Ok(BuiltinFeature::DayOfWeek(day_of_week::DayOfWeek::new(
             output_index,
         ))),
+        IndicatorSpec::TimeSinceSessionOpen { utc_offset_millis } => {
+            Ok(session::build_builtin(*utc_offset_millis, output_index))
+        }
     }
 }
 
@@ -315,23 +351,23 @@ mod tests {
         (a - b).abs() < 1e-9
     }
 
-    fn sma(period: usize) -> BuiltinSpec {
-        BuiltinSpec::Sma { period }
+    fn sma(period: usize) -> IndicatorSpec {
+        IndicatorSpec::Sma { period }
     }
 
-    fn ema(period: usize) -> BuiltinSpec {
-        BuiltinSpec::Ema { period }
+    fn ema(period: usize) -> IndicatorSpec {
+        IndicatorSpec::Ema { period }
     }
 
-    fn sma_timed(aggregation_millis: u64, window_millis: u64) -> BuiltinSpec {
-        BuiltinSpec::SmaTimed {
+    fn sma_timed(aggregation_millis: u64, window_millis: u64) -> IndicatorSpec {
+        IndicatorSpec::SmaTimed {
             aggregation: std::time::Duration::from_millis(aggregation_millis),
             window: std::time::Duration::from_millis(window_millis),
         }
     }
 
-    fn obv_timed(aggregation_millis: u64, window_millis: u64) -> BuiltinSpec {
-        BuiltinSpec::ObvTimed {
+    fn obv_timed(aggregation_millis: u64, window_millis: u64) -> IndicatorSpec {
+        IndicatorSpec::ObvTimed {
             aggregation: std::time::Duration::from_millis(aggregation_millis),
             window: std::time::Duration::from_millis(window_millis),
         }
@@ -453,33 +489,38 @@ mod tests {
     }
 
     #[test]
-    fn routes_each_event_to_its_own_group() {
+    fn clock_features_run_on_every_event_while_others_stay_routed() {
         let aapl = symbols::intern("AAPL");
         // Interleave kinds so grouping has to reorder the stored features while
-        // keeping cell order (sma_3 -> cell 0, day_of_week -> cell 1).
+        // keeping cell order (sma_3 -> cell 0, day_of_week -> cell 1). The SMA is
+        // price-routed; day_of_week is an every-event clock feature.
         let specs = [
             ("sma_3_sec", aapl, sma(3)),
-            ("day_of_week", aapl, BuiltinSpec::DayOfWeek),
+            ("day_of_week", aapl, IndicatorSpec::DayOfWeek),
         ];
         let mut fv: Fv<2, 2> =
             IndicatorFeatureVector::from_builtin_specs(ArrayFeatureVector::new(), &specs).unwrap();
 
-        // Price events touch only the SMA; the calendar cell stays zero.
+        // 2021-01-01 (Friday = 5), in epoch milliseconds.
+        let friday = 1_609_459_200_000;
+        let one_day = 86_400_000;
+
+        // Price events feed the SMA and, being every-event, refresh the clock too.
         for v in [3.0, 6.0, 9.0] {
-            fv.dispatch(&Event::price(aapl, v, 0));
+            fv.dispatch(&Event::price(aapl, v, friday));
         }
         assert!(approx_eq(fv.feature_vector().values()[0], 6.0)); // mean(3,6,9)
-        assert!(approx_eq(fv.feature_vector().values()[1], 0.0)); // untouched
+        assert!(approx_eq(fv.feature_vector().values()[1], 5.0)); // Friday from price ts
 
-        // A time event touches only the calendar feature; the SMA is unchanged.
-        fv.dispatch(&Event::time(1_609_459_200)); // 2021-01-01, a Friday
+        // A time event refreshes the clock (now Saturday = 6) but not the SMA.
+        fv.dispatch(&Event::time(friday + one_day));
         assert!(approx_eq(fv.feature_vector().values()[0], 6.0)); // unchanged
-        assert!(approx_eq(fv.feature_vector().values()[1], 5.0)); // Friday
+        assert!(approx_eq(fv.feature_vector().values()[1], 6.0)); // Saturday
 
-        // An event kind with no subscribers is a no-op.
-        fv.dispatch(&Event::order_book(aapl, 1.0, 2.0, 0));
-        assert!(approx_eq(fv.feature_vector().values()[0], 6.0));
-        assert!(approx_eq(fv.feature_vector().values()[1], 5.0));
+        // An order-book event has no kind-subscriber but still refreshes the clock.
+        fv.dispatch(&Event::order_book(aapl, 1.0, 2.0, friday + 2 * one_day));
+        assert!(approx_eq(fv.feature_vector().values()[0], 6.0)); // SMA unchanged
+        assert!(approx_eq(fv.feature_vector().values()[1], 0.0)); // Sunday = 0
     }
 
     #[test]

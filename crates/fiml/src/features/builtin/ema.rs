@@ -1,6 +1,7 @@
 use crate::features::BuiltinFeature;
 use crate::features::event::Event;
 use crate::features::event::EventKind;
+use crate::features::event::FeatureRoute;
 use crate::features::event::market_value_for_kind;
 use crate::features::indicator_vector::{BuiltinFeatureEntry, FeatureKey};
 use crate::indicators::{ExponentialMovingAverage, PendingEmaPeriods};
@@ -124,7 +125,7 @@ pub(crate) fn build_ema_periods_entry<F: Float>(
             output_indexes,
             config.window_count,
         )),
-        kind: config.event_kind,
+        route: FeatureRoute::Kind(config.event_kind),
     }
 }
 

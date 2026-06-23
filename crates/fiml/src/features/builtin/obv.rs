@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use crate::features::BuiltinFeature;
-use crate::features::event::{Event, EventKind};
+use crate::features::event::{Event, EventKind, FeatureRoute};
 use crate::features::indicator_vector::{BuiltinFeatureEntry, FeatureKey};
 use crate::indicators::{ObvBucket, OnBalanceVolumeTimed, PendingObvTimedPeriods};
 use crate::vectors::FeatureVector;
@@ -160,7 +160,7 @@ pub(crate) fn build_obv_timed_periods_entry<F: Float>(
             output_indexes,
             config.window_count,
         )),
-        kind: EventKind::Trade,
+        route: FeatureRoute::Kind(EventKind::Trade),
     })
 }
 
