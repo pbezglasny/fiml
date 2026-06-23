@@ -4,7 +4,8 @@ use std::time::Duration;
 
 use crate::features::builtin::BuiltinFeature;
 use crate::features::builtin::{
-    day_of_week, ema as ema_indicator, obv as obv_indicator, sma as sma_indicator,
+    day_of_week, ema as ema_indicator, obv as obv_indicator, session as session_indicator,
+    sma as sma_indicator, trade_count as trade_count_indicator,
 };
 use crate::features::indicator_vector::IndicatorFeatureVector;
 use crate::indicators::averages::{
@@ -20,7 +21,21 @@ pub(crate) enum PendingFeature {
     EmaPeriods(PendingEmaPeriods),
     SmaTimedPeriods(PendingSmaTimedPeriods),
     ObvTimedPeriods(PendingObvTimedPeriods),
-    DayOfWeek { symbol: Symbol, output_index: usize },
+    TradeCountTimed {
+        symbol: Symbol,
+        aggregation: Duration,
+        window: Duration,
+        output_index: usize,
+    },
+    DayOfWeek {
+        symbol: Symbol,
+        output_index: usize,
+    },
+    TimeSinceSessionOpen {
+        symbol: Symbol,
+        utc_offset_millis: i64,
+        output_index: usize,
+    },
 }
 
 /// Fixed-capacity builder for [`IndicatorFeatureVector`] instances backed by
@@ -90,11 +105,45 @@ where
         ObvTimedPeriodsBuilder::new(self, symbol, aggregation)
     }
 
+    /// Add a time-bucketed trade-count output cell over `window`, bucketed by
+    /// `aggregation`. Trade event timestamps must be milliseconds.
+    pub fn trade_count_timed(
+        mut self,
+        symbol: Symbol,
+        aggregation: Duration,
+        window: Duration,
+    ) -> Result<Self> {
+        let output_index = self.reserve_outputs(1)?;
+        self.push_entry(PendingFeature::TradeCountTimed {
+            symbol,
+            aggregation,
+            window,
+            output_index,
+        });
+        Ok(self)
+    }
+
     /// Add a day-of-week output cell.
     pub fn day_of_week(mut self, symbol: Symbol) -> Result<Self> {
         let output_index = self.reserve_outputs(1)?;
         self.push_entry(PendingFeature::DayOfWeek {
             symbol,
+            output_index,
+        });
+        Ok(self)
+    }
+
+    /// Add a "milliseconds since session open" output cell. The day boundary is
+    /// taken in a fixed UTC offset (`utc_offset_millis`, `0` = UTC).
+    pub fn time_since_session_open(
+        mut self,
+        symbol: Symbol,
+        utc_offset_millis: i64,
+    ) -> Result<Self> {
+        let output_index = self.reserve_outputs(1)?;
+        self.push_entry(PendingFeature::TimeSinceSessionOpen {
+            symbol,
+            utc_offset_millis,
             output_index,
         });
         Ok(self)
@@ -119,10 +168,32 @@ where
                 PendingFeature::ObvTimedPeriods(config) => {
                     obv_indicator::build_obv_timed_periods_entry(config, &mut names)?
                 }
+                PendingFeature::TradeCountTimed {
+                    symbol,
+                    aggregation,
+                    window,
+                    output_index,
+                } => trade_count_indicator::build_entry(
+                    *symbol,
+                    *aggregation,
+                    *window,
+                    *output_index,
+                    &mut names,
+                )?,
                 PendingFeature::DayOfWeek {
                     symbol,
                     output_index,
                 } => day_of_week::build_entry(*symbol, *output_index, &mut names),
+                PendingFeature::TimeSinceSessionOpen {
+                    symbol,
+                    utc_offset_millis,
+                    output_index,
+                } => session_indicator::build_entry(
+                    *symbol,
+                    *utc_offset_millis,
+                    *output_index,
+                    &mut names,
+                ),
             };
             entries[entry_index].write(entry);
         }
@@ -531,7 +602,9 @@ mod tests {
         for v in [3.0, 6.0, 9.0] {
             fv.dispatch(&Event::price(aapl, v, 0));
         }
-        fv.dispatch(&Event::time(1_609_459_200));
+        // day_of_week is every-event, so the last event's timestamp wins:
+        // 2021-01-01 (Friday = 5), in epoch milliseconds.
+        fv.dispatch(&Event::time(1_609_459_200_000));
 
         assert!(approx_eq(fv.feature_vector().values()[0], 6.0));
         assert!(approx_eq(fv.feature_vector().values()[1], 5.0));

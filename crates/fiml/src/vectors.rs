@@ -104,6 +104,45 @@ impl<F: Float, const N: usize> FeatureVector for ArrayFeatureVector<F, N> {
     }
 }
 
+/// Heap-backed [`FeatureVector`] whose cell count is chosen at runtime.
+///
+/// Use this when the number of features is not known at compile time (for
+/// example when an engine is built from a deserialized spec). For a
+/// compile-time fixed size prefer [`ArrayFeatureVector`], which avoids the heap
+/// allocation.
+pub struct VecFeatureVector<F: Float> {
+    data: Vec<F>,
+}
+
+impl<F: Float> VecFeatureVector<F> {
+    /// Allocate `len` cells, all initialized to zero.
+    pub fn new(len: usize) -> Self {
+        Self {
+            data: vec![F::ZERO; len],
+        }
+    }
+}
+
+impl<F: Float> FeatureVector for VecFeatureVector<F> {
+    type F = F;
+
+    fn value_at(&self, index: usize) -> Option<F> {
+        self.data.get(index).copied()
+    }
+
+    fn values(&self) -> &[F] {
+        &self.data
+    }
+
+    fn len(&self) -> usize {
+        self.data.len()
+    }
+
+    fn set_value_at(&mut self, index: usize, value: F) {
+        self.data[index] = value;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -140,6 +179,33 @@ mod tests {
         let mut values = ArrayFeatureVector::<f64, 3>::new();
 
         let result = values.try_set_values_range(2, 2, &[4.0, 5.0]);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn vec_feature_vector_starts_zeroed_with_runtime_len() {
+        let values = VecFeatureVector::<f64>::new(3);
+
+        assert_eq!(values.len(), 3);
+        assert_eq!(values.values(), &[0.0, 0.0, 0.0]);
+    }
+
+    #[test]
+    fn vec_feature_vector_writes_and_reads_by_index() {
+        let mut values = VecFeatureVector::<f64>::new(2);
+
+        values.set_value_at(1, 4.0);
+
+        assert_eq!(values.value_at(1), Some(4.0));
+        assert_eq!(values.value_at(2), None);
+    }
+
+    #[test]
+    fn vec_feature_vector_rejects_out_of_bounds_via_try() {
+        let mut values = VecFeatureVector::<f64>::new(2);
+
+        let result = values.try_set_value_at(2, 4.0);
 
         assert!(result.is_err());
     }

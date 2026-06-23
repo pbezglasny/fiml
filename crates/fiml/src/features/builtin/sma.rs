@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use crate::features::BuiltinFeature;
-use crate::features::event::{Event, EventKind, market_value_for_kind};
+use crate::features::event::{Event, EventKind, FeatureRoute, market_value_for_kind};
 use crate::features::indicator_vector::{BuiltinFeatureEntry, FeatureKey};
 use crate::indicators::{
     PendingSmaPeriods, PendingSmaTimedPeriods, SimpleMovingAverage, SimpleMovingAverageTimed,
@@ -232,7 +232,7 @@ pub(crate) fn build_sma_periods_entry<F: Float>(
             output_indexes,
             config.window_count,
         )),
-        kind: config.event_kind,
+        route: FeatureRoute::Kind(config.event_kind),
     }
 }
 
@@ -286,7 +286,7 @@ pub(crate) fn build_sma_timed_periods_entry<F: Float>(
             output_indexes,
             config.window_count,
         )),
-        kind: EventKind::Price,
+        route: FeatureRoute::Kind(EventKind::Price),
     })
 }
 

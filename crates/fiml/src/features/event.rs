@@ -5,6 +5,15 @@ use crate::Symbol;
 /// [`IndicatorFeatureVector`](crate::features::IndicatorFeatureVector).
 pub const EVENT_KIND_COUNT: usize = 5;
 
+/// Number of dispatch groups: one per [`EventKind`] plus the "every-event" group
+/// that runs on every [`dispatch`](crate::features::IndicatorFeatures::dispatch)
+/// regardless of kind.
+pub const FEATURE_GROUP_COUNT: usize = EVENT_KIND_COUNT + 1;
+
+/// Index of the "every-event" group within the dispatch group table. It sits
+/// after all the per-kind groups (`0..EVENT_KIND_COUNT`).
+pub const EVERY_EVENT_GROUP: usize = EVENT_KIND_COUNT;
+
 /// Kind tag of an [`Event`], used to route an event to the features that
 /// subscribe to it. Discriminants must stay `0..EVENT_KIND_COUNT` and match the
 /// group order in the feature vector.
@@ -15,6 +24,29 @@ pub enum EventKind {
     Trade,
     OrderBook,
     Time,
+}
+
+/// Where a feature subscribes in the dispatch table: to a single [`EventKind`],
+/// or to **every** event. Clock features (`day_of_week`,
+/// `time_since_session_open`) subscribe to every event so they refresh from each
+/// event's timestamp, guaranteeing a value on every output row of any stream.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FeatureRoute {
+    /// Runs only for events of this kind.
+    Kind(EventKind),
+    /// Runs on every dispatch, whatever the event kind.
+    Every,
+}
+
+impl FeatureRoute {
+    /// Index of the dispatch group this route maps to: the kind's discriminant
+    /// for per-kind features, or [`EVERY_EVENT_GROUP`] for every-event features.
+    pub fn group_index(self) -> usize {
+        match self {
+            FeatureRoute::Kind(kind) => kind as usize,
+            FeatureRoute::Every => EVERY_EVENT_GROUP,
+        }
+    }
 }
 
 /// A price tick.
@@ -73,6 +105,19 @@ impl<F: Float> Event<F> {
             Event::Trade(_) => EventKind::Trade,
             Event::OrderBook(_) => EventKind::OrderBook,
             Event::Time(_) => EventKind::Time,
+        }
+    }
+
+    /// Timestamp carried by this event, in epoch milliseconds. Every variant
+    /// carries one, so every-event (clock) features can derive calendar/session
+    /// values regardless of which stream the event came from.
+    pub fn timestamp(&self) -> i64 {
+        match self {
+            Event::Price(p) => p.timestamp,
+            Event::Volume(v) => v.timestamp,
+            Event::Trade(t) => t.timestamp,
+            Event::OrderBook(o) => o.timestamp,
+            Event::Time(t) => t.timestamp,
         }
     }
 
