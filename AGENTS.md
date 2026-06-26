@@ -8,6 +8,7 @@ This is a financial library for machine learning prediction. It is intended for 
 - great performance
 - human readable code
 - minimal or none third-party dependencies
+- currently library is development stage, it acceptable to make breaking changes until the first release
 
 ## Coding Style & Naming Conventions
 
