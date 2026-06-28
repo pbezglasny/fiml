@@ -86,6 +86,19 @@ where
     pub fn feature_vector(&self) -> &V {
         &self.feature_vector
     }
+
+    /// Feature names in output-cell order, so callers can label each column of
+    /// [`feature_vector().values()`](Self::feature_vector). Cells without a
+    /// registered feature yield an empty string.
+    pub fn feature_names(&self) -> Vec<String> {
+        self.names
+            .iter()
+            .map(|key| match key {
+                Some(key) => key.name.clone(),
+                None => String::new(),
+            })
+            .collect()
+    }
 }
 
 impl<F, V, I, const M: usize> IndicatorFeatures for IndicatorFeatureVector<F, V, I, M>

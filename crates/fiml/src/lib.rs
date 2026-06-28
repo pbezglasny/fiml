@@ -8,8 +8,9 @@ mod vectors;
 use std::{error::Error, fmt::Display};
 
 pub use features::{
-    Event, EventKind, Feature, IndicatorFeatureVector, IndicatorFeatures, OrderBookUpdate,
-    PriceUpdate, TimeUpdate, TradeUpdate, VolumeUpdate,
+    BuiltinSpec, DynIndicatorEngine, EngineSpec, Event, EventKind, Feature, FeatureSpec,
+    IndicatorFeatureVector, IndicatorFeatures, OrderBookUpdate, PriceUpdate, TimeUnit, TimeUpdate,
+    TradeUpdate, VolumeUpdate,
 };
 pub use indicators::{
     IndicatorFeatureVectorBuilder, ObvBucket, ObvTimedPeriodsBuilder, OnBalanceVolumeTimed,
@@ -19,7 +20,7 @@ pub use ring_buffer::{
 };
 pub use symbols::Symbol;
 pub use types::Float;
-pub use vectors::{ArrayFeatureVector, FeatureVector};
+pub use vectors::{ArrayFeatureVector, FeatureVector, VecFeatureVector};
 
 pub type Result<T> = std::result::Result<T, FimlError>;
 
