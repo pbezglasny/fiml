@@ -9,9 +9,9 @@ Cargo.lock
 
 
 #python
+.venv/
 __pycache__/
 *.py[codz]
 *$py.class
 # compiled extension built by `maturin develop` into the package source tree
 *.so
-
