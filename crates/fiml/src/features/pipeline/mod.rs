@@ -3,7 +3,7 @@ use std::mem::MaybeUninit;
 
 use crate::features::IndicatorFeatures;
 use crate::features::transformers::Transformation;
-use crate::{Event, FeatureVector, FimlError, Float};
+use crate::{Event, FeatureVector, FimlError, Float, Result};
 
 pub struct Pipeline<I, T, F, V, const TRANSFORMER_SIZE: usize>
 where
@@ -34,7 +34,7 @@ where
         }
     }
 
-    pub fn add_transformer(&mut self, transformer: T) -> Result<(), FimlError> {
+    pub fn add_transformer(&mut self, transformer: T) -> Result<()> {
         if self.num_transformers < NUM_TRANSFORMERS_SIZE {
             self.transformers[self.num_transformers].write(transformer);
             self.num_transformers += 1;
@@ -55,10 +55,10 @@ where
         }
     }
 
-    pub fn dispatch(&mut self, event: &Event<I::F>) {
-        self.indicators.dispatch(event);
+    pub fn dispatch(&mut self, event: &Event<I::F>) -> Result<()> {
+        self.indicators.dispatch(event)?;
         if self.num_transformers == 0 {
-            return;
+            return Ok(());
         }
 
         let first = unsafe { self.transformers[0].assume_init_mut() };
@@ -70,6 +70,7 @@ where
             let current_transformation = unsafe { current[0].assume_init_mut() };
             current_transformation.transform(prev_transformation.output_values());
         }
+        Ok(())
     }
 
     pub fn values(&self) -> &[F] {
@@ -125,7 +126,13 @@ mod tests {
             &self.cells
         }
 
-        fn dispatch(&mut self, _event: &Event<Self::F>) {}
+        fn dispatch(&mut self, _event: &Event<Self::F>) -> Result<()> {
+            Ok(())
+        }
+
+        fn validate_dispatch(&self, _event: &Event<Self::F>) -> Result<()> {
+            Ok(())
+        }
 
         fn index_of(&self, _symbol: Symbol, _name: &str) -> Option<usize> {
             None
@@ -177,7 +184,9 @@ mod tests {
             ))
             .unwrap();
 
-        pipeline.dispatch(&Event::price(crate::symbols::intern("TEST"), 0.0, 0));
+        pipeline
+            .dispatch(&Event::price(crate::symbols::intern("TEST"), 0.0, 0))
+            .unwrap();
 
         assert!(approx_eq(pipeline.values()[0], 1.5));
     }

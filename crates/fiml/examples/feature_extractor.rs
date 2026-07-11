@@ -26,7 +26,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("columns: {:?}", extractor.feature_names());
     for (timestamp, price) in prices.iter().enumerate() {
-        extractor.dispatch(&Event::price(btc, *price, timestamp as i64));
+        extractor.dispatch(&Event::price(btc, *price, timestamp as i64))?;
         println!("t={timestamp} price={price} -> {:?}", extractor.values());
     }
 

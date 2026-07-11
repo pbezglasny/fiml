@@ -297,8 +297,8 @@ mod tests {
                 .done()?
                 .build()?;
 
-        fv.dispatch(&Event::price(aapl, 10.0, 0));
-        fv.dispatch(&Event::price(aapl, 20.0, 0));
+        fv.dispatch(&Event::price(aapl, 10.0, 0)).unwrap();
+        fv.dispatch(&Event::price(aapl, 20.0, 0)).unwrap();
 
         assert!(approx_eq(fv.feature_vector().values()[0], 15.0));
         assert_eq!(fv.index_of(aapl, "sma_periods_2"), Some(0));
@@ -317,7 +317,7 @@ mod tests {
                 .build()?;
 
         for v in [1.0, 2.0, 3.0, 4.0, 5.0] {
-            fv.dispatch(&Event::price(aapl, v, 0));
+            fv.dispatch(&Event::price(aapl, v, 0)).unwrap();
         }
 
         assert!(approx_eq(fv.feature_vector().values()[0], 4.5));
@@ -342,10 +342,10 @@ mod tests {
                 .build()?;
 
         for v in [3.0, 6.0, 9.0] {
-            fv.dispatch(&Event::price(aapl, v, 0));
+            fv.dispatch(&Event::price(aapl, v, 0)).unwrap();
         }
         for v in [100.0, 200.0, 300.0] {
-            fv.dispatch(&Event::volume(aapl, v, 0));
+            fv.dispatch(&Event::volume(aapl, v, 0)).unwrap();
         }
 
         assert!(approx_eq(fv.feature_vector().values()[0], 6.0));
@@ -370,10 +370,10 @@ mod tests {
                 .build()?;
 
         for v in [3.0, 6.0, 9.0] {
-            fv.dispatch(&Event::price(aapl, v, 0));
+            fv.dispatch(&Event::price(aapl, v, 0)).unwrap();
         }
         for price in [100.0, 200.0, 300.0] {
-            fv.dispatch(&Event::trade(aapl, price, 10.0, 0));
+            fv.dispatch(&Event::trade(aapl, price, 10.0, 0)).unwrap();
         }
 
         assert!(approx_eq(fv.feature_vector().values()[0], 6.0));
@@ -406,7 +406,7 @@ mod tests {
                 .build()?;
 
         for v in [10.0, 20.0, 30.0] {
-            fv.dispatch(&Event::price(aapl, v, 0));
+            fv.dispatch(&Event::price(aapl, v, 0)).unwrap();
         }
 
         assert!(approx_eq(fv.feature_vector().values()[0], 22.5));
@@ -434,10 +434,10 @@ mod tests {
                 .build()?;
 
         for v in [10.0, 20.0, 30.0] {
-            fv.dispatch(&Event::price(aapl, v, 0));
+            fv.dispatch(&Event::price(aapl, v, 0)).unwrap();
         }
         for v in [100.0, 200.0, 300.0] {
-            fv.dispatch(&Event::volume(aapl, v, 0));
+            fv.dispatch(&Event::volume(aapl, v, 0)).unwrap();
         }
 
         assert!(approx_eq(fv.feature_vector().values()[0], 22.5));
@@ -462,10 +462,10 @@ mod tests {
                 .build()?;
 
         for v in [10.0, 20.0, 30.0] {
-            fv.dispatch(&Event::price(aapl, v, 0));
+            fv.dispatch(&Event::price(aapl, v, 0)).unwrap();
         }
         for price in [100.0, 200.0, 300.0] {
-            fv.dispatch(&Event::trade(aapl, price, 10.0, 0));
+            fv.dispatch(&Event::trade(aapl, price, 10.0, 0)).unwrap();
         }
 
         assert!(approx_eq(fv.feature_vector().values()[0], 22.5));
@@ -504,7 +504,7 @@ mod tests {
             (40.0, 2_500),
             (50.0, 3_000),
         ] {
-            fv.dispatch(&Event::price(aapl, value, timestamp));
+            fv.dispatch(&Event::price(aapl, value, timestamp)).unwrap();
         }
 
         assert!(approx_eq(fv.feature_vector().values()[0], 42.5));
@@ -532,10 +532,12 @@ mod tests {
             (102.0, 5.0, 2_000),
             (99.0, 2.0, 3_000),
         ] {
-            fv.dispatch(&Event::trade(aapl, price, volume, timestamp));
+            fv.dispatch(&Event::trade(aapl, price, volume, timestamp))
+                .unwrap();
         }
-        fv.dispatch(&Event::trade(googl, 120.0, 100.0, 3_000));
-        fv.dispatch(&Event::price(aapl, 120.0, 4_000));
+        fv.dispatch(&Event::trade(googl, 120.0, 100.0, 3_000))
+            .unwrap();
+        fv.dispatch(&Event::price(aapl, 120.0, 4_000)).unwrap();
 
         assert!(approx_eq(fv.feature_vector().values()[0], 3.0));
         assert!(approx_eq(fv.feature_vector().values()[1], 10.0));
@@ -600,11 +602,11 @@ mod tests {
                 .build()?;
 
         for v in [3.0, 6.0, 9.0] {
-            fv.dispatch(&Event::price(aapl, v, 0));
+            fv.dispatch(&Event::price(aapl, v, 0)).unwrap();
         }
         // day_of_week is every-event, so the last event's timestamp wins:
         // 2021-01-01 (Friday = 5), in epoch milliseconds.
-        fv.dispatch(&Event::time(1_609_459_200_000));
+        fv.dispatch(&Event::time(1_609_459_200_000)).unwrap();
 
         assert!(approx_eq(fv.feature_vector().values()[0], 6.0));
         assert!(approx_eq(fv.feature_vector().values()[1], 5.0));

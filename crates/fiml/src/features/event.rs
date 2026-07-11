@@ -1,3 +1,5 @@
+use std::fmt;
+
 use crate::Float;
 use crate::Symbol;
 
@@ -17,13 +19,26 @@ pub const EVERY_EVENT_GROUP: usize = EVENT_KIND_COUNT;
 /// Kind tag of an [`Event`], used to route an event to the features that
 /// subscribe to it. Discriminants must stay `0..EVENT_KIND_COUNT` and match the
 /// group order in the feature vector.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum EventKind {
     Price,
     Volume,
     Trade,
     OrderBook,
     Time,
+}
+
+impl fmt::Display for EventKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let name = match self {
+            Self::Price => "price",
+            Self::Volume => "volume",
+            Self::Trade => "trade",
+            Self::OrderBook => "order book",
+            Self::Time => "time",
+        };
+        f.write_str(name)
+    }
 }
 
 /// Where a feature subscribes in the dispatch table: to a single [`EventKind`],
@@ -118,6 +133,17 @@ impl<F: Float> Event<F> {
             Event::Trade(t) => t.timestamp,
             Event::OrderBook(o) => o.timestamp,
             Event::Time(t) => t.timestamp,
+        }
+    }
+
+    /// Market symbol carried by this event, or `None` for the global time stream.
+    pub fn symbol(&self) -> Option<Symbol> {
+        match self {
+            Event::Price(p) => Some(p.symbol),
+            Event::Volume(v) => Some(v.symbol),
+            Event::Trade(t) => Some(t.symbol),
+            Event::OrderBook(o) => Some(o.symbol),
+            Event::Time(_) => None,
         }
     }
 

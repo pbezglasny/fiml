@@ -54,7 +54,7 @@ async fn main() -> anyhow::Result<()> {
         match msg? {
             Message::Text(text) => match serde_json::from_str::<BinanceTrade>(&text) {
                 Ok(trade) => {
-                    indicators.dispatch(&Event::price(symbol, trade.price, trade.trade_time));
+                    indicators.dispatch(&Event::price(symbol, trade.price, trade.trade_time))?;
                     let values = indicators.feature_vector().values();
 
                     println!(

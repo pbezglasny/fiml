@@ -208,3 +208,9 @@ To guarantee identical output between Python (batch) and Rust (live):
   `equal_nan=True`).
 
 See `examples/quickstart.py`.
+
+Timestamps must be non-decreasing within each `(symbol, event kind)` market
+stream. `KIND_TIME` is one global symbol-less stream. Independent streams may
+interleave freely, and equal timestamps are processed in caller-provided arrival
+order. Both `update` and `transform` enforce this same contract as Rust;
+`transform` validates the entire batch before changing extractor state.

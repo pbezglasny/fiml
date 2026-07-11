@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::marker::PhantomData;
 use std::mem::MaybeUninit;
 
@@ -29,7 +30,10 @@ pub trait IndicatorFeatures {
 
     /// Route an event to the features subscribing to its kind, writing fresh
     /// values into their cells. Features of other kinds are not touched.
-    fn dispatch(&mut self, event: &Event<Self::F>);
+    fn dispatch(&mut self, event: &Event<Self::F>) -> Result<()>;
+
+    /// Check whether an event may be dispatched without changing state.
+    fn validate_dispatch(&self, event: &Event<Self::F>) -> Result<()>;
 
     /// Cell index a named feature for `symbol` writes to, or `None` if no such key.
     fn index_of(&self, symbol: Symbol, name: &str) -> Option<usize>;
@@ -74,6 +78,8 @@ where
     feature_count: usize,
     groups: [(usize, usize); FEATURE_GROUP_COUNT],
     names: Box<[Option<FeatureKey>]>,
+    market_timestamps: HashMap<(Symbol, crate::features::EventKind), i64>,
+    time_timestamp: Option<i64>,
     _marker: PhantomData<F>,
 }
 
@@ -127,12 +133,38 @@ where
         &self.feature_vector
     }
 
-    fn dispatch(&mut self, event: &Event<F>) {
+    fn dispatch(&mut self, event: &Event<F>) -> Result<()> {
+        self.validate_dispatch(event)?;
+        if let Some(symbol) = event.symbol() {
+            self.market_timestamps
+                .insert((symbol, event.kind()), event.timestamp());
+        } else {
+            self.time_timestamp = Some(event.timestamp());
+        }
         // Features subscribing to this event's kind, then the every-event group
         // (clock features) which refresh on every dispatch. The two ranges are
         // disjoint, so each feature runs at most once.
         self.run_group(self.groups[event.kind() as usize], event);
         self.run_group(self.groups[EVERY_EVENT_GROUP], event);
+        Ok(())
+    }
+
+    fn validate_dispatch(&self, event: &Event<F>) -> Result<()> {
+        let previous = match event.symbol() {
+            Some(symbol) => self.market_timestamps.get(&(symbol, event.kind())).copied(),
+            None => self.time_timestamp,
+        };
+        if let Some(previous_timestamp) = previous
+            && event.timestamp() < previous_timestamp
+        {
+            return Err(FimlError::TimestampOutOfOrder {
+                symbol: event.symbol(),
+                event_kind: event.kind(),
+                timestamp: event.timestamp(),
+                previous_timestamp,
+            });
+        }
+        Ok(())
     }
 
     fn index_of(&self, symbol: Symbol, name: &str) -> Option<usize> {
@@ -247,6 +279,8 @@ where
             feature_count,
             groups,
             names,
+            market_timestamps: HashMap::new(),
+            time_timestamp: None,
             _marker: PhantomData,
         }
     }
@@ -381,7 +415,7 @@ mod tests {
             IndicatorFeatureVector::from_builtin_specs(ArrayFeatureVector::new(), &specs).unwrap();
 
         for v in [1.0, 2.0, 3.0, 4.0, 5.0] {
-            fv.dispatch(&Event::price(aapl, v, 0));
+            fv.dispatch(&Event::price(aapl, v, 0)).unwrap();
         }
 
         // sma_2: mean(4,5) = 4.5 ; sma_5: mean(1..5) = 3.0
@@ -397,7 +431,7 @@ mod tests {
             IndicatorFeatureVector::from_builtin_specs(ArrayFeatureVector::new(), &specs).unwrap();
 
         for v in [10.0, 20.0, 30.0] {
-            fv.dispatch(&Event::price(aapl, v, 0));
+            fv.dispatch(&Event::price(aapl, v, 0)).unwrap();
         }
 
         assert!(approx_eq(fv.feature_vector().values()[0], 22.5));
@@ -418,7 +452,7 @@ mod tests {
             (40.0, 2_500),
             (50.0, 3_000),
         ] {
-            fv.dispatch(&Event::price(aapl, value, timestamp));
+            fv.dispatch(&Event::price(aapl, value, timestamp)).unwrap();
         }
 
         assert!(approx_eq(fv.feature_vector().values()[0], 42.5));
@@ -438,7 +472,8 @@ mod tests {
             (102.0, 5.0, 2_000),
             (99.0, 2.0, 3_000),
         ] {
-            fv.dispatch(&Event::trade(aapl, price, volume, timestamp));
+            fv.dispatch(&Event::trade(aapl, price, volume, timestamp))
+                .unwrap();
         }
 
         assert!(approx_eq(fv.feature_vector().values()[0], 3.0));
@@ -478,10 +513,10 @@ mod tests {
             IndicatorFeatureVector::from_builtin_specs(ArrayFeatureVector::new(), &specs).unwrap();
 
         for v in [10.0, 20.0] {
-            fv.dispatch(&Event::price(aapl, v, 0));
+            fv.dispatch(&Event::price(aapl, v, 0)).unwrap();
         }
         for v in [100.0, 200.0] {
-            fv.dispatch(&Event::price(googl, v, 0));
+            fv.dispatch(&Event::price(googl, v, 0)).unwrap();
         }
 
         assert!(approx_eq(fv.feature_vector().values()[0], 15.0));
@@ -507,18 +542,19 @@ mod tests {
 
         // Price events feed the SMA and, being every-event, refresh the clock too.
         for v in [3.0, 6.0, 9.0] {
-            fv.dispatch(&Event::price(aapl, v, friday));
+            fv.dispatch(&Event::price(aapl, v, friday)).unwrap();
         }
         assert!(approx_eq(fv.feature_vector().values()[0], 6.0)); // mean(3,6,9)
         assert!(approx_eq(fv.feature_vector().values()[1], 5.0)); // Friday from price ts
 
         // A time event refreshes the clock (now Saturday = 6) but not the SMA.
-        fv.dispatch(&Event::time(friday + one_day));
+        fv.dispatch(&Event::time(friday + one_day)).unwrap();
         assert!(approx_eq(fv.feature_vector().values()[0], 6.0)); // unchanged
         assert!(approx_eq(fv.feature_vector().values()[1], 6.0)); // Saturday
 
         // An order-book event has no kind-subscriber but still refreshes the clock.
-        fv.dispatch(&Event::order_book(aapl, 1.0, 2.0, friday + 2 * one_day));
+        fv.dispatch(&Event::order_book(aapl, 1.0, 2.0, friday + 2 * one_day))
+            .unwrap();
         assert!(approx_eq(fv.feature_vector().values()[0], 6.0)); // SMA unchanged
         assert!(approx_eq(fv.feature_vector().values()[1], 0.0)); // Sunday = 0
     }
@@ -534,7 +570,7 @@ mod tests {
         // moving the aggregate cannot invalidate borrowed cell references.
         let mut moved = fv;
         for v in [10.0, 20.0] {
-            moved.dispatch(&Event::price(aapl, v, 0));
+            moved.dispatch(&Event::price(aapl, v, 0)).unwrap();
         }
         assert!(approx_eq(moved.feature_vector().values()[0], 15.0));
     }
