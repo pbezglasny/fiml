@@ -71,7 +71,7 @@ fn main() -> anyhow::Result<()> {
     println!("timestamp,price,scaled_ema_5");
     for _ in 0..20 {
         let (tick, event) = producer.next_event();
-        pipeline.dispatch(&event);
+        pipeline.dispatch(&event)?;
 
         println!(
             "{},{:.4},{:.4}",

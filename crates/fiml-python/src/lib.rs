@@ -6,6 +6,7 @@
 //! [`fiml::FeatureSet`] JSON and feed the same events in the same order to get
 //! identical output. The extractor is `f64` only.
 
+use std::collections::HashMap;
 use std::time::Duration;
 
 use fiml::{
@@ -461,8 +462,9 @@ impl FeatureExtractor {
         ask: Option<f64>,
     ) -> PyResult<()> {
         let event = self.build_event(kind, symbol, timestamp, price, volume, bid, ask)?;
-        self.inner.dispatch(&event);
-        Ok(())
+        self.inner
+            .dispatch(&event)
+            .map_err(|e| PyValueError::new_err(e.to_string()))
     }
 
     /// Replay a full event stream and return one feature row per input row.
@@ -516,35 +518,48 @@ impl FeatureExtractor {
         let bid = column("bid", &bid, n_rows)?;
         let ask = column("ask", &ask, n_rows)?;
 
-        // All-or-nothing: validate every row before dispatching any, so a bad
-        // row (unknown kind or handle, missing column) cannot leave the
-        // extractor half-stepped behind an exception.
+        // All-or-nothing: build and validate every event, including ordering
+        // against both extractor state and earlier rows in this batch, before
+        // dispatching any event or allocating the output matrix.
+        let mut events = Vec::with_capacity(n_rows);
+        let mut batch_timestamps = HashMap::new();
         for row in 0..n_rows {
-            self.build_event(
-                kind[row],
-                symbol[row],
-                timestamp[row],
-                price.map(|column| column[row]),
-                volume.map(|column| column[row]),
-                bid.map(|column| column[row]),
-                ask.map(|column| column[row]),
-            )
-            .map_err(|err| PyValueError::new_err(format!("row {row}: {}", err.value(py))))?;
+            let event = self
+                .build_event(
+                    kind[row],
+                    symbol[row],
+                    timestamp[row],
+                    price.map(|column| column[row]),
+                    volume.map(|column| column[row]),
+                    bid.map(|column| column[row]),
+                    ask.map(|column| column[row]),
+                )
+                .map_err(|err| PyValueError::new_err(format!("row {row}: {}", err.value(py))))?;
+            self.inner
+                .validate_dispatch(&event)
+                .map_err(|err| PyValueError::new_err(format!("row {row}: {err}")))?;
+            let key = (event.symbol(), event.kind());
+            if let Some(&previous_timestamp) = batch_timestamps.get(&key)
+                && event.timestamp() < previous_timestamp
+            {
+                let err = fiml::FimlError::TimestampOutOfOrder {
+                    symbol: event.symbol(),
+                    event_kind: event.kind(),
+                    timestamp: event.timestamp(),
+                    previous_timestamp,
+                };
+                return Err(PyValueError::new_err(format!("row {row}: {err}")));
+            }
+            batch_timestamps.insert(key, event.timestamp());
+            events.push(event);
         }
 
         let n_features = self.n_features;
         let mut out = vec![0.0f64; n_rows * n_features];
-        for row in 0..n_rows {
-            let event = self.build_event(
-                kind[row],
-                symbol[row],
-                timestamp[row],
-                price.map(|column| column[row]),
-                volume.map(|column| column[row]),
-                bid.map(|column| column[row]),
-                ask.map(|column| column[row]),
-            )?;
-            self.inner.dispatch(&event);
+        for (row, event) in events.iter().enumerate() {
+            self.inner
+                .dispatch(event)
+                .map_err(|err| PyValueError::new_err(format!("row {row}: {err}")))?;
             out[row * n_features..(row + 1) * n_features].copy_from_slice(self.inner.values());
         }
 

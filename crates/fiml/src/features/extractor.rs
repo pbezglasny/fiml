@@ -84,9 +84,15 @@ macro_rules! dyn_indicator_engine {
                 }
             }
 
-            fn dispatch(&mut self, event: &Event<f64>) {
+            fn dispatch(&mut self, event: &Event<f64>) -> Result<()> {
                 match self {
                     $(Self::$variant(engine) => engine.dispatch(event),)+
+                }
+            }
+
+            fn validate_dispatch(&self, event: &Event<f64>) -> Result<()> {
+                match self {
+                    $(Self::$variant(engine) => engine.validate_dispatch(event),)+
                 }
             }
 
@@ -173,7 +179,7 @@ mod tests {
         let mut engine = FeatureExtractor::from_feature_set(&spec).unwrap();
 
         for value in [1.0, 2.0, 3.0, 4.0, 5.0] {
-            engine.dispatch(&Event::price(aapl, value, 0));
+            engine.dispatch(&Event::price(aapl, value, 0)).unwrap();
         }
 
         assert_eq!(engine.feature_names(), vec!["sma_2", "sma_5"]);
@@ -192,8 +198,64 @@ mod tests {
         // Warmup: nothing dispatched yet, the cell is an honest "no value".
         assert!(engine.values()[0].is_nan());
 
-        engine.dispatch(&Event::price(aapl, 4.0, 0));
+        engine.dispatch(&Event::price(aapl, 4.0, 0)).unwrap();
         assert!(!engine.values()[0].is_nan());
+    }
+
+    #[test]
+    fn dispatch_enforces_order_per_stream_without_mutating_on_error() {
+        let spec = FeatureSet::new(vec![sma("sma_2", "AAPL", 2)]);
+        let aapl = symbols::intern("AAPL");
+        let googl = symbols::intern("GOOGL");
+        let mut engine = FeatureExtractor::from_feature_set(&spec).unwrap();
+
+        engine.dispatch(&Event::price(aapl, 10.0, 100)).unwrap();
+        let value_before_error = engine.values()[0];
+        let error = engine
+            .dispatch(&Event::price(aapl, 1_000.0, 99))
+            .unwrap_err();
+        assert_eq!(engine.values()[0].to_bits(), value_before_error.to_bits());
+        match &error {
+            FimlError::TimestampOutOfOrder {
+                symbol,
+                event_kind,
+                timestamp,
+                previous_timestamp,
+            } => {
+                assert_eq!(*symbol, Some(aapl));
+                assert_eq!(*event_kind, crate::EventKind::Price);
+                assert_eq!(*timestamp, 99);
+                assert_eq!(*previous_timestamp, 100);
+            }
+            other => panic!("unexpected error: {other}"),
+        }
+        let message = error.to_string();
+        assert!(message.contains("AAPL"));
+        assert!(message.contains("price"));
+        assert!(message.contains("99"));
+        assert!(message.contains("100"));
+
+        // Equal timestamps retain arrival order. Symbols and kinds are
+        // independent, and large forward gaps are accepted.
+        engine.dispatch(&Event::price(aapl, 20.0, 100)).unwrap();
+        assert!(approx_eq(engine.values()[0], 15.0));
+        engine.dispatch(&Event::price(googl, 1.0, 1)).unwrap();
+        engine.dispatch(&Event::trade(aapl, 1.0, 1.0, 1)).unwrap();
+        engine
+            .dispatch(&Event::price(aapl, 30.0, 1_000_000))
+            .unwrap();
+
+        engine.dispatch(&Event::time(50)).unwrap();
+        let time_error = engine.dispatch(&Event::time(49)).unwrap_err();
+        assert!(matches!(
+            time_error,
+            FimlError::TimestampOutOfOrder {
+                symbol: None,
+                event_kind: crate::EventKind::Time,
+                timestamp: 49,
+                previous_timestamp: 50,
+            }
+        ));
     }
 
     #[test]
@@ -230,8 +292,8 @@ mod tests {
         let mut from_json = FeatureExtractor::from_feature_set(&restored).unwrap();
 
         for value in [10.0, 11.0, 9.0, 12.0, 13.0] {
-            direct.dispatch(&Event::price(aapl, value, 0));
-            from_json.dispatch(&Event::price(aapl, value, 0));
+            direct.dispatch(&Event::price(aapl, value, 0)).unwrap();
+            from_json.dispatch(&Event::price(aapl, value, 0)).unwrap();
         }
 
         // Exact equality, not approximate: identical spec + identical code path.

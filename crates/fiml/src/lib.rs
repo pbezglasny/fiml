@@ -28,12 +28,37 @@ pub type Result<T> = std::result::Result<T, FimlError>;
 #[non_exhaustive]
 pub enum FimlError {
     InvalidArgument(String),
+    TimestampOutOfOrder {
+        symbol: Option<Symbol>,
+        event_kind: EventKind,
+        timestamp: i64,
+        previous_timestamp: i64,
+    },
 }
 
 impl Display for FimlError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             FimlError::InvalidArgument(msg) => write!(f, "invalid argument: {}", msg),
+            FimlError::TimestampOutOfOrder {
+                symbol,
+                event_kind,
+                timestamp,
+                previous_timestamp,
+            } => {
+                write!(f, "timestamp {timestamp} for {event_kind}")?;
+                if let Some(symbol) = symbol {
+                    write!(
+                        f,
+                        " event for symbol {}",
+                        symbols::resolve(*symbol).unwrap_or_else(|| format!("{symbol:?}"))
+                    )?;
+                }
+                write!(
+                    f,
+                    " is earlier than previous timestamp {previous_timestamp}"
+                )
+            }
         }
     }
 }
