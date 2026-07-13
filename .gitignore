@@ -15,3 +15,7 @@ __pycache__/
 *$py.class
 # compiled extension built by `maturin develop` into the package source tree
 *.so
+
+#jupyter notebooks
+.ipynb_checkpoints/
+*/.ipynb_checkpoints/*
