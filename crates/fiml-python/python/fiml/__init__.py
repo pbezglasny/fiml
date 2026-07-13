@@ -92,9 +92,40 @@ class FeatureExtractor(_FeatureExtractor):
         epoch **milliseconds**. Features are snapshotted once per input row;
         cells are NaN until their feature warms up.
 
-        Returns a pandas DataFrame aligned to ``df.index`` when ``df`` is a
-        pandas DataFrame, otherwise an ``(n_rows, n_features)`` float64 numpy
-        array. Column order is ``feature_names()``.
+        Args:
+            df: A pandas DataFrame or DataFrame-like object that supports
+                ``df[column_name]``. All referenced columns must have the same
+                number of rows.
+            source: Input row type. Must be ``"bars"`` or ``"trades"``.
+                Bar rows produce a price event followed by an optional volume
+                event; trade rows produce one trade event.
+            symbol: Name of the instrument-symbol column. Values are converted
+                to strings and interned by the extractor. Rows may contain
+                multiple symbols.
+            time: Name of the event-time column. Values must be NumPy
+                ``datetime64`` values or integer Unix timestamps in
+                milliseconds. Timestamps must be nondecreasing within each
+                symbol and event-kind stream; equal timestamps are allowed and
+                preserve input order.
+            close: Name of the numeric close-price column. Required when
+                ``source="bars"`` and ignored for trades. Values must be
+                convertible to ``float64``.
+            volume: Name of the numeric volume column. Optional for bars; when
+                provided, each bar emits a volume event after its price event.
+                Required for trades. Values must be convertible to ``float64``.
+            price: Name of the numeric trade-price column. Required when
+                ``source="trades"`` and ignored for bars. Values must be
+                convertible to ``float64``.
+
+        Returns:
+            A pandas DataFrame aligned to ``df.index`` when ``df`` is a pandas
+            DataFrame. Otherwise, returns an ``(n_rows, n_features)``
+            ``float64`` NumPy array. Columns follow ``feature_names()`` order.
+
+        Raises:
+            ValueError: If ``source`` is unsupported, a required column name is
+                omitted, a named column does not exist, or timestamps are out
+                of order.
         """
         timestamps = _timestamps_ms(df, time)
         n = timestamps.shape[0]
