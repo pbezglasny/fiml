@@ -5,6 +5,11 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "fiml",
     "jupyterlab>=4.6.1",
     "pandas>=3.0.3",
+    "pyarrow>=25.0.0",
 ]
+
+[tool.uv.sources]
+fiml = { path = "../crates/fiml-python", editable = true }
