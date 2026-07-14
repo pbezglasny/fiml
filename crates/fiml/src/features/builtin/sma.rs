@@ -154,8 +154,10 @@ pub(in crate::features) fn validate_timed_durations(
 pub(in crate::features) fn build_builtin<F: Float>(
     symbol: Symbol,
     period: usize,
+    event_kind: EventKind,
     output_index: usize,
 ) -> Result<BuiltinFeature<F>> {
+    validate_event_kind(event_kind)?;
     let mut sma =
         SimpleMovingAverage::<HeapRingBuffer<F>, F, MAX_WINDOWS_PER_SMA>::new_heap(period);
     sma.add_window(period)
@@ -164,7 +166,7 @@ pub(in crate::features) fn build_builtin<F: Float>(
     output_indexes[0] = output_index;
     Ok(BuiltinFeature::Sma(SmaFeature::new(
         symbol,
-        EventKind::Price,
+        event_kind,
         sma,
         output_indexes,
         1,

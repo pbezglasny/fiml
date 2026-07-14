@@ -20,6 +20,7 @@ pub const EVERY_EVENT_GROUP: usize = EVENT_KIND_COUNT;
 /// subscribe to it. Discriminants must stay `0..EVENT_KIND_COUNT` and match the
 /// group order in the feature vector.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum EventKind {
     Price,
     Volume,

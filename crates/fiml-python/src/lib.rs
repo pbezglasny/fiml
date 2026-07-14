@@ -4,9 +4,10 @@
 //! computed by replaying events through [`fiml::FeatureExtractor`]'s dispatch,
 //! the same code the live Rust environment uses. Build both sides from the same
 //! [`fiml::FeatureSet`] JSON and feed the same events in the same order to get
-//! identical output. The extractor is `f64` only.
+//! identical output. Indicator state is always `f64`; Python arrays can be
+//! returned as `float32` or `float64`.
 
-use std::collections::HashMap;
+use std::collections::HashSet;
 use std::time::Duration;
 
 use fiml::{
@@ -14,7 +15,7 @@ use fiml::{
     IndicatorFeatures, IndicatorSpec, Symbol, symbols,
 };
 use numpy::ndarray::Array2;
-use numpy::{IntoPyArray, PyArray1, PyArray2, PyReadonlyArray1};
+use numpy::{IntoPyArray, PyArray1, PyReadonlyArray1};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 
@@ -54,6 +55,17 @@ fn invalid_duration(field: &str, text: &str) -> PyErr {
         "invalid `{field}` duration {text:?}; use an integer with a unit: \
          \"500ms\", \"1s\", \"5m\", \"1h\""
     ))
+}
+
+fn parse_event_kind(field: &str, value: &str) -> PyResult<fiml::EventKind> {
+    match value {
+        "price" => Ok(fiml::EventKind::Price),
+        "volume" => Ok(fiml::EventKind::Volume),
+        "trade" => Ok(fiml::EventKind::Trade),
+        _ => Err(PyValueError::new_err(format!(
+            "invalid `{field}` {value:?}; expected \"price\", \"volume\", or \"trade\""
+        ))),
+    }
 }
 
 /// Parse a fixed-offset timezone into an offset from UTC in milliseconds:
@@ -147,38 +159,46 @@ impl FeatureSet {
         self.inner.features.len()
     }
 
-    /// Simple moving average of `symbol` prices over `period` events.
-    #[pyo3(signature = (symbol, period, name=None))]
+    /// Simple moving average over `period` values from `event_kind`.
+    #[pyo3(signature = (symbol, period, name=None, *, event_kind="price"))]
     fn sma<'py>(
         mut slf: PyRefMut<'py, Self>,
         symbol: &str,
         period: usize,
         name: Option<String>,
-    ) -> PyRefMut<'py, Self> {
+        event_kind: &str,
+    ) -> PyResult<PyRefMut<'py, Self>> {
         slf.push(
             name,
             format!("sma_{period}"),
             symbol,
-            IndicatorSpec::Sma { period },
+            IndicatorSpec::Sma {
+                period,
+                event_kind: parse_event_kind("event_kind", event_kind)?,
+            },
         );
-        slf
+        Ok(slf)
     }
 
-    /// Exponential moving average of `symbol` prices over `period` events.
-    #[pyo3(signature = (symbol, period, name=None))]
+    /// Exponential moving average over `period` values from `event_kind`.
+    #[pyo3(signature = (symbol, period, name=None, *, event_kind="price"))]
     fn ema<'py>(
         mut slf: PyRefMut<'py, Self>,
         symbol: &str,
         period: usize,
         name: Option<String>,
-    ) -> PyRefMut<'py, Self> {
+        event_kind: &str,
+    ) -> PyResult<PyRefMut<'py, Self>> {
         slf.push(
             name,
             format!("ema_{period}"),
             symbol,
-            IndicatorSpec::Ema { period },
+            IndicatorSpec::Ema {
+                period,
+                event_kind: parse_event_kind("event_kind", event_kind)?,
+            },
         );
-        slf
+        Ok(slf)
     }
 
     /// Time-bucketed SMA of `symbol` prices: buckets of `aggregation` over a
@@ -285,6 +305,86 @@ impl FeatureSet {
     }
 }
 
+#[derive(Clone, Copy)]
+enum OutputDtype {
+    Float32,
+    Float64,
+}
+
+impl OutputDtype {
+    fn parse(value: &str) -> PyResult<Self> {
+        match value {
+            "float32" => Ok(Self::Float32),
+            "float64" => Ok(Self::Float64),
+            _ => Err(Self::invalid()),
+        }
+    }
+
+    fn name(self) -> &'static str {
+        match self {
+            Self::Float32 => "float32",
+            Self::Float64 => "float64",
+        }
+    }
+
+    fn invalid() -> PyErr {
+        PyValueError::new_err(
+            "output_dtype must be \"float32\", \"float64\", numpy.float32, or numpy.float64",
+        )
+    }
+}
+
+enum OutputBuffer {
+    Float32(Vec<f32>),
+    Float64(Vec<f64>),
+}
+
+impl OutputBuffer {
+    fn new(dtype: OutputDtype, len: usize) -> Self {
+        match dtype {
+            OutputDtype::Float32 => Self::Float32(vec![0.0; len]),
+            OutputDtype::Float64 => Self::Float64(vec![0.0; len]),
+        }
+    }
+
+    fn write_row(&mut self, row: usize, row_width: usize, values: &[f64]) {
+        let range = row * row_width..(row + 1) * row_width;
+        match self {
+            Self::Float32(output) => {
+                for (target, &value) in output[range].iter_mut().zip(values) {
+                    *target = value as f32;
+                }
+            }
+            Self::Float64(output) => output[range].copy_from_slice(values),
+        }
+    }
+
+    fn into_pyarray(self, py: Python<'_>, n_rows: usize, n_features: usize) -> PyResult<Py<PyAny>> {
+        match self {
+            Self::Float32(output) => Array2::from_shape_vec((n_rows, n_features), output)
+                .map_err(|error| PyValueError::new_err(error.to_string()))
+                .map(|matrix| matrix.into_pyarray(py).into_any().unbind()),
+            Self::Float64(output) => Array2::from_shape_vec((n_rows, n_features), output)
+                .map_err(|error| PyValueError::new_err(error.to_string()))
+                .map(|matrix| matrix.into_pyarray(py).into_any().unbind()),
+        }
+    }
+}
+
+fn build_core(feature_set: &CoreFeatureSet) -> PyResult<CoreFeatureExtractor> {
+    let mut names = HashSet::with_capacity(feature_set.features.len());
+    for feature in &feature_set.features {
+        if !names.insert(feature.name.as_str()) {
+            return Err(PyValueError::new_err(format!(
+                "duplicate feature name {:?}",
+                feature.name
+            )));
+        }
+    }
+    CoreFeatureExtractor::from_feature_set(feature_set)
+        .map_err(|error| PyValueError::new_err(error.to_string()))
+}
+
 /// A configured, runnable feature extractor.
 #[pyclass(subclass)]
 pub struct FeatureExtractor {
@@ -293,16 +393,32 @@ pub struct FeatureExtractor {
     /// in array columns instead of strings per row.
     symbols: Vec<Symbol>,
     n_features: usize,
+    output_dtype: OutputDtype,
+    /// Timestamp of the last event accepted through any mutating Python API.
+    last_timestamp: Option<i64>,
 }
 
 impl FeatureExtractor {
-    fn from_core(inner: CoreFeatureExtractor) -> Self {
+    fn from_core(inner: CoreFeatureExtractor, output_dtype: OutputDtype) -> Self {
         let n_features = inner.feature_names().len();
         Self {
             inner,
             symbols: Vec::new(),
             n_features,
+            output_dtype,
+            last_timestamp: None,
         }
+    }
+
+    fn validate_global_timestamp(&self, timestamp: i64) -> PyResult<()> {
+        if let Some(previous) = self.last_timestamp
+            && timestamp < previous
+        {
+            return Err(PyValueError::new_err(format!(
+                "timestamp {timestamp} is before the global timestamp watermark {previous}"
+            )));
+        }
+        Ok(())
     }
 
     fn symbol_at(&self, handle: i64) -> PyResult<Symbol> {
@@ -398,21 +514,43 @@ fn column<'a>(
 impl FeatureExtractor {
     /// Build an extractor directly from a [`FeatureSet`].
     #[new]
-    fn new(feature_set: PyRef<'_, FeatureSet>) -> PyResult<Self> {
-        let inner = CoreFeatureExtractor::from_feature_set(&feature_set.inner)
-            .map_err(|e| PyValueError::new_err(e.to_string()))?;
-        Ok(Self::from_core(inner))
+    #[pyo3(signature = (feature_set, output_dtype="float64"))]
+    fn new(feature_set: PyRef<'_, FeatureSet>, output_dtype: &str) -> PyResult<Self> {
+        Ok(Self::from_core(
+            build_core(&feature_set.inner)?,
+            OutputDtype::parse(output_dtype)?,
+        ))
     }
 
     /// Build an extractor from a `FeatureSet` JSON string (the parity contract
     /// shared with the live Rust environment).
     #[staticmethod]
-    fn from_json(json: &str) -> PyResult<Self> {
+    #[pyo3(signature = (json, output_dtype="float64"))]
+    fn from_json(json: &str, output_dtype: &str) -> PyResult<Self> {
         let feature_set: CoreFeatureSet =
             serde_json::from_str(json).map_err(|e| PyValueError::new_err(e.to_string()))?;
-        let inner = CoreFeatureExtractor::from_feature_set(&feature_set)
-            .map_err(|e| PyValueError::new_err(e.to_string()))?;
-        Ok(Self::from_core(inner))
+        Ok(Self::from_core(
+            build_core(&feature_set)?,
+            OutputDtype::parse(output_dtype)?,
+        ))
+    }
+
+    /// Numeric dtype used by arrays returned to Python.
+    #[getter]
+    fn output_dtype(&self) -> &'static str {
+        self.output_dtype.name()
+    }
+
+    /// Change the output dtype before the first event is processed.
+    #[setter]
+    fn set_output_dtype(&mut self, value: &str) -> PyResult<()> {
+        if self.last_timestamp.is_some() {
+            return Err(PyValueError::new_err(
+                "output_dtype cannot be changed after the extractor has processed an event",
+            ));
+        }
+        self.output_dtype = OutputDtype::parse(value)?;
+        Ok(())
     }
 
     /// Intern `name` and return a stable integer handle to use in the `symbol`
@@ -436,10 +574,23 @@ impl FeatureExtractor {
         self.n_features
     }
 
-    /// Current feature values in output order as a `float64` array. A cell is
-    /// NaN until its feature has produced a first value (warmup).
-    fn values<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<f64>> {
-        PyArray1::from_slice(py, self.inner.values())
+    /// Current feature values in output order. A cell is NaN until its feature
+    /// has produced a first value (warmup).
+    fn values(&self, py: Python<'_>) -> Py<PyAny> {
+        match self.output_dtype {
+            OutputDtype::Float32 => {
+                let values: Vec<f32> = self
+                    .inner
+                    .values()
+                    .iter()
+                    .map(|&value| value as f32)
+                    .collect();
+                PyArray1::from_vec(py, values).into_any().unbind()
+            }
+            OutputDtype::Float64 => PyArray1::from_slice(py, self.inner.values())
+                .into_any()
+                .unbind(),
+        }
     }
 
     /// Apply a single event and update the feature vector. Useful for live
@@ -462,9 +613,15 @@ impl FeatureExtractor {
         ask: Option<f64>,
     ) -> PyResult<()> {
         let event = self.build_event(kind, symbol, timestamp, price, volume, bid, ask)?;
+        self.validate_global_timestamp(timestamp)?;
+        self.inner
+            .validate_dispatch(&event)
+            .map_err(|error| PyValueError::new_err(error.to_string()))?;
         self.inner
             .dispatch(&event)
-            .map_err(|e| PyValueError::new_err(e.to_string()))
+            .map_err(|error| PyValueError::new_err(error.to_string()))?;
+        self.last_timestamp = Some(timestamp);
+        Ok(())
     }
 
     /// Replay a full event stream and return one feature row per input row.
@@ -484,9 +641,9 @@ impl FeatureExtractor {
     /// the length of `kind`. Every row is validated **before** the first
     /// dispatch, so a bad row raises without mutating extractor state. Row `i`
     /// builds its event, dispatches it, then snapshots every feature into row
-    /// `i` of the returned `(n_rows, n_features)` `float64` matrix (cells are
-    /// NaN until their feature warms up). Looping in Rust keeps this fast while
-    /// using the exact live dispatch path.
+    /// `i` of the returned `(n_rows, n_features)` matrix in `output_dtype`
+    /// (cells are NaN until their feature warms up). Looping in Rust keeps this
+    /// fast while using the exact live dispatch path.
     #[pyo3(signature = (kind, symbol, timestamp, *, price=None, volume=None, bid=None, ask=None))]
     #[allow(clippy::too_many_arguments)] // payload columns are the Python keyword API
     fn transform<'py>(
@@ -499,7 +656,7 @@ impl FeatureExtractor {
         volume: Option<PyReadonlyArray1<'py, f64>>,
         bid: Option<PyReadonlyArray1<'py, f64>>,
         ask: Option<PyReadonlyArray1<'py, f64>>,
-    ) -> PyResult<Bound<'py, PyArray2<f64>>> {
+    ) -> PyResult<Py<PyAny>> {
         let kind = kind.as_slice()?;
         let symbol = symbol.as_slice()?;
         let timestamp = timestamp.as_slice()?;
@@ -522,7 +679,7 @@ impl FeatureExtractor {
         // against both extractor state and earlier rows in this batch, before
         // dispatching any event or allocating the output matrix.
         let mut events = Vec::with_capacity(n_rows);
-        let mut batch_timestamps = HashMap::new();
+        let mut previous_timestamp = self.last_timestamp;
         for row in 0..n_rows {
             let event = self
                 .build_event(
@@ -535,37 +692,31 @@ impl FeatureExtractor {
                     ask.map(|column| column[row]),
                 )
                 .map_err(|err| PyValueError::new_err(format!("row {row}: {}", err.value(py))))?;
+            if let Some(previous) = previous_timestamp
+                && event.timestamp() < previous
+            {
+                return Err(PyValueError::new_err(format!(
+                    "row {row}: timestamp {} is before the global timestamp watermark {previous}",
+                    event.timestamp()
+                )));
+            }
             self.inner
                 .validate_dispatch(&event)
                 .map_err(|err| PyValueError::new_err(format!("row {row}: {err}")))?;
-            let key = (event.symbol(), event.kind());
-            if let Some(&previous_timestamp) = batch_timestamps.get(&key)
-                && event.timestamp() < previous_timestamp
-            {
-                let err = fiml::FimlError::TimestampOutOfOrder {
-                    symbol: event.symbol(),
-                    event_kind: event.kind(),
-                    timestamp: event.timestamp(),
-                    previous_timestamp,
-                };
-                return Err(PyValueError::new_err(format!("row {row}: {err}")));
-            }
-            batch_timestamps.insert(key, event.timestamp());
+            previous_timestamp = Some(event.timestamp());
             events.push(event);
         }
 
         let n_features = self.n_features;
-        let mut out = vec![0.0f64; n_rows * n_features];
+        let mut output = OutputBuffer::new(self.output_dtype, n_rows * n_features);
         for (row, event) in events.iter().enumerate() {
             self.inner
                 .dispatch(event)
                 .map_err(|err| PyValueError::new_err(format!("row {row}: {err}")))?;
-            out[row * n_features..(row + 1) * n_features].copy_from_slice(self.inner.values());
+            output.write_row(row, n_features, self.inner.values());
+            self.last_timestamp = Some(event.timestamp());
         }
-
-        let matrix = Array2::from_shape_vec((n_rows, n_features), out)
-            .map_err(|e| PyValueError::new_err(e.to_string()))?;
-        Ok(matrix.into_pyarray(py))
+        output.into_pyarray(py, n_rows, n_features)
     }
 }
 

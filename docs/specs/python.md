@@ -3,6 +3,10 @@
 Status of this document: **design/usage spec**. It records how the Python
 bindings are meant to be used and the decisions taken so far. Items are tagged:
 
+The current high-level Trade DataFrame contract is recorded in
+[`python2027-07-14.md`](python2027-07-14.md). That accepted decision supersedes
+the older bars/trades `source` design previously described here.
+
 - ✅ **implemented** — exists today in `crates/fiml-python`.
 - 🔜 **proposed** — agreed in principle, not built yet.
 - ❓ **open** — still to decide (see [Open questions](#open-questions)).
@@ -42,8 +46,8 @@ Two layers feed events:
 - **Low-level event API** (✅) — the faithful contract. You pass columns of
   typed events and they are replayed in row order. Best for tick/trade data and
   for anyone who wants full control.
-- **`compute_features`** (✅) — turns a wide DataFrame (OHLCV bars or tick rows)
-  into the event stream for you, and returns **one feature row per input row**.
+- **`compute_features`** (✅) — turns a trade DataFrame into the event stream
+  for you, and returns **one feature row per input row** plus copied metadata.
   This is what most ML users will reach for.
 
 Both go through the identical dispatch path, so they preserve parity.
@@ -68,8 +72,10 @@ extractor = fiml.FeatureExtractor.from_json(json_str)   # or fiml.FeatureSet.fro
 ```json
 {
   "features": [
-    { "name": "sma_12", "symbol": "BTCUSDT", "indicator": { "Sma": { "period": 12 } } },
-    { "name": "ema_12", "symbol": "BTCUSDT", "indicator": { "Ema": { "period": 12 } } },
+    { "name": "sma_12", "symbol": "BTCUSDT",
+      "indicator": { "Sma": { "period": 12, "event_kind": "Trade" } } },
+    { "name": "ema_12", "symbol": "BTCUSDT",
+      "indicator": { "Ema": { "period": 12, "event_kind": "Trade" } } },
     { "name": "obv_2s", "symbol": "BTCUSDT",
       "indicator": { "ObvTimed": { "aggregation": { "secs": 1, "nanos": 0 },
                                    "window":      { "secs": 2, "nanos": 0 } } } }
@@ -81,8 +87,8 @@ extractor = fiml.FeatureExtractor.from_json(json_str)   # or fiml.FeatureSet.fro
 
 ```python
 fs = (fiml.FeatureSet()
-      .sma("BTCUSDT", period=12)
-      .ema("BTCUSDT", period=12)
+      .sma("BTCUSDT", period=12, event_kind="trade")
+      .ema("BTCUSDT", period=12, event_kind="trade")
       .obv_timed("BTCUSDT", aggregation="1s", window="2s")
       .day_of_week("BTCUSDT"))
 
@@ -96,6 +102,10 @@ each appends a `FeatureDef` (`name`, `symbol`, `indicator`), with an optional
 `name=` kwarg overriding the generated column name. Durations are strings
 (`"500ms"`, `"1s"`, `"5m"`, `"1h"`). Feature **order** in the builder is the
 output column order, exactly as in JSON.
+
+`sma` and `ema` accept `event_kind="price"|"volume"|"trade"`, defaulting to
+`"price"`. Trade DataFrames require `event_kind="trade"`; the route is part of
+the serialized parity contract.
 
 ## 4. Symbols
 
@@ -158,72 +168,49 @@ extractor.update(fiml.KIND_PRICE, btc, ts_ms, price=last_close)
 row = extractor.values()          # current feature vector, in feature_names() order
 ```
 
-## 6. `compute_features` — DataFrame in, feature DataFrame out ✅
+## 6. `compute_features` — Trade DataFrame in, snapshots out ✅
 
-The most common ML input is a **wide DataFrame** (OHLCV bars or tick rows), not a
-melted event stream. `compute_features` does the melt internally and snapshots
-features **once per input row**, returning a result aligned to the caller's index
-— which dissolves the alignment problem of the raw per-event matrix. It is the
-obvious entry point for batch feature generation; the low-level `transform` (§5a)
-stays for raw event arrays.
+The high-level API accepts an already-loaded pandas DataFrame with `symbol`,
+`ts`, `price`, and `volume` columns by default:
 
 ```python
-# OHLCV bars: one row per bar
-feats = extractor.compute_features(
-    df,
-    source="bars",      # row -> price(close) [+ volume(volume)]
-    symbol="symbol",    # column holding the per-row symbol (interned internally)
-    time="ts",          # ms timestamp column
-    close="close",      # drives price-based indicators
-    volume="volume",    # optional
-)
-# feats: one row per bar, aligned to df.index; columns = extractor.feature_names()
+feats = extractor.compute_features(trades)
 ```
 
+Alternate column names are mappings, not literal values:
+
 ```python
-# trade/tick rows: one row per trade
 feats = extractor.compute_features(
-    df,
-    source="trades",    # row -> a single trade(price, volume) event
-    symbol="symbol",    # column holding the per-row symbol
-    time="ts",
-    price="price",
-    volume="qty",
+    trades, symbol="ticker", time="timestamp", price="px", volume="qty"
 )
 ```
 
-`source` selects how each row maps to events — the one real difference between bar
-and trade input: `"bars"` emits `price(close)` then optional `volume(volume)`;
-`"trades"` emits one `trade(price, volume)`.
+There is no `source` switch and no bars path. Each row emits one `Trade` event.
+The result preserves the input index and contains copied symbol and timestamp
+columns followed by one complete feature-vector snapshot per trade. Multi-symbol
+frames are supported; a row snapshots the complete extractor, so cells for
+other symbols retain their latest state.
 
-Design intent:
-- Every field kwarg (`symbol`, `time`, `close`, `volume`, `price`, …) names a
-  **DataFrame column**, not a literal value. `symbol` is the column holding each
-  row's symbol; `compute_features` interns it for you (no manual
-  `extractor.symbol(...)`), so a multi-symbol frame works directly. See the
-  multi-symbol open question for snapshot semantics across symbols.
-- Internally builds the per-row events, dispatches them in row order, and takes a
-  feature snapshot after each input **row** (the decision point), so the result
-  is **row-per-input** even though the low-level API is row-per-event.
-- Output columns are named by `feature_names()`. Returns a pandas DataFrame
-  aligned to `df.index` when the input is a pandas DataFrame, otherwise a
-  float64 numpy array (decided — see open questions).
-- Intra-bar event order (decided, was open): `price(close)` then, if a volume
-  column is given, `volume(volume)`; no OHLC event in core yet.
+The caller supplies a globally timestamp-ordered frame. Equal timestamps retain
+row order. Symbols are non-empty strings, timestamps are signed-int64 epoch
+milliseconds, and price/volume are finite positive numbers. Validation is
+all-or-nothing. See the dated contract linked above for the complete rules.
 
 ## 7. Output and alignment
 
-- **Low-level `transform`** returns a `(n_events, n_features)` `float64` matrix —
+- **Low-level `transform`** returns a `(n_events, n_features)` matrix in the
+  extractor's configured output dtype —
   one row **per event**. The caller is responsible for selecting decision-point
   rows and for masking warmup. (Decision: keep the per-event matrix here.) ✅
 - **`compute_features`** returns **one row per input row**, aligned to the input
-  index, so features join cleanly to labels. ✅
+  index, with copied symbol/timestamp metadata before the features. ✅
 - Column order is the feature-set order; `extractor.feature_names()` gives the
   names, `extractor.n_features()` the count. ✅
 
 ## 8. Determinism rules (must hold for parity)
 
-1. **f64 on both sides.** The extractor is `f64`; the live Rust extractor must be too.
+1. **f64 calculation state on both sides.** Use `output_dtype="float64"` for an
+   exact Python/Rust output comparison.
 2. **Same `FeatureSet`** — same periods, durations, symbol names, feature order.
 3. **Replay the full stream in the same order with the same millisecond
    timestamps.** Do not downsample or skip rows: timed indicators (`SmaTimed`,
@@ -237,7 +224,7 @@ Design intent:
 ## 9. End-to-end workflow
 
 ```
-parquet/CSV of bars or trades
+loaded pandas Trade DataFrame
         │  (compute_features)
         ▼
 features DataFrame  ──►  train lightgbm/xgboost   ──►  model + features.json
@@ -356,30 +343,22 @@ This work is no longer binding-only. To deliver the full-dataframe guarantee:
 - `number_of_trades` is a **timed** counter (reusing aggregation+window); cumulative
   is an optional extra (not yet added).
 - Canonical timestamp unit is **epoch milliseconds** end-to-end.
-- **Intra-bar event order** (was open Q1): `price = close`; per bar emit
-  `price(close)` then, if a volume column is given, `volume(volume)`. The order
-  is part of the contract. No OHLC event in core yet (an OHLC bar event for
-  ATR/Stochastic-style indicators remains future work).
+- **High-level source**: `compute_features` accepts Trade DataFrames only. Bars
+  remain possible through the low-level event API and may receive a separately
+  designed high-level boundary later.
 - **Warmup** (was open Q2): extractor cells are initialized to **NaN** in core
   (`FeatureExtractor::from_feature_set`), so a cell reads NaN until its feature
   first writes — in both `transform`/`compute_features` output and Rust live
   serving, preserving parity. Partial *ramping* values after the first write
   (e.g. SMA before its window fills) are still emitted and documented; a
   per-feature warmup-length mask is possible future work.
-- **Helper return type** (was open Q3): `compute_features` returns a pandas
-  `DataFrame` aligned to `df.index` when the input is a pandas DataFrame,
-  otherwise a float64 numpy array. pandas stays an optional dependency.
+- **Helper return type**: `compute_features` requires and returns a pandas
+  `DataFrame`. pandas is installed with the optional `pandas` package extra.
 
 ## Open questions
 
-1. **Multi-symbol snapshot semantics.** `compute_features` reads a per-row
-   `symbol` column, so a multi-symbol frame is accepted directly. Open: when rows
-   of different symbols interleave, each output row snapshots **all** feature cells,
-   so other symbols' cells carry their last (stale) value. Is per-symbol
-   snapshotting wanted, or is one extractor **per symbol** the recommended pattern?
-   - _Recommendation:_ one extractor **per symbol** for training simplicity and clean
-     per-symbol frames; multiplexing remains available for interleaved live
-     streams.
+The former multi-symbol snapshot question is resolved: multi-symbol Trade
+DataFrames are supported and each row snapshots the complete extractor.
 
 ## Deferred (separate work)
 

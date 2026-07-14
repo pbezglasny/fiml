@@ -158,7 +158,10 @@ mod tests {
         FeatureDef {
             name: name.to_string(),
             symbol: symbol.to_string(),
-            indicator: IndicatorSpec::Sma { period },
+            indicator: IndicatorSpec::Sma {
+                period,
+                event_kind: crate::EventKind::Price,
+            },
         }
     }
 
@@ -187,6 +190,39 @@ mod tests {
         assert!(approx_eq(engine.values()[0], 4.5));
         assert!(approx_eq(engine.values()[1], 3.0));
         assert_eq!(engine.index_of(aapl, "sma_5"), Some(1));
+    }
+
+    #[test]
+    fn feature_set_moving_averages_can_subscribe_to_trades() {
+        let spec = FeatureSet::new(vec![
+            FeatureDef {
+                name: "trade_sma_2".to_string(),
+                symbol: "AAPL".to_string(),
+                indicator: IndicatorSpec::Sma {
+                    period: 2,
+                    event_kind: crate::EventKind::Trade,
+                },
+            },
+            FeatureDef {
+                name: "trade_ema_2".to_string(),
+                symbol: "AAPL".to_string(),
+                indicator: IndicatorSpec::Ema {
+                    period: 2,
+                    event_kind: crate::EventKind::Trade,
+                },
+            },
+        ]);
+        let aapl = symbols::intern("AAPL");
+        let mut engine = FeatureExtractor::from_feature_set(&spec).unwrap();
+
+        for (timestamp, price) in [1.0, 2.0, 3.0].into_iter().enumerate() {
+            engine
+                .dispatch(&Event::trade(aapl, price, 1.0, timestamp as i64))
+                .unwrap();
+        }
+
+        assert!(approx_eq(engine.values()[0], 2.5));
+        assert!(!engine.values()[1].is_nan());
     }
 
     #[test]
@@ -279,7 +315,10 @@ mod tests {
             FeatureDef {
                 name: "ema_3".to_string(),
                 symbol: "AAPL".to_string(),
-                indicator: IndicatorSpec::Ema { period: 3 },
+                indicator: IndicatorSpec::Ema {
+                    period: 3,
+                    event_kind: crate::EventKind::Price,
+                },
             },
         ]);
         let aapl = symbols::intern("AAPL");
@@ -299,5 +338,27 @@ mod tests {
         // Exact equality, not approximate: identical spec + identical code path.
         assert_eq!(direct.values(), from_json.values());
         assert_eq!(direct.feature_names(), from_json.feature_names());
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn legacy_moving_average_json_defaults_to_price_events() {
+        let json = r#"{
+            "features": [{
+                "name": "sma_2",
+                "symbol": "AAPL",
+                "indicator": {"Sma": {"period": 2}}
+            }]
+        }"#;
+
+        let restored: FeatureSet = serde_json::from_str(json).unwrap();
+
+        assert_eq!(
+            restored.features[0].indicator,
+            IndicatorSpec::Sma {
+                period: 2,
+                event_kind: crate::EventKind::Price,
+            }
+        );
     }
 }

@@ -289,11 +289,17 @@ where
 fn validate_builtin_specs(specs: &[(&str, Symbol, IndicatorSpec)]) -> Result<()> {
     for (i, (name, symbol, spec)) in specs.iter().enumerate() {
         match spec {
-            IndicatorSpec::Sma { period, .. } if *period < 1 => {
-                return invalid_period("SMA", *symbol, name);
+            IndicatorSpec::Sma { period, event_kind } => {
+                if *period < 1 {
+                    return invalid_period("SMA", *symbol, name);
+                }
+                sma::validate_event_kind(*event_kind)?;
             }
-            IndicatorSpec::Ema { period, .. } if *period < 1 => {
-                return invalid_period("EMA", *symbol, name);
+            IndicatorSpec::Ema { period, event_kind } => {
+                if *period < 1 {
+                    return invalid_period("EMA", *symbol, name);
+                }
+                ema::validate_event_kind(*event_kind)?;
             }
             IndicatorSpec::SmaTimed {
                 aggregation,
@@ -336,8 +342,12 @@ fn build_builtin<F: Float>(
     output_index: usize,
 ) -> Result<BuiltinFeature<F>> {
     match spec {
-        IndicatorSpec::Sma { period, .. } => sma::build_builtin(symbol, *period, output_index),
-        IndicatorSpec::Ema { period, .. } => ema::build_builtin(symbol, *period, output_index),
+        IndicatorSpec::Sma { period, event_kind } => {
+            sma::build_builtin(symbol, *period, *event_kind, output_index)
+        }
+        IndicatorSpec::Ema { period, event_kind } => {
+            ema::build_builtin(symbol, *period, *event_kind, output_index)
+        }
         IndicatorSpec::SmaTimed {
             aggregation,
             window,
@@ -376,7 +386,7 @@ fn feature_label(symbol: Symbol, name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{ArrayFeatureVector, symbols};
+    use crate::{ArrayFeatureVector, EventKind, symbols};
 
     type Fv<const N: usize, const M: usize> =
         IndicatorFeatureVector<f64, ArrayFeatureVector<f64, N>, BuiltinFeature<f64>, M>;
@@ -386,11 +396,17 @@ mod tests {
     }
 
     fn sma(period: usize) -> IndicatorSpec {
-        IndicatorSpec::Sma { period }
+        IndicatorSpec::Sma {
+            period,
+            event_kind: EventKind::Price,
+        }
     }
 
     fn ema(period: usize) -> IndicatorSpec {
-        IndicatorSpec::Ema { period }
+        IndicatorSpec::Ema {
+            period,
+            event_kind: EventKind::Price,
+        }
     }
 
     fn sma_timed(aggregation_millis: u64, window_millis: u64) -> IndicatorSpec {
