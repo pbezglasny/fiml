@@ -5,7 +5,7 @@ Run after ``maturin develop``:
     python examples/quickstart.py
 
 It authors a ``FeatureSet`` with the fluent builder, computes features on a
-small OHLCV frame with ``compute_features`` (the DataFrame path), verifies the
+small trade frame with ``compute_features`` (the DataFrame path), verifies the
 low-level batch ``transform`` exactly equals stepping the same events one at a
 time with ``update`` (the streaming path), and shows the keyword payload
 columns each event kind uses. Batch and streaming go through the same Rust
@@ -70,7 +70,7 @@ def main() -> None:
 
 
 def check_compute_features() -> None:
-    """The DataFrame path: one feature row per input row, aligned to the index."""
+    """The trade DataFrame path: one snapshot per row, including metadata."""
     try:
         import pandas as pd
     except ImportError:
@@ -80,20 +80,27 @@ def check_compute_features() -> None:
     df = pd.DataFrame(
         {
             "symbol": "BTCUSDT",
-            "ts": pd.to_datetime(T0 + np.arange(6) * 1_000, unit="ms"),
-            "close": [10.0, 11.0, 9.0, 12.0, 13.0, 12.5],
+            "ts": T0 + np.arange(6, dtype=np.int64) * 1_000,
+            "price": [10.0, 11.0, 9.0, 12.0, 13.0, 12.5],
             "volume": [1.0, 2.0, 1.5, 3.0, 2.5, 2.0],
         }
     )
 
-    extractor = fiml.FeatureExtractor(build_feature_set())
-    feats = extractor.compute_features(
-        df, source="bars", symbol="symbol", time="ts", close="close", volume="volume"
+    feature_set = (
+        fiml.FeatureSet()
+        .sma("BTCUSDT", period=3, event_kind="trade")
+        .ema("BTCUSDT", period=3, event_kind="trade")
+        .obv_timed("BTCUSDT", aggregation="1s", window="60s")
+        .trade_count_timed("BTCUSDT", aggregation="1s", window="60s")
+        .day_of_week("BTCUSDT")
     )
-    assert feats.shape == (len(df), extractor.n_features())
-    assert list(feats.columns) == extractor.feature_names()
+    extractor = fiml.FeatureExtractor(feature_set, output_dtype=np.float32)
+    feats = extractor.compute_features(df)
+    assert feats.shape == (len(df), extractor.n_features() + 2)
+    assert list(feats.columns) == ["symbol", "ts", *extractor.feature_names()]
     assert (feats.index == df.index).all()
-    print("OK: compute_features returned one aligned row per bar")
+    assert all(dtype == np.float32 for dtype in feats.dtypes.iloc[2:])
+    print("OK: compute_features returned one aligned snapshot per trade")
     print(feats)
 
 

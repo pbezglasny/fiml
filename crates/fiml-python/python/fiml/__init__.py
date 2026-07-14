@@ -29,26 +29,34 @@ __all__ = [
 ]
 
 
-def _column(df, name):
-    """Fetch DataFrame column `name` as a numpy array (duck-typed via to_numpy)."""
-    try:
-        values = df[name]
-    except KeyError:
-        raise ValueError(f"input has no column {name!r}") from None
-    to_numpy = getattr(values, "to_numpy", None)
-    return to_numpy() if to_numpy is not None else np.asarray(values)
+def _normalize_output_dtype(value):
+    if isinstance(value, str):
+        if value in ("float32", "float64"):
+            return value
+    elif value is np.float32:
+        return "float32"
+    elif value is np.float64:
+        return "float64"
+    raise ValueError(
+        'output_dtype must be "float32", "float64", numpy.float32, or numpy.float64'
+    )
 
 
-def _timestamps_ms(df, name):
-    """Fetch the time column as int64 epoch milliseconds.
+def _index_label(df, position):
+    index = df.index[position]
+    return index.item() if isinstance(index, np.generic) else index
 
-    datetime64 columns are converted; integer columns are assumed to already be
-    epoch milliseconds (the engine-wide timestamp unit).
-    """
-    values = _column(df, name)
-    if np.issubdtype(values.dtype, np.datetime64):
-        return values.astype("datetime64[ms]").astype(np.int64)
-    return values.astype(np.int64, copy=False)
+
+def _row_error(df, position, column, message):
+    return ValueError(
+        f"row {position} (index={_index_label(df, position)!r}), "
+        f"column {column!r}: {message}"
+    )
+
+
+def _first_invalid(mask):
+    positions = np.flatnonzero(mask)
+    return int(positions[0]) if positions.size else None
 
 
 class FeatureExtractor(_FeatureExtractor):
@@ -60,131 +68,173 @@ class FeatureExtractor(_FeatureExtractor):
     ``transform`` / ``update`` for raw event arrays.
     """
 
+    def __new__(cls, feature_set, output_dtype="float64"):
+        return _FeatureExtractor.__new__(
+            cls, feature_set, _normalize_output_dtype(output_dtype)
+        )
+
+    @property
+    def output_dtype(self):
+        return _FeatureExtractor.output_dtype.__get__(self, type(self))
+
+    @output_dtype.setter
+    def output_dtype(self, value):
+        _FeatureExtractor.output_dtype.__set__(
+            self, _normalize_output_dtype(value)
+        )
+
     @classmethod
-    def from_json(cls, json_str):
+    def from_json(cls, json_str, output_dtype="float64"):
         """Build an extractor from a ``FeatureSet`` JSON string."""
-        return cls(FeatureSet.from_json(json_str))
+        return cls(FeatureSet.from_json(json_str), output_dtype=output_dtype)
 
     def compute_features(
         self,
         df,
         *,
-        source,
-        symbol,
-        time,
-        close=None,
-        volume=None,
-        price=None,
+        symbol="symbol",
+        time="ts",
+        price="price",
+        volume="volume",
     ):
-        """Compute features for a wide DataFrame, one output row per input row.
+        """Compute one feature-vector snapshot after every trade row.
 
-        Every field kwarg names a **column of** ``df``. ``source`` selects how
-        each row maps to events:
-
-        - ``source="bars"`` — each row emits ``price(close)`` then, if a
-          ``volume`` column is given, ``volume(volume)``. Requires ``close``.
-        - ``source="trades"`` — each row emits one ``trade(price, volume)``.
-          Requires ``price`` and ``volume``.
-
-        The ``symbol`` column is interned automatically (multi-symbol frames
-        work directly; for training, one extractor per symbol is the
-        recommended pattern). The ``time`` column is ``datetime64`` or int
-        epoch **milliseconds**. Features are snapshotted once per input row;
-        cells are NaN until their feature warms up.
+        ``df`` must be a pandas DataFrame in globally nondecreasing timestamp
+        order. Every field argument names a distinct column. Symbols are
+        non-empty strings, timestamps are signed-int64 Unix milliseconds, and
+        price/volume values are finite, strictly positive integers or floats.
+        The complete frame is validated before the first trade is dispatched.
 
         Args:
-            df: A pandas DataFrame or DataFrame-like object that supports
-                ``df[column_name]``. All referenced columns must have the same
-                number of rows.
-            source: Input row type. Must be ``"bars"`` or ``"trades"``.
-                Bar rows produce a price event followed by an optional volume
-                event; trade rows produce one trade event.
+            df: A pandas DataFrame containing trades.
             symbol: Name of the instrument-symbol column. Values are converted
-                to strings and interned by the extractor. Rows may contain
-                multiple symbols.
-            time: Name of the event-time column. Values must be NumPy
-                ``datetime64`` values or integer Unix timestamps in
-                milliseconds. Timestamps must be nondecreasing within each
-                symbol and event-kind stream; equal timestamps are allowed and
-                preserve input order.
-            close: Name of the numeric close-price column. Required when
-                ``source="bars"`` and ignored for trades. Values must be
-                convertible to ``float64``.
-            volume: Name of the numeric volume column. Optional for bars; when
-                provided, each bar emits a volume event after its price event.
-                Required for trades. Values must be convertible to ``float64``.
-            price: Name of the numeric trade-price column. Required when
-                ``source="trades"`` and ignored for bars. Values must be
-                convertible to ``float64``.
+                to interned handles after validation. Rows may contain multiple
+                symbols.
+            time: Name of the signed-int64 epoch-millisecond timestamp column.
+            price: Name of the numeric trade-price column.
+            volume: Name of the numeric trade-volume column.
 
         Returns:
-            A pandas DataFrame aligned to ``df.index`` when ``df`` is a pandas
-            DataFrame. Otherwise, returns an ``(n_rows, n_features)``
-            ``float64`` NumPy array. Columns follow ``feature_names()`` order.
+            A pandas DataFrame aligned to ``df.index``. The selected symbol and
+            timestamp columns are copied first, followed by feature columns in
+            ``feature_names()`` order and the configured ``output_dtype``.
 
         Raises:
-            ValueError: If ``source`` is unsupported, a required column name is
-                omitted, a named column does not exist, or timestamps are out
-                of order.
+            ValueError: If the schema, values, feature names, or ordering are
+                invalid.
         """
-        timestamps = _timestamps_ms(df, time)
-        n = timestamps.shape[0]
-
-        names, inverse = np.unique(_column(df, symbol), return_inverse=True)
-        handle_of = np.array(
-            [self.symbol(str(name)) for name in names], dtype=np.int64
-        )
-        handles = handle_of[inverse]
-
-        if source == "bars":
-            if close is None:
-                raise ValueError('source="bars" requires the `close` column kwarg')
-            closes = _column(df, close).astype(np.float64, copy=False)
-            if volume is None:
-                kind = np.full(n, KIND_PRICE, dtype=np.uint8)
-                matrix = self.transform(kind, handles, timestamps, price=closes)
-            else:
-                # Two events per row (price then volume): interleave the
-                # columns, dispatch the melted stream, then keep the snapshot
-                # taken after each row's *last* event.
-                volumes = _column(df, volume).astype(np.float64, copy=False)
-                kind = np.empty(2 * n, dtype=np.uint8)
-                kind[0::2] = KIND_PRICE
-                kind[1::2] = KIND_VOLUME
-                price_col = np.zeros(2 * n, dtype=np.float64)
-                price_col[0::2] = closes
-                volume_col = np.zeros(2 * n, dtype=np.float64)
-                volume_col[1::2] = volumes
-                matrix = self.transform(
-                    kind,
-                    np.repeat(handles, 2),
-                    np.repeat(timestamps, 2),
-                    price=price_col,
-                    volume=volume_col,
-                )
-                matrix = matrix[1::2].copy()
-        elif source == "trades":
-            if price is None or volume is None:
-                raise ValueError(
-                    'source="trades" requires the `price` and `volume` column kwargs'
-                )
-            kind = np.full(n, KIND_TRADE, dtype=np.uint8)
-            matrix = self.transform(
-                kind,
-                handles,
-                timestamps,
-                price=_column(df, price).astype(np.float64, copy=False),
-                volume=_column(df, volume).astype(np.float64, copy=False),
-            )
-        else:
-            raise ValueError(
-                f'unsupported source {source!r} (expected "bars" or "trades")'
-            )
-
         try:
             import pandas as pd
-        except ImportError:
-            return matrix
-        if isinstance(df, pd.DataFrame):
-            return pd.DataFrame(matrix, index=df.index, columns=self.feature_names())
-        return matrix
+            from pandas.api.types import (
+                is_bool_dtype,
+                is_float_dtype,
+                is_integer_dtype,
+                is_unsigned_integer_dtype,
+            )
+        except ImportError as error:
+            raise ImportError(
+                'compute_features requires pandas; install fiml with "fiml[pandas]"'
+            ) from error
+
+        if not isinstance(df, pd.DataFrame):
+            raise TypeError("compute_features requires a pandas DataFrame")
+
+        mappings = (symbol, time, price, volume)
+        if not all(isinstance(name, str) for name in mappings):
+            raise ValueError("symbol, time, price, and volume must be column-name strings")
+        if len(set(mappings)) != len(mappings):
+            raise ValueError("symbol, time, price, and volume must name distinct columns")
+        if not df.columns.is_unique:
+            raise ValueError("input DataFrame column labels must be unique")
+        for name in mappings:
+            if name not in df.columns:
+                raise ValueError(f"input has no column {name!r}")
+
+        feature_names = self.feature_names()
+        if len(feature_names) != len(set(feature_names)):
+            raise ValueError("feature names must be unique")
+        collisions = set(feature_names).intersection((symbol, time))
+        if collisions:
+            name = min(collisions)
+            raise ValueError(f"feature name {name!r} collides with a metadata column")
+
+        symbol_values = df[symbol].to_numpy(copy=False)
+        for position, value in enumerate(symbol_values):
+            if not isinstance(value, (str, np.str_)) or not value:
+                raise _row_error(df, position, symbol, "must be a non-empty string")
+
+        time_series = df[time]
+        if is_bool_dtype(time_series.dtype) or not is_integer_dtype(time_series.dtype):
+            raise ValueError(
+                f"column {time!r} must contain signed-int64 Unix milliseconds"
+            )
+        missing = _first_invalid(time_series.isna().to_numpy())
+        if missing is not None:
+            raise _row_error(df, missing, time, "must not be null")
+        if is_unsigned_integer_dtype(time_series.dtype) and len(time_series):
+            too_large = _first_invalid(
+                time_series.to_numpy(copy=False) > np.iinfo(np.int64).max
+            )
+            if too_large is not None:
+                raise _row_error(df, too_large, time, "must fit signed int64")
+        timestamps = time_series.to_numpy(dtype=np.int64, copy=False)
+        if len(timestamps) > 1:
+            backward = _first_invalid(timestamps[1:] < timestamps[:-1])
+            if backward is not None:
+                position = backward + 1
+                raise _row_error(
+                    df,
+                    position,
+                    time,
+                    f"timestamp {timestamps[position]} is before previous "
+                    f"timestamp {timestamps[position - 1]}",
+                )
+
+        numeric = {}
+        for name in (price, volume):
+            series = df[name]
+            if is_bool_dtype(series.dtype) or not (
+                is_integer_dtype(series.dtype) or is_float_dtype(series.dtype)
+            ):
+                raise ValueError(f"column {name!r} must contain integers or floats")
+            values = series.to_numpy(dtype=np.float64, na_value=np.nan)
+            invalid = _first_invalid(~np.isfinite(values) | (values <= 0.0))
+            if invalid is not None:
+                raise _row_error(df, invalid, name, "must be finite and greater than zero")
+            numeric[name] = values
+
+        n_rows = len(df)
+        handles = np.empty(n_rows, dtype=np.int64)
+        handle_by_name = {}
+        for position, name in enumerate(symbol_values):
+            handle = handle_by_name.get(name)
+            if handle is None:
+                handle = self.symbol(name)
+                handle_by_name[name] = handle
+            handles[position] = handle
+
+        try:
+            matrix = self.transform(
+                np.full(n_rows, KIND_TRADE, dtype=np.uint8),
+                handles,
+                timestamps,
+                price=numeric[price],
+                volume=numeric[volume],
+            )
+        except ValueError as error:
+            message = str(error)
+            if message.startswith("row "):
+                row, separator, detail = message[4:].partition(": ")
+                if separator and row.isdigit() and int(row) < n_rows:
+                    position = int(row)
+                    raise ValueError(
+                        f"row {position} (index={_index_label(df, position)!r}): {detail}"
+                    ) from None
+            raise
+
+        result = pd.DataFrame(
+            matrix, index=df.index, columns=feature_names, copy=False
+        )
+        result.insert(0, time, df[time].array)
+        result.insert(0, symbol, df[symbol].array)
+        return result

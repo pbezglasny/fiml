@@ -18,7 +18,7 @@ Publishing to PyPI is planned; for now the package is installed from this
 repository. You need:
 
 - a Rust toolchain (`rustup` — <https://rustup.rs>)
-- Python ≥ 3.9
+- Python ≥ 3.12
 
 ### Into a fresh environment (recommended)
 
@@ -27,13 +27,13 @@ From the repository root:
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-pip install ./crates/fiml-python
+pip install "./crates/fiml-python[pandas]"
 ```
 
 `pip` invokes the maturin build backend declared in `pyproject.toml`, compiles
 the Rust extension, and installs the `fiml` package with its only runtime
-dependency (`numpy`). `pandas` is optional — needed only for
-`compute_features` DataFrame output.
+dependency (`numpy`). The `pandas` extra installs pandas ≥ 2.0 for the
+trade-DataFrame `compute_features` API; low-level NumPy users can omit it.
 
 Installing straight from git also works:
 
@@ -69,7 +69,7 @@ ways to get there:
 
 ```bash
 source .venv/bin/activate
-pip install ./crates/fiml-python jupyterlab pandas
+pip install "./crates/fiml-python[pandas]" jupyterlab
 jupyter lab
 ```
 
@@ -77,7 +77,7 @@ jupyter lab
 
 ```bash
 source .venv/bin/activate
-pip install ./crates/fiml-python ipykernel pandas
+pip install "./crates/fiml-python[pandas]" ipykernel
 python -m ipykernel install --user --name fiml --display-name "Python (fiml)"
 ```
 
@@ -99,25 +99,41 @@ import pandas as pd
 import fiml
 
 fs = (fiml.FeatureSet()
-      .sma("BTCUSDT", period=12)
-      .ema("BTCUSDT", period=12)
-      .obv_timed("BTCUSDT", aggregation="1s", window="60s")
+      .sma("BTCUSDT", period=12, event_kind="trade")
+      .ema("BTCUSDT", period=12, event_kind="trade")
+      .obv_timed("BTCUSDT", aggregation="1ms", window="60s")
+      .trade_count_timed("BTCUSDT", aggregation="1ms", window="60s")
       .day_of_week("BTCUSDT"))
 
-extractor = fiml.FeatureExtractor(fs)
+extractor = fiml.FeatureExtractor(fs, output_dtype="float32")
 
-df = pd.read_parquet("bars.parquet")   # symbol, ts, close, volume columns
-feats = extractor.compute_features(
-    df, source="bars",
-    symbol="symbol", time="ts", close="close", volume="volume",
-)
-feats.head()                            # one row per bar, aligned to df.index
+trades = pd.read_csv("trades.csv")     # symbol, ts, price, volume columns
+feats = extractor.compute_features(trades)
+feats.head()                            # one snapshot after every trade
 ```
 
-`feats` is a pandas DataFrame (columns = `extractor.feature_names()`), ready to
-join labels onto and feed to lightgbm/xgboost/catboost/sklearn. Cells are
+`feats` preserves the input index and starts with copied `symbol` and `ts`
+columns, followed by `extractor.feature_names()`. The feature columns are ready
+to feed to lightgbm/xgboost/catboost/sklearn. Cells are
 **NaN until their indicator warms up** — gradient-boosting libraries handle NaN
 natively; drop or mask those rows for models that don't.
+
+Column mappings remain configurable when a frame uses other names:
+
+```python
+feats = extractor.compute_features(
+    trades, symbol="ticker", time="timestamp", price="px", volume="qty"
+)
+```
+
+The input must already be globally ordered by signed-int64 epoch-millisecond
+timestamps. Symbols must be non-empty strings; prices and volumes must be finite
+and positive. The complete frame is validated before the extractor changes.
+
+`output_dtype` accepts `"float32"`, `"float64"`, `numpy.float32`, or
+`numpy.float64` and applies to `values`, `transform`, and feature DataFrame
+columns. Calculation state remains `float64`. The property can be changed until
+the first event is processed and is then locked.
 
 ## The parity contract: a shared feature set
 
@@ -126,14 +142,18 @@ Save the JSON next to the trained model and load the same file in Rust serving:
 
 ```python
 json_str = fs.to_json()                          # save next to the model
-extractor = fiml.FeatureExtractor.from_json(json_str)   # rebuild anywhere
+extractor = fiml.FeatureExtractor.from_json(
+    json_str, output_dtype="float64"
+)                                                        # rebuild anywhere
 ```
 
 ```json
 {
   "features": [
-    { "name": "sma_12", "symbol": "BTCUSDT", "indicator": { "Sma": { "period": 12 } } },
-    { "name": "ema_12", "symbol": "BTCUSDT", "indicator": { "Ema": { "period": 12 } } },
+    { "name": "sma_12", "symbol": "BTCUSDT",
+      "indicator": { "Sma": { "period": 12, "event_kind": "Trade" } } },
+    { "name": "ema_12", "symbol": "BTCUSDT",
+      "indicator": { "Ema": { "period": 12, "event_kind": "Trade" } } },
     { "name": "obv_timed_1s_60s", "symbol": "BTCUSDT",
       "indicator": { "ObvTimed": { "aggregation": { "secs": 1, "nanos": 0 },
                                    "window":      { "secs": 60, "nanos": 0 } } } }
@@ -146,6 +166,11 @@ Builder methods: `sma`, `ema`, `sma_timed`, `obv_timed`, `trade_count_timed`,
 Durations are strings (`"500ms"`, `"1s"`, `"5m"`, `"1h"`); every method accepts
 `name=` to override the generated column name. Feature order in the builder is
 the output column order.
+
+`sma` and `ema` accept a keyword-only `event_kind` of `"price"`, `"volume"`, or
+`"trade"` (default `"price"`). Use `event_kind="trade"` with the trade-only
+`compute_features` API. The selected kind is serialized in `FeatureSet` JSON so
+historical Python and live Rust routing remain identical.
 
 ## Low-level event API
 
@@ -180,8 +205,8 @@ needs:
 A row whose kind needs a column you did not pass raises `ValueError` naming
 that column; any column you do pass must match the length of `kind`. All rows
 are validated **before** the first dispatch, so a bad row never leaves the
-extractor half-stepped. Rows are dispatched in array order — order events the
-way they actually occurred. `update(...)` takes the same keyword payloads as
+extractor half-stepped. Rows must be globally nondecreasing by timestamp and
+are dispatched in array order. `update(...)` takes the same keyword payloads as
 scalars. `KIND_ORDERBOOK` dispatches today but no builtin feature subscribes to
 it yet, so it does not change output on its own.
 
@@ -189,8 +214,8 @@ it yet, so it does not change output on its own.
 
 To guarantee identical output between Python (batch) and Rust (live):
 
-1. **f64 on both sides.** The extractor is `f64`; the live Rust extractor must
-   also be `f64`.
+1. **f64 calculation state on both sides.** The extractor calculates in `f64`;
+   choose `output_dtype="float64"` when comparing exact Python/Rust output.
 2. **Same `FeatureSet` JSON** — same periods, aggregation/window durations,
    symbol names, and feature order.
 3. **Replay the full event stream in the same order with the same millisecond
@@ -209,8 +234,7 @@ To guarantee identical output between Python (batch) and Rust (live):
 
 See `examples/quickstart.py`.
 
-Timestamps must be non-decreasing within each `(symbol, event kind)` market
-stream. `KIND_TIME` is one global symbol-less stream. Independent streams may
-interleave freely, and equal timestamps are processed in caller-provided arrival
-order. Both `update` and `transform` enforce this same contract as Rust;
-`transform` validates the entire batch before changing extractor state.
+Timestamps must be globally nondecreasing across every `update`, `transform`,
+and `compute_features` call on an extractor. Equal timestamps are processed in
+caller-provided arrival order. `transform` and `compute_features` validate the
+entire batch before changing extractor state.

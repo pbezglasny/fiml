@@ -12,8 +12,8 @@ crate-type = ["cdylib"]
 
 [dependencies]
 fiml = { path = "../fiml", features = ["serde"] }
-# abi3 builds one wheel that works across CPython >= 3.9, including newer
+# abi3 builds one wheel that works across CPython >= 3.12, including newer
 # interpreters than this PyO3 release knows about.
-pyo3 = { version = "0.23", features = ["extension-module", "abi3-py39"] }
+pyo3 = { version = "0.23", features = ["extension-module", "abi3-py312"] }
 numpy = "0.23"
 serde_json = "1.0"

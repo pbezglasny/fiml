@@ -77,8 +77,10 @@ pub(crate) fn validate_event_kind(event_kind: EventKind) -> Result<()> {
 pub(in crate::features) fn build_builtin<F: Float>(
     symbol: Symbol,
     period: usize,
+    event_kind: EventKind,
     output_index: usize,
 ) -> Result<BuiltinFeature<F>> {
+    validate_event_kind(event_kind)?;
     let mut ema = ExponentialMovingAverage::<F, MAX_WINDOWS_PER_EMA>::new();
     ema.add_window(period)
         .expect("validated EMA period should fit its window storage");
@@ -86,7 +88,7 @@ pub(in crate::features) fn build_builtin<F: Float>(
     output_indexes[0] = output_index;
     Ok(BuiltinFeature::Ema(EmaFeature::new(
         symbol,
-        EventKind::Price,
+        event_kind,
         ema,
         output_indexes,
         1,

@@ -18,10 +18,18 @@ pub enum TimeUnit {
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum IndicatorSpec {
-    /// Simple moving average over `period`
-    Sma { period: usize },
-    /// Exponential moving average over `period`
-    Ema { period: usize },
+    /// Simple moving average over `period`, consuming values from `event_kind`.
+    Sma {
+        period: usize,
+        #[cfg_attr(feature = "serde", serde(default = "default_price_event_kind"))]
+        event_kind: EventKind,
+    },
+    /// Exponential moving average over `period`, consuming values from `event_kind`.
+    Ema {
+        period: usize,
+        #[cfg_attr(feature = "serde", serde(default = "default_price_event_kind"))]
+        event_kind: EventKind,
+    },
     /// Time-bucketed simple moving average over `window`, using `aggregation`
     /// as the bucket size. Price event timestamps must be milliseconds.
     SmaTimed {
@@ -56,8 +64,8 @@ impl IndicatorSpec {
     /// every dispatch.
     pub fn route(&self) -> FeatureRoute {
         match self {
-            IndicatorSpec::Sma { .. } => FeatureRoute::Kind(EventKind::Price),
-            IndicatorSpec::Ema { .. } => FeatureRoute::Kind(EventKind::Price),
+            IndicatorSpec::Sma { event_kind, .. } => FeatureRoute::Kind(*event_kind),
+            IndicatorSpec::Ema { event_kind, .. } => FeatureRoute::Kind(*event_kind),
             IndicatorSpec::SmaTimed { .. } => FeatureRoute::Kind(EventKind::Price),
             IndicatorSpec::ObvTimed { .. } => FeatureRoute::Kind(EventKind::Trade),
             IndicatorSpec::TradeCountTimed { .. } => FeatureRoute::Kind(EventKind::Trade),
@@ -65,6 +73,10 @@ impl IndicatorSpec {
             IndicatorSpec::TimeSinceSessionOpen { .. } => FeatureRoute::Every,
         }
     }
+}
+
+fn default_price_event_kind() -> EventKind {
+    EventKind::Price
 }
 
 /// One output column of an engine: the cell `name`, the `symbol` it tracks
