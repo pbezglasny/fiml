@@ -1,22 +1,23 @@
+mod builder;
 pub(crate) mod builtin;
+pub(crate) mod compiler;
+mod definition;
 mod event;
 mod extractor;
-mod feature_set;
 pub(crate) mod indicator_vector;
 mod pipeline;
 pub mod transformers;
 
-pub use crate::indicators::IndicatorFeatureVectorBuilder;
+pub use builder::FeatureSetBuilder;
 pub use builtin::BuiltinFeature;
-pub use builtin::{
-    DayOfWeek, EmaPeriodsBuilder, MAX_WINDOWS_PER_EMA, MAX_WINDOWS_PER_OBV, MAX_WINDOWS_PER_SMA,
-    ObvTimedPeriodsBuilder, SmaPeriodsBuilder, SmaTimedPeriodsBuilder,
+pub use builtin::{DayOfWeek, EmaFeature, ObvTimedFeature, SmaFeature, SmaTimedFeature};
+pub use definition::{
+    FeatureSet, IndicatorDef, IndicatorSpec, MAX_OUTPUTS_PER_INDICATOR, TimeWindows, ValueSource,
 };
 pub use event::{
     EVENT_KIND_COUNT, Event, EventKind, OrderBookUpdate, PriceUpdate, TimeUpdate, TradeUpdate,
     VolumeUpdate,
 };
-pub use extractor::FeatureExtractor;
-pub use feature_set::{FeatureDef, FeatureSet, IndicatorSpec, TimeUnit};
+pub use extractor::{DispatchSequenceError, FeatureExtractor};
 pub use indicator_vector::{Feature, IndicatorFeatureVector, IndicatorFeatures};
 pub use pipeline::Pipeline;

@@ -44,8 +44,8 @@ impl fmt::Display for EventKind {
 
 /// Where a feature subscribes in the dispatch table: to a single [`EventKind`],
 /// or to **every** event. Clock features (`day_of_week`,
-/// `time_since_session_open`) subscribe to every event so they refresh from each
-/// event's timestamp, guaranteeing a value on every output row of any stream.
+/// `time_since_first_event_of_day`) subscribe to every event so they refresh
+/// from each event's timestamp, guaranteeing a value on every output row.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FeatureRoute {
     /// Runs only for events of this kind.
@@ -125,7 +125,7 @@ impl<F: Float> Event<F> {
     }
 
     /// Timestamp carried by this event, in epoch milliseconds. Every variant
-    /// carries one, so every-event (clock) features can derive calendar/session
+    /// carries one, so every-event (clock) features can derive calendar/day
     /// values regardless of which stream the event came from.
     pub fn timestamp(&self) -> i64 {
         match self {
@@ -184,19 +184,6 @@ impl<F: Float> Event<F> {
 
     pub fn time(timestamp: i64) -> Self {
         Event::Time(TimeUpdate { timestamp })
-    }
-}
-
-pub(crate) fn market_value_for_kind<F: Float>(
-    event: &Event<F>,
-    event_kind: EventKind,
-    symbol: Symbol,
-) -> Option<F> {
-    match (event_kind, event) {
-        (EventKind::Price, Event::Price(p)) if p.symbol == symbol => Some(p.value),
-        (EventKind::Volume, Event::Volume(v)) if v.symbol == symbol => Some(v.value),
-        (EventKind::Trade, Event::Trade(t)) if t.symbol == symbol => Some(t.price),
-        _ => None,
     }
 }
 

@@ -11,9 +11,15 @@
 use fiml::{Event, FeatureExtractor, FeatureSet, IndicatorFeatures, symbols};
 
 const FEATURE_SET_JSON: &str = r#"{
-    "features": [
-        { "name": "sma_3", "symbol": "BTCUSDT", "indicator": { "Sma": { "period": 3 } } },
-        { "name": "ema_3", "symbol": "BTCUSDT", "indicator": { "Ema": { "period": 3 } } }
+    "indicators": [
+        {
+            "symbol": "BTCUSDT",
+            "indicator": { "Sma": { "source": "price", "windows": [3] } }
+        },
+        {
+            "symbol": "BTCUSDT",
+            "indicator": { "Ema": { "source": "price", "windows": [3] } }
+        }
     ]
 }"#;
 

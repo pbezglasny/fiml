@@ -1,6 +1,6 @@
 use fiml::{
-    ArrayFeatureVector, Event, FeatureVector, IndicatorFeatureVectorBuilder, IndicatorFeatures,
-    symbols,
+    ArrayFeatureVector, Event, FeatureSet, FeatureVector, IndicatorFeatureVector,
+    IndicatorFeatures, symbols,
 };
 use futures::StreamExt;
 use serde::Deserialize;
@@ -33,17 +33,17 @@ async fn main() -> anyhow::Result<()> {
         .nth(1)
         .unwrap_or_else(|| "btcusdt".to_string())
         .to_lowercase();
-    let symbol = symbols::intern(&stream_symbol.to_uppercase());
+    let symbol_name = stream_symbol.to_uppercase();
+    let symbol = symbols::intern(&symbol_name);
 
-    let mut indicators =
-        IndicatorFeatureVectorBuilder::<f64, _, 2>::new(ArrayFeatureVector::<f64, 2>::new())
-            .ema_periods(symbol)
-            .window(12)?
-            .done()?
-            .sma_periods(symbol)
-            .window(12)?
-            .done()?
-            .build()?;
+    let feature_set = FeatureSet::builder()
+        .ema(&symbol_name, [12])
+        .sma(&symbol_name, [12])
+        .build();
+    let mut indicators = IndicatorFeatureVector::<f64, _, 2>::from_feature_set(
+        ArrayFeatureVector::<f64, 2>::new(),
+        &feature_set,
+    )?;
 
     let url = format!("{BINANCE_STREAM_URL}/{stream_symbol}@trade");
     let (mut ws_stream, _) = connect_async(&url).await?;

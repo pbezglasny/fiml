@@ -252,12 +252,22 @@ where
                 "Ring buffer capacity must be greater than 0".to_string(),
             ));
         }
-        if aggeregation.as_millis() == 0 {
+        let aggregation_millis = aggeregation.as_millis();
+        if aggregation_millis == 0 {
             return Err(FimlError::InvalidArgument(
                 "Aggregation duration must be at least 1 millisecond".to_string(),
             ));
         }
-        let millis_aggregation = aggeregation.as_millis() as i64;
+        if !aggeregation.subsec_nanos().is_multiple_of(1_000_000) {
+            return Err(FimlError::InvalidArgument(
+                "Aggregation duration must use whole-millisecond precision".to_string(),
+            ));
+        }
+        let millis_aggregation = i64::try_from(aggregation_millis).map_err(|_| {
+            FimlError::InvalidArgument(
+                "Aggregation duration must fit signed 64-bit milliseconds".to_string(),
+            )
+        })?;
         Ok(Self {
             data,
             millis_aggregation,
@@ -284,8 +294,18 @@ where
                 "Window period must be less than ring buffer capacity".to_string(),
             ));
         }
+        let periods_i64 = i64::try_from(periods).map_err(|_| {
+            FimlError::InvalidArgument("Window period must fit signed 64-bit".to_string())
+        })?;
+        let duration = periods_i64
+            .checked_mul(self.millis_aggregation)
+            .ok_or_else(|| {
+                FimlError::InvalidArgument(
+                    "Window duration must fit signed 64-bit milliseconds".to_string(),
+                )
+            })?;
         self.windows[self.window_count].write(SmaWindowTimed {
-            duration: periods as i64 * self.millis_aggregation,
+            duration,
             bucket_count: 0,
             sum: T::ZERO,
             moving_avg: T::ZERO,
@@ -298,14 +318,23 @@ where
             window_count = self.window_count,
             window_capacity = WINDOWS,
             periods,
-            duration_millis = periods as i64 * self.millis_aggregation,
+            duration_millis = duration,
             "added indicator window"
         );
         Ok(())
     }
 
     pub fn add_window_with_duration(&mut self, period: Duration) -> Result<()> {
-        let millis_period = period.as_millis() as i64;
+        if !period.subsec_nanos().is_multiple_of(1_000_000) {
+            return Err(FimlError::InvalidArgument(
+                "Window duration must use whole-millisecond precision".to_string(),
+            ));
+        }
+        let millis_period = i64::try_from(period.as_millis()).map_err(|_| {
+            FimlError::InvalidArgument(
+                "Window duration must fit signed 64-bit milliseconds".to_string(),
+            )
+        })?;
         if millis_period < self.millis_aggregation {
             return Err(FimlError::InvalidArgument(
                 "Window period cannot be less than aggregation duration".to_string(),
@@ -316,7 +345,8 @@ where
                 "Window period must be a multiple of aggregation duration".to_string(),
             ));
         }
-        let period_in_aggregations = (millis_period / self.millis_aggregation) as usize;
+        let period_in_aggregations = usize::try_from(millis_period / self.millis_aggregation)
+            .map_err(|_| FimlError::InvalidArgument("Window period must fit usize".to_string()))?;
         self.add_window_with_periods(period_in_aggregations)
     }
 

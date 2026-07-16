@@ -89,14 +89,25 @@ where
                 "Ring buffer capacity must be greater than 0".to_string(),
             ));
         }
-        if aggregation.as_millis() == 0 {
+        let aggregation_millis = aggregation.as_millis();
+        if aggregation_millis == 0 {
             return Err(FimlError::InvalidArgument(
                 "Aggregation duration must be at least 1 millisecond".to_string(),
             ));
         }
+        if !aggregation.subsec_nanos().is_multiple_of(1_000_000) {
+            return Err(FimlError::InvalidArgument(
+                "Aggregation duration must use whole-millisecond precision".to_string(),
+            ));
+        }
+        let millis_aggregation = i64::try_from(aggregation_millis).map_err(|_| {
+            FimlError::InvalidArgument(
+                "Aggregation duration must fit signed 64-bit milliseconds".to_string(),
+            )
+        })?;
         Ok(Self {
             data,
-            millis_aggregation: aggregation.as_millis() as i64,
+            millis_aggregation,
             windows: [const { MaybeUninit::<ObvWindowTimed<F>>::uninit() }; WINDOWS],
             window_count: 0,
         })
@@ -124,8 +135,18 @@ where
             ));
         }
 
+        let periods_i64 = i64::try_from(periods).map_err(|_| {
+            FimlError::InvalidArgument("Window period must fit signed 64-bit".to_string())
+        })?;
+        let duration = periods_i64
+            .checked_mul(self.millis_aggregation)
+            .ok_or_else(|| {
+                FimlError::InvalidArgument(
+                    "Window duration must fit signed 64-bit milliseconds".to_string(),
+                )
+            })?;
         self.windows[self.window_count].write(ObvWindowTimed {
-            duration: periods as i64 * self.millis_aggregation,
+            duration,
             value: F::ZERO,
             front_offset: 0,
         });
@@ -138,7 +159,7 @@ where
             window_count = self.window_count,
             window_capacity = WINDOWS,
             periods,
-            duration_millis = periods as i64 * self.millis_aggregation,
+            duration_millis = duration,
             "added indicator window"
         );
         Ok(())

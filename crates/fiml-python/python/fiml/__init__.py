@@ -178,18 +178,6 @@ class FeatureExtractor(_FeatureExtractor):
             if too_large is not None:
                 raise _row_error(df, too_large, time, "must fit signed int64")
         timestamps = time_series.to_numpy(dtype=np.int64, copy=False)
-        if len(timestamps) > 1:
-            backward = _first_invalid(timestamps[1:] < timestamps[:-1])
-            if backward is not None:
-                position = backward + 1
-                raise _row_error(
-                    df,
-                    position,
-                    time,
-                    f"timestamp {timestamps[position]} is before previous "
-                    f"timestamp {timestamps[position - 1]}",
-                )
-
         numeric = {}
         for name in (price, volume):
             series = df[name]

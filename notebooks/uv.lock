@@ -362,7 +362,15 @@ dependencies = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "numpy", specifier = ">=1.21" }]
+requires-dist = [
+    { name = "ipykernel", marker = "extra == 'test'", specifier = ">=6.0" },
+    { name = "nbclient", marker = "extra == 'test'", specifier = ">=0.10" },
+    { name = "numpy", specifier = ">=1.21" },
+    { name = "pandas", marker = "extra == 'pandas'", specifier = ">=2.0" },
+    { name = "pandas", marker = "extra == 'test'", specifier = ">=2.0" },
+    { name = "pytest", marker = "extra == 'test'", specifier = ">=8.0" },
+]
+provides-extras = ["pandas", "test"]
 
 [[package]]
 name = "fqdn"
