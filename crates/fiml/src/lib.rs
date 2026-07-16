@@ -8,13 +8,12 @@ mod vectors;
 use std::{error::Error, fmt::Display};
 
 pub use features::{
-    Event, EventKind, Feature, FeatureDef, FeatureExtractor, FeatureSet, IndicatorFeatureVector,
-    IndicatorFeatures, IndicatorSpec, OrderBookUpdate, PriceUpdate, TimeUnit, TimeUpdate,
-    TradeUpdate, VolumeUpdate,
+    DispatchSequenceError, Event, EventKind, Feature, FeatureExtractor, FeatureSet,
+    FeatureSetBuilder, IndicatorDef, IndicatorFeatureVector, IndicatorFeatures, IndicatorSpec,
+    MAX_OUTPUTS_PER_INDICATOR, OrderBookUpdate, PriceUpdate, TimeUpdate, TimeWindows, TradeUpdate,
+    ValueSource, VolumeUpdate,
 };
-pub use indicators::{
-    IndicatorFeatureVectorBuilder, ObvBucket, ObvTimedPeriodsBuilder, OnBalanceVolumeTimed,
-};
+pub use indicators::{ObvBucket, OnBalanceVolumeTimed};
 pub use ring_buffer::{
     HeapRingBuffer, RingBuffer, StackRingBuffer, new_heap_ring_buffer, new_stack_ring_buffer,
 };
@@ -28,6 +27,22 @@ pub type Result<T> = std::result::Result<T, FimlError>;
 #[non_exhaustive]
 pub enum FimlError {
     InvalidArgument(String),
+    InvalidIndicatorDefinition {
+        index: usize,
+        reason: String,
+    },
+    TooManyIndicators {
+        count: usize,
+        capacity: usize,
+    },
+    TooManyOutputs {
+        count: usize,
+        capacity: usize,
+    },
+    OutputCountMismatch {
+        expected: usize,
+        actual: usize,
+    },
     TimestampOutOfOrder {
         symbol: Option<Symbol>,
         event_kind: EventKind,
@@ -40,6 +55,24 @@ impl Display for FimlError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             FimlError::InvalidArgument(msg) => write!(f, "invalid argument: {}", msg),
+            FimlError::InvalidIndicatorDefinition { index, reason } => {
+                write!(f, "invalid indicator definition at index {index}: {reason}")
+            }
+            FimlError::TooManyIndicators { count, capacity } => {
+                write!(
+                    f,
+                    "indicator count {count} exceeds fixed capacity {capacity}"
+                )
+            }
+            FimlError::TooManyOutputs { count, capacity } => {
+                write!(f, "output count {count} exceeds fixed capacity {capacity}")
+            }
+            FimlError::OutputCountMismatch { expected, actual } => {
+                write!(
+                    f,
+                    "output storage has {actual} cells, but compilation requires exactly {expected}"
+                )
+            }
             FimlError::TimestampOutOfOrder {
                 symbol,
                 event_kind,

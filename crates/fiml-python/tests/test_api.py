@@ -5,15 +5,14 @@ import pytest
 import fiml
 
 
+def count_name(symbol):
+    return f"{symbol}:trade:count_timed:1ms:10000ms"
+
+
 def trade_counts(*symbols):
     feature_set = fiml.FeatureSet()
     for symbol in symbols:
-        feature_set.trade_count_timed(
-            symbol,
-            aggregation="1ms",
-            window="10s",
-            name=f"{symbol.lower()}_count",
-        )
+        feature_set.trade_count_timed(symbol, aggregation="1ms", window="10s")
     return feature_set
 
 
@@ -35,25 +34,29 @@ def test_compute_features_returns_one_multi_symbol_snapshot_per_trade():
     source = trades()
 
     result = extractor.compute_features(source)
+    btc_count = count_name("BTCUSDT")
+    eth_count = count_name("ETHUSDT")
 
-    assert list(result.columns) == ["symbol", "ts", "btcusdt_count", "ethusdt_count"]
+    assert list(result.columns) == ["symbol", "ts", btc_count, eth_count]
     assert result.index.equals(source.index)
     assert result["symbol"].equals(source["symbol"])
     assert result["ts"].equals(source["ts"])
-    assert result["btcusdt_count"].dtype == np.float32
-    assert result["ethusdt_count"].dtype == np.float32
+    assert result[btc_count].dtype == np.float32
+    assert result[eth_count].dtype == np.float32
     np.testing.assert_equal(
-        result[["btcusdt_count", "ethusdt_count"]].to_numpy(),
+        result[[btc_count, eth_count]].to_numpy(),
         np.array([[1.0, np.nan], [1.0, 1.0], [2.0, 1.0]], dtype=np.float32),
     )
 
 
-def test_sma_and_ema_can_consume_trade_prices():
+def test_grouped_sma_and_ema_can_consume_trade_price_and_volume():
     feature_set = (
         fiml.FeatureSet()
-        .sma("BTCUSDT", period=2, event_kind="trade")
-        .ema("BTCUSDT", period=2, event_kind="trade")
+        .sma("BTCUSDT", [2, 3], source="trade_price")
+        .ema("BTCUSDT", [2], source="trade_volume")
     )
+    assert feature_set.indicator_count() == 2
+    assert feature_set.output_count() == 3
     extractor = fiml.FeatureExtractor(feature_set)
     source = pd.DataFrame(
         {
@@ -66,13 +69,47 @@ def test_sma_and_ema_can_consume_trade_prices():
 
     result = extractor.compute_features(source)
 
-    assert not result[["sma_2", "ema_2"]].isna().any().any()
-    np.testing.assert_allclose(result["sma_2"], [0.5, 1.05, 1.15, 1.1])
+    assert extractor.feature_names() == [
+        "BTCUSDT:trade_price:sma:2",
+        "BTCUSDT:trade_price:sma:3",
+        "BTCUSDT:trade_volume:ema:2",
+    ]
+    np.testing.assert_allclose(
+        result["BTCUSDT:trade_price:sma:2"], [0.5, 1.05, 1.15, 1.1]
+    )
+    assert not result["BTCUSDT:trade_volume:ema:2"].isna().any()
 
 
-def test_moving_average_event_kind_is_validated():
-    with pytest.raises(ValueError, match='expected "price", "volume", or "trade"'):
-        fiml.FeatureSet().sma("BTCUSDT", period=2, event_kind="orderbook")
+def test_moving_average_source_is_validated():
+    with pytest.raises(
+        ValueError,
+        match='expected "price", "volume", "trade_price", or "trade_volume"',
+    ):
+        fiml.FeatureSet().sma("BTCUSDT", [2], source="orderbook")
+
+
+def test_compilation_rejects_duplicate_identity_and_invalid_windows():
+    duplicate = (
+        fiml.FeatureSet()
+        .sma("BTCUSDT", [2], source="trade_price")
+        .sma("BTCUSDT", [3], source="trade_price")
+    )
+    with pytest.raises(ValueError, match="duplicates an earlier indicator identity"):
+        fiml.FeatureExtractor(duplicate)
+
+    with pytest.raises(ValueError, match="windows must not be empty"):
+        fiml.FeatureExtractor(fiml.FeatureSet().ema("BTCUSDT", []))
+
+
+def test_global_clock_features_have_no_symbol():
+    extractor = fiml.FeatureExtractor(
+        fiml.FeatureSet().day_of_week().time_since_first_event_of_day("UTC+02:00")
+    )
+
+    assert extractor.feature_names() == [
+        "clock:day_of_week",
+        "clock:time_since_first_event_of_day:7200000ms",
+    ]
 
 
 def test_custom_column_names_are_preserved():
@@ -101,10 +138,8 @@ def test_failed_validation_is_atomic_and_does_not_lock_dtype():
         extractor.compute_features(invalid)
 
     extractor.output_dtype = np.float32
-    result = extractor.compute_features(
-        invalid.assign(price=[10.0, 12.0, 11.0])
-    )
-    np.testing.assert_array_equal(result["btcusdt_count"], [1.0, 2.0, 3.0])
+    result = extractor.compute_features(invalid.assign(price=[10.0, 12.0, 11.0]))
+    np.testing.assert_array_equal(result[count_name("BTCUSDT")], [1.0, 2.0, 3.0])
 
 
 def test_global_order_is_enforced_across_all_mutating_methods():
@@ -112,7 +147,7 @@ def test_global_order_is_enforced_across_all_mutating_methods():
     btc = extractor.symbol("BTCUSDT")
     extractor.update(fiml.KIND_TRADE, btc, 200, price=10.0, volume=1.0)
 
-    with pytest.raises(ValueError, match="global timestamp watermark 200"):
+    with pytest.raises(ValueError, match="previous timestamp 200"):
         extractor.compute_features(
             pd.DataFrame(
                 {"symbol": ["BTCUSDT"], "ts": [199], "price": [10.0], "volume": [1.0]},
@@ -120,7 +155,7 @@ def test_global_order_is_enforced_across_all_mutating_methods():
             )
         )
 
-    with pytest.raises(ValueError, match="global timestamp watermark 200"):
+    with pytest.raises(ValueError, match="previous timestamp 200"):
         extractor.transform(
             np.array([fiml.KIND_TRADE], dtype=np.uint8),
             np.array([btc], dtype=np.int64),
@@ -162,7 +197,7 @@ def test_empty_input_has_schema_and_does_not_lock_dtype():
     result = extractor.compute_features(source)
 
     assert result.empty
-    assert list(result.columns) == ["symbol", "ts", "btcusdt_count"]
+    assert list(result.columns) == ["symbol", "ts", count_name("BTCUSDT")]
     extractor.output_dtype = np.float32
     assert extractor.output_dtype == "float32"
 
@@ -193,21 +228,7 @@ def test_backward_timestamp_reports_row_and_index():
         extractor.compute_features(source)
 
 
-def test_duplicate_and_colliding_names_are_rejected():
-    duplicate_features = (
-        fiml.FeatureSet()
-        .day_of_week("BTCUSDT", name="duplicate")
-        .day_of_week("ETHUSDT", name="duplicate")
-    )
-    with pytest.raises(ValueError, match="duplicate feature name"):
-        fiml.FeatureExtractor(duplicate_features)
-
-    extractor = fiml.FeatureExtractor(
-        fiml.FeatureSet().day_of_week("BTCUSDT", name="symbol")
-    )
-    with pytest.raises(ValueError, match="collides with a metadata column"):
-        extractor.compute_features(trades())
-
+def test_duplicate_input_columns_are_rejected():
     duplicate_columns = trades()
     duplicate_columns.columns = ["symbol", "ts", "price", "price"]
     with pytest.raises(ValueError, match="column labels must be unique"):

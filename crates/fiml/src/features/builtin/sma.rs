@@ -1,40 +1,33 @@
 use std::time::Duration;
 
 use crate::features::BuiltinFeature;
-use crate::features::event::{Event, EventKind, FeatureRoute, market_value_for_kind};
-use crate::features::indicator_vector::{BuiltinFeatureEntry, FeatureKey};
-use crate::indicators::{
-    PendingSmaPeriods, PendingSmaTimedPeriods, SimpleMovingAverage, SimpleMovingAverageTimed,
-};
+use crate::features::builtin::write_outputs;
+use crate::features::compiler::OutputSpan;
+use crate::features::definition::{MAX_OUTPUTS_PER_INDICATOR, ValueSource};
+use crate::features::event::Event;
+use crate::indicators::{SimpleMovingAverage, SimpleMovingAverageTimed};
 use crate::vectors::FeatureVector;
 use crate::{FimlError, Float, HeapRingBuffer, Result, Symbol};
 
-/// Maximum number of SMA windows that can share a single indicator instance.
-/// Exceeding it during construction is an error.
-pub const MAX_WINDOWS_PER_SMA: usize = 16;
-
 pub struct SmaFeature<F: Float> {
     symbol: Symbol,
-    event_kind: EventKind,
-    sma: SimpleMovingAverage<HeapRingBuffer<F>, F, MAX_WINDOWS_PER_SMA>,
-    output_indexes: [usize; MAX_WINDOWS_PER_SMA],
-    output_count: usize,
+    source: ValueSource,
+    sma: SimpleMovingAverage<HeapRingBuffer<F>, F, MAX_OUTPUTS_PER_INDICATOR>,
+    output_span: OutputSpan,
 }
 
 impl<F: Float> SmaFeature<F> {
     pub(crate) fn new(
         symbol: Symbol,
-        event_kind: EventKind,
-        sma: SimpleMovingAverage<HeapRingBuffer<F>, F, MAX_WINDOWS_PER_SMA>,
-        output_indexes: [usize; MAX_WINDOWS_PER_SMA],
-        output_count: usize,
+        source: ValueSource,
+        sma: SimpleMovingAverage<HeapRingBuffer<F>, F, MAX_OUTPUTS_PER_INDICATOR>,
+        output_span: OutputSpan,
     ) -> Self {
         Self {
             symbol,
-            event_kind,
+            source,
             sma,
-            output_indexes,
-            output_count,
+            output_span,
         }
     }
 
@@ -43,41 +36,32 @@ impl<F: Float> SmaFeature<F> {
         event: &Event<F>,
         output: &mut O,
     ) {
-        if let Some(value) = market_value_for_kind(event, self.event_kind, self.symbol) {
+        if let Some(value) = self.source.value(event, self.symbol) {
             self.sma.update(value);
-            for (window_index, output_index) in self
-                .output_indexes
-                .iter()
-                .enumerate()
-                .take(self.output_count)
-            {
-                if let Some(value) = self.sma.value_at(window_index) {
-                    output.set_value_at(*output_index, value);
-                }
-            }
+            write_outputs(self.output_span, output, |index| self.sma.value_at(index));
         }
     }
 }
 
 pub struct SmaTimedFeature<F: Float> {
     symbol: Symbol,
-    sma: SimpleMovingAverageTimed<HeapRingBuffer<(i64, F)>, F, MAX_WINDOWS_PER_SMA>,
-    output_indexes: [usize; MAX_WINDOWS_PER_SMA],
-    output_count: usize,
+    source: ValueSource,
+    sma: SimpleMovingAverageTimed<HeapRingBuffer<(i64, F)>, F, MAX_OUTPUTS_PER_INDICATOR>,
+    output_span: OutputSpan,
 }
 
 impl<F: Float> SmaTimedFeature<F> {
     pub(crate) fn new(
         symbol: Symbol,
-        sma: SimpleMovingAverageTimed<HeapRingBuffer<(i64, F)>, F, MAX_WINDOWS_PER_SMA>,
-        output_indexes: [usize; MAX_WINDOWS_PER_SMA],
-        output_count: usize,
+        source: ValueSource,
+        sma: SimpleMovingAverageTimed<HeapRingBuffer<(i64, F)>, F, MAX_OUTPUTS_PER_INDICATOR>,
+        output_span: OutputSpan,
     ) -> Self {
         Self {
             symbol,
+            source,
             sma,
-            output_indexes,
-            output_count,
+            output_span,
         }
     }
 
@@ -86,210 +70,61 @@ impl<F: Float> SmaTimedFeature<F> {
         event: &Event<F>,
         output: &mut O,
     ) {
-        if let Event::Price(p) = event
-            && p.symbol == self.symbol
-        {
-            self.sma.update_inner(p.value, p.timestamp);
-            for (window_index, output_index) in self
-                .output_indexes
-                .iter()
-                .enumerate()
-                .take(self.output_count)
-            {
-                if let Some(value) = self.sma.value_at(window_index) {
-                    output.set_value_at(*output_index, value);
-                }
-            }
+        if let Some(value) = self.source.value(event, self.symbol) {
+            self.sma.update_inner(value, event.timestamp());
+            write_outputs(self.output_span, output, |index| self.sma.value_at(index));
         }
     }
 }
 
-pub(crate) fn validate_period(period: usize) -> Result<()> {
-    if period == 0 {
-        return Err(FimlError::InvalidArgument(
-            "SMA period must be at least 1".to_string(),
-        ));
-    }
-    Ok(())
-}
-
-pub(crate) fn validate_event_kind(event_kind: EventKind) -> Result<()> {
-    match event_kind {
-        EventKind::Price | EventKind::Volume | EventKind::Trade => Ok(()),
-        EventKind::OrderBook | EventKind::Time => Err(FimlError::InvalidArgument(
-            "SMA event kind must be price, volume, or trade".to_string(),
-        )),
-    }
-}
-
-pub(in crate::features) fn timed_periods(aggregation: Duration, window: Duration) -> Result<usize> {
-    validate_timed_durations(aggregation, window)?;
-    Ok((window.as_millis() / aggregation.as_millis()) as usize)
-}
-
-pub(in crate::features) fn validate_timed_durations(
-    aggregation: Duration,
-    window: Duration,
-) -> Result<()> {
-    let aggregation_millis = aggregation.as_millis();
-    let window_millis = window.as_millis();
-    if aggregation_millis == 0 {
-        return Err(FimlError::InvalidArgument(
-            "SMA timed aggregation must be at least 1 millisecond".to_string(),
-        ));
-    }
-    if window_millis < aggregation_millis {
-        return Err(FimlError::InvalidArgument(
-            "SMA timed window cannot be less than aggregation".to_string(),
-        ));
-    }
-    if !window_millis.is_multiple_of(aggregation_millis) {
-        return Err(FimlError::InvalidArgument(
-            "SMA timed window must be a multiple of aggregation".to_string(),
-        ));
-    }
-    Ok(())
-}
-
-pub(in crate::features) fn build_builtin<F: Float>(
+pub(crate) fn build<F: Float>(
     symbol: Symbol,
-    period: usize,
-    event_kind: EventKind,
-    output_index: usize,
+    source: ValueSource,
+    windows: &[usize],
+    output_span: OutputSpan,
 ) -> Result<BuiltinFeature<F>> {
-    validate_event_kind(event_kind)?;
-    let mut sma =
-        SimpleMovingAverage::<HeapRingBuffer<F>, F, MAX_WINDOWS_PER_SMA>::new_heap(period);
-    sma.add_window(period)
-        .expect("validated SMA period should fit its ring buffer");
-    let mut output_indexes = [0; MAX_WINDOWS_PER_SMA];
-    output_indexes[0] = output_index;
+    debug_assert_eq!(windows.len(), output_span.count);
+    let max_window = windows.iter().copied().max().unwrap_or(0);
+    let mut sma = SimpleMovingAverage::<HeapRingBuffer<F>, F, MAX_OUTPUTS_PER_INDICATOR>::new_heap(
+        max_window,
+    );
+    for &window in windows {
+        sma.add_window(window)?;
+    }
     Ok(BuiltinFeature::Sma(SmaFeature::new(
         symbol,
-        event_kind,
+        source,
         sma,
-        output_indexes,
-        1,
+        output_span,
     )))
 }
 
-pub(in crate::features) fn build_timed_builtin<F: Float>(
+pub(crate) fn build_timed<F: Float>(
     symbol: Symbol,
+    source: ValueSource,
     aggregation: Duration,
-    window: Duration,
-    output_index: usize,
+    periods: &[usize],
+    max_period: usize,
+    output_span: OutputSpan,
 ) -> Result<BuiltinFeature<F>> {
-    let period = timed_periods(aggregation, window)?;
-    let capacity = period
+    debug_assert_eq!(periods.len(), output_span.count);
+    let capacity = max_period
         .checked_add(1)
         .ok_or_else(|| FimlError::InvalidArgument("SMA timed period is too large".to_string()))?;
-    let mut sma =
-        SimpleMovingAverageTimed::<HeapRingBuffer<(i64, F)>, F, MAX_WINDOWS_PER_SMA>::new_heap(
-            aggregation,
-            capacity,
-        )?;
-    sma.add_window_with_periods(period)
-        .expect("validated SMA timed period should fit its ring buffer");
-    let mut output_indexes = [0; MAX_WINDOWS_PER_SMA];
-    output_indexes[0] = output_index;
+    let mut sma = SimpleMovingAverageTimed::<
+        HeapRingBuffer<(i64, F)>,
+        F,
+        MAX_OUTPUTS_PER_INDICATOR,
+    >::new_heap(aggregation, capacity)?;
+    for &period in periods {
+        sma.add_window_with_periods(period)?;
+    }
     Ok(BuiltinFeature::SmaTimed(SmaTimedFeature::new(
         symbol,
+        source,
         sma,
-        output_indexes,
-        1,
+        output_span,
     )))
-}
-
-pub(crate) fn build_sma_periods_entry<F: Float>(
-    config: &PendingSmaPeriods,
-    names: &mut [Option<FeatureKey>],
-) -> BuiltinFeatureEntry<F> {
-    let mut sma = SimpleMovingAverage::<HeapRingBuffer<F>, F, MAX_WINDOWS_PER_SMA>::new_heap(
-        config.max_period,
-    );
-    let mut output_indexes = [0; MAX_WINDOWS_PER_SMA];
-
-    for (window_index, period) in config
-        .periods
-        .iter()
-        .copied()
-        .enumerate()
-        .take(config.window_count)
-    {
-        sma.add_window(period)
-            .expect("validated SMA period should fit its ring buffer");
-        let output_index = config.output_start + window_index;
-        output_indexes[window_index] = output_index;
-        names[output_index] = Some(FeatureKey {
-            symbol: config.symbol,
-            name: feature_name(config.event_kind, period),
-        });
-    }
-
-    BuiltinFeatureEntry {
-        feature: BuiltinFeature::Sma(SmaFeature::new(
-            config.symbol,
-            config.event_kind,
-            sma,
-            output_indexes,
-            config.window_count,
-        )),
-        route: FeatureRoute::Kind(config.event_kind),
-    }
-}
-
-fn feature_name(event_kind: EventKind, period: usize) -> String {
-    match event_kind {
-        EventKind::Price => format!("sma_periods_{period}"),
-        EventKind::Volume => format!("volume_sma_periods_{period}"),
-        EventKind::Trade => format!("trade_sma_periods_{period}"),
-        EventKind::OrderBook | EventKind::Time => {
-            unreachable!("validated SMA event kind should be price, volume, or trade")
-        }
-    }
-}
-
-pub(crate) fn build_sma_timed_periods_entry<F: Float>(
-    config: &PendingSmaTimedPeriods,
-    names: &mut [Option<FeatureKey>],
-) -> Result<BuiltinFeatureEntry<F>> {
-    let capacity = config
-        .max_period
-        .checked_add(1)
-        .ok_or_else(|| FimlError::InvalidArgument("SMA timed period is too large".to_string()))?;
-    let mut sma =
-        SimpleMovingAverageTimed::<HeapRingBuffer<(i64, F)>, F, MAX_WINDOWS_PER_SMA>::new_heap(
-            config.aggregation,
-            capacity,
-        )?;
-    let mut output_indexes = [0; MAX_WINDOWS_PER_SMA];
-
-    for (window_index, period) in config
-        .periods
-        .iter()
-        .copied()
-        .enumerate()
-        .take(config.window_count)
-    {
-        sma.add_window_with_periods(period)
-            .expect("validated SMA timed period should fit its ring buffer");
-        let output_index = config.output_start + window_index;
-        output_indexes[window_index] = output_index;
-        names[output_index] = Some(FeatureKey {
-            symbol: config.symbol,
-            name: format!("sma_timed_periods_{period}"),
-        });
-    }
-
-    Ok(BuiltinFeatureEntry {
-        feature: BuiltinFeature::SmaTimed(SmaTimedFeature::new(
-            config.symbol,
-            sma,
-            output_indexes,
-            config.window_count,
-        )),
-        route: FeatureRoute::Kind(EventKind::Price),
-    })
 }
 
 #[cfg(test)]
@@ -302,69 +137,48 @@ mod tests {
     }
 
     #[test]
-    fn sma_reacts_to_price_events() {
-        let aapl = symbols::intern("AAPL");
-        let googl = symbols::intern("GOOGL");
-        let mut fv: ArrayFeatureVector<f64, 1> = ArrayFeatureVector::new();
-        let mut sma: SimpleMovingAverage<HeapRingBuffer<f64>, f64, MAX_WINDOWS_PER_SMA> =
-            SimpleMovingAverage::new_heap(3);
-        sma.add_window(3).unwrap();
-        let mut output_indexes = [0; MAX_WINDOWS_PER_SMA];
-        output_indexes[0] = 0;
+    fn grouped_sma_writes_adjacent_outputs() {
+        let symbol = symbols::intern("AAPL");
+        let mut feature = match build::<f64>(
+            symbol,
+            ValueSource::Price,
+            &[2, 3],
+            OutputSpan { start: 0, count: 2 },
+        )
+        .unwrap()
+        {
+            BuiltinFeature::Sma(feature) => feature,
+            _ => unreachable!(),
+        };
+        let mut output = ArrayFeatureVector::<f64, 2>::new();
 
-        let mut feat = SmaFeature::new(aapl, EventKind::Price, sma, output_indexes, 1);
-        for v in [3.0, 6.0, 9.0] {
-            feat.update(&Event::price(aapl, v, 0), &mut fv);
+        for value in [1.0, 2.0, 3.0] {
+            feature.update(&Event::price(symbol, value, 0), &mut output);
         }
-        feat.update(&Event::volume(aapl, 90.0, 0), &mut fv);
-        feat.update(&Event::price(googl, 30.0, 0), &mut fv);
-        feat.update(&Event::time(123), &mut fv);
 
-        assert!(approx_eq(fv.values()[0], 6.0));
+        assert!(approx_eq(output.values()[0], 2.5));
+        assert!(approx_eq(output.values()[1], 2.0));
     }
 
     #[test]
-    fn sma_reacts_to_volume_events() {
-        let aapl = symbols::intern("AAPL");
-        let googl = symbols::intern("GOOGL");
-        let mut fv: ArrayFeatureVector<f64, 1> = ArrayFeatureVector::new();
-        let mut sma: SimpleMovingAverage<HeapRingBuffer<f64>, f64, MAX_WINDOWS_PER_SMA> =
-            SimpleMovingAverage::new_heap(3);
-        sma.add_window(3).unwrap();
-        let mut output_indexes = [0; MAX_WINDOWS_PER_SMA];
-        output_indexes[0] = 0;
+    fn sma_can_consume_trade_volume() {
+        let symbol = symbols::intern("AAPL");
+        let mut feature = match build::<f64>(
+            symbol,
+            ValueSource::TradeVolume,
+            &[2],
+            OutputSpan { start: 0, count: 1 },
+        )
+        .unwrap()
+        {
+            BuiltinFeature::Sma(feature) => feature,
+            _ => unreachable!(),
+        };
+        let mut output = ArrayFeatureVector::<f64, 1>::new();
 
-        let mut feat = SmaFeature::new(aapl, EventKind::Volume, sma, output_indexes, 1);
-        feat.update(&Event::price(aapl, 1_000.0, 0), &mut fv);
-        for v in [100.0, 200.0, 300.0] {
-            feat.update(&Event::volume(aapl, v, 0), &mut fv);
-        }
-        feat.update(&Event::volume(googl, 3_000.0, 0), &mut fv);
-        feat.update(&Event::time(123), &mut fv);
+        feature.update(&Event::trade(symbol, 100.0, 4.0, 0), &mut output);
+        feature.update(&Event::trade(symbol, 101.0, 6.0, 1), &mut output);
 
-        assert!(approx_eq(fv.values()[0], 200.0));
-    }
-
-    #[test]
-    fn sma_reacts_to_trade_price_events() {
-        let aapl = symbols::intern("AAPL");
-        let googl = symbols::intern("GOOGL");
-        let mut fv: ArrayFeatureVector<f64, 1> = ArrayFeatureVector::new();
-        let mut sma: SimpleMovingAverage<HeapRingBuffer<f64>, f64, MAX_WINDOWS_PER_SMA> =
-            SimpleMovingAverage::new_heap(3);
-        sma.add_window(3).unwrap();
-        let mut output_indexes = [0; MAX_WINDOWS_PER_SMA];
-        output_indexes[0] = 0;
-
-        let mut feat = SmaFeature::new(aapl, EventKind::Trade, sma, output_indexes, 1);
-        feat.update(&Event::price(aapl, 1_000.0, 0), &mut fv);
-        feat.update(&Event::volume(aapl, 1_000.0, 0), &mut fv);
-        for price in [3.0, 6.0, 9.0] {
-            feat.update(&Event::trade(aapl, price, 100.0, 0), &mut fv);
-        }
-        feat.update(&Event::trade(googl, 30.0, 100.0, 0), &mut fv);
-        feat.update(&Event::time(123), &mut fv);
-
-        assert!(approx_eq(fv.values()[0], 6.0));
+        assert!(approx_eq(output.values()[0], 5.0));
     }
 }

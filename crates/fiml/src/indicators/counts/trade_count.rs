@@ -51,8 +51,16 @@ where
         let data = new_heap_ring_buffer::<CountBucket>(capacity);
         Ok(Self {
             data,
-            millis_aggregation: aggregation.as_millis() as i64,
-            window_duration: window.as_millis() as i64,
+            millis_aggregation: i64::try_from(aggregation.as_millis()).map_err(|_| {
+                FimlError::InvalidArgument(
+                    "trade count aggregation must fit signed 64-bit milliseconds".into(),
+                )
+            })?,
+            window_duration: i64::try_from(window.as_millis()).map_err(|_| {
+                FimlError::InvalidArgument(
+                    "trade count window must fit signed 64-bit milliseconds".into(),
+                )
+            })?,
             window_count: 0,
             front_offset: 0,
             _marker: PhantomData,
@@ -129,6 +137,13 @@ where
 pub(crate) fn validate_durations(aggregation: Duration, window: Duration) -> Result<usize> {
     let aggregation_millis = aggregation.as_millis();
     let window_millis = window.as_millis();
+    if !aggregation.subsec_nanos().is_multiple_of(1_000_000)
+        || !window.subsec_nanos().is_multiple_of(1_000_000)
+    {
+        return Err(FimlError::InvalidArgument(
+            "trade count durations must use whole-millisecond precision".to_string(),
+        ));
+    }
     if aggregation_millis == 0 {
         return Err(FimlError::InvalidArgument(
             "trade count aggregation must be at least 1 millisecond".to_string(),
@@ -144,7 +159,18 @@ pub(crate) fn validate_durations(aggregation: Duration, window: Duration) -> Res
             "trade count window must be a multiple of aggregation".to_string(),
         ));
     }
-    Ok((window_millis / aggregation_millis) as usize)
+    i64::try_from(aggregation_millis).map_err(|_| {
+        FimlError::InvalidArgument(
+            "trade count aggregation must fit signed 64-bit milliseconds".to_string(),
+        )
+    })?;
+    i64::try_from(window_millis).map_err(|_| {
+        FimlError::InvalidArgument(
+            "trade count window must fit signed 64-bit milliseconds".to_string(),
+        )
+    })?;
+    usize::try_from(window_millis / aggregation_millis)
+        .map_err(|_| FimlError::InvalidArgument("trade count period must fit usize".to_string()))
 }
 
 #[cfg(test)]

@@ -31,10 +31,18 @@ tungstenite = "0.29"
 name = "feature_extractor"
 required-features = ["serde"]
 
+[[example]]
+name = "feature_set_from_json"
+required-features = ["serde"]
+
 [[bench]]
 name = "sma"
 harness = false
 
 [[bench]]
 name = "ring_buffer"
+harness = false
+
+[[bench]]
+name = "extractor_dispatch"
 harness = false

@@ -7,12 +7,11 @@
 //! identical output. Indicator state is always `f64`; Python arrays can be
 //! returned as `float32` or `float64`.
 
-use std::collections::HashSet;
 use std::time::Duration;
 
 use fiml::{
-    Event, FeatureDef, FeatureExtractor as CoreFeatureExtractor, FeatureSet as CoreFeatureSet,
-    IndicatorFeatures, IndicatorSpec, Symbol, symbols,
+    Event, FeatureExtractor as CoreFeatureExtractor, FeatureSet as CoreFeatureSet, IndicatorDef,
+    IndicatorFeatures, IndicatorSpec, Symbol, TimeWindows, ValueSource, symbols,
 };
 use numpy::ndarray::Array2;
 use numpy::{IntoPyArray, PyArray1, PyReadonlyArray1};
@@ -57,21 +56,30 @@ fn invalid_duration(field: &str, text: &str) -> PyErr {
     ))
 }
 
-fn parse_event_kind(field: &str, value: &str) -> PyResult<fiml::EventKind> {
+fn parse_value_source(field: &str, value: &str) -> PyResult<ValueSource> {
     match value {
-        "price" => Ok(fiml::EventKind::Price),
-        "volume" => Ok(fiml::EventKind::Volume),
-        "trade" => Ok(fiml::EventKind::Trade),
+        "price" => Ok(ValueSource::Price),
+        "volume" => Ok(ValueSource::Volume),
+        "trade_price" => Ok(ValueSource::TradePrice),
+        "trade_volume" => Ok(ValueSource::TradeVolume),
         _ => Err(PyValueError::new_err(format!(
-            "invalid `{field}` {value:?}; expected \"price\", \"volume\", or \"trade\""
+            "invalid `{field}` {value:?}; expected \"price\", \"volume\", \
+             \"trade_price\", or \"trade_volume\""
         ))),
     }
 }
 
+fn parse_durations(field: &str, values: Vec<String>) -> PyResult<Vec<Duration>> {
+    values
+        .iter()
+        .map(|value| parse_duration(field, value))
+        .collect()
+}
+
 /// Parse a fixed-offset timezone into an offset from UTC in milliseconds:
 /// `"UTC"`, `"UTC+3"`, `"UTC-05:30"`, `"+02:00"`, `"-7"`. Named IANA zones are
-/// intentionally unsupported (the core carries no timezone database); pass the
-/// session's fixed UTC offset instead.
+/// intentionally unsupported (the core carries no timezone database); pass a
+/// fixed UTC offset instead.
 fn parse_tz(tz: &str) -> PyResult<i64> {
     let invalid = || {
         PyValueError::new_err(format!(
@@ -110,19 +118,14 @@ pub struct FeatureSet {
 }
 
 impl FeatureSet {
-    /// Append one feature definition; `name` overrides the generated default.
-    fn push(
-        &mut self,
-        name: Option<String>,
-        default_name: String,
-        symbol: &str,
-        indicator: IndicatorSpec,
-    ) {
-        self.inner.features.push(FeatureDef {
-            name: name.unwrap_or(default_name),
-            symbol: symbol.to_string(),
-            indicator,
-        });
+    fn push_symbol(&mut self, symbol: &str, indicator: IndicatorSpec) {
+        self.inner
+            .indicators
+            .push(IndicatorDef::symbol(symbol, indicator));
+    }
+
+    fn push_global(&mut self, indicator: IndicatorSpec) {
+        self.inner.indicators.push(IndicatorDef::global(indicator));
     }
 }
 
@@ -146,161 +149,131 @@ impl FeatureSet {
         serde_json::to_string(&self.inner).map_err(|e| PyValueError::new_err(e.to_string()))
     }
 
-    /// Feature (output column) names in definition order.
-    fn feature_names(&self) -> Vec<String> {
-        self.inner
-            .features
-            .iter()
-            .map(|feature| feature.name.clone())
-            .collect()
+    /// Number of runtime indicator instances.
+    fn indicator_count(&self) -> usize {
+        self.inner.indicator_count()
     }
 
-    fn __len__(&self) -> usize {
-        self.inner.features.len()
+    /// Number of output cells produced after compilation.
+    fn output_count(&self) -> usize {
+        self.inner.output_count()
     }
 
-    /// Simple moving average over `period` values from `event_kind`.
-    #[pyo3(signature = (symbol, period, name=None, *, event_kind="price"))]
+    /// Grouped simple moving averages over ordered sample windows.
+    #[pyo3(signature = (symbol, windows, *, source="price"))]
     fn sma<'py>(
         mut slf: PyRefMut<'py, Self>,
         symbol: &str,
-        period: usize,
-        name: Option<String>,
-        event_kind: &str,
+        windows: Vec<usize>,
+        source: &str,
     ) -> PyResult<PyRefMut<'py, Self>> {
-        slf.push(
-            name,
-            format!("sma_{period}"),
+        slf.push_symbol(
             symbol,
             IndicatorSpec::Sma {
-                period,
-                event_kind: parse_event_kind("event_kind", event_kind)?,
+                source: parse_value_source("source", source)?,
+                windows,
             },
         );
         Ok(slf)
     }
 
-    /// Exponential moving average over `period` values from `event_kind`.
-    #[pyo3(signature = (symbol, period, name=None, *, event_kind="price"))]
+    /// Grouped exponential moving averages over ordered sample windows.
+    #[pyo3(signature = (symbol, windows, *, source="price"))]
     fn ema<'py>(
         mut slf: PyRefMut<'py, Self>,
         symbol: &str,
-        period: usize,
-        name: Option<String>,
-        event_kind: &str,
+        windows: Vec<usize>,
+        source: &str,
     ) -> PyResult<PyRefMut<'py, Self>> {
-        slf.push(
-            name,
-            format!("ema_{period}"),
+        slf.push_symbol(
             symbol,
             IndicatorSpec::Ema {
-                period,
-                event_kind: parse_event_kind("event_kind", event_kind)?,
+                source: parse_value_source("source", source)?,
+                windows,
             },
         );
         Ok(slf)
     }
 
-    /// Time-bucketed SMA of `symbol` prices: buckets of `aggregation` over a
-    /// rolling `window` (duration strings, e.g. `aggregation="1s", window="60s"`).
-    #[pyo3(signature = (symbol, aggregation, window, name=None))]
+    /// Grouped time-bucketed moving averages over ordered duration windows.
+    #[pyo3(signature = (symbol, aggregation, windows, *, source="price"))]
     fn sma_timed<'py>(
         mut slf: PyRefMut<'py, Self>,
         symbol: &str,
         aggregation: &str,
-        window: &str,
-        name: Option<String>,
+        windows: Vec<String>,
+        source: &str,
     ) -> PyResult<PyRefMut<'py, Self>> {
-        let spec = IndicatorSpec::SmaTimed {
-            aggregation: parse_duration("aggregation", aggregation)?,
-            window: parse_duration("window", window)?,
-        };
-        slf.push(
-            name,
-            format!("sma_timed_{aggregation}_{window}"),
+        slf.push_symbol(
             symbol,
-            spec,
+            IndicatorSpec::SmaTimed {
+                source: parse_value_source("source", source)?,
+                time_windows: TimeWindows::new(
+                    parse_duration("aggregation", aggregation)?,
+                    parse_durations("windows", windows)?,
+                ),
+            },
         );
         Ok(slf)
     }
 
-    /// Time-bucketed on-balance volume of `symbol` trades over a rolling
-    /// `window`, bucketed by `aggregation` (duration strings).
-    #[pyo3(signature = (symbol, aggregation, window, name=None))]
+    /// Grouped time-bucketed on-balance-volume windows.
+    #[pyo3(signature = (symbol, aggregation, windows))]
     fn obv_timed<'py>(
         mut slf: PyRefMut<'py, Self>,
         symbol: &str,
         aggregation: &str,
-        window: &str,
-        name: Option<String>,
+        windows: Vec<String>,
     ) -> PyResult<PyRefMut<'py, Self>> {
-        let spec = IndicatorSpec::ObvTimed {
-            aggregation: parse_duration("aggregation", aggregation)?,
-            window: parse_duration("window", window)?,
-        };
-        slf.push(
-            name,
-            format!("obv_timed_{aggregation}_{window}"),
+        slf.push_symbol(
             symbol,
-            spec,
+            IndicatorSpec::ObvTimed {
+                time_windows: TimeWindows::new(
+                    parse_duration("aggregation", aggregation)?,
+                    parse_durations("windows", windows)?,
+                ),
+            },
         );
         Ok(slf)
     }
 
     /// Rolling count of `symbol` trades over a `window`, bucketed by
     /// `aggregation` (duration strings).
-    #[pyo3(signature = (symbol, aggregation, window, name=None))]
+    #[pyo3(signature = (symbol, aggregation, window))]
     fn trade_count_timed<'py>(
         mut slf: PyRefMut<'py, Self>,
         symbol: &str,
         aggregation: &str,
         window: &str,
-        name: Option<String>,
     ) -> PyResult<PyRefMut<'py, Self>> {
-        let spec = IndicatorSpec::TradeCountTimed {
-            aggregation: parse_duration("aggregation", aggregation)?,
-            window: parse_duration("window", window)?,
-        };
-        slf.push(
-            name,
-            format!("trade_count_timed_{aggregation}_{window}"),
+        slf.push_symbol(
             symbol,
-            spec,
+            IndicatorSpec::TradeCountTimed {
+                aggregation: parse_duration("aggregation", aggregation)?,
+                window: parse_duration("window", window)?,
+            },
         );
         Ok(slf)
     }
 
     /// Day-of-week clock feature (`0 = Sunday ..= 6 = Saturday`). Refreshes
     /// from every event's timestamp, so it has a value on every row.
-    #[pyo3(signature = (symbol, name=None))]
-    fn day_of_week<'py>(
-        mut slf: PyRefMut<'py, Self>,
-        symbol: &str,
-        name: Option<String>,
-    ) -> PyRefMut<'py, Self> {
-        slf.push(
-            name,
-            "day_of_week".to_string(),
-            symbol,
-            IndicatorSpec::DayOfWeek,
-        );
+    fn day_of_week(slf: PyRefMut<'_, Self>) -> PyRefMut<'_, Self> {
+        let mut slf = slf;
+        slf.push_global(IndicatorSpec::DayOfWeek);
         slf
     }
 
-    /// Milliseconds since the session opened (the first event after a day
-    /// boundary in `tz`). `tz` is `"UTC"` or a fixed offset like `"UTC+3"` /
-    /// `"-05:30"`. Refreshes on every event.
-    #[pyo3(signature = (symbol, tz="UTC", name=None))]
-    fn time_since_session_open<'py>(
+    /// Milliseconds since the first observed event after a local day boundary.
+    #[pyo3(signature = (tz="UTC"))]
+    fn time_since_first_event_of_day<'py>(
         mut slf: PyRefMut<'py, Self>,
-        symbol: &str,
         tz: &str,
-        name: Option<String>,
     ) -> PyResult<PyRefMut<'py, Self>> {
-        let spec = IndicatorSpec::TimeSinceSessionOpen {
+        let spec = IndicatorSpec::TimeSinceFirstEventOfDay {
             utc_offset_millis: parse_tz(tz)?,
         };
-        slf.push(name, "time_since_session_open".to_string(), symbol, spec);
+        slf.push_global(spec);
         Ok(slf)
     }
 }
@@ -372,15 +345,6 @@ impl OutputBuffer {
 }
 
 fn build_core(feature_set: &CoreFeatureSet) -> PyResult<CoreFeatureExtractor> {
-    let mut names = HashSet::with_capacity(feature_set.features.len());
-    for feature in &feature_set.features {
-        if !names.insert(feature.name.as_str()) {
-            return Err(PyValueError::new_err(format!(
-                "duplicate feature name {:?}",
-                feature.name
-            )));
-        }
-    }
     CoreFeatureExtractor::from_feature_set(feature_set)
         .map_err(|error| PyValueError::new_err(error.to_string()))
 }
@@ -394,8 +358,6 @@ pub struct FeatureExtractor {
     symbols: Vec<Symbol>,
     n_features: usize,
     output_dtype: OutputDtype,
-    /// Timestamp of the last event accepted through any mutating Python API.
-    last_timestamp: Option<i64>,
 }
 
 impl FeatureExtractor {
@@ -406,19 +368,7 @@ impl FeatureExtractor {
             symbols: Vec::new(),
             n_features,
             output_dtype,
-            last_timestamp: None,
         }
-    }
-
-    fn validate_global_timestamp(&self, timestamp: i64) -> PyResult<()> {
-        if let Some(previous) = self.last_timestamp
-            && timestamp < previous
-        {
-            return Err(PyValueError::new_err(format!(
-                "timestamp {timestamp} is before the global timestamp watermark {previous}"
-            )));
-        }
-        Ok(())
     }
 
     fn symbol_at(&self, handle: i64) -> PyResult<Symbol> {
@@ -544,7 +494,7 @@ impl FeatureExtractor {
     /// Change the output dtype before the first event is processed.
     #[setter]
     fn set_output_dtype(&mut self, value: &str) -> PyResult<()> {
-        if self.last_timestamp.is_some() {
+        if self.inner.has_dispatched() {
             return Err(PyValueError::new_err(
                 "output_dtype cannot be changed after the extractor has processed an event",
             ));
@@ -566,7 +516,7 @@ impl FeatureExtractor {
 
     /// Feature (column) names in output order.
     fn feature_names(&self) -> Vec<String> {
-        self.inner.feature_names()
+        self.inner.feature_names().to_vec()
     }
 
     /// Number of feature columns.
@@ -613,14 +563,9 @@ impl FeatureExtractor {
         ask: Option<f64>,
     ) -> PyResult<()> {
         let event = self.build_event(kind, symbol, timestamp, price, volume, bid, ask)?;
-        self.validate_global_timestamp(timestamp)?;
-        self.inner
-            .validate_dispatch(&event)
-            .map_err(|error| PyValueError::new_err(error.to_string()))?;
         self.inner
             .dispatch(&event)
             .map_err(|error| PyValueError::new_err(error.to_string()))?;
-        self.last_timestamp = Some(timestamp);
         Ok(())
     }
 
@@ -679,7 +624,6 @@ impl FeatureExtractor {
         // against both extractor state and earlier rows in this batch, before
         // dispatching any event or allocating the output matrix.
         let mut events = Vec::with_capacity(n_rows);
-        let mut previous_timestamp = self.last_timestamp;
         for row in 0..n_rows {
             let event = self
                 .build_event(
@@ -692,20 +636,13 @@ impl FeatureExtractor {
                     ask.map(|column| column[row]),
                 )
                 .map_err(|err| PyValueError::new_err(format!("row {row}: {}", err.value(py))))?;
-            if let Some(previous) = previous_timestamp
-                && event.timestamp() < previous
-            {
-                return Err(PyValueError::new_err(format!(
-                    "row {row}: timestamp {} is before the global timestamp watermark {previous}",
-                    event.timestamp()
-                )));
-            }
-            self.inner
-                .validate_dispatch(&event)
-                .map_err(|err| PyValueError::new_err(format!("row {row}: {err}")))?;
-            previous_timestamp = Some(event.timestamp());
             events.push(event);
         }
+        self.inner
+            .validate_dispatch_sequence(&events)
+            .map_err(|error| {
+                PyValueError::new_err(format!("row {}: {}", error.index, error.error))
+            })?;
 
         let n_features = self.n_features;
         let mut output = OutputBuffer::new(self.output_dtype, n_rows * n_features);
@@ -714,7 +651,6 @@ impl FeatureExtractor {
                 .dispatch(event)
                 .map_err(|err| PyValueError::new_err(format!("row {row}: {err}")))?;
             output.write_row(row, n_features, self.inner.values());
-            self.last_timestamp = Some(event.timestamp());
         }
         output.into_pyarray(py, n_rows, n_features)
     }

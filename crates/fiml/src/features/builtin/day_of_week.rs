@@ -1,8 +1,8 @@
+use crate::Float;
 use crate::features::BuiltinFeature;
-use crate::features::event::{Event, FeatureRoute};
-use crate::features::indicator_vector::{BuiltinFeatureEntry, FeatureKey};
+use crate::features::compiler::OutputSpan;
+use crate::features::event::Event;
 use crate::vectors::FeatureVector;
-use crate::{Float, Symbol};
 
 /// Milliseconds in a day. Event timestamps are epoch milliseconds, so the
 /// calendar day index is the timestamp divided by this.
@@ -12,19 +12,20 @@ const MILLIS_PER_DAY: i64 = 86_400_000;
 /// event timestamp to its output cell. An every-event clock feature: it refreshes
 /// from each event's timestamp regardless of kind, so it has a value on every row.
 pub struct DayOfWeek {
-    output_index: usize,
+    output_span: OutputSpan,
 }
 
 impl DayOfWeek {
-    pub fn new(output_index: usize) -> Self {
-        Self { output_index }
+    pub(crate) fn new(output_span: OutputSpan) -> Self {
+        debug_assert_eq!(output_span.count, 1);
+        Self { output_span }
     }
 
     pub fn update<F: Float, O: FeatureVector<F = F>>(&mut self, timestamp: i64, output: &mut O) {
         // Unix epoch (1970-01-01) was a Thursday, index 4 in a Sunday-based week.
         let days = timestamp.div_euclid(MILLIS_PER_DAY);
         let dow = (days + 4).rem_euclid(7);
-        output.set_value_at(self.output_index, F::from_usize(dow as usize));
+        output.set_value_at(self.output_span.start, F::from_usize(dow as usize));
     }
 
     pub(in crate::features) fn update_event<F: Float, O: FeatureVector<F = F>>(
@@ -36,19 +37,8 @@ impl DayOfWeek {
     }
 }
 
-pub(crate) fn build_entry<F: Float>(
-    symbol: Symbol,
-    output_index: usize,
-    names: &mut [Option<FeatureKey>],
-) -> BuiltinFeatureEntry<F> {
-    names[output_index] = Some(FeatureKey {
-        symbol,
-        name: "day_of_week".to_string(),
-    });
-    BuiltinFeatureEntry {
-        feature: BuiltinFeature::DayOfWeek(DayOfWeek::new(output_index)),
-        route: FeatureRoute::Every,
-    }
+pub(crate) fn build<F: Float>(output_span: OutputSpan) -> BuiltinFeature<F> {
+    BuiltinFeature::DayOfWeek(DayOfWeek::new(output_span))
 }
 
 #[cfg(test)]
@@ -64,7 +54,7 @@ mod tests {
     fn day_of_week_reacts_to_every_event() {
         let aapl = symbols::intern("AAPL");
         let mut fv: ArrayFeatureVector<f64, 1> = ArrayFeatureVector::new();
-        let mut feat = DayOfWeek::new(0);
+        let mut feat = DayOfWeek::new(OutputSpan { start: 0, count: 1 });
 
         // A price event carries a timestamp too, so the clock feature updates from
         // it without needing an explicit time event. 2021-01-01 was a Friday (5),

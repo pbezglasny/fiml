@@ -1,6 +1,6 @@
 use fiml::features::Pipeline;
 use fiml::features::transformers::StandardScaler;
-use fiml::{ArrayFeatureVector, Event, IndicatorFeatureVectorBuilder, Symbol, symbols};
+use fiml::{ArrayFeatureVector, Event, FeatureSet, IndicatorFeatureVector, Symbol, symbols};
 use rand::rngs::StdRng;
 use rand::{RngExt, SeedableRng};
 
@@ -44,12 +44,11 @@ impl StubPriceProducer {
 fn main() -> anyhow::Result<()> {
     let symbol = symbols::intern("STUB");
 
-    let indicators =
-        IndicatorFeatureVectorBuilder::<f64, _, 1>::new(ArrayFeatureVector::<f64, 1>::new())
-            .ema_periods(symbol)
-            .window(5)?
-            .done()?
-            .build()?;
+    let feature_set = FeatureSet::builder().ema("STUB", [5]).build();
+    let indicators = IndicatorFeatureVector::<f64, _, 1>::from_feature_set(
+        ArrayFeatureVector::<f64, 1>::new(),
+        &feature_set,
+    )?;
 
     let mut pipeline: Pipeline<
         _,

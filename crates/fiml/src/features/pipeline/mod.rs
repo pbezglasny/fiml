@@ -104,7 +104,7 @@ where
 mod tests {
     use super::*;
     use crate::features::transformers::StandardScaler;
-    use crate::{ArrayFeatureVector, FeatureVector, Symbol};
+    use crate::{ArrayFeatureVector, FeatureVector};
 
     struct TestIndicators {
         cells: ArrayFeatureVector<f64, 1>,
@@ -134,7 +134,7 @@ mod tests {
             Ok(())
         }
 
-        fn index_of(&self, _symbol: Symbol, _name: &str) -> Option<usize> {
+        fn index_of(&self, _canonical_name: &str) -> Option<usize> {
             None
         }
     }

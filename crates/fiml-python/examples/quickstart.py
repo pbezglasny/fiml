@@ -23,9 +23,9 @@ T0 = 1_609_459_200_000
 def build_feature_set() -> fiml.FeatureSet:
     return (
         fiml.FeatureSet()
-        .sma("BTCUSDT", period=3)
-        .ema("BTCUSDT", period=3)
-        .day_of_week("BTCUSDT")
+        .sma("BTCUSDT", [3])
+        .ema("BTCUSDT", [3])
+        .day_of_week()
     )
 
 
@@ -88,11 +88,11 @@ def check_compute_features() -> None:
 
     feature_set = (
         fiml.FeatureSet()
-        .sma("BTCUSDT", period=3, event_kind="trade")
-        .ema("BTCUSDT", period=3, event_kind="trade")
-        .obv_timed("BTCUSDT", aggregation="1s", window="60s")
+        .sma("BTCUSDT", [3], source="trade_price")
+        .ema("BTCUSDT", [3], source="trade_price")
+        .obv_timed("BTCUSDT", aggregation="1s", windows=["60s"])
         .trade_count_timed("BTCUSDT", aggregation="1s", window="60s")
-        .day_of_week("BTCUSDT")
+        .day_of_week()
     )
     extractor = fiml.FeatureExtractor(feature_set, output_dtype=np.float32)
     feats = extractor.compute_features(df)

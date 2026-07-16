@@ -99,11 +99,11 @@ import pandas as pd
 import fiml
 
 fs = (fiml.FeatureSet()
-      .sma("BTCUSDT", period=12, event_kind="trade")
-      .ema("BTCUSDT", period=12, event_kind="trade")
-      .obv_timed("BTCUSDT", aggregation="1ms", window="60s")
+      .sma("BTCUSDT", [12, 24], source="trade_price")
+      .ema("BTCUSDT", [12], source="trade_price")
+      .obv_timed("BTCUSDT", aggregation="1ms", windows=["30s", "60s"])
       .trade_count_timed("BTCUSDT", aggregation="1ms", window="60s")
-      .day_of_week("BTCUSDT"))
+      .day_of_week())
 
 extractor = fiml.FeatureExtractor(fs, output_dtype="float32")
 
@@ -149,28 +149,37 @@ extractor = fiml.FeatureExtractor.from_json(
 
 ```json
 {
-  "features": [
-    { "name": "sma_12", "symbol": "BTCUSDT",
-      "indicator": { "Sma": { "period": 12, "event_kind": "Trade" } } },
-    { "name": "ema_12", "symbol": "BTCUSDT",
-      "indicator": { "Ema": { "period": 12, "event_kind": "Trade" } } },
-    { "name": "obv_timed_1s_60s", "symbol": "BTCUSDT",
-      "indicator": { "ObvTimed": { "aggregation": { "secs": 1, "nanos": 0 },
-                                   "window":      { "secs": 60, "nanos": 0 } } } }
+  "indicators": [
+    { "symbol": "BTCUSDT",
+      "indicator": { "Sma": {
+        "source": "trade_price", "windows": [12, 24]
+      } } },
+    { "symbol": "BTCUSDT",
+      "indicator": { "Ema": {
+        "source": "trade_price", "windows": [12]
+      } } },
+    { "symbol": "BTCUSDT",
+      "indicator": { "ObvTimed": { "time_windows": {
+        "aggregation": { "secs": 0, "nanos": 1000000 },
+        "windows": [
+          { "secs": 30, "nanos": 0 },
+          { "secs": 60, "nanos": 0 }
+        ]
+      } } } }
   ]
 }
 ```
 
 Builder methods: `sma`, `ema`, `sma_timed`, `obv_timed`, `trade_count_timed`,
-`day_of_week`, `time_since_session_open` (fixed-offset `tz`, default `"UTC"`).
-Durations are strings (`"500ms"`, `"1s"`, `"5m"`, `"1h"`); every method accepts
-`name=` to override the generated column name. Feature order in the builder is
-the output column order.
+`day_of_week`, and `time_since_first_event_of_day` (fixed-offset `tz`, default
+`"UTC"`). SMA, EMA, timed SMA, and timed OBV accept ordered window lists; each
+list becomes one runtime indicator with adjacent output cells. Durations are
+strings (`"500ms"`, `"1s"`, `"5m"`, `"1h"`).
 
-`sma` and `ema` accept a keyword-only `event_kind` of `"price"`, `"volume"`, or
-`"trade"` (default `"price"`). Use `event_kind="trade"` with the trade-only
-`compute_features` API. The selected kind is serialized in `FeatureSet` JSON so
-historical Python and live Rust routing remain identical.
+Moving averages accept a keyword-only `source` of `"price"`, `"volume"`,
+`"trade_price"`, or `"trade_volume"` (default `"price"`). Use a trade source
+with `compute_features`. Output names are generated canonically at compilation,
+for example `BTCUSDT:trade_price:sma:12`; arbitrary aliases are not supported.
 
 ## Low-level event API
 

@@ -1,8 +1,8 @@
 use std::time::Duration;
 
 use crate::features::BuiltinFeature;
-use crate::features::event::{Event, EventKind, FeatureRoute};
-use crate::features::indicator_vector::{BuiltinFeatureEntry, FeatureKey};
+use crate::features::compiler::OutputSpan;
+use crate::features::event::Event;
 use crate::indicators::{CountBucket, TradeCountTimed};
 use crate::vectors::FeatureVector;
 use crate::{Float, HeapRingBuffer, Result, Symbol};
@@ -12,19 +12,20 @@ use crate::{Float, HeapRingBuffer, Result, Symbol};
 pub struct TradeCountTimedFeature<F: Float> {
     symbol: Symbol,
     counter: TradeCountTimed<HeapRingBuffer<CountBucket>, F>,
-    output_index: usize,
+    output_span: OutputSpan,
 }
 
 impl<F: Float> TradeCountTimedFeature<F> {
     pub(crate) fn new(
         symbol: Symbol,
         counter: TradeCountTimed<HeapRingBuffer<CountBucket>, F>,
-        output_index: usize,
+        output_span: OutputSpan,
     ) -> Self {
+        debug_assert_eq!(output_span.count, 1);
         Self {
             symbol,
             counter,
-            output_index,
+            output_span,
         }
     }
 
@@ -37,38 +38,21 @@ impl<F: Float> TradeCountTimedFeature<F> {
             && trade.symbol == self.symbol
         {
             self.counter.update_inner(trade.timestamp);
-            output.set_value_at(self.output_index, self.counter.window_value());
+            output.set_value_at(self.output_span.start, self.counter.window_value());
         }
     }
 }
 
-pub(in crate::features) fn build_builtin<F: Float>(
+pub(crate) fn build<F: Float>(
     symbol: Symbol,
     aggregation: Duration,
     window: Duration,
-    output_index: usize,
+    output_span: OutputSpan,
 ) -> Result<BuiltinFeature<F>> {
     let counter = TradeCountTimed::<HeapRingBuffer<CountBucket>, F>::new_heap(aggregation, window)?;
     Ok(BuiltinFeature::TradeCountTimed(
-        TradeCountTimedFeature::new(symbol, counter, output_index),
+        TradeCountTimedFeature::new(symbol, counter, output_span),
     ))
-}
-
-pub(crate) fn build_entry<F: Float>(
-    symbol: Symbol,
-    aggregation: Duration,
-    window: Duration,
-    output_index: usize,
-    names: &mut [Option<FeatureKey>],
-) -> Result<BuiltinFeatureEntry<F>> {
-    names[output_index] = Some(FeatureKey {
-        symbol,
-        name: "trade_count_timed".to_string(),
-    });
-    Ok(BuiltinFeatureEntry {
-        feature: build_builtin(symbol, aggregation, window, output_index)?,
-        route: FeatureRoute::Kind(EventKind::Trade),
-    })
 }
 
 #[cfg(test)]
@@ -90,7 +74,8 @@ mod tests {
             Duration::from_millis(2_000),
         )
         .unwrap();
-        let mut feat = TradeCountTimedFeature::new(aapl, counter, 0);
+        let mut feat =
+            TradeCountTimedFeature::new(aapl, counter, OutputSpan { start: 0, count: 1 });
 
         feat.update(&Event::trade(aapl, 100.0, 1.0, 0), &mut fv);
         feat.update(&Event::trade(aapl, 101.0, 1.0, 100), &mut fv);

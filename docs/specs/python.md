@@ -71,14 +71,20 @@ extractor = fiml.FeatureExtractor.from_json(json_str)   # or fiml.FeatureSet.fro
 
 ```json
 {
-  "features": [
-    { "name": "sma_12", "symbol": "BTCUSDT",
-      "indicator": { "Sma": { "period": 12, "event_kind": "Trade" } } },
-    { "name": "ema_12", "symbol": "BTCUSDT",
-      "indicator": { "Ema": { "period": 12, "event_kind": "Trade" } } },
-    { "name": "obv_2s", "symbol": "BTCUSDT",
-      "indicator": { "ObvTimed": { "aggregation": { "secs": 1, "nanos": 0 },
-                                   "window":      { "secs": 2, "nanos": 0 } } } }
+  "indicators": [
+    { "symbol": "BTCUSDT",
+      "indicator": { "Sma": {
+        "source": "trade_price", "windows": [12, 24]
+      } } },
+    { "symbol": "BTCUSDT",
+      "indicator": { "Ema": {
+        "source": "trade_price", "windows": [12]
+      } } },
+    { "symbol": "BTCUSDT",
+      "indicator": { "ObvTimed": { "time_windows": {
+        "aggregation": { "secs": 1, "nanos": 0 },
+        "windows": [{ "secs": 2, "nanos": 0 }]
+      } } } }
   ]
 }
 ```
@@ -87,25 +93,23 @@ extractor = fiml.FeatureExtractor.from_json(json_str)   # or fiml.FeatureSet.fro
 
 ```python
 fs = (fiml.FeatureSet()
-      .sma("BTCUSDT", period=12, event_kind="trade")
-      .ema("BTCUSDT", period=12, event_kind="trade")
-      .obv_timed("BTCUSDT", aggregation="1s", window="2s")
-      .day_of_week("BTCUSDT"))
+      .sma("BTCUSDT", [12, 24], source="trade_price")
+      .ema("BTCUSDT", [12], source="trade_price")
+      .obv_timed("BTCUSDT", aggregation="1s", windows=["2s"])
+      .day_of_week())
 
 extractor = fiml.FeatureExtractor(fs)   # build directly from a FeatureSet
 fs.to_json()                      # == the JSON in 3a; saveable for Rust serving
 ```
 
-Builder methods mirror the available `IndicatorSpec` variants (`Sma`, `Ema`,
-`SmaTimed`, `ObvTimed`, `TradeCountTimed`, `DayOfWeek`, `TimeSinceSessionOpen`);
-each appends a `FeatureDef` (`name`, `symbol`, `indicator`), with an optional
-`name=` kwarg overriding the generated column name. Durations are strings
-(`"500ms"`, `"1s"`, `"5m"`, `"1h"`). Feature **order** in the builder is the
-output column order, exactly as in JSON.
+Builder methods mirror the grouped `IndicatorSpec` variants. Each call appends
+one runtime indicator definition, and its ordered windows own adjacent output
+cells. Durations are strings (`"500ms"`, `"1s"`, `"5m"`, `"1h"`). Output names
+are generated canonically during compilation; user aliases are not accepted.
 
-`sma` and `ema` accept `event_kind="price"|"volume"|"trade"`, defaulting to
-`"price"`. Trade DataFrames require `event_kind="trade"`; the route is part of
-the serialized parity contract.
+Moving averages accept `source="price"|"volume"|"trade_price"|"trade_volume"`,
+defaulting to `"price"`. Trade DataFrames require a trade source; the source is
+part of the serialized parity contract.
 
 ## 4. Symbols
 
@@ -258,8 +262,8 @@ Derived features fall into two categories.
 
 ### 11a. Time-derived ("clock") features — must update every row ✅ (core change)
 
-Pure (or session-stateful) functions of the current timestamp: `day_of_week`,
-`time_of_day`, `time_since_session_open`, … Every event already carries a
+Pure (or day-stateful) functions of the current timestamp: `day_of_week`,
+`time_of_day`, `time_since_first_event_of_day`, … Every event already carries a
 timestamp, so these can refresh on every row.
 
 - **Mechanism (A1):** an "every-event" feature group in core. In addition to the
@@ -267,14 +271,14 @@ timestamp, so these can refresh on every row.
   `Event::timestamp()` accessor. `day_of_week` moves out of the `Time`-only group
   into it. Result: a value on every row, on any stream, with no synthetic events
   and no phantom rows in the per-event matrix.
-- **`time_since_session_open`:** a *stateful* clock feature. It records the
-  session-open timestamp = the first event after a **day boundary**, and outputs
-  `current_ts − session_open_ts` on every row. The day boundary is defined by a
+- **`time_since_first_event_of_day`:** a *stateful* clock feature. It records
+  the first observed timestamp after a **day boundary**, and outputs
+  `current_ts − first_event_ts` on every row. The day boundary is defined by a
   timezone (default **UTC**), the feature's only config. It is **inferred from the
   stream** — no hard-coded exchange hours — so Python and Rust derive the same
   boundary from the same events.
-  *Implementation deviation:* the core variant is
-  `TimeSinceSessionOpen { utc_offset_millis: i64 }` — a **fixed UTC offset**,
+  The core variant is
+  `TimeSinceFirstEventOfDay { utc_offset_millis: i64 }` — a **fixed UTC offset**,
   not an IANA zone name (a tz database would violate the no-third-party-deps
   rule). The Python builder accepts `tz="UTC"`, `"UTC+3"`, `"-05:30"`, … and
   maps it to the offset; zones with DST transitions are not representable.
@@ -294,8 +298,8 @@ change** — just new builtins. Window semantics:
 
 ```python
 fs = (fiml.FeatureSet()
-      .day_of_week("BTCUSDT")
-      .time_since_session_open("BTCUSDT", tz="UTC")
+      .day_of_week()
+      .time_since_first_event_of_day(tz="UTC")
       .trade_count_timed("BTCUSDT", aggregation="1s", window="60s"))
 ```
 
@@ -310,24 +314,20 @@ This work is no longer binding-only. To deliver the full-dataframe guarantee:
 2. **"Every-event" feature group** in `IndicatorFeatureVector`: run it on every
    `dispatch`; move `day_of_week` into it; extend the group/`Drop` bookkeeping. ✅
 3. **New builtins + `IndicatorSpec` variants:**
-   `TimeSinceSessionOpen { utc_offset_millis }` (fixed offset, not an IANA `tz`
+   `TimeSinceFirstEventOfDay { utc_offset_millis }` (fixed offset, not an IANA `tz`
    — see §11a) and `TradeCountTimed { aggregation, window }` (cumulative count
-   not added yet). Wired into `build_builtin` / `route`, the feature-vector
-   builder, and the Python `FeatureSet` builder (per AGENTS.md: update the
-   feature vector builder after adding indicators). ✅
+   not added yet). Both use the unified feature-set compiler. ✅
 4. **Fix timestamp units:** `day_of_week` divided by `86_400` assuming
    **seconds** while the contract is **milliseconds** (§8.5). Fixed: divisor is
    `86_400_000`. ✅
-5. **RENAME `spec` → `FeatureSet` in the Rust core:** ✅
-   - `EngineSpec` → `FeatureSet`; `FeatureSpec` → `FeatureDef`; `BuiltinSpec` →
-     `IndicatorSpec` (note: the per-entry type **cannot** be `Feature` — that name
-     is the runtime trait in `indicator_vector.rs`).
+5. **Unify definitions and compilation in the Rust core:** ✅
+   - `FeatureSet` contains grouped `IndicatorDef` values and `IndicatorSpec`
+     stores ordered output windows.
    - `DynIndicatorEngine::from_spec` → `from_feature_set`; binding
      `Engine.from_spec_json` → `FeatureExtractor.from_json`; added
-     `FeatureSet.from_json` / `to_json`. `spec.rs` renamed to `feature_set.rs`.
-   - **JSON shape change:** the per-feature key `"spec"` → `"indicator"` (the top
-     `"features"` key stays). This changes saved parity files — migrate or
-     version them.
+     `FeatureSet.from_json` / `to_json`.
+   - **JSON shape change:** the top-level key is `"indicators"` and arbitrary
+     names are removed. This changes saved parity files.
 6. **RENAME `Engine` → `FeatureExtractor`:** the Python binding class and the
    Rust runtime `DynIndicatorEngine` (`engine.rs` renamed to `extractor.rs`),
    with constructors `from_feature_set` (Rust) / `FeatureExtractor(fs)` and
@@ -337,8 +337,8 @@ This work is no longer binding-only. To deliver the full-dataframe guarantee:
 
 - Time-derived features update on **every event** via an "every-event" core group
   (A1), not synthetic `Time` events.
-- `time_since_session_open` infers session start from the stream (first event after
-  a day boundary); timezone is the only knob, default **UTC**, expressed as a
+- `time_since_first_event_of_day` records the first stream event after a day
+  boundary; timezone is the only knob, default **UTC**, expressed as a
   **fixed UTC offset** (`utc_offset_millis`) — no IANA tz database (§11a).
 - `number_of_trades` is a **timed** counter (reusing aggregation+window); cumulative
   is an optional extra (not yet added).
