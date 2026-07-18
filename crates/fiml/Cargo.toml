@@ -36,6 +36,10 @@ required-features = ["serde"]
 name = "feature_set_from_json"
 required-features = ["serde"]
 
+[[example]]
+name = "replay_trades"
+required-features = ["serde"]
+
 [[bench]]
 name = "sma"
 harness = false
