@@ -39,6 +39,44 @@
       }
     },
     {
+      "symbol": "ETHUSDT",
+      "indicator": {
+        "Sma": {
+          "source": "trade_price",
+          "windows": [
+            2,
+            4
+          ]
+        }
+      }
+    },
+    {
+      "symbol": "ETHUSDT",
+      "indicator": {
+        "Ema": {
+          "source": "trade_price",
+          "windows": [
+            2
+          ]
+        }
+      }
+    },
+    {
+      "symbol": "ETHUSDT",
+      "indicator": {
+        "TradeCountTimed": {
+          "aggregation": {
+            "secs": 0,
+            "nanos": 1000000
+          },
+          "window": {
+            "secs": 60,
+            "nanos": 0
+          }
+        }
+      }
+    },
+    {
       "symbol": null,
       "indicator": "DayOfWeek"
     }
