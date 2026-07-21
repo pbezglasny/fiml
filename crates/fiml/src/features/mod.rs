@@ -11,6 +11,8 @@ pub mod transformers;
 pub use builder::FeatureSetBuilder;
 pub use builtin::BuiltinFeature;
 pub use builtin::{DayOfWeek, EmaFeature, ObvTimedFeature, SmaFeature, SmaTimedFeature};
+#[cfg(feature = "serde")]
+pub use definition::FEATURE_SET_FORMAT_VERSION;
 pub use definition::{
     FeatureSet, IndicatorDef, IndicatorSpec, MAX_OUTPUTS_PER_INDICATOR, TimeWindows, ValueSource,
 };

@@ -1,3 +1,5 @@
+import json
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -256,3 +258,31 @@ def test_from_json_accepts_numpy_dtype():
         trade_counts("BTCUSDT").to_json(), output_dtype=np.float32
     )
     assert extractor.output_dtype == "float32"
+
+
+def test_feature_set_json_emits_and_accepts_compatible_semantic_versions():
+    payload = json.loads(trade_counts("BTCUSDT").to_json())
+    assert fiml.FEATURE_SET_FORMAT_VERSION == "1.0.0"
+    assert payload["version"] == fiml.FEATURE_SET_FORMAT_VERSION
+
+    for version in ["1.0", "1.99.3"]:
+        payload["version"] = version
+        restored = fiml.FeatureSet.from_json(json.dumps(payload))
+        assert restored.indicator_count() == 1
+
+
+@pytest.mark.parametrize(
+    ("payload", "message"),
+    [
+        ({"indicators": []}, "missing field.*version"),
+        ({"version": "release-1", "indicators": []}, "invalid feature set version"),
+        ({"version": "2.0", "indicators": []}, "unsupported feature set version"),
+        ({"version": "1.1.0-beta.1", "indicators": []}, "unsupported feature set version"),
+    ],
+)
+@pytest.mark.parametrize(
+    "loader", [fiml.FeatureSet.from_json, fiml.FeatureExtractor.from_json]
+)
+def test_json_loaders_reject_incompatible_versions(loader, payload, message):
+    with pytest.raises(ValueError, match=message):
+        loader(json.dumps(payload))

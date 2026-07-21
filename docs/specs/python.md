@@ -71,6 +71,7 @@ extractor = fiml.FeatureExtractor.from_json(json_str)   # or fiml.FeatureSet.fro
 
 ```json
 {
+  "version": "1.0.0",
   "indicators": [
     { "symbol": "BTCUSDT",
       "indicator": { "Sma": {
@@ -88,6 +89,11 @@ extractor = fiml.FeatureExtractor.from_json(json_str)   # or fiml.FeatureSet.fro
   ]
 }
 ```
+
+The required `version` is the feature-set schema version, independent of the
+package version. Writers emit full SemVer. Readers also accept short forms such
+as `1.0` and accept stable artifacts with the same major version; prerelease
+artifacts require an exact matching prerelease loader.
 
 ### 3b. Python builder ✅
 

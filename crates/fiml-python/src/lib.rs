@@ -10,8 +10,9 @@
 use std::time::Duration;
 
 use fiml::{
-    Event, FeatureExtractor as CoreFeatureExtractor, FeatureSet as CoreFeatureSet, IndicatorDef,
-    IndicatorFeatures, IndicatorSpec, Symbol, TimeWindows, ValueSource, symbols,
+    Event, FEATURE_SET_FORMAT_VERSION, FeatureExtractor as CoreFeatureExtractor,
+    FeatureSet as CoreFeatureSet, IndicatorDef, IndicatorFeatures, IndicatorSpec, Symbol,
+    TimeWindows, ValueSource, symbols,
 };
 use numpy::ndarray::Array2;
 use numpy::{IntoPyArray, PyArray1, PyReadonlyArray1};
@@ -144,7 +145,9 @@ impl FeatureSet {
         Ok(Self { inner })
     }
 
-    /// Serialize to the JSON parity artifact shared with Rust serving.
+    /// Serialize to the versioned JSON parity artifact shared with Rust
+    /// serving. The top-level `version` defaults to
+    /// `FEATURE_SET_FORMAT_VERSION`.
     fn to_json(&self) -> PyResult<String> {
         serde_json::to_string(&self.inner).map_err(|e| PyValueError::new_err(e.to_string()))
     }
@@ -660,6 +663,7 @@ impl FeatureExtractor {
 fn _fiml(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<FeatureSet>()?;
     m.add_class::<FeatureExtractor>()?;
+    m.add("FEATURE_SET_FORMAT_VERSION", FEATURE_SET_FORMAT_VERSION)?;
     m.add("KIND_PRICE", KIND_PRICE)?;
     m.add("KIND_VOLUME", KIND_VOLUME)?;
     m.add("KIND_TRADE", KIND_TRADE)?;
