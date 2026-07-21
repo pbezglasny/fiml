@@ -11,6 +11,7 @@
 use fiml::{Event, FeatureExtractor, FeatureSet, IndicatorFeatures, symbols};
 
 const FEATURE_SET_JSON: &str = r#"{
+    "version": "1.0.0",
     "indicators": [
         {
             "symbol": "BTCUSDT",

@@ -149,6 +149,7 @@ extractor = fiml.FeatureExtractor.from_json(
 
 ```json
 {
+  "version": "1.0.0",
   "indicators": [
     { "symbol": "BTCUSDT",
       "indicator": { "Sma": {
@@ -169,6 +170,11 @@ extractor = fiml.FeatureExtractor.from_json(
   ]
 }
 ```
+
+`version` identifies the feature-set schema independently of the package
+version. Serialization emits full SemVer. Deserialization also accepts short
+forms such as `1.0` and compatible stable versions with the same major version;
+prerelease artifacts require an exact matching prerelease loader.
 
 Builder methods: `sma`, `ema`, `sma_timed`, `obv_timed`, `trade_count_timed`,
 `day_of_week`, and `time_since_first_event_of_day` (fixed-offset `tz`, default

@@ -9,6 +9,7 @@ determinism rules.
 import numpy as np
 
 from ._fiml import (
+    FEATURE_SET_FORMAT_VERSION,
     FeatureSet,
     KIND_PRICE,
     KIND_VOLUME,
@@ -21,6 +22,7 @@ from ._fiml import FeatureExtractor as _FeatureExtractor
 __all__ = [
     "FeatureExtractor",
     "FeatureSet",
+    "FEATURE_SET_FORMAT_VERSION",
     "KIND_PRICE",
     "KIND_VOLUME",
     "KIND_TRADE",

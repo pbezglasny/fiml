@@ -1,10 +1,17 @@
 use std::time::Duration;
 
+#[cfg(feature = "serde")]
+use std::borrow::Cow;
+
 use crate::features::event::{Event, EventKind, FeatureRoute};
 use crate::{Float, Symbol};
 
 /// Maximum number of adjacent outputs one runtime indicator may own.
 pub const MAX_OUTPUTS_PER_INDICATOR: usize = 16;
+
+/// Semantic version emitted in serialized [`FeatureSet`] JSON artifacts.
+#[cfg(feature = "serde")]
+pub const FEATURE_SET_FORMAT_VERSION: &str = "1.0.0";
 
 /// Numeric event field consumed by a moving average.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
@@ -172,9 +179,103 @@ impl IndicatorDef {
 
 /// Ordered, serializable definitions for a complete extractor.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct FeatureSet {
     pub indicators: Vec<IndicatorDef>,
+}
+
+#[cfg(feature = "serde")]
+#[derive(serde::Serialize)]
+struct VersionedFeatureSetRef<'a> {
+    version: &'static str,
+    indicators: &'a [IndicatorDef],
+}
+
+#[cfg(feature = "serde")]
+#[derive(serde::Deserialize)]
+struct VersionedFeatureSet<'a> {
+    #[serde(borrow)]
+    version: Cow<'a, str>,
+    indicators: Vec<IndicatorDef>,
+}
+
+#[cfg(feature = "serde")]
+impl serde::Serialize for FeatureSet {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serde::Serialize::serialize(
+            &VersionedFeatureSetRef {
+                version: FEATURE_SET_FORMAT_VERSION,
+                indicators: &self.indicators,
+            },
+            serializer,
+        )
+    }
+}
+
+#[cfg(feature = "serde")]
+impl<'de> serde::Deserialize<'de> for FeatureSet {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let serialized: VersionedFeatureSet<'de> = serde::Deserialize::deserialize(deserializer)?;
+        validate_feature_set_version(&serialized.version).map_err(serde::de::Error::custom)?;
+        Ok(Self {
+            indicators: serialized.indicators,
+        })
+    }
+}
+
+#[cfg(feature = "serde")]
+fn parse_feature_set_version(version: &str) -> Result<semver::Version, semver::Error> {
+    match semver::Version::parse(version) {
+        Ok(version) => Ok(version),
+        Err(original_error) => {
+            let suffix_start = version.find(['-', '+']).unwrap_or(version.len());
+            let (core, suffix) = version.split_at(suffix_start);
+            if core.bytes().filter(|byte| *byte == b'.').count() != 1 {
+                return Err(original_error);
+            }
+
+            semver::Version::parse(&format!("{core}.0{suffix}"))
+        }
+    }
+}
+
+#[cfg(feature = "serde")]
+fn feature_set_versions_are_compatible(
+    artifact: &semver::Version,
+    supported: &semver::Version,
+) -> bool {
+    if artifact.major != supported.major {
+        return false;
+    }
+    if artifact.pre.is_empty() {
+        return true;
+    }
+
+    !supported.pre.is_empty()
+        && artifact.minor == supported.minor
+        && artifact.patch == supported.patch
+        && artifact.pre == supported.pre
+}
+
+#[cfg(feature = "serde")]
+fn validate_feature_set_version(version: &str) -> Result<(), String> {
+    let artifact = parse_feature_set_version(version)
+        .map_err(|error| format!("invalid feature set version {version:?}: {error}"))?;
+    let supported = semver::Version::parse(FEATURE_SET_FORMAT_VERSION)
+        .expect("the feature set format version constant must be valid SemVer");
+    if feature_set_versions_are_compatible(&artifact, &supported) {
+        Ok(())
+    } else {
+        Err(format!(
+            "unsupported feature set version {version:?}; this library supports stable version {}.x",
+            supported.major
+        ))
+    }
 }
 
 impl FeatureSet {
@@ -191,5 +292,73 @@ impl FeatureSet {
             .iter()
             .map(|definition| definition.indicator.output_count())
             .sum()
+    }
+}
+
+#[cfg(all(test, feature = "serde"))]
+mod serde_tests {
+    use super::*;
+
+    #[test]
+    fn serialization_emits_current_version_before_indicators() {
+        let json = serde_json::to_string(&FeatureSet::default()).unwrap();
+
+        assert_eq!(
+            json,
+            format!(r#"{{"version":"{FEATURE_SET_FORMAT_VERSION}","indicators":[]}}"#)
+        );
+    }
+
+    #[test]
+    fn deserialization_accepts_short_and_same_major_stable_versions() {
+        for version in ["1.0", "1.0.0", "1.99.3"] {
+            let json = format!(r#"{{"version":"{version}","indicators":[]}}"#);
+            let feature_set: FeatureSet = serde_json::from_str(&json).unwrap();
+            assert!(feature_set.indicators.is_empty());
+        }
+    }
+
+    #[test]
+    fn deserialization_rejects_missing_malformed_and_different_major_versions() {
+        let cases = [
+            (r#"{"indicators":[]}"#, "missing field `version`"),
+            (
+                r#"{"version":"release-1","indicators":[]}"#,
+                "invalid feature set version",
+            ),
+            (
+                r#"{"version":"2.0","indicators":[]}"#,
+                "unsupported feature set version",
+            ),
+        ];
+
+        for (json, expected) in cases {
+            let error = serde_json::from_str::<FeatureSet>(json).unwrap_err();
+            assert!(
+                error.to_string().contains(expected),
+                "expected {expected:?} in {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn prerelease_artifacts_require_the_exact_supported_prerelease() {
+        let supported = parse_feature_set_version("1.1.0-beta.2+loader").unwrap();
+
+        for compatible in ["1.1-beta.2", "1.1.0-beta.2+artifact"] {
+            let artifact = parse_feature_set_version(compatible).unwrap();
+            assert!(feature_set_versions_are_compatible(&artifact, &supported));
+        }
+        for incompatible in ["1.1.0-alpha.1", "1.1.0-beta.1", "1.2.0-beta.2"] {
+            let artifact = parse_feature_set_version(incompatible).unwrap();
+            assert!(!feature_set_versions_are_compatible(&artifact, &supported));
+        }
+
+        let stable_supported = parse_feature_set_version("1.1.0").unwrap();
+        let prerelease = parse_feature_set_version("1.1.0-beta.2").unwrap();
+        assert!(!feature_set_versions_are_compatible(
+            &prerelease,
+            &stable_supported
+        ));
     }
 }

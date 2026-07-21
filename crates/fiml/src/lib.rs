@@ -7,6 +7,8 @@ mod vectors;
 
 use std::{error::Error, fmt::Display};
 
+#[cfg(feature = "serde")]
+pub use features::FEATURE_SET_FORMAT_VERSION;
 pub use features::{
     DispatchSequenceError, Event, EventKind, Feature, FeatureExtractor, FeatureSet,
     FeatureSetBuilder, IndicatorDef, IndicatorFeatureVector, IndicatorFeatures, IndicatorSpec,
