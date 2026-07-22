@@ -85,9 +85,53 @@ def test_grouped_sma_and_ema_can_consume_trade_price_and_volume():
 def test_moving_average_source_is_validated():
     with pytest.raises(
         ValueError,
-        match='expected "price", "volume", "trade_price", or "trade_volume"',
+        match='expected "price", "volume", "trade_price", "trade_volume", or "trade_direction"',
     ):
         fiml.FeatureSet().sma("BTCUSDT", [2], source="orderbook")
+
+
+def test_trade_direction_ema_uses_buyer_market_maker_flag():
+    feature_set = fiml.FeatureSet().ema(
+        "BTCUSDT", [3], source="trade_direction"
+    )
+    extractor = fiml.FeatureExtractor(feature_set)
+    source = pd.DataFrame(
+        {
+            "symbol": ["BTCUSDT"] * 4,
+            "ts": np.arange(1_000, 1_004, dtype=np.int64),
+            "price": [10.0] * 4,
+            "volume": [1.0] * 4,
+            "buyer_maker": [False, False, True, True],
+        }
+    )
+
+    result = extractor.compute_features(source, market_maker="buyer_maker")
+
+    assert extractor.feature_names() == ["BTCUSDT:trade_direction:ema:3"]
+    np.testing.assert_allclose(result.iloc[:, 2], [1.0, 1.0, 0.0, -0.5])
+
+
+def test_trade_direction_requires_market_maker_mapping():
+    extractor = fiml.FeatureExtractor(
+        fiml.FeatureSet().ema("BTCUSDT", [3], source="trade_direction")
+    )
+
+    with pytest.raises(ValueError, match="market_maker"):
+        extractor.compute_features(trades())
+
+    btc = extractor.symbol("BTCUSDT")
+    with pytest.raises(ValueError, match="market_maker"):
+        extractor.update(fiml.KIND_TRADE, btc, 1_000, price=10.0, volume=1.0)
+
+
+def test_market_maker_column_must_be_boolean():
+    source = trades(market_maker=[0, 1, 0])
+    extractor = fiml.FeatureExtractor(
+        fiml.FeatureSet().ema("BTCUSDT", [3], source="trade_direction")
+    )
+
+    with pytest.raises(ValueError, match="must contain booleans"):
+        extractor.compute_features(source, market_maker="market_maker")
 
 
 def test_compilation_rejects_duplicate_identity_and_invalid_windows():

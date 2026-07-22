@@ -122,7 +122,12 @@ Column mappings remain configurable when a frame uses other names:
 
 ```python
 feats = extractor.compute_features(
-    trades, symbol="ticker", time="timestamp", price="px", volume="qty"
+    trades,
+    symbol="ticker",
+    time="timestamp",
+    price="px",
+    volume="qty",
+    market_maker="buyer_is_market_maker",
 )
 ```
 
@@ -183,9 +188,13 @@ list becomes one runtime indicator with adjacent output cells. Durations are
 strings (`"500ms"`, `"1s"`, `"5m"`, `"1h"`).
 
 Moving averages accept a keyword-only `source` of `"price"`, `"volume"`,
-`"trade_price"`, or `"trade_volume"` (default `"price"`). Use a trade source
-with `compute_features`. Output names are generated canonically at compilation,
-for example `BTCUSDT:trade_price:sma:12`; arbitrary aliases are not supported.
+`"trade_price"`, `"trade_volume"`, or `"trade_direction"` (default `"price"`).
+`trade_direction` derives aggressor direction from Binance-style
+buyer-is-market-maker metadata: `+1` means buyer initiated and `-1` means seller
+initiated. Pass its Boolean column as `market_maker=...` to `compute_features`.
+Use a trade source with `compute_features`. Output names are generated
+canonically at compilation, for example `BTCUSDT:trade_price:sma:12`; arbitrary
+aliases are not supported.
 
 ## Low-level event API
 
@@ -213,7 +222,7 @@ needs:
 |------|------|-----------------|
 | price | `KIND_PRICE` | `price` |
 | volume | `KIND_VOLUME` | `volume` |
-| trade | `KIND_TRADE` | `price`, `volume` |
+| trade | `KIND_TRADE` | `price`, `volume`; `market_maker` when `trade_direction` is configured |
 | order book | `KIND_ORDERBOOK` | `bid`, `ask` |
 | time | `KIND_TIME` | — |
 

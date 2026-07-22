@@ -15,7 +15,7 @@ use fiml::{
     TimeWindows, ValueSource, symbols,
 };
 use numpy::ndarray::Array2;
-use numpy::{IntoPyArray, PyArray1, PyReadonlyArray1};
+use numpy::{Element, IntoPyArray, PyArray1, PyReadonlyArray1};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 
@@ -63,9 +63,10 @@ fn parse_value_source(field: &str, value: &str) -> PyResult<ValueSource> {
         "volume" => Ok(ValueSource::Volume),
         "trade_price" => Ok(ValueSource::TradePrice),
         "trade_volume" => Ok(ValueSource::TradeVolume),
+        "trade_direction" => Ok(ValueSource::TradeDirection),
         _ => Err(PyValueError::new_err(format!(
             "invalid `{field}` {value:?}; expected \"price\", \"volume\", \
-             \"trade_price\", or \"trade_volume\""
+             \"trade_price\", \"trade_volume\", or \"trade_direction\""
         ))),
     }
 }
@@ -360,16 +361,22 @@ pub struct FeatureExtractor {
     /// in array columns instead of strings per row.
     symbols: Vec<Symbol>,
     n_features: usize,
+    requires_market_maker: bool,
     output_dtype: OutputDtype,
 }
 
 impl FeatureExtractor {
-    fn from_core(inner: CoreFeatureExtractor, output_dtype: OutputDtype) -> Self {
+    fn from_core(
+        inner: CoreFeatureExtractor,
+        requires_market_maker: bool,
+        output_dtype: OutputDtype,
+    ) -> Self {
         let n_features = inner.feature_names().len();
         Self {
             inner,
             symbols: Vec::new(),
             n_features,
+            requires_market_maker,
             output_dtype,
         }
     }
@@ -400,6 +407,7 @@ impl FeatureExtractor {
         timestamp: i64,
         price: Option<f64>,
         volume: Option<f64>,
+        market_maker: Option<bool>,
         bid: Option<f64>,
         ask: Option<f64>,
     ) -> PyResult<Event<f64>> {
@@ -412,12 +420,22 @@ impl FeatureExtractor {
                 require("volume", volume)?,
                 timestamp,
             ),
-            KIND_TRADE => Event::trade(
-                self.symbol_at(symbol)?,
-                require("price", price)?,
-                require("volume", volume)?,
-                timestamp,
-            ),
+            KIND_TRADE => {
+                let symbol = self.symbol_at(symbol)?;
+                let price = require("price", price)?;
+                let volume = require("volume", volume)?;
+                if self.requires_market_maker && market_maker.is_none() {
+                    return Err(PyValueError::new_err(
+                        "trade_direction requires the `market_maker` column",
+                    ));
+                }
+                match market_maker {
+                    Some(value) => {
+                        Event::trade_with_market_maker(symbol, price, volume, value, timestamp)
+                    }
+                    None => Event::trade(symbol, price, volume, timestamp),
+                }
+            }
             KIND_ORDERBOOK => Event::order_book(
                 self.symbol_at(symbol)?,
                 require("bid", bid)?,
@@ -444,11 +462,11 @@ fn require(column: &str, value: Option<f64>) -> PyResult<f64> {
 /// Resolve an optional `transform` payload column to a contiguous slice, checking
 /// that a supplied column matches the row count. The returned slice borrows the
 /// array for as long as `array` is held, so the per-row loop only indexes it.
-fn column<'a>(
+fn column<'a, T: Element>(
     name: &str,
-    array: &'a Option<PyReadonlyArray1<'_, f64>>,
+    array: &'a Option<PyReadonlyArray1<'_, T>>,
     n_rows: usize,
-) -> PyResult<Option<&'a [f64]>> {
+) -> PyResult<Option<&'a [T]>> {
     array
         .as_ref()
         .map(|array| {
@@ -471,6 +489,7 @@ impl FeatureExtractor {
     fn new(feature_set: PyRef<'_, FeatureSet>, output_dtype: &str) -> PyResult<Self> {
         Ok(Self::from_core(
             build_core(&feature_set.inner)?,
+            feature_set.inner.requires_market_maker(),
             OutputDtype::parse(output_dtype)?,
         ))
     }
@@ -484,6 +503,7 @@ impl FeatureExtractor {
             serde_json::from_str(json).map_err(|e| PyValueError::new_err(e.to_string()))?;
         Ok(Self::from_core(
             build_core(&feature_set)?,
+            feature_set.requires_market_maker(),
             OutputDtype::parse(output_dtype)?,
         ))
     }
@@ -527,6 +547,11 @@ impl FeatureExtractor {
         self.n_features
     }
 
+    /// Whether trade events need buyer-maker metadata for this feature set.
+    fn requires_market_maker(&self) -> bool {
+        self.requires_market_maker
+    }
+
     /// Current feature values in output order. A cell is NaN until its feature
     /// has produced a first value (warmup).
     fn values(&self, py: Python<'_>) -> Py<PyAny> {
@@ -553,7 +578,7 @@ impl FeatureExtractor {
     /// [`transform`](Self::transform) for the per-kind columns): e.g.
     /// `update(KIND_PRICE, sym, ts, price=...)` or
     /// `update(KIND_ORDERBOOK, sym, ts, bid=..., ask=...)`.
-    #[pyo3(signature = (kind, symbol, timestamp, *, price=None, volume=None, bid=None, ask=None))]
+    #[pyo3(signature = (kind, symbol, timestamp, *, price=None, volume=None, market_maker=None, bid=None, ask=None))]
     #[allow(clippy::too_many_arguments)] // payload columns are the Python keyword API
     fn update(
         &mut self,
@@ -562,10 +587,20 @@ impl FeatureExtractor {
         timestamp: i64,
         price: Option<f64>,
         volume: Option<f64>,
+        market_maker: Option<bool>,
         bid: Option<f64>,
         ask: Option<f64>,
     ) -> PyResult<()> {
-        let event = self.build_event(kind, symbol, timestamp, price, volume, bid, ask)?;
+        let event = self.build_event(
+            kind,
+            symbol,
+            timestamp,
+            price,
+            volume,
+            market_maker,
+            bid,
+            ask,
+        )?;
         self.inner
             .dispatch(&event)
             .map_err(|error| PyValueError::new_err(error.to_string()))?;
@@ -580,7 +615,8 @@ impl FeatureExtractor {
     ///
     /// - `KIND_PRICE` -> `price`
     /// - `KIND_VOLUME` -> `volume`
-    /// - `KIND_TRADE` -> `price` and `volume`
+    /// - `KIND_TRADE` -> `price`, `volume`, and `market_maker` when required by
+    ///   a `trade_direction` source
     /// - `KIND_ORDERBOOK` -> `bid` and `ask`
     /// - `KIND_TIME` -> none
     ///
@@ -592,7 +628,7 @@ impl FeatureExtractor {
     /// `i` of the returned `(n_rows, n_features)` matrix in `output_dtype`
     /// (cells are NaN until their feature warms up). Looping in Rust keeps this
     /// fast while using the exact live dispatch path.
-    #[pyo3(signature = (kind, symbol, timestamp, *, price=None, volume=None, bid=None, ask=None))]
+    #[pyo3(signature = (kind, symbol, timestamp, *, price=None, volume=None, market_maker=None, bid=None, ask=None))]
     #[allow(clippy::too_many_arguments)] // payload columns are the Python keyword API
     fn transform<'py>(
         &mut self,
@@ -602,6 +638,7 @@ impl FeatureExtractor {
         timestamp: PyReadonlyArray1<'py, i64>,
         price: Option<PyReadonlyArray1<'py, f64>>,
         volume: Option<PyReadonlyArray1<'py, f64>>,
+        market_maker: Option<PyReadonlyArray1<'py, bool>>,
         bid: Option<PyReadonlyArray1<'py, f64>>,
         ask: Option<PyReadonlyArray1<'py, f64>>,
     ) -> PyResult<Py<PyAny>> {
@@ -620,6 +657,7 @@ impl FeatureExtractor {
         // length here so the per-row hot loop only indexes (no allocation).
         let price = column("price", &price, n_rows)?;
         let volume = column("volume", &volume, n_rows)?;
+        let market_maker = column("market_maker", &market_maker, n_rows)?;
         let bid = column("bid", &bid, n_rows)?;
         let ask = column("ask", &ask, n_rows)?;
 
@@ -635,6 +673,7 @@ impl FeatureExtractor {
                     timestamp[row],
                     price.map(|column| column[row]),
                     volume.map(|column| column[row]),
+                    market_maker.map(|column| column[row]),
                     bid.map(|column| column[row]),
                     ask.map(|column| column[row]),
                 )

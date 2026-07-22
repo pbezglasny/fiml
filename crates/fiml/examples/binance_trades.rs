@@ -1,6 +1,6 @@
 use fiml::{
     ArrayFeatureVector, Event, FeatureSet, FeatureVector, IndicatorFeatureVector,
-    IndicatorFeatures, symbols,
+    IndicatorFeatures, ValueSource, symbols,
 };
 use futures::StreamExt;
 use serde::Deserialize;
@@ -21,6 +21,8 @@ struct BinanceTrade {
     quantity: f64,
     #[serde(rename = "T")]
     trade_time: i64,
+    #[serde(rename = "m")]
+    buyer_is_market_maker: bool,
 }
 
 #[tokio::main]
@@ -37,11 +39,12 @@ async fn main() -> anyhow::Result<()> {
     let symbol = symbols::intern(&symbol_name);
 
     let feature_set = FeatureSet::builder()
-        .ema(&symbol_name, [12])
-        .sma(&symbol_name, [12])
+        .ema_from(&symbol_name, ValueSource::TradePrice, [12])
+        .sma_from(&symbol_name, ValueSource::TradePrice, [12])
+        .ema_from(&symbol_name, ValueSource::TradeDirection, [12])
         .build();
-    let mut indicators = IndicatorFeatureVector::<f64, _, 2>::from_feature_set(
-        ArrayFeatureVector::<f64, 2>::new(),
+    let mut indicators = IndicatorFeatureVector::<f64, _, 3>::from_feature_set(
+        ArrayFeatureVector::<f64, 3>::new(),
         &feature_set,
     )?;
 
@@ -49,23 +52,34 @@ async fn main() -> anyhow::Result<()> {
     let (mut ws_stream, _) = connect_async(&url).await?;
     eprintln!("Connected to Binance trade stream at {url}");
 
-    println!("event_time,trade_time,symbol,price,quantity,ema_12,sma_12");
+    println!(
+        "event_time,trade_time,symbol,price,quantity,buyer_is_market_maker,\
+         trade_price_ema_12,trade_price_sma_12,trade_direction_ema_12"
+    );
     while let Some(msg) = ws_stream.next().await {
         match msg? {
             Message::Text(text) => match serde_json::from_str::<BinanceTrade>(&text) {
                 Ok(trade) => {
-                    indicators.dispatch(&Event::price(symbol, trade.price, trade.trade_time))?;
+                    indicators.dispatch(&Event::trade_with_market_maker(
+                        symbol,
+                        trade.price,
+                        trade.quantity,
+                        trade.buyer_is_market_maker,
+                        trade.trade_time,
+                    ))?;
                     let values = indicators.feature_vector().values();
 
                     println!(
-                        "{},{},{},{:.8},{:.8},{:.8},{:.8}",
+                        "{},{},{},{:.8},{:.8},{},{:.8},{:.8},{:.8}",
                         trade.event_time,
                         trade.trade_time,
                         trade.symbol,
                         trade.price,
                         trade.quantity,
+                        trade.buyer_is_market_maker,
                         values[0],
                         values[1],
+                        values[2],
                     );
                 }
                 Err(err) => eprintln!("Failed to deserialize Binance trade: {err}"),

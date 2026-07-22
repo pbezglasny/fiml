@@ -144,4 +144,32 @@ mod tests {
 
         assert!(approx_eq(fv.values()[0], 22.5));
     }
+
+    #[test]
+    fn ema_can_smooth_trade_direction() {
+        let aapl = symbols::intern("AAPL");
+        let mut feature = match build::<f64>(
+            aapl,
+            ValueSource::TradeDirection,
+            &[3],
+            OutputSpan { start: 0, count: 1 },
+        )
+        .unwrap()
+        {
+            BuiltinFeature::Ema(feature) => feature,
+            _ => unreachable!(),
+        };
+        let mut output = ArrayFeatureVector::<f64, 1>::new();
+
+        feature.update(
+            &Event::trade_with_market_maker(aapl, 100.0, 1.0, false, 0),
+            &mut output,
+        );
+        feature.update(
+            &Event::trade_with_market_maker(aapl, 100.0, 1.0, true, 1),
+            &mut output,
+        );
+
+        assert!(approx_eq(output.values()[0], 0.0));
+    }
 }

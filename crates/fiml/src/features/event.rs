@@ -79,11 +79,14 @@ pub struct VolumeUpdate<F: Float> {
     pub timestamp: i64,
 }
 
-/// A trade tick carrying price and volume.
+/// A trade tick carrying price, volume, and optional aggressor-side metadata.
 pub struct TradeUpdate<F: Float> {
     pub symbol: Symbol,
     pub price: F,
     pub volume: F,
+    /// Whether the buyer was the market maker. `None` means the source did not
+    /// provide maker-side metadata.
+    pub buyer_is_market_maker: Option<bool>,
     pub timestamp: i64,
 }
 
@@ -169,6 +172,24 @@ impl<F: Float> Event<F> {
             symbol,
             price,
             volume,
+            buyer_is_market_maker: None,
+            timestamp,
+        })
+    }
+
+    /// A trade with Binance-style buyer-maker metadata.
+    pub fn trade_with_market_maker(
+        symbol: Symbol,
+        price: F,
+        volume: F,
+        buyer_is_market_maker: bool,
+        timestamp: i64,
+    ) -> Self {
+        Event::Trade(TradeUpdate {
+            symbol,
+            price,
+            volume,
+            buyer_is_market_maker: Some(buyer_is_market_maker),
             timestamp,
         })
     }
@@ -210,7 +231,20 @@ mod tests {
             assert_eq!(trade.symbol, aapl);
             assert_eq!(trade.price, 42.0);
             assert_eq!(trade.volume, 100.0);
+            assert_eq!(trade.buyer_is_market_maker, None);
             assert_eq!(trade.timestamp, 123);
+        } else {
+            unreachable!("trade constructor should return Event::Trade");
+        }
+    }
+
+    #[test]
+    fn trade_can_carry_buyer_market_maker_flag() {
+        let aapl = symbols::intern("AAPL");
+        let event = Event::trade_with_market_maker(aapl, 42.0, 100.0, true, 123);
+
+        if let Event::Trade(trade) = event {
+            assert_eq!(trade.buyer_is_market_maker, Some(true));
         } else {
             unreachable!("trade constructor should return Event::Trade");
         }

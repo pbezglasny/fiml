@@ -98,6 +98,7 @@ class FeatureExtractor(_FeatureExtractor):
         time="ts",
         price="price",
         volume="volume",
+        market_maker=None,
     ):
         """Compute one feature-vector snapshot after every trade row.
 
@@ -105,6 +106,8 @@ class FeatureExtractor(_FeatureExtractor):
         order. Every field argument names a distinct column. Symbols are
         non-empty strings, timestamps are signed-int64 Unix milliseconds, and
         price/volume values are finite, strictly positive integers or floats.
+        ``market_maker``, when provided, names a Boolean Binance-style
+        buyer-is-market-maker column. A ``trade_direction`` feature requires it.
         The complete frame is validated before the first trade is dispatched.
 
         Args:
@@ -115,6 +118,8 @@ class FeatureExtractor(_FeatureExtractor):
             time: Name of the signed-int64 epoch-millisecond timestamp column.
             price: Name of the numeric trade-price column.
             volume: Name of the numeric trade-volume column.
+            market_maker: Optional name of the Boolean buyer-is-market-maker
+                column.
 
         Returns:
             A pandas DataFrame aligned to ``df.index``. The selected symbol and
@@ -144,8 +149,17 @@ class FeatureExtractor(_FeatureExtractor):
         mappings = (symbol, time, price, volume)
         if not all(isinstance(name, str) for name in mappings):
             raise ValueError("symbol, time, price, and volume must be column-name strings")
+        if market_maker is not None and not isinstance(market_maker, str):
+            raise ValueError("market_maker must be a column-name string or None")
+        if self.requires_market_maker() and market_maker is None:
+            raise ValueError(
+                "this feature set uses trade_direction; pass the buyer-is-market-maker "
+                "column name with market_maker=..."
+            )
+        if market_maker is not None:
+            mappings = (*mappings, market_maker)
         if len(set(mappings)) != len(mappings):
-            raise ValueError("symbol, time, price, and volume must name distinct columns")
+            raise ValueError("trade field mappings must name distinct columns")
         if not df.columns.is_unique:
             raise ValueError("input DataFrame column labels must be unique")
         for name in mappings:
@@ -193,6 +207,18 @@ class FeatureExtractor(_FeatureExtractor):
                 raise _row_error(df, invalid, name, "must be finite and greater than zero")
             numeric[name] = values
 
+        market_maker_values = None
+        if market_maker is not None:
+            market_maker_series = df[market_maker]
+            if not is_bool_dtype(market_maker_series.dtype):
+                raise ValueError(f"column {market_maker!r} must contain booleans")
+            missing = _first_invalid(market_maker_series.isna().to_numpy())
+            if missing is not None:
+                raise _row_error(df, missing, market_maker, "must not be null")
+            market_maker_values = market_maker_series.to_numpy(
+                dtype=np.bool_, copy=False
+            )
+
         n_rows = len(df)
         handles = np.empty(n_rows, dtype=np.int64)
         handle_by_name = {}
@@ -210,6 +236,7 @@ class FeatureExtractor(_FeatureExtractor):
                 timestamps,
                 price=numeric[price],
                 volume=numeric[volume],
+                market_maker=market_maker_values,
             )
         except ValueError as error:
             message = str(error)

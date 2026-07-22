@@ -26,6 +26,9 @@ pub enum ValueSource {
     Volume,
     TradePrice,
     TradeVolume,
+    /// Aggressor direction derived from buyer-maker metadata: `+1` for a
+    /// buyer-initiated trade and `-1` for a seller-initiated trade.
+    TradeDirection,
 }
 
 impl ValueSource {
@@ -33,7 +36,7 @@ impl ValueSource {
         FeatureRoute::Kind(match self {
             Self::Price => EventKind::Price,
             Self::Volume => EventKind::Volume,
-            Self::TradePrice | Self::TradeVolume => EventKind::Trade,
+            Self::TradePrice | Self::TradeVolume | Self::TradeDirection => EventKind::Trade,
         })
     }
 
@@ -43,6 +46,7 @@ impl ValueSource {
             Self::Volume => "volume",
             Self::TradePrice => "trade_price",
             Self::TradeVolume => "trade_volume",
+            Self::TradeDirection => "trade_direction",
         }
     }
 
@@ -56,8 +60,21 @@ impl ValueSource {
             (Self::TradeVolume, Event::Trade(update)) if update.symbol == symbol => {
                 Some(update.volume)
             }
+            (Self::TradeDirection, Event::Trade(update)) if update.symbol == symbol => {
+                update.buyer_is_market_maker.map(|buyer_is_market_maker| {
+                    if buyer_is_market_maker {
+                        F::ZERO.sub(F::ONE)
+                    } else {
+                        F::ONE
+                    }
+                })
+            }
             _ => None,
         }
+    }
+
+    pub fn requires_market_maker(self) -> bool {
+        matches!(self, Self::TradeDirection)
     }
 }
 
@@ -292,6 +309,19 @@ impl FeatureSet {
             .iter()
             .map(|definition| definition.indicator.output_count())
             .sum()
+    }
+
+    /// Whether computing this feature set from trades requires buyer-maker
+    /// metadata.
+    pub fn requires_market_maker(&self) -> bool {
+        self.indicators
+            .iter()
+            .any(|definition| match definition.indicator {
+                IndicatorSpec::Sma { source, .. }
+                | IndicatorSpec::Ema { source, .. }
+                | IndicatorSpec::SmaTimed { source, .. } => source.requires_market_maker(),
+                _ => false,
+            })
     }
 }
 
