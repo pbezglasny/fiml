@@ -176,8 +176,8 @@ mod tests {
         };
         let mut output = ArrayFeatureVector::<f64, 1>::new();
 
-        feature.update(&Event::trade(symbol, 100.0, 4.0, 0), &mut output);
-        feature.update(&Event::trade(symbol, 101.0, 6.0, 1), &mut output);
+        feature.update(&Event::trade(symbol, 100.0, 4.0, 0, None), &mut output);
+        feature.update(&Event::trade(symbol, 101.0, 6.0, 1, None), &mut output);
 
         assert!(approx_eq(output.values()[0], 5.0));
     }

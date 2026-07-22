@@ -86,7 +86,7 @@ mod tests {
         assert!(approx_eq(fv.values()[0], 0.0));
 
         // Later same-day event: elapsed grows from the first event.
-        feat.update_event(&Event::trade(aapl, 11.0, 1.0, open + 5_000), &mut fv);
+        feat.update_event(&Event::trade(aapl, 11.0, 1.0, open + 5_000, None), &mut fv);
         assert!(approx_eq(fv.values()[0], 5_000.0));
     }
 

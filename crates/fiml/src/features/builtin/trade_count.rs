@@ -77,9 +77,9 @@ mod tests {
         let mut feat =
             TradeCountTimedFeature::new(aapl, counter, OutputSpan { start: 0, count: 1 });
 
-        feat.update(&Event::trade(aapl, 100.0, 1.0, 0), &mut fv);
-        feat.update(&Event::trade(aapl, 101.0, 1.0, 100), &mut fv);
-        feat.update(&Event::trade(googl, 50.0, 1.0, 200), &mut fv); // other symbol
+        feat.update(&Event::trade(aapl, 100.0, 1.0, 0, None), &mut fv);
+        feat.update(&Event::trade(aapl, 101.0, 1.0, 100, None), &mut fv);
+        feat.update(&Event::trade(googl, 50.0, 1.0, 200, None), &mut fv); // other symbol
         feat.update(&Event::price(aapl, 102.0, 300), &mut fv); // other kind
 
         assert!(approx_eq(fv.values()[0], 2.0));

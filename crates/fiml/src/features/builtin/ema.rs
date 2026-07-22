@@ -137,9 +137,9 @@ mod tests {
         feat.update(&Event::price(aapl, 1_000.0, 0), &mut fv);
         feat.update(&Event::volume(aapl, 1_000.0, 0), &mut fv);
         for price in [10.0, 20.0, 30.0] {
-            feat.update(&Event::trade(aapl, price, 100.0, 0), &mut fv);
+            feat.update(&Event::trade(aapl, price, 100.0, 0, None), &mut fv);
         }
-        feat.update(&Event::trade(googl, 300.0, 100.0, 0), &mut fv);
+        feat.update(&Event::trade(googl, 300.0, 100.0, 0, None), &mut fv);
         feat.update(&Event::time(123), &mut fv);
 
         assert!(approx_eq(fv.values()[0], 22.5));

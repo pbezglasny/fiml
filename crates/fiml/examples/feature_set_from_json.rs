@@ -41,7 +41,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     for (index, symbol_name) in symbol_names.into_iter().enumerate() {
         let timestamp = (index + 1) as i64;
         let symbol = symbols::intern(symbol_name);
-        extractor.dispatch(&Event::trade(symbol, 100.0, 1.0, timestamp))?;
+        extractor.dispatch(&Event::trade(symbol, 100.0, 1.0, timestamp, None))?;
     }
 
     println!("values: {:?}", extractor.values());
