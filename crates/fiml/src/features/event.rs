@@ -79,12 +79,21 @@ pub struct VolumeUpdate<F: Float> {
     pub timestamp: i64,
 }
 
+// Who was agressor in a trade: the buyer or the seller.
+// If buyer was agressor, the trade was a buy (ask) and the price is the ask price.
+// If seller was agressor, the trade was a sell (bid) and the price is the bid price.
+pub enum TradeSide {
+    AgressorBuy,
+    AgressorSell,
+}
+
 /// A trade tick carrying price and volume.
 pub struct TradeUpdate<F: Float> {
     pub symbol: Symbol,
     pub price: F,
     pub volume: F,
     pub timestamp: i64,
+    pub side: Option<TradeSide>,
 }
 
 /// An order-book change.
@@ -164,12 +173,19 @@ impl<F: Float> Event<F> {
         })
     }
 
-    pub fn trade(symbol: Symbol, price: F, volume: F, timestamp: i64) -> Self {
+    pub fn trade(
+        symbol: Symbol,
+        price: F,
+        volume: F,
+        timestamp: i64,
+        side: Option<TradeSide>,
+    ) -> Self {
         Event::Trade(TradeUpdate {
             symbol,
             price,
             volume,
             timestamp,
+            side,
         })
     }
 
@@ -203,7 +219,7 @@ mod tests {
     #[test]
     fn trade_event_has_trade_kind_and_payload() {
         let aapl = symbols::intern("AAPL");
-        let event = Event::trade(aapl, 42.0, 100.0, 123);
+        let event = Event::trade(aapl, 42.0, 100.0, 123, Some(TradeSide::AgressorSell));
 
         assert_eq!(event.kind(), EventKind::Trade);
         if let Event::Trade(trade) = event {
@@ -211,6 +227,7 @@ mod tests {
             assert_eq!(trade.price, 42.0);
             assert_eq!(trade.volume, 100.0);
             assert_eq!(trade.timestamp, 123);
+            assert!(matches!(trade.side, Some(TradeSide::AgressorSell)));
         } else {
             unreachable!("trade constructor should return Event::Trade");
         }

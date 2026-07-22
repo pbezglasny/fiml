@@ -46,7 +46,7 @@ fn benchmark_dispatch(c: &mut Criterion) {
                 .dispatch(black_box(&Event::price(aapl, 100.0, timestamp)))
                 .unwrap();
             extractor
-                .dispatch(black_box(&Event::trade(msft, 200.0, 10.0, timestamp)))
+                .dispatch(black_box(&Event::trade(msft, 200.0, 10.0, timestamp, None)))
                 .unwrap();
         });
     });

@@ -94,11 +94,11 @@ mod tests {
         obv.add_window_with_periods(2).unwrap();
 
         let mut feat = ObvTimedFeature::new(aapl, obv, OutputSpan { start: 0, count: 1 });
-        feat.update(&Event::trade(aapl, 100.0, 10.0, 0), &mut fv);
-        feat.update(&Event::trade(aapl, 101.0, 7.0, 1_000), &mut fv);
-        feat.update(&Event::trade(aapl, 99.0, 2.0, 2_000), &mut fv);
+        feat.update(&Event::trade(aapl, 100.0, 10.0, 0, None), &mut fv);
+        feat.update(&Event::trade(aapl, 101.0, 7.0, 1_000, None), &mut fv);
+        feat.update(&Event::trade(aapl, 99.0, 2.0, 2_000, None), &mut fv);
         feat.update(&Event::price(aapl, 200.0, 3_000), &mut fv);
-        feat.update(&Event::trade(googl, 110.0, 99.0, 3_000), &mut fv);
+        feat.update(&Event::trade(googl, 110.0, 99.0, 3_000, None), &mut fv);
         feat.update(&Event::time(3_000), &mut fv);
 
         assert!(approx_eq(fv.values()[0], 5.0));

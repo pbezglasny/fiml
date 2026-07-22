@@ -417,6 +417,7 @@ impl FeatureExtractor {
                 require("price", price)?,
                 require("volume", volume)?,
                 timestamp,
+                None,
             ),
             KIND_ORDERBOOK => Event::order_book(
                 self.symbol_at(symbol)?,
