@@ -1,14 +1,24 @@
+use std::ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Sub, SubAssign};
+
 /// Generic trait for floating-point types (f32, f64).
 /// Implementations of this trait supposed to inline the operations for better performance.
-pub trait Float: Copy + PartialOrd {
+pub trait Float:
+    Copy
+    + PartialOrd
+    + Add<Output = Self>
+    + AddAssign
+    + Sub<Output = Self>
+    + SubAssign
+    + Mul<Output = Self>
+    + MulAssign
+    + Div<Output = Self>
+    + DivAssign
+    + Neg<Output = Self>
+{
     const ZERO: Self;
     const ONE: Self;
 
     fn from_usize(value: usize) -> Self;
-    fn add(self, other: Self) -> Self;
-    fn sub(self, other: Self) -> Self;
-    fn mul(self, other: Self) -> Self;
-    fn div(self, other: Self) -> Self;
     fn abs(self) -> Self;
 }
 
@@ -20,22 +30,6 @@ macro_rules! impl_float {
             #[inline]
             fn from_usize(value: usize) -> Self {
                 value as $t
-            }
-            #[inline]
-            fn add(self, other: Self) -> Self {
-                self + other
-            }
-            #[inline]
-            fn sub(self, other: Self) -> Self {
-                self - other
-            }
-            #[inline]
-            fn mul(self, other: Self) -> Self {
-                self * other
-            }
-            #[inline]
-            fn div(self, other: Self) -> Self {
-                self / other
             }
             #[inline]
             fn abs(self) -> Self {
@@ -60,22 +54,6 @@ mod decimal_impl {
         #[inline]
         fn from_usize(value: usize) -> Self {
             Decimal::from(value as u64)
-        }
-        #[inline]
-        fn add(self, other: Self) -> Self {
-            self + other
-        }
-        #[inline]
-        fn sub(self, other: Self) -> Self {
-            self - other
-        }
-        #[inline]
-        fn mul(self, other: Self) -> Self {
-            self * other
-        }
-        #[inline]
-        fn div(self, other: Self) -> Self {
-            self / other
         }
         #[inline]
         fn abs(self) -> Self {

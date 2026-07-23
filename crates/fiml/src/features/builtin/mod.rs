@@ -4,6 +4,7 @@ use crate::features::event::Event;
 use crate::features::indicator_vector::Feature;
 use crate::vectors::FeatureVector;
 
+pub(crate) mod cvd;
 pub(crate) mod day_of_week;
 pub(crate) mod ema;
 pub(crate) mod obv;
@@ -11,6 +12,7 @@ pub(crate) mod sma;
 pub(crate) mod time_since_first_event_of_day;
 pub(crate) mod trade_count;
 
+pub use cvd::CvdFeature;
 pub use day_of_week::DayOfWeek;
 pub use ema::EmaFeature;
 pub use obv::ObvTimedFeature;
@@ -24,6 +26,7 @@ pub use trade_count::TradeCountTimedFeature;
 /// direct calls, no `Box` and no vtable. Users needing custom features wrap
 /// this in their own enum (see the module docs).
 pub enum BuiltinFeature<F: Float> {
+    Cvd(CvdFeature<F>),
     Sma(SmaFeature<F>),
     Ema(EmaFeature<F>),
     SmaTimed(SmaTimedFeature<F>),
@@ -36,6 +39,7 @@ pub enum BuiltinFeature<F: Float> {
 impl<F: Float> Feature<F> for BuiltinFeature<F> {
     fn update<O: FeatureVector<F = F>>(&mut self, event: &Event<F>, output: &mut O) {
         match self {
+            BuiltinFeature::Cvd(cvd) => cvd.update(event, output),
             BuiltinFeature::Sma(sma) => sma.update(event, output),
             BuiltinFeature::Ema(ema) => ema.update(event, output),
             BuiltinFeature::SmaTimed(sma) => sma.update(event, output),

@@ -58,6 +58,15 @@ impl FeatureSetBuilder {
         ))
     }
 
+    pub fn cvd(self, symbol: impl Into<String>, windows: impl IntoIterator<Item = usize>) -> Self {
+        self.indicator(IndicatorDef::symbol(
+            symbol,
+            IndicatorSpec::Cvd {
+                windows: windows.into_iter().collect(),
+            },
+        ))
+    }
+
     pub fn sma_timed(
         self,
         symbol: impl Into<String>,

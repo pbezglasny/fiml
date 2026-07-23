@@ -10,15 +10,17 @@ pub mod transformers;
 
 pub use builder::FeatureSetBuilder;
 pub use builtin::BuiltinFeature;
-pub use builtin::{DayOfWeek, EmaFeature, ObvTimedFeature, SmaFeature, SmaTimedFeature};
+pub use builtin::{
+    CvdFeature, DayOfWeek, EmaFeature, ObvTimedFeature, SmaFeature, SmaTimedFeature,
+};
 #[cfg(feature = "serde")]
 pub use definition::FEATURE_SET_FORMAT_VERSION;
 pub use definition::{
     FeatureSet, IndicatorDef, IndicatorSpec, MAX_OUTPUTS_PER_INDICATOR, TimeWindows, ValueSource,
 };
 pub use event::{
-    EVENT_KIND_COUNT, Event, EventKind, OrderBookUpdate, PriceUpdate, TimeUpdate, TradeUpdate,
-    VolumeUpdate,
+    EVENT_KIND_COUNT, Event, EventKind, OrderBookUpdate, PriceUpdate, TimeUpdate, TradeSide,
+    TradeUpdate, VolumeUpdate,
 };
 pub use extractor::{DispatchSequenceError, FeatureExtractor};
 pub use indicator_vector::{Feature, IndicatorFeatureVector, IndicatorFeatures};

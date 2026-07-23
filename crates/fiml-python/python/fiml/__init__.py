@@ -16,6 +16,8 @@ from ._fiml import (
     KIND_TRADE,
     KIND_ORDERBOOK,
     KIND_TIME,
+    SIDE_AGGRESSOR_BUY,
+    SIDE_AGGRESSOR_SELL,
 )
 from ._fiml import FeatureExtractor as _FeatureExtractor
 
@@ -28,6 +30,8 @@ __all__ = [
     "KIND_TRADE",
     "KIND_ORDERBOOK",
     "KIND_TIME",
+    "SIDE_AGGRESSOR_BUY",
+    "SIDE_AGGRESSOR_SELL",
 ]
 
 
@@ -98,6 +102,7 @@ class FeatureExtractor(_FeatureExtractor):
         time="ts",
         price="price",
         volume="volume",
+        side=None,
     ):
         """Compute one feature-vector snapshot after every trade row.
 
@@ -105,7 +110,9 @@ class FeatureExtractor(_FeatureExtractor):
         order. Every field argument names a distinct column. Symbols are
         non-empty strings, timestamps are signed-int64 Unix milliseconds, and
         price/volume values are finite, strictly positive integers or floats.
-        The complete frame is validated before the first trade is dispatched.
+        If ``side`` names a column, it must contain ``SIDE_AGGRESSOR_BUY`` or
+        ``SIDE_AGGRESSOR_SELL`` integer codes. The complete frame is validated
+        before the first trade is dispatched.
 
         Args:
             df: A pandas DataFrame containing trades.
@@ -115,6 +122,9 @@ class FeatureExtractor(_FeatureExtractor):
             time: Name of the signed-int64 epoch-millisecond timestamp column.
             price: Name of the numeric trade-price column.
             volume: Name of the numeric trade-volume column.
+            side: Optional name of the uint8 aggressor-side column. If omitted,
+                trades have no classified side and side-dependent indicators
+                such as CVD do not update.
 
         Returns:
             A pandas DataFrame aligned to ``df.index``. The selected symbol and
@@ -141,11 +151,19 @@ class FeatureExtractor(_FeatureExtractor):
         if not isinstance(df, pd.DataFrame):
             raise TypeError("compute_features requires a pandas DataFrame")
 
-        mappings = (symbol, time, price, volume)
+        mappings = [symbol, time, price, volume]
+        if side is not None:
+            mappings.append(side)
         if not all(isinstance(name, str) for name in mappings):
-            raise ValueError("symbol, time, price, and volume must be column-name strings")
+            raise ValueError(
+                "symbol, time, price, volume, and optional side must be "
+                "column-name strings"
+            )
         if len(set(mappings)) != len(mappings):
-            raise ValueError("symbol, time, price, and volume must name distinct columns")
+            raise ValueError(
+                "symbol, time, price, volume, and optional side must name "
+                "distinct columns"
+            )
         if not df.columns.is_unique:
             raise ValueError("input DataFrame column labels must be unique")
         for name in mappings:
@@ -193,6 +211,33 @@ class FeatureExtractor(_FeatureExtractor):
                 raise _row_error(df, invalid, name, "must be finite and greater than zero")
             numeric[name] = values
 
+        sides = None
+        if side is not None:
+            side_series = df[side]
+            if is_bool_dtype(side_series.dtype) or not is_integer_dtype(
+                side_series.dtype
+            ):
+                raise ValueError(
+                    f"column {side!r} must contain SIDE_AGGRESSOR_BUY or "
+                    "SIDE_AGGRESSOR_SELL integer codes"
+                )
+            missing = _first_invalid(side_series.isna().to_numpy())
+            if missing is not None:
+                raise _row_error(df, missing, side, "must not be null")
+            side_values = side_series.to_numpy(copy=False)
+            invalid = _first_invalid(
+                (side_values != SIDE_AGGRESSOR_BUY)
+                & (side_values != SIDE_AGGRESSOR_SELL)
+            )
+            if invalid is not None:
+                raise _row_error(
+                    df,
+                    invalid,
+                    side,
+                    "must be SIDE_AGGRESSOR_BUY or SIDE_AGGRESSOR_SELL",
+                )
+            sides = side_values.astype(np.uint8, copy=False)
+
         n_rows = len(df)
         handles = np.empty(n_rows, dtype=np.int64)
         handle_by_name = {}
@@ -210,6 +255,7 @@ class FeatureExtractor(_FeatureExtractor):
                 timestamps,
                 price=numeric[price],
                 volume=numeric[volume],
+                side=sides,
             )
         except ValueError as error:
             message = str(error)

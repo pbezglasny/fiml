@@ -168,7 +168,7 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
-    use crate::features::{IndicatorDef, IndicatorSpec, TimeWindows, ValueSource};
+    use crate::features::{IndicatorDef, IndicatorSpec, TimeWindows, TradeSide, ValueSource};
     use crate::{ArrayFeatureVector, FeatureVector, symbols};
 
     type Vector<const N: usize, const M: usize> =
@@ -209,6 +209,49 @@ mod tests {
         assert!(approx_eq(vector.feature_vector().values()[1], 4.5));
         assert!(approx_eq(vector.feature_vector().values()[2], 5.0));
         assert_eq!(vector.index_of("AAPL:price:sma:2"), Some(1));
+    }
+
+    #[test]
+    fn cvd_builder_dispatches_grouped_trade_side_outputs() {
+        let feature_set = FeatureSet::builder().cvd("AAPL", [2, 3]).build();
+        let mut vector: Vector<2, 1> =
+            IndicatorFeatureVector::from_feature_set(ArrayFeatureVector::new(), &feature_set)
+                .unwrap();
+        let aapl = symbols::intern("AAPL");
+
+        vector
+            .dispatch(&Event::trade(
+                aapl,
+                100.0,
+                10.0,
+                0,
+                Some(TradeSide::AgressorBuy),
+            ))
+            .unwrap();
+        vector
+            .dispatch(&Event::trade(
+                aapl,
+                99.0,
+                3.0,
+                1,
+                Some(TradeSide::AgressorSell),
+            ))
+            .unwrap();
+        vector
+            .dispatch(&Event::trade(
+                aapl,
+                101.0,
+                7.0,
+                2,
+                Some(TradeSide::AgressorBuy),
+            ))
+            .unwrap();
+
+        assert_eq!(
+            vector.feature_names(),
+            ["AAPL:trade:cvd:2", "AAPL:trade:cvd:3"]
+        );
+        assert_eq!(vector.feature_vector().values(), [4.0, 14.0]);
     }
 
     #[test]

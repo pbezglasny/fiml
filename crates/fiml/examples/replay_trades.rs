@@ -115,6 +115,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             trade.price,
             trade.volume,
             trade.timestamp,
+            None,
         ))?;
         values.push(
             extractor

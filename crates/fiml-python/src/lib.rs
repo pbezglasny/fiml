@@ -12,10 +12,10 @@ use std::time::Duration;
 use fiml::{
     Event, FEATURE_SET_FORMAT_VERSION, FeatureExtractor as CoreFeatureExtractor,
     FeatureSet as CoreFeatureSet, IndicatorDef, IndicatorFeatures, IndicatorSpec, Symbol,
-    TimeWindows, ValueSource, symbols,
+    TimeWindows, TradeSide, ValueSource, symbols,
 };
 use numpy::ndarray::Array2;
-use numpy::{IntoPyArray, PyArray1, PyReadonlyArray1};
+use numpy::{Element, IntoPyArray, PyArray1, PyReadonlyArray1};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 
@@ -29,6 +29,10 @@ const KIND_VOLUME: u8 = 1;
 const KIND_TRADE: u8 = 2;
 const KIND_ORDERBOOK: u8 = 3;
 const KIND_TIME: u8 = 4;
+
+/// Trade-side codes for optional `side` payloads on trade events.
+const SIDE_AGGRESSOR_BUY: u8 = 0;
+const SIDE_AGGRESSOR_SELL: u8 = 1;
 
 /// Parse a duration string such as `"500ms"`, `"1s"`, `"5m"` or `"1h"`.
 /// `field` names the argument in the error message.
@@ -195,6 +199,17 @@ impl FeatureSet {
                 windows,
             },
         );
+        Ok(slf)
+    }
+
+    /// Grouped cumulative-volume-delta windows over classified trades.
+    #[pyo3(signature = (symbol, windows))]
+    fn cvd<'py>(
+        mut slf: PyRefMut<'py, Self>,
+        symbol: &str,
+        windows: Vec<usize>,
+    ) -> PyResult<PyRefMut<'py, Self>> {
+        slf.push_symbol(symbol, IndicatorSpec::Cvd { windows });
         Ok(slf)
     }
 
@@ -400,6 +415,7 @@ impl FeatureExtractor {
         timestamp: i64,
         price: Option<f64>,
         volume: Option<f64>,
+        side: Option<u8>,
         bid: Option<f64>,
         ask: Option<f64>,
     ) -> PyResult<Event<f64>> {
@@ -417,7 +433,7 @@ impl FeatureExtractor {
                 require("price", price)?,
                 require("volume", volume)?,
                 timestamp,
-                None,
+                side.map(parse_trade_side).transpose()?,
             ),
             KIND_ORDERBOOK => Event::order_book(
                 self.symbol_at(symbol)?,
@@ -436,6 +452,17 @@ impl FeatureExtractor {
     }
 }
 
+fn parse_trade_side(side: u8) -> PyResult<TradeSide> {
+    match side {
+        SIDE_AGGRESSOR_BUY => Ok(TradeSide::AgressorBuy),
+        SIDE_AGGRESSOR_SELL => Ok(TradeSide::AgressorSell),
+        _ => Err(PyValueError::new_err(format!(
+            "invalid `side` {side}; expected SIDE_AGGRESSOR_BUY \
+             ({SIDE_AGGRESSOR_BUY}) or SIDE_AGGRESSOR_SELL ({SIDE_AGGRESSOR_SELL})"
+        ))),
+    }
+}
+
 /// Fetch a payload value an event kind requires, erroring with the column name
 /// when the caller did not supply that column.
 fn require(column: &str, value: Option<f64>) -> PyResult<f64> {
@@ -445,11 +472,11 @@ fn require(column: &str, value: Option<f64>) -> PyResult<f64> {
 /// Resolve an optional `transform` payload column to a contiguous slice, checking
 /// that a supplied column matches the row count. The returned slice borrows the
 /// array for as long as `array` is held, so the per-row loop only indexes it.
-fn column<'a>(
+fn column<'a, T: Element>(
     name: &str,
-    array: &'a Option<PyReadonlyArray1<'_, f64>>,
+    array: &'a Option<PyReadonlyArray1<'_, T>>,
     n_rows: usize,
-) -> PyResult<Option<&'a [f64]>> {
+) -> PyResult<Option<&'a [T]>> {
     array
         .as_ref()
         .map(|array| {
@@ -554,7 +581,17 @@ impl FeatureExtractor {
     /// [`transform`](Self::transform) for the per-kind columns): e.g.
     /// `update(KIND_PRICE, sym, ts, price=...)` or
     /// `update(KIND_ORDERBOOK, sym, ts, bid=..., ask=...)`.
-    #[pyo3(signature = (kind, symbol, timestamp, *, price=None, volume=None, bid=None, ask=None))]
+    #[pyo3(signature = (
+        kind,
+        symbol,
+        timestamp,
+        *,
+        price=None,
+        volume=None,
+        side=None,
+        bid=None,
+        ask=None
+    ))]
     #[allow(clippy::too_many_arguments)] // payload columns are the Python keyword API
     fn update(
         &mut self,
@@ -563,10 +600,11 @@ impl FeatureExtractor {
         timestamp: i64,
         price: Option<f64>,
         volume: Option<f64>,
+        side: Option<u8>,
         bid: Option<f64>,
         ask: Option<f64>,
     ) -> PyResult<()> {
-        let event = self.build_event(kind, symbol, timestamp, price, volume, bid, ask)?;
+        let event = self.build_event(kind, symbol, timestamp, price, volume, side, bid, ask)?;
         self.inner
             .dispatch(&event)
             .map_err(|error| PyValueError::new_err(error.to_string()))?;
@@ -581,7 +619,7 @@ impl FeatureExtractor {
     ///
     /// - `KIND_PRICE` -> `price`
     /// - `KIND_VOLUME` -> `volume`
-    /// - `KIND_TRADE` -> `price` and `volume`
+    /// - `KIND_TRADE` -> `price`, `volume`, and optional `side`
     /// - `KIND_ORDERBOOK` -> `bid` and `ask`
     /// - `KIND_TIME` -> none
     ///
@@ -593,7 +631,17 @@ impl FeatureExtractor {
     /// `i` of the returned `(n_rows, n_features)` matrix in `output_dtype`
     /// (cells are NaN until their feature warms up). Looping in Rust keeps this
     /// fast while using the exact live dispatch path.
-    #[pyo3(signature = (kind, symbol, timestamp, *, price=None, volume=None, bid=None, ask=None))]
+    #[pyo3(signature = (
+        kind,
+        symbol,
+        timestamp,
+        *,
+        price=None,
+        volume=None,
+        side=None,
+        bid=None,
+        ask=None
+    ))]
     #[allow(clippy::too_many_arguments)] // payload columns are the Python keyword API
     fn transform<'py>(
         &mut self,
@@ -603,6 +651,7 @@ impl FeatureExtractor {
         timestamp: PyReadonlyArray1<'py, i64>,
         price: Option<PyReadonlyArray1<'py, f64>>,
         volume: Option<PyReadonlyArray1<'py, f64>>,
+        side: Option<PyReadonlyArray1<'py, u8>>,
         bid: Option<PyReadonlyArray1<'py, f64>>,
         ask: Option<PyReadonlyArray1<'py, f64>>,
     ) -> PyResult<Py<PyAny>> {
@@ -621,6 +670,7 @@ impl FeatureExtractor {
         // length here so the per-row hot loop only indexes (no allocation).
         let price = column("price", &price, n_rows)?;
         let volume = column("volume", &volume, n_rows)?;
+        let side = column("side", &side, n_rows)?;
         let bid = column("bid", &bid, n_rows)?;
         let ask = column("ask", &ask, n_rows)?;
 
@@ -636,6 +686,7 @@ impl FeatureExtractor {
                     timestamp[row],
                     price.map(|column| column[row]),
                     volume.map(|column| column[row]),
+                    side.map(|column| column[row]),
                     bid.map(|column| column[row]),
                     ask.map(|column| column[row]),
                 )
@@ -670,5 +721,7 @@ fn _fiml(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("KIND_TRADE", KIND_TRADE)?;
     m.add("KIND_ORDERBOOK", KIND_ORDERBOOK)?;
     m.add("KIND_TIME", KIND_TIME)?;
+    m.add("SIDE_AGGRESSOR_BUY", SIDE_AGGRESSOR_BUY)?;
+    m.add("SIDE_AGGRESSOR_SELL", SIDE_AGGRESSOR_SELL)?;
     Ok(())
 }

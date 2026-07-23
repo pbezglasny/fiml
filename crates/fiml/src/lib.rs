@@ -12,10 +12,10 @@ pub use features::FEATURE_SET_FORMAT_VERSION;
 pub use features::{
     DispatchSequenceError, Event, EventKind, Feature, FeatureExtractor, FeatureSet,
     FeatureSetBuilder, IndicatorDef, IndicatorFeatureVector, IndicatorFeatures, IndicatorSpec,
-    MAX_OUTPUTS_PER_INDICATOR, OrderBookUpdate, PriceUpdate, TimeUpdate, TimeWindows, TradeUpdate,
-    ValueSource, VolumeUpdate,
+    MAX_OUTPUTS_PER_INDICATOR, OrderBookUpdate, PriceUpdate, TimeUpdate, TimeWindows, TradeSide,
+    TradeUpdate, ValueSource, VolumeUpdate,
 };
-pub use indicators::{ObvBucket, OnBalanceVolumeTimed};
+pub use indicators::{CumulativeVolumeDelta, ObvBucket, OnBalanceVolumeTimed};
 pub use ring_buffer::{
     HeapRingBuffer, RingBuffer, StackRingBuffer, new_heap_ring_buffer, new_stack_ring_buffer,
 };
