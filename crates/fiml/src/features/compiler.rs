@@ -29,6 +29,7 @@ pub(crate) struct Compilation<F: Float> {
 enum IndicatorIdentity {
     Sma(Symbol, ValueSource),
     Ema(Symbol, ValueSource),
+    Cvd(Symbol),
     SmaTimed(Symbol, ValueSource, i64),
     ObvTimed(Symbol, i64),
     TradeCountTimed(Symbol, i64),
@@ -159,6 +160,19 @@ fn compile_definition<F: Float>(
                 })
                 .collect();
             Ok((feature, IndicatorIdentity::Ema(symbol, *source), names))
+        }
+        IndicatorSpec::Cvd { windows } => {
+            validate_sample_windows(index, definition, windows, true)?;
+            let symbol = symbol.expect("validated symbol-scoped definition");
+            let feature = builtin::cvd::build(symbol, windows, span)
+                .map_err(|error| contextualize(index, definition, error))?;
+            let names = windows
+                .iter()
+                .map(|window| {
+                    market_name(symbol_name.unwrap(), "trade", "cvd", &window.to_string())
+                })
+                .collect();
+            Ok((feature, IndicatorIdentity::Cvd(symbol), names))
         }
         IndicatorSpec::SmaTimed {
             source,
@@ -501,6 +515,30 @@ mod tests {
             compile_names(&feature_set).unwrap(),
             ["A%25B%3AC:price:sma:2"]
         );
+    }
+
+    #[test]
+    fn cvd_builder_generates_grouped_names_and_identity() {
+        let feature_set = FeatureSet::builder().cvd("BTCUSDT", [2, 5]).build();
+
+        assert_eq!(
+            compile_names(&feature_set).unwrap(),
+            ["BTCUSDT:trade:cvd:2", "BTCUSDT:trade:cvd:5"]
+        );
+
+        let duplicate = FeatureSet::builder()
+            .cvd("BTCUSDT", [2])
+            .cvd("BTCUSDT", [5])
+            .build();
+        let error = compile_names(&duplicate).unwrap_err();
+        assert!(error.to_string().contains("combine its windows"));
+
+        for invalid_windows in [vec![], vec![0]] {
+            let invalid = FeatureSet::builder()
+                .cvd("BTCUSDT", invalid_windows)
+                .build();
+            assert!(compile_names(&invalid).is_err());
+        }
     }
 
     #[test]

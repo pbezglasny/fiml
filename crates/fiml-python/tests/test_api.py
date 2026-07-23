@@ -82,6 +82,49 @@ def test_grouped_sma_and_ema_can_consume_trade_price_and_volume():
     assert not result["BTCUSDT:trade_volume:ema:2"].isna().any()
 
 
+def test_cvd_uses_aggressor_side_codes():
+    feature_set = fiml.FeatureSet().cvd("BTCUSDT", [1, 2])
+    extractor = fiml.FeatureExtractor(feature_set)
+    source = trades(
+        side=np.array(
+            [
+                fiml.SIDE_AGGRESSOR_BUY,
+                fiml.SIDE_AGGRESSOR_SELL,
+                fiml.SIDE_AGGRESSOR_BUY,
+            ],
+            dtype=np.uint8,
+        )
+    )
+
+    result = extractor.compute_features(source, side="side")
+
+    assert extractor.feature_names() == [
+        "BTCUSDT:trade:cvd:1",
+        "BTCUSDT:trade:cvd:2",
+    ]
+    np.testing.assert_equal(
+        result[extractor.feature_names()].to_numpy(),
+        np.array([[1.0, 1.0], [1.0, 1.0], [3.0, 4.0]]),
+    )
+
+
+def test_invalid_trade_side_is_rejected_before_dispatch():
+    extractor = fiml.FeatureExtractor(fiml.FeatureSet().cvd("BTCUSDT", [1]))
+    btc = extractor.symbol("BTCUSDT")
+
+    with pytest.raises(ValueError, match=r"invalid `side` 9"):
+        extractor.update(
+            fiml.KIND_TRADE,
+            btc,
+            1,
+            price=10.0,
+            volume=1.0,
+            side=9,
+        )
+
+    assert np.isnan(extractor.values()[0])
+
+
 def test_moving_average_source_is_validated():
     with pytest.raises(
         ValueError,

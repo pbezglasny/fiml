@@ -90,6 +90,9 @@ pub enum IndicatorSpec {
         source: ValueSource,
         windows: Vec<usize>,
     },
+    Cvd {
+        windows: Vec<usize>,
+    },
     SmaTimed {
         source: ValueSource,
         time_windows: TimeWindows,
@@ -110,7 +113,9 @@ pub enum IndicatorSpec {
 impl IndicatorSpec {
     pub fn output_count(&self) -> usize {
         match self {
-            Self::Sma { windows, .. } | Self::Ema { windows, .. } => windows.len(),
+            Self::Sma { windows, .. } | Self::Ema { windows, .. } | Self::Cvd { windows } => {
+                windows.len()
+            }
             Self::SmaTimed { time_windows, .. } | Self::ObvTimed { time_windows } => {
                 time_windows.windows.len()
             }
@@ -125,7 +130,7 @@ impl IndicatorSpec {
             Self::Sma { source, .. } | Self::Ema { source, .. } | Self::SmaTimed { source, .. } => {
                 source.route()
             }
-            Self::ObvTimed { .. } | Self::TradeCountTimed { .. } => {
+            Self::Cvd { .. } | Self::ObvTimed { .. } | Self::TradeCountTimed { .. } => {
                 FeatureRoute::Kind(EventKind::Trade)
             }
             Self::DayOfWeek | Self::TimeSinceFirstEventOfDay { .. } => FeatureRoute::Every,
@@ -136,6 +141,7 @@ impl IndicatorSpec {
         match self {
             Self::Sma { .. } => "SMA",
             Self::Ema { .. } => "EMA",
+            Self::Cvd { .. } => "CVD",
             Self::SmaTimed { .. } => "timed SMA",
             Self::ObvTimed { .. } => "timed OBV",
             Self::TradeCountTimed { .. } => "timed trade count",
@@ -307,6 +313,16 @@ mod serde_tests {
             json,
             format!(r#"{{"version":"{FEATURE_SET_FORMAT_VERSION}","indicators":[]}}"#)
         );
+    }
+
+    #[test]
+    fn cvd_spec_round_trips_with_grouped_windows() {
+        let feature_set = FeatureSet::builder().cvd("BTCUSDT", [10, 50]).build();
+
+        let json = serde_json::to_string(&feature_set).unwrap();
+        let restored: FeatureSet = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(restored, feature_set);
     }
 
     #[test]

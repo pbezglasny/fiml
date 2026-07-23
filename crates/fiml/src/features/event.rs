@@ -82,6 +82,7 @@ pub struct VolumeUpdate<F: Float> {
 // Who was agressor in a trade: the buyer or the seller.
 // If buyer was agressor, the trade was a buy (ask) and the price is the ask price.
 // If seller was agressor, the trade was a sell (bid) and the price is the bid price.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TradeSide {
     AgressorBuy,
     AgressorSell,

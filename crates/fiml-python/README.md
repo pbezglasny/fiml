@@ -122,13 +122,20 @@ Column mappings remain configurable when a frame uses other names:
 
 ```python
 feats = extractor.compute_features(
-    trades, symbol="ticker", time="timestamp", price="px", volume="qty"
+    trades,
+    symbol="ticker",
+    time="timestamp",
+    price="px",
+    volume="qty",
+    side="aggressor_side",
 )
 ```
 
 The input must already be globally ordered by signed-int64 epoch-millisecond
 timestamps. Symbols must be non-empty strings; prices and volumes must be finite
-and positive. The complete frame is validated before the extractor changes.
+and positive. The optional side column uses `fiml.SIDE_AGGRESSOR_BUY` and
+`fiml.SIDE_AGGRESSOR_SELL`; omit it when the input does not classify trade
+aggressors. The complete frame is validated before the extractor changes.
 
 `output_dtype` accepts `"float32"`, `"float64"`, `numpy.float32`, or
 `numpy.float64` and applies to `values`, `transform`, and feature DataFrame
@@ -176,11 +183,12 @@ version. Serialization emits full SemVer. Deserialization also accepts short
 forms such as `1.0` and compatible stable versions with the same major version;
 prerelease artifacts require an exact matching prerelease loader.
 
-Builder methods: `sma`, `ema`, `sma_timed`, `obv_timed`, `trade_count_timed`,
-`day_of_week`, and `time_since_first_event_of_day` (fixed-offset `tz`, default
-`"UTC"`). SMA, EMA, timed SMA, and timed OBV accept ordered window lists; each
-list becomes one runtime indicator with adjacent output cells. Durations are
-strings (`"500ms"`, `"1s"`, `"5m"`, `"1h"`).
+Builder methods: `sma`, `ema`, `cvd`, `sma_timed`, `obv_timed`,
+`trade_count_timed`, `day_of_week`, and `time_since_first_event_of_day`
+(fixed-offset `tz`, default `"UTC"`). SMA, EMA, CVD, timed SMA, and timed OBV
+accept ordered window lists; each list becomes one runtime indicator with
+adjacent output cells. Durations are strings (`"500ms"`, `"1s"`, `"5m"`,
+`"1h"`).
 
 Moving averages accept a keyword-only `source` of `"price"`, `"volume"`,
 `"trade_price"`, or `"trade_volume"` (default `"price"`). Use a trade source
@@ -213,7 +221,7 @@ needs:
 |------|------|-----------------|
 | price | `KIND_PRICE` | `price` |
 | volume | `KIND_VOLUME` | `volume` |
-| trade | `KIND_TRADE` | `price`, `volume` |
+| trade | `KIND_TRADE` | `price`, `volume`, optional `side` |
 | order book | `KIND_ORDERBOOK` | `bid`, `ask` |
 | time | `KIND_TIME` | — |
 
@@ -236,7 +244,10 @@ To guarantee identical output between Python (batch) and Rust (live):
 3. **Replay the full event stream in the same order with the same millisecond
    timestamps.** Do not downsample or skip rows: timed indicators (`SmaTimed`,
    `ObvTimed`, `TradeCountTimed`) bucket by timestamp.
-4. **Intern the same symbol strings** on both sides.
+4. **Use the same trade-side classifications.** CVD ignores trades without a
+   side and uses positive volume for `SIDE_AGGRESSOR_BUY`, negative volume for
+   `SIDE_AGGRESSOR_SELL`.
+5. **Intern the same symbol strings** on both sides.
 
 ## Verifying parity
 
