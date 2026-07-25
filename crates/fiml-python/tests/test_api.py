@@ -77,7 +77,7 @@ def test_grouped_sma_and_ema_can_consume_trade_price_and_volume():
         "BTCUSDT:trade_volume:ema:2",
     ]
     np.testing.assert_allclose(
-        result["BTCUSDT:trade_price:sma:2"], [0.5, 1.05, 1.15, 1.1]
+        result["BTCUSDT:trade_price:sma:2"], [1.0, 1.05, 1.15, 1.1]
     )
     assert not result["BTCUSDT:trade_volume:ema:2"].isna().any()
 

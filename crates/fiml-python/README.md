@@ -114,9 +114,11 @@ feats.head()                            # one snapshot after every trade
 
 `feats` preserves the input index and starts with copied `symbol` and `ts`
 columns, followed by `extractor.feature_names()`. The feature columns are ready
-to feed to lightgbm/xgboost/catboost/sklearn. Cells are
-**NaN until their indicator warms up** — gradient-boosting libraries handle NaN
-natively; drop or mask those rows for models that don't.
+to feed to lightgbm/xgboost/catboost/sklearn. Cells are **NaN until their
+indicator first produces a value**. A sample-window SMA produces a partial mean
+from its first matching sample: before its period is full, it averages the
+samples available so far. Gradient-boosting libraries handle NaN natively; drop
+or mask those rows for models that don't.
 
 Column mappings remain configurable when a frame uses other names:
 

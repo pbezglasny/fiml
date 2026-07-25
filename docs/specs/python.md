@@ -355,9 +355,9 @@ This work is no longer binding-only. To deliver the full-dataframe guarantee:
 - **Warmup** (was open Q2): extractor cells are initialized to **NaN** in core
   (`FeatureExtractor::from_feature_set`), so a cell reads NaN until its feature
   first writes — in both `transform`/`compute_features` output and Rust live
-  serving, preserving parity. Partial *ramping* values after the first write
-  (e.g. SMA before its window fills) are still emitted and documented; a
-  per-feature warmup-length mask is possible future work.
+  serving, preserving parity. A sample-window SMA emits the mean of its
+  available samples before the window fills; a per-feature warmup-length mask
+  is possible future work.
 - **Helper return type**: `compute_features` requires and returns a pandas
   `DataFrame`. pandas is installed with the optional `pandas` package extra.
 
