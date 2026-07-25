@@ -77,12 +77,19 @@ where
         timestamp - timestamp.rem_euclid(self.millis_aggregation)
     }
 
-    fn expire_old_buckets(&mut self, current_window_start: i64) {
+    /// Advance the counter's clock to `now`, dropping every bucket that has
+    /// fallen outside the window.
+    ///
+    /// Monotone and idempotent: advancing to a later timestamp drops a superset
+    /// of the buckets an earlier one drops, so calling this repeatedly, or with
+    /// timestamps that arrive between trades, never changes the result for a
+    /// given `now`.
+    pub(crate) fn advance_to(&mut self, now: i64) {
         while self.front_offset < self.data.len() {
             let Some(bucket) = self.data.peek_front_at(self.front_offset) else {
                 break;
             };
-            if bucket.timestamp + self.window_duration > current_window_start {
+            if bucket.timestamp + self.window_duration > now {
                 break;
             }
             self.window_count -= bucket.count;
@@ -92,6 +99,7 @@ where
 
     /// Record one trade at `now` (epoch milliseconds).
     pub(crate) fn update_inner(&mut self, now: i64) {
+        self.advance_to(now);
         let insert_bucket_start = self.bucket_start(now);
 
         // Same bucket as the last trade? Increment its count in place.
@@ -105,7 +113,6 @@ where
             self.data.push_back(bucket);
             self.window_count += 1;
         } else {
-            self.expire_old_buckets(insert_bucket_start);
             let bucket = CountBucket {
                 timestamp: insert_bucket_start,
                 count: 1,
@@ -131,6 +138,13 @@ where
     /// Current rolling trade count over the window.
     pub fn window_value(&self) -> F {
         F::from_usize(self.window_count as usize)
+    }
+
+    /// Whether any trade has ever been recorded. Expiry advances a cursor
+    /// rather than dropping buckets, so this stays true once the first trade
+    /// arrives, including after the window has decayed to empty.
+    pub fn has_observations(&self) -> bool {
+        !self.data.is_empty()
     }
 }
 
@@ -235,6 +249,27 @@ mod tests {
 
         // Only the last two buckets remain inside the 2s window.
         assert!(approx_eq(counter.window_value(), 2.0));
+    }
+
+    #[test]
+    fn advance_to_expires_buckets_without_recording_a_trade() {
+        let mut counter: TradeCountTimed<HeapRingBuffer<CountBucket>, f64> =
+            TradeCountTimed::new_heap(Duration::from_millis(1_000), Duration::from_millis(2_000))
+                .unwrap();
+
+        counter.update_inner(0);
+        counter.update_inner(1_000);
+        assert!(approx_eq(counter.window_value(), 2.0));
+
+        counter.advance_to(2_000);
+        assert!(approx_eq(counter.window_value(), 1.0));
+
+        counter.advance_to(3_600_000);
+        assert!(approx_eq(counter.window_value(), 0.0));
+
+        // Idempotent: advancing again to the same instant changes nothing.
+        counter.advance_to(3_600_000);
+        assert!(approx_eq(counter.window_value(), 0.0));
     }
 
     #[test]

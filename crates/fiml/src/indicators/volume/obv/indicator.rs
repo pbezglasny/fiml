@@ -184,7 +184,14 @@ where
         }
     }
 
-    fn expire_old_buckets(&mut self, current_window_start: i64) {
+    /// Advance every window's clock to `now`, dropping the buckets that have
+    /// fallen outside it.
+    ///
+    /// Monotone and idempotent: advancing to a later timestamp drops a superset
+    /// of the buckets an earlier one drops, so calling this repeatedly, or with
+    /// timestamps that arrive between trades, never changes the result for a
+    /// given `now`.
+    pub(crate) fn advance_to(&mut self, now: i64) {
         for window_index in 0..self.window_count {
             let window = unsafe { self.windows[window_index].assume_init_mut() };
 
@@ -195,7 +202,7 @@ where
                 let Some(bucket) = self.data.peek_front_at(window.front_offset) else {
                     break;
                 };
-                if bucket.timestamp + window.duration > current_window_start {
+                if bucket.timestamp + window.duration > now {
                     break;
                 }
                 window.value = window.value.sub(bucket.signed_volume());
@@ -226,6 +233,7 @@ where
     }
 
     pub(crate) fn update_inner(&mut self, price: F, volume: F, now: i64) {
+        self.advance_to(now);
         let insert_bucket_start = self.bucket_start(now);
 
         // are we in the same bucket as the last trade? if so, update the last bucket instead of
@@ -246,7 +254,6 @@ where
             self.data.push_back(bucket);
             self.add_delta_to_windows(delta);
         } else {
-            self.expire_old_buckets(insert_bucket_start);
             let previous_close = self.data.peek_back().map(|bucket| bucket.close_price);
             let sign = Self::sign(previous_close, price);
             let bucket = ObvBucket {
@@ -268,6 +275,13 @@ where
             .expect("Time went backwards")
             .as_millis() as i64;
         self.update_inner(price, volume, now);
+    }
+
+    /// Whether any trade has ever been recorded. Expiry advances a cursor
+    /// rather than dropping buckets, so this stays true once the first trade
+    /// arrives, including after the windows have decayed to empty.
+    pub fn has_observations(&self) -> bool {
+        !self.data.is_empty()
     }
 
     pub fn window_value(&self, window_idx: usize) -> Option<F> {
@@ -402,6 +416,24 @@ mod tests {
         assert!(approx_eq(obv.window_value(0).unwrap(), 13.0));
         // 4-period window keeps the last four buckets: 4 + 5 + 6 + 7.
         assert!(approx_eq(obv.window_value(1).unwrap(), 22.0));
+    }
+
+    #[test]
+    fn advance_to_decays_the_window_without_a_trade() {
+        let mut obv: OnBalanceVolumeTimed<HeapRingBuffer<ObvBucket<f64>>, f64, 1> =
+            OnBalanceVolumeTimed::new_heap(Duration::from_millis(1_000), 3).unwrap();
+        obv.add_window_with_periods(2).unwrap();
+
+        obv.update_inner(100.0, 10.0, 0);
+        obv.update_inner(101.0, 7.0, 1_000);
+        assert!(approx_eq(obv.window_value(0).unwrap(), 7.0));
+
+        // A signed-volume sum over an empty window is genuinely zero.
+        obv.advance_to(3_000);
+        assert!(approx_eq(obv.window_value(0).unwrap(), 0.0));
+
+        obv.advance_to(3_000);
+        assert!(approx_eq(obv.window_value(0).unwrap(), 0.0));
     }
 
     #[test]

@@ -249,6 +249,18 @@ To guarantee identical output between Python (batch) and Rust (live):
    `SIDE_AGGRESSOR_SELL`.
 5. **Intern the same symbol strings** on both sides.
 
+Extra events are safe. Timed indicators decay with the dispatch clock — every
+event advances them, whatever its kind or symbol — so a window that has aged out
+reports its empty value instead of a frozen one. Because that advance is
+idempotent, a live stream carrying heartbeat `KIND_TIME` events stays in parity
+with a heartbeat-free replay of the same trades: the heartbeats add **rows**,
+never different **values** at the shared rows. That also makes `KIND_TIME` the
+way to read a correctly decayed snapshot at a decision point between trades.
+
+An emptied window reports `0` for `TradeCountTimed` and `ObvTimed` — no trades
+and no signed volume are true facts about a quiet market — and `NaN` for
+`SmaTimed`, whose mean over no samples is undefined.
+
 ## Verifying parity
 
 - `transform(...)` over the whole stream equals stepping the same events one at

@@ -75,6 +75,24 @@ impl<F: Float> SmaTimedFeature<F> {
             write_outputs(self.output_span, output, |index| self.sma.value_at(index));
         }
     }
+
+    /// Deliberately unfiltered by symbol or event kind: any event's timestamp
+    /// ages this window, so a quiet symbol decays while others keep trading.
+    ///
+    /// An indicator that has never seen a value is left alone, so decay cannot
+    /// overwrite a warm-up cell with a NaN that claims the symbol was quiet
+    /// over a window nobody has observed yet.
+    pub(in crate::features) fn advance_to<O: FeatureVector<F = F>>(
+        &mut self,
+        now: i64,
+        output: &mut O,
+    ) {
+        if !self.sma.has_observations() {
+            return;
+        }
+        self.sma.advance_to(now);
+        write_outputs(self.output_span, output, |index| self.sma.value_at(index));
+    }
 }
 
 pub(crate) fn build<F: Float>(

@@ -308,7 +308,7 @@ where
             duration,
             bucket_count: 0,
             sum: T::ZERO,
-            moving_avg: T::ZERO,
+            moving_avg: T::NAN,
         });
         self.window_count += 1;
         #[cfg(feature = "tracing")]
@@ -350,7 +350,8 @@ where
         self.add_window_with_periods(period_in_aggregations)
     }
 
-    fn expire_old_buckets(data: &R, window: &mut SmaWindowTimed<T>, now: i64) {
+    fn expire_window(data: &R, window: &mut SmaWindowTimed<T>, now: i64) {
+        let bucket_count_before = window.bucket_count;
         while window.bucket_count > 0 {
             let index = data.len() - window.bucket_count;
             let (date, value) = data.peek_front_at(index).unwrap();
@@ -360,19 +361,33 @@ where
             window.sum = window.sum.sub(*value);
             window.bucket_count -= 1;
         }
-        window.moving_avg = if window.bucket_count > 0 {
-            window.sum.div(T::from_usize(window.bucket_count))
-        } else {
-            T::ZERO
-        };
+        if window.bucket_count != bucket_count_before {
+            Self::update_moving_avg(window);
+        }
     }
 
+    /// Advance every window's clock to `now`, dropping the buckets that have
+    /// fallen outside it.
+    ///
+    /// Monotone and idempotent: advancing to a later timestamp drops a superset
+    /// of the buckets an earlier one drops, so calling this repeatedly, or with
+    /// timestamps that arrive between updates, never changes the result for a
+    /// given `now`.
+    pub(crate) fn advance_to(&mut self, now: i64) {
+        for i in 0..self.window_count {
+            let window = unsafe { self.windows[i].assume_init_mut() };
+            Self::expire_window(&self.data, window, now);
+        }
+    }
+
+    /// The mean of no samples is undefined, so a window holding no buckets
+    /// reports [`Float::NAN`] rather than a zero that reads as a real price.
     #[inline]
     fn update_moving_avg(window: &mut SmaWindowTimed<T>) {
         window.moving_avg = if window.bucket_count > 0 {
             window.sum.div(T::from_usize(window.bucket_count))
         } else {
-            T::ZERO
+            T::NAN
         };
     }
 
@@ -381,11 +396,8 @@ where
     }
 
     pub(crate) fn update_inner(&mut self, value: T, now: i64) {
+        self.advance_to(now);
         let bucket_start = self.bucket_start(now);
-        for i in 0..self.window_count {
-            let window = unsafe { self.windows[i].assume_init_mut() };
-            Self::expire_old_buckets(&self.data, window, now);
-        }
 
         let update_last_bucket = self
             .data
@@ -401,12 +413,12 @@ where
             self.data.push_back((prev_date, new_value));
             for i in 0..self.window_count {
                 let window = unsafe { self.windows[i].assume_init_mut() };
-                if window.bucket_count > 0 {
-                    window.sum = window.sum.sub(prev_value).add(new_value);
-                } else if prev_date + window.duration > now {
-                    window.sum = window.sum.add(new_value);
-                    window.bucket_count = 1;
-                }
+                // `advance_to(now)` ran above, and a bucket covering `now`
+                // cannot have aged out of a window that is at least one
+                // aggregation long, so the bucket being rewritten is still
+                // inside every window.
+                debug_assert!(window.bucket_count > 0);
+                window.sum = window.sum.sub(prev_value).add(new_value);
                 Self::update_moving_avg(window);
             }
         } else {
@@ -437,6 +449,13 @@ where
             .expect("Time went backwards")
             .as_millis() as i64;
         self.update_inner(value, now);
+    }
+
+    /// Whether any value has ever been recorded. Expiry advances a cursor
+    /// rather than dropping buckets, so this stays true once the first update
+    /// arrives, including after the windows have decayed to empty.
+    pub fn has_observations(&self) -> bool {
+        !self.data.is_empty()
     }
 
     /// Return value of i-th Window
@@ -712,7 +731,7 @@ mod tests {
     }
 
     #[test]
-    fn timed_same_bucket_update_can_readd_expired_bucket() {
+    fn timed_same_bucket_update_rewrites_the_bucket_covering_now() {
         let mut sma: SimpleMovingAverageTimed<HeapRingBuffer<(i64, f64)>, f64, 1> =
             SimpleMovingAverageTimed::new_heap(Duration::from_millis(1_000), 4).unwrap();
         sma.add_window_with_duration(Duration::from_millis(1_000))
@@ -724,6 +743,28 @@ mod tests {
 
         assert_eq!(timed_bucket_count(&sma, 0), 1);
         assert!(approx_eq(timed_value_at(&sma, 0), 30.0));
+    }
+
+    #[test]
+    fn timed_advance_to_expires_and_reports_nan_when_the_window_empties() {
+        let mut sma: SimpleMovingAverageTimed<HeapRingBuffer<(i64, f64)>, f64, 1> =
+            SimpleMovingAverageTimed::new_heap(Duration::from_millis(1_000), 4).unwrap();
+        sma.add_window_with_duration(Duration::from_millis(2_000))
+            .unwrap();
+
+        // The mean of no samples is undefined, before any data and after decay.
+        assert!(timed_value_at(&sma, 0).is_nan());
+
+        sma.update_inner(10.0, 0);
+        sma.update_inner(20.0, 1_000);
+        assert!(approx_eq(timed_value_at(&sma, 0), 15.0));
+
+        sma.advance_to(2_500);
+        assert!(approx_eq(timed_value_at(&sma, 0), 20.0));
+
+        sma.advance_to(3_600_000);
+        assert!(timed_value_at(&sma, 0).is_nan());
+        assert_eq!(timed_bucket_count(&sma, 0), 0);
     }
 
     #[test]

@@ -156,6 +156,19 @@ impl IndicatorSpec {
             Self::DayOfWeek | Self::TimeSinceFirstEventOfDay { .. }
         )
     }
+
+    /// Whether this indicator's value ages with the clock, so it must be
+    /// advanced on every dispatch rather than only when its own data arrives.
+    ///
+    /// True for the bucketed indicators, whose windows are measured in time.
+    /// Sample-windowed indicators hold the last N observations however old they
+    /// are, so nothing about them changes when the clock moves.
+    pub(crate) fn is_time_decaying(&self) -> bool {
+        matches!(
+            self,
+            Self::SmaTimed { .. } | Self::ObvTimed { .. } | Self::TradeCountTimed { .. }
+        )
+    }
 }
 
 /// One user-authored runtime indicator definition.

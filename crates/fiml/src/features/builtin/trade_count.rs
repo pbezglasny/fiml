@@ -41,6 +41,24 @@ impl<F: Float> TradeCountTimedFeature<F> {
             output.set_value_at(self.output_span.start, self.counter.window_value());
         }
     }
+
+    /// Deliberately unfiltered by symbol or event kind: any event's timestamp
+    /// ages this window, so a quiet symbol decays while others keep trading.
+    ///
+    /// A counter that has never seen a trade is left alone, so decay cannot
+    /// overwrite a warm-up cell with a zero that claims the symbol was quiet
+    /// over a window nobody has observed yet.
+    pub(in crate::features) fn advance_to<O: FeatureVector<F = F>>(
+        &mut self,
+        now: i64,
+        output: &mut O,
+    ) {
+        if !self.counter.has_observations() {
+            return;
+        }
+        self.counter.advance_to(now);
+        output.set_value_at(self.output_span.start, self.counter.window_value());
+    }
 }
 
 pub(crate) fn build<F: Float>(

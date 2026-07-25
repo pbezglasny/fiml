@@ -18,6 +18,7 @@ pub(crate) struct OutputSpan {
 pub(crate) struct CompiledFeature<F: Float> {
     pub(crate) feature: BuiltinFeature<F>,
     pub(crate) route: FeatureRoute,
+    pub(crate) time_decaying: bool,
 }
 
 pub(crate) struct Compilation<F: Float> {
@@ -92,6 +93,7 @@ pub(crate) fn compile<F: Float>(
         entries.push(CompiledFeature {
             feature,
             route: definition.indicator.route(),
+            time_decaying: definition.indicator.is_time_decaying(),
         });
     }
 

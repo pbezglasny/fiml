@@ -17,6 +17,11 @@ pub trait Float:
 {
     const ZERO: Self;
     const ONE: Self;
+    /// Value written to an output cell whose result is undefined, such as the
+    /// mean of a time-decaying window that holds no samples. An implementing
+    /// type must be able to represent it; exact types without a native NaN need
+    /// a wrapper that adds one.
+    const NAN: Self;
 
     fn from_usize(value: usize) -> Self;
     fn abs(self) -> Self;
@@ -27,6 +32,7 @@ macro_rules! impl_float {
         impl Float for $t {
             const ZERO: Self = 0.0;
             const ONE: Self = 1.0;
+            const NAN: Self = <$t>::NAN;
             #[inline]
             fn from_usize(value: usize) -> Self {
                 value as $t
@@ -41,23 +47,3 @@ macro_rules! impl_float {
 
 impl_float!(f32);
 impl_float!(f64);
-
-#[cfg(feature = "decimal")]
-mod decimal_impl {
-    use super::Float;
-    use rust_decimal::Decimal;
-
-    impl Float for Decimal {
-        const ZERO: Self = Decimal::ZERO;
-        const ONE: Self = Decimal::ONE;
-
-        #[inline]
-        fn from_usize(value: usize) -> Self {
-            Decimal::from(value as u64)
-        }
-        #[inline]
-        fn abs(self) -> Self {
-            Self::abs(&self)
-        }
-    }
-}

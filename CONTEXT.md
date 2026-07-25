@@ -72,6 +72,33 @@ A shared timed-indicator definition containing one aggregation duration and an
 ordered list of rolling window durations. Every window is a nonzero exact
 multiple of the aggregation and must fit in signed 64-bit milliseconds.
 
+## Time-decaying feature
+
+A feature whose value loses validity as the timestamp advances, because its
+window is measured in time rather than in samples. Timed SMA, timed OBV and
+timed trade count are time-decaying; sample-windowed features are not, since
+they hold the last N observations however old those are.
+
+A time-decaying feature is advanced on every dispatch, whatever kind or symbol
+the event carries, so every output cell is valid as of the last dispatched
+event's timestamp. Advancing is monotone and idempotent in that timestamp:
+advancing to a later instant expires a superset of what an earlier one expires,
+so events interleaved between two updates add snapshots without changing the
+values observed at those updates.
+
+Distinct from a [global clock feature](#global-clock-feature), which derives its
+value *from* the timestamp rather than losing validity *as* the timestamp moves.
+
+## Empty window
+
+A time-decaying window whose buckets have all expired. A count or a
+signed-volume sum over an empty window is genuinely zero; a mean over an empty
+window is undefined and reports NaN.
+
+An indicator that has not yet received any data does not have an empty window —
+it has no window at all, and its cell keeps its warm-up value. The distinction
+is what separates an observed quiet market from an unobserved one.
+
 ## Canonical feature name
 
 A library-generated, globally unique output name derived from symbol, value

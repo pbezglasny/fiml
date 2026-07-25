@@ -49,6 +49,22 @@ impl<F: Float> Feature<F> for BuiltinFeature<F> {
             BuiltinFeature::TimeSinceFirstEventOfDay(clock) => clock.update_event(event, output),
         }
     }
+
+    /// Only the timed variants carry a window that ages; the rest keep the
+    /// no-op. Compilation lists the time-decaying features, so the others are
+    /// never reached through this path.
+    fn advance_to<O: FeatureVector<F = F>>(&mut self, now: i64, output: &mut O) {
+        match self {
+            BuiltinFeature::SmaTimed(sma) => sma.advance_to(now, output),
+            BuiltinFeature::ObvTimed(obv) => obv.advance_to(now, output),
+            BuiltinFeature::TradeCountTimed(count) => count.advance_to(now, output),
+            BuiltinFeature::Cvd(_)
+            | BuiltinFeature::Sma(_)
+            | BuiltinFeature::Ema(_)
+            | BuiltinFeature::DayOfWeek(_)
+            | BuiltinFeature::TimeSinceFirstEventOfDay(_) => {}
+        }
+    }
 }
 
 #[inline]
