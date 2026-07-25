@@ -155,11 +155,7 @@ where
                 .sum
                 .add(value)
                 .sub(prev_value.copied().unwrap_or(F::ZERO));
-            let divisor = if self.data.capacity() < window.period {
-                F::from_usize(self.data.capacity())
-            } else {
-                F::from_usize(window.period)
-            };
+            let divisor = F::from_usize(self.data.len().min(window.period));
             window.moving_avg = window.sum.div(divisor);
         }
     }
@@ -527,16 +523,16 @@ mod tests {
     }
 
     #[test]
-    fn moving_average_within_period() {
+    fn moving_average_uses_available_samples_during_warmup() {
         let mut sma: SimpleMovingAverage<StackRingBuffer<4, f64>, f64, 1> =
             SimpleMovingAverage::new_stack();
         sma.add_window(3).unwrap();
 
         sma.update(3.0);
-        assert!(approx_eq(sma.value_at(0).unwrap(), 1.0));
+        assert!(approx_eq(sma.value_at(0).unwrap(), 3.0));
 
         sma.update(6.0);
-        assert!(approx_eq(sma.value_at(0).unwrap(), 3.0));
+        assert!(approx_eq(sma.value_at(0).unwrap(), 4.5));
 
         sma.update(9.0);
         assert!(approx_eq(sma.value_at(0).unwrap(), 6.0));

@@ -114,3 +114,10 @@ Configuration, metadata processing, canonical-name generation, and compilation
 may allocate. A compiled extractor preallocates its required state; event
 dispatch, indicator updates, and output-cell writes perform no per-event
 allocation.
+
+## Partial sample-window SMA
+
+A sample-count simple moving average whose configured period has not yet been
+filled. After at least one matching sample, it averages the available
+`min(samples_seen, period)` samples. Whether feature outputs should instead
+remain NaN until a complete window is ready is a separate warm-up policy.

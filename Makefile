@@ -1,7 +1,17 @@
 PYTHON_VENV := .venv
+PYTHON := $(PYTHON_VENV)/bin/python
 MATURIN := $(PYTHON_VENV)/bin/maturin
 
-.PHONY: build-python python-venv jupyter-lab
+.PHONY: test test-rust test-python build-python python-venv jupyter-lab
+
+test: test-rust test-python
+
+test-rust:
+	cargo test --all-features
+
+test-python: python-venv
+	uv pip install --python $(PYTHON) --reinstall-package fiml "./crates/fiml-python[test]"
+	$(PYTHON) -m pytest crates/fiml-python/tests
 
 build-python: python-venv
 	cd crates/fiml-python && ../../$(MATURIN) build --release --out dist

@@ -204,6 +204,20 @@ mod tests {
     }
 
     #[test]
+    fn sample_sma_emits_partial_mean_during_warmup() {
+        let mut extractor = FeatureExtractor::from_feature_set(&feature_set()).unwrap();
+        let aapl = symbols::intern("AAPL");
+
+        assert!(extractor.values().iter().all(|value| value.is_nan()));
+
+        extractor.dispatch(&Event::price(aapl, 100.0, 0)).unwrap();
+        assert_eq!(extractor.values(), [100.0, 100.0]);
+
+        extractor.dispatch(&Event::price(aapl, 102.0, 1)).unwrap();
+        assert_eq!(extractor.values(), [101.0, 101.0]);
+    }
+
+    #[test]
     fn batch_validation_uses_global_watermark_without_mutation() {
         let mut extractor = FeatureExtractor::from_feature_set(&feature_set()).unwrap();
         extractor.dispatch(&Event::time(100)).unwrap();
