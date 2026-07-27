@@ -4,7 +4,7 @@ use crate::features::TradeSide;
 use crate::ring_buffer::{
     HeapRingBuffer, RingBuffer, StackRingBuffer, new_heap_ring_buffer, new_stack_ring_buffer,
 };
-use crate::{FimlError, Float, Result};
+use crate::{FimlError, Float, Result, WarmupPolicy};
 
 struct CvdWindow<F: Float> {
     period: usize,
@@ -23,6 +23,7 @@ where
     data: R,
     windows: [MaybeUninit<CvdWindow<F>>; WINDOWS],
     window_count: usize,
+    warmup_policy: WarmupPolicy,
 }
 
 impl<const N: usize, F, const WINDOWS: usize>
@@ -30,10 +31,11 @@ impl<const N: usize, F, const WINDOWS: usize>
 where
     F: Float,
 {
-    pub fn new_stack() -> Self {
+    pub fn new_stack(warmup_policy: WarmupPolicy) -> Self {
         Self::new(
             new_stack_ring_buffer(),
             [const { MaybeUninit::<CvdWindow<F>>::uninit() }; WINDOWS],
+            warmup_policy,
         )
     }
 }
@@ -42,10 +44,11 @@ impl<F, const WINDOWS: usize> CumulativeVolumeDelta<HeapRingBuffer<F>, F, WINDOW
 where
     F: Float,
 {
-    pub fn new_heap(periods: usize) -> Self {
+    pub fn new_heap(periods: usize, warmup_policy: WarmupPolicy) -> Self {
         Self::new(
             new_heap_ring_buffer(periods),
             [const { MaybeUninit::<CvdWindow<F>>::uninit() }; WINDOWS],
+            warmup_policy,
         )
     }
 }
@@ -55,11 +58,16 @@ where
     R: RingBuffer<Item = F>,
     F: Float,
 {
-    fn new(data: R, windows: [MaybeUninit<CvdWindow<F>>; WINDOWS]) -> Self {
+    fn new(
+        data: R,
+        windows: [MaybeUninit<CvdWindow<F>>; WINDOWS],
+        warmup_policy: WarmupPolicy,
+    ) -> Self {
         Self {
             data,
             windows,
             window_count: 0,
+            warmup_policy,
         }
     }
 
@@ -115,17 +123,34 @@ where
     }
 
     pub fn value_at(&self, index: usize) -> Option<F> {
-        if index >= self.window_count {
+        if !self.is_ready_at(index) {
             return None;
         }
         let window = unsafe { self.windows[index].assume_init_ref() };
         Some(window.current_value)
     }
 
+    pub fn is_ready_at(&self, index: usize) -> bool {
+        if index >= self.window_count {
+            return false;
+        }
+        let window = unsafe { self.windows[index].assume_init_ref() };
+        match self.warmup_policy {
+            WarmupPolicy::FirstValue => !self.data.is_empty(),
+            WarmupPolicy::FullWindow => self.data.len() >= window.period,
+        }
+    }
+
+    pub fn is_ready(&self) -> bool {
+        self.window_count > 0 && (0..self.window_count).all(|index| self.is_ready_at(index))
+    }
+
     pub fn values(&self) -> [F; WINDOWS] {
-        let mut result = [F::ZERO; WINDOWS];
+        let mut result = [F::NAN; WINDOWS];
         for (index, value) in result.iter_mut().enumerate().take(self.window_count) {
-            *value = self.value_at(index).unwrap();
+            if let Some(current) = self.value_at(index) {
+                *value = current;
+            }
         }
         result
     }
@@ -137,7 +162,7 @@ mod tests {
 
     fn new_cvd<const CAPACITY: usize, const WINDOWS: usize>()
     -> CumulativeVolumeDelta<StackRingBuffer<CAPACITY, f64>, f64, WINDOWS> {
-        CumulativeVolumeDelta::new_stack()
+        CumulativeVolumeDelta::new_stack(WarmupPolicy::FirstValue)
     }
 
     #[test]
@@ -150,6 +175,25 @@ mod tests {
 
         cvd.update(3.0, TradeSide::AgressorSell).unwrap();
         assert_eq!(cvd.value_at(0), Some(7.0));
+    }
+
+    #[test]
+    fn full_window_policy_withholds_cvd_until_enough_classified_trades() {
+        let mut cvd: CumulativeVolumeDelta<StackRingBuffer<3, f64>, f64, 2> =
+            CumulativeVolumeDelta::new_stack(WarmupPolicy::FullWindow);
+        cvd.add_window(2).unwrap();
+        cvd.add_window(3).unwrap();
+
+        cvd.update(10.0, TradeSide::AgressorBuy).unwrap();
+        assert_eq!(cvd.value_at(0), None);
+
+        cvd.update(3.0, TradeSide::AgressorSell).unwrap();
+        assert_eq!(cvd.value_at(0), Some(7.0));
+        assert_eq!(cvd.value_at(1), None);
+
+        cvd.update(2.0, TradeSide::AgressorBuy).unwrap();
+        assert!(cvd.is_ready());
+        assert_eq!(cvd.value_at(1), Some(9.0));
     }
 
     #[test]

@@ -15,11 +15,19 @@ const FEATURE_SET_JSON: &str = r#"{
     "indicators": [
         {
             "symbol": "BTCUSDT",
-            "indicator": { "Sma": { "source": "price", "windows": [3] } }
+            "indicator": { "Sma": {
+                "source": "price",
+                "windows": [3],
+                "warmup_policy": "full_window"
+            } }
         },
         {
             "symbol": "BTCUSDT",
-            "indicator": { "Ema": { "source": "price", "windows": [3] } }
+            "indicator": { "Ema": {
+                "source": "price",
+                "windows": [3],
+                "warmup_policy": "full_window"
+            } }
         }
     ]
 }"#;

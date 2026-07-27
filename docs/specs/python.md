@@ -75,17 +75,19 @@ extractor = fiml.FeatureExtractor.from_json(json_str)   # or fiml.FeatureSet.fro
   "indicators": [
     { "symbol": "BTCUSDT",
       "indicator": { "Sma": {
-        "source": "trade_price", "windows": [12, 24]
+        "source": "trade_price", "windows": [12, 24],
+        "warmup_policy": "full_window"
       } } },
     { "symbol": "BTCUSDT",
       "indicator": { "Ema": {
-        "source": "trade_price", "windows": [12]
+        "source": "trade_price", "windows": [12],
+        "warmup_policy": "full_window"
       } } },
     { "symbol": "BTCUSDT",
       "indicator": { "ObvTimed": { "time_windows": {
         "aggregation": { "secs": 1, "nanos": 0 },
         "windows": [{ "secs": 2, "nanos": 0 }]
-      } } } }
+      }, "warmup_policy": "full_window" } } }
   ]
 }
 ```
@@ -352,12 +354,12 @@ This work is no longer binding-only. To deliver the full-dataframe guarantee:
 - **High-level source**: `compute_features` accepts Trade DataFrames only. Bars
   remain possible through the low-level event API and may receive a separately
   designed high-level boundary later.
-- **Warmup** (was open Q2): extractor cells are initialized to **NaN** in core
-  (`FeatureExtractor::from_feature_set`), so a cell reads NaN until its feature
-  first writes — in both `transform`/`compute_features` output and Rust live
-  serving, preserving parity. A sample-window SMA emits the mean of its
-  available samples before the window fills; a per-feature warmup-length mask
-  is possible future work.
+- **Warmup** (was open Q2): every window indicator stores a `WarmupPolicy`.
+  `FullWindow` is the builder default and keeps each output **NaN** until its
+  complete sample or time window is ready; `FirstValue` explicitly enables
+  partial values. Timed readiness and expiry advance from global event time.
+  Readiness is monotonic and distinct from current-value availability. A
+  feature-vector `all_ready()` aggregation is possible future work.
 - **Helper return type**: `compute_features` requires and returns a pandas
   `DataFrame`. pandas is installed with the optional `pandas` package extra.
 

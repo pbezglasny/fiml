@@ -1,11 +1,12 @@
 use std::time::Duration;
 
 use crate::features::BuiltinFeature;
+use crate::features::builtin::write_outputs;
 use crate::features::compiler::OutputSpan;
 use crate::features::event::Event;
 use crate::indicators::{CountBucket, TradeCountTimed};
 use crate::vectors::FeatureVector;
-use crate::{Float, HeapRingBuffer, Result, Symbol};
+use crate::{Float, HeapRingBuffer, Result, Symbol, WarmupPolicy};
 
 /// Rolling count of trades over a time window, wired to one output cell. Reacts
 /// to [`Trade`](EventKind::Trade) events for its symbol.
@@ -38,7 +39,17 @@ impl<F: Float> TradeCountTimedFeature<F> {
             && trade.symbol == self.symbol
         {
             self.counter.update_inner(trade.timestamp);
-            output.set_value_at(self.output_span.start, self.counter.window_value());
+            write_outputs(self.output_span, output, |_| self.counter.window_value());
+        }
+    }
+
+    pub(in crate::features) fn observe<O: FeatureVector<F = F>>(
+        &mut self,
+        timestamp: i64,
+        output: &mut O,
+    ) {
+        if self.counter.observe(timestamp) {
+            write_outputs(self.output_span, output, |_| self.counter.window_value());
         }
     }
 }
@@ -47,9 +58,14 @@ pub(crate) fn build<F: Float>(
     symbol: Symbol,
     aggregation: Duration,
     window: Duration,
+    warmup_policy: WarmupPolicy,
     output_span: OutputSpan,
 ) -> Result<BuiltinFeature<F>> {
-    let counter = TradeCountTimed::<HeapRingBuffer<CountBucket>, F>::new_heap(aggregation, window)?;
+    let counter = TradeCountTimed::<HeapRingBuffer<CountBucket>, F>::new_heap(
+        aggregation,
+        window,
+        warmup_policy,
+    )?;
     Ok(BuiltinFeature::TradeCountTimed(
         TradeCountTimedFeature::new(symbol, counter, output_span),
     ))
@@ -72,6 +88,7 @@ mod tests {
         let counter = TradeCountTimed::<HeapRingBuffer<CountBucket>, f64>::new_heap(
             Duration::from_millis(1_000),
             Duration::from_millis(2_000),
+            WarmupPolicy::FirstValue,
         )
         .unwrap();
         let mut feat =

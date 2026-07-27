@@ -5,7 +5,7 @@ use crate::features::definition::{MAX_OUTPUTS_PER_INDICATOR, ValueSource};
 use crate::features::event::Event;
 use crate::indicators::ExponentialMovingAverage;
 use crate::vectors::FeatureVector;
-use crate::{Float, Result, Symbol};
+use crate::{Float, Result, Symbol, WarmupPolicy};
 
 pub struct EmaFeature<F: Float> {
     symbol: Symbol,
@@ -45,10 +45,11 @@ pub(crate) fn build<F: Float>(
     symbol: Symbol,
     source: ValueSource,
     windows: &[usize],
+    warmup_policy: WarmupPolicy,
     output_span: OutputSpan,
 ) -> Result<BuiltinFeature<F>> {
     debug_assert_eq!(windows.len(), output_span.count);
-    let mut ema = ExponentialMovingAverage::<F, MAX_OUTPUTS_PER_INDICATOR>::new();
+    let mut ema = ExponentialMovingAverage::<F, MAX_OUTPUTS_PER_INDICATOR>::new(warmup_policy);
     for &window in windows {
         ema.add_window(window)?;
     }
@@ -75,7 +76,7 @@ mod tests {
         let googl = symbols::intern("GOOGL");
         let mut fv: ArrayFeatureVector<f64, 1> = ArrayFeatureVector::new();
         let mut ema: ExponentialMovingAverage<f64, MAX_OUTPUTS_PER_INDICATOR> =
-            ExponentialMovingAverage::new();
+            ExponentialMovingAverage::new(WarmupPolicy::FirstValue);
         ema.add_window(3).unwrap();
 
         let mut feat = EmaFeature::new(
@@ -100,7 +101,7 @@ mod tests {
         let googl = symbols::intern("GOOGL");
         let mut fv: ArrayFeatureVector<f64, 1> = ArrayFeatureVector::new();
         let mut ema: ExponentialMovingAverage<f64, MAX_OUTPUTS_PER_INDICATOR> =
-            ExponentialMovingAverage::new();
+            ExponentialMovingAverage::new(WarmupPolicy::FirstValue);
         ema.add_window(3).unwrap();
 
         let mut feat = EmaFeature::new(
@@ -125,7 +126,7 @@ mod tests {
         let googl = symbols::intern("GOOGL");
         let mut fv: ArrayFeatureVector<f64, 1> = ArrayFeatureVector::new();
         let mut ema: ExponentialMovingAverage<f64, MAX_OUTPUTS_PER_INDICATOR> =
-            ExponentialMovingAverage::new();
+            ExponentialMovingAverage::new(WarmupPolicy::FirstValue);
         ema.add_window(3).unwrap();
 
         let mut feat = EmaFeature::new(

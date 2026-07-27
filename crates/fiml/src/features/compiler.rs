@@ -125,10 +125,14 @@ fn compile_definition<F: Float>(
 ) -> Result<(BuiltinFeature<F>, IndicatorIdentity, Vec<String>)> {
     let symbol_name = definition.symbol.as_deref();
     match &definition.indicator {
-        IndicatorSpec::Sma { source, windows } => {
+        IndicatorSpec::Sma {
+            source,
+            windows,
+            warmup_policy,
+        } => {
             validate_sample_windows(index, definition, windows, true)?;
             let symbol = symbol.expect("validated symbol-scoped definition");
-            let feature = builtin::sma::build(symbol, *source, windows, span)
+            let feature = builtin::sma::build(symbol, *source, windows, *warmup_policy, span)
                 .map_err(|error| contextualize(index, definition, error))?;
             let names = windows
                 .iter()
@@ -143,10 +147,14 @@ fn compile_definition<F: Float>(
                 .collect();
             Ok((feature, IndicatorIdentity::Sma(symbol, *source), names))
         }
-        IndicatorSpec::Ema { source, windows } => {
+        IndicatorSpec::Ema {
+            source,
+            windows,
+            warmup_policy,
+        } => {
             validate_sample_windows(index, definition, windows, false)?;
             let symbol = symbol.expect("validated symbol-scoped definition");
-            let feature = builtin::ema::build(symbol, *source, windows, span)
+            let feature = builtin::ema::build(symbol, *source, windows, *warmup_policy, span)
                 .map_err(|error| contextualize(index, definition, error))?;
             let names = windows
                 .iter()
@@ -161,10 +169,13 @@ fn compile_definition<F: Float>(
                 .collect();
             Ok((feature, IndicatorIdentity::Ema(symbol, *source), names))
         }
-        IndicatorSpec::Cvd { windows } => {
+        IndicatorSpec::Cvd {
+            windows,
+            warmup_policy,
+        } => {
             validate_sample_windows(index, definition, windows, true)?;
             let symbol = symbol.expect("validated symbol-scoped definition");
-            let feature = builtin::cvd::build(symbol, windows, span)
+            let feature = builtin::cvd::build(symbol, windows, *warmup_policy, span)
                 .map_err(|error| contextualize(index, definition, error))?;
             let names = windows
                 .iter()
@@ -177,6 +188,7 @@ fn compile_definition<F: Float>(
         IndicatorSpec::SmaTimed {
             source,
             time_windows,
+            warmup_policy,
         } => {
             let validated = validate_time_windows(index, definition, time_windows)?;
             let symbol = symbol.expect("validated symbol-scoped definition");
@@ -186,6 +198,7 @@ fn compile_definition<F: Float>(
                 time_windows.aggregation,
                 &validated.periods,
                 validated.max_period,
+                *warmup_policy,
                 span,
             )
             .map_err(|error| contextualize(index, definition, error))?;
@@ -207,7 +220,10 @@ fn compile_definition<F: Float>(
                 names,
             ))
         }
-        IndicatorSpec::ObvTimed { time_windows } => {
+        IndicatorSpec::ObvTimed {
+            time_windows,
+            warmup_policy,
+        } => {
             let validated = validate_time_windows(index, definition, time_windows)?;
             let symbol = symbol.expect("validated symbol-scoped definition");
             let feature = builtin::obv::build_timed(
@@ -215,6 +231,7 @@ fn compile_definition<F: Float>(
                 time_windows.aggregation,
                 &validated.periods,
                 validated.max_period,
+                *warmup_policy,
                 span,
             )
             .map_err(|error| contextualize(index, definition, error))?;
@@ -239,12 +256,14 @@ fn compile_definition<F: Float>(
         IndicatorSpec::TradeCountTimed {
             aggregation,
             window,
+            warmup_policy,
         } => {
             let time_windows = TimeWindows::new(*aggregation, vec![*window]);
             let validated = validate_time_windows(index, definition, &time_windows)?;
             let symbol = symbol.expect("validated symbol-scoped definition");
-            let feature = builtin::trade_count::build(symbol, *aggregation, *window, span)
-                .map_err(|error| contextualize(index, definition, error))?;
+            let feature =
+                builtin::trade_count::build(symbol, *aggregation, *window, *warmup_policy, span)
+                    .map_err(|error| contextualize(index, definition, error))?;
             let name = market_name(
                 symbol_name.unwrap(),
                 "trade",
@@ -508,6 +527,7 @@ mod tests {
             IndicatorSpec::Sma {
                 source: ValueSource::Price,
                 windows: vec![2],
+                warmup_policy: crate::WarmupPolicy::FullWindow,
             },
         )]);
 
@@ -549,6 +569,7 @@ mod tests {
                 IndicatorSpec::Sma {
                     source: ValueSource::Price,
                     windows: vec![2],
+                    warmup_policy: crate::WarmupPolicy::FullWindow,
                 },
             ),
             IndicatorDef::symbol(
@@ -556,6 +577,7 @@ mod tests {
                 IndicatorSpec::Sma {
                     source: ValueSource::Price,
                     windows: vec![5],
+                    warmup_policy: crate::WarmupPolicy::FirstValue,
                 },
             ),
         ]);
@@ -579,6 +601,7 @@ mod tests {
                     Duration::from_secs(1),
                     vec![Duration::from_millis(1_500)],
                 ),
+                warmup_policy: crate::WarmupPolicy::FullWindow,
             },
         )]);
         let sub_millisecond = FeatureSet::new(vec![IndicatorDef::symbol(
@@ -589,6 +612,7 @@ mod tests {
                     Duration::from_micros(1_500),
                     vec![Duration::from_millis(3)],
                 ),
+                warmup_policy: crate::WarmupPolicy::FullWindow,
             },
         )]);
 

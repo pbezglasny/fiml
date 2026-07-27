@@ -1,5 +1,6 @@
 use std::time::Duration;
 
+use crate::WarmupPolicy;
 use crate::features::definition::{
     FeatureSet, IndicatorDef, IndicatorSpec, TimeWindows, ValueSource,
 };
@@ -21,7 +22,16 @@ impl FeatureSetBuilder {
     }
 
     pub fn sma(self, symbol: impl Into<String>, windows: impl IntoIterator<Item = usize>) -> Self {
-        self.sma_from(symbol, ValueSource::Price, windows)
+        self.sma_with_warmup(symbol, windows, WarmupPolicy::FullWindow)
+    }
+
+    pub fn sma_with_warmup(
+        self,
+        symbol: impl Into<String>,
+        windows: impl IntoIterator<Item = usize>,
+        warmup_policy: WarmupPolicy,
+    ) -> Self {
+        self.sma_from_with_warmup(symbol, ValueSource::Price, windows, warmup_policy)
     }
 
     pub fn sma_from(
@@ -30,17 +40,37 @@ impl FeatureSetBuilder {
         source: ValueSource,
         windows: impl IntoIterator<Item = usize>,
     ) -> Self {
+        self.sma_from_with_warmup(symbol, source, windows, WarmupPolicy::FullWindow)
+    }
+
+    pub fn sma_from_with_warmup(
+        self,
+        symbol: impl Into<String>,
+        source: ValueSource,
+        windows: impl IntoIterator<Item = usize>,
+        warmup_policy: WarmupPolicy,
+    ) -> Self {
         self.indicator(IndicatorDef::symbol(
             symbol,
             IndicatorSpec::Sma {
                 source,
                 windows: windows.into_iter().collect(),
+                warmup_policy,
             },
         ))
     }
 
     pub fn ema(self, symbol: impl Into<String>, windows: impl IntoIterator<Item = usize>) -> Self {
-        self.ema_from(symbol, ValueSource::Price, windows)
+        self.ema_with_warmup(symbol, windows, WarmupPolicy::FullWindow)
+    }
+
+    pub fn ema_with_warmup(
+        self,
+        symbol: impl Into<String>,
+        windows: impl IntoIterator<Item = usize>,
+        warmup_policy: WarmupPolicy,
+    ) -> Self {
+        self.ema_from_with_warmup(symbol, ValueSource::Price, windows, warmup_policy)
     }
 
     pub fn ema_from(
@@ -49,20 +79,41 @@ impl FeatureSetBuilder {
         source: ValueSource,
         windows: impl IntoIterator<Item = usize>,
     ) -> Self {
+        self.ema_from_with_warmup(symbol, source, windows, WarmupPolicy::FullWindow)
+    }
+
+    pub fn ema_from_with_warmup(
+        self,
+        symbol: impl Into<String>,
+        source: ValueSource,
+        windows: impl IntoIterator<Item = usize>,
+        warmup_policy: WarmupPolicy,
+    ) -> Self {
         self.indicator(IndicatorDef::symbol(
             symbol,
             IndicatorSpec::Ema {
                 source,
                 windows: windows.into_iter().collect(),
+                warmup_policy,
             },
         ))
     }
 
     pub fn cvd(self, symbol: impl Into<String>, windows: impl IntoIterator<Item = usize>) -> Self {
+        self.cvd_with_warmup(symbol, windows, WarmupPolicy::FullWindow)
+    }
+
+    pub fn cvd_with_warmup(
+        self,
+        symbol: impl Into<String>,
+        windows: impl IntoIterator<Item = usize>,
+        warmup_policy: WarmupPolicy,
+    ) -> Self {
         self.indicator(IndicatorDef::symbol(
             symbol,
             IndicatorSpec::Cvd {
                 windows: windows.into_iter().collect(),
+                warmup_policy,
             },
         ))
     }
@@ -73,7 +124,23 @@ impl FeatureSetBuilder {
         aggregation: Duration,
         windows: impl IntoIterator<Item = Duration>,
     ) -> Self {
-        self.sma_timed_from(symbol, ValueSource::Price, aggregation, windows)
+        self.sma_timed_with_warmup(symbol, aggregation, windows, WarmupPolicy::FullWindow)
+    }
+
+    pub fn sma_timed_with_warmup(
+        self,
+        symbol: impl Into<String>,
+        aggregation: Duration,
+        windows: impl IntoIterator<Item = Duration>,
+        warmup_policy: WarmupPolicy,
+    ) -> Self {
+        self.sma_timed_from_with_warmup(
+            symbol,
+            ValueSource::Price,
+            aggregation,
+            windows,
+            warmup_policy,
+        )
     }
 
     pub fn sma_timed_from(
@@ -83,11 +150,29 @@ impl FeatureSetBuilder {
         aggregation: Duration,
         windows: impl IntoIterator<Item = Duration>,
     ) -> Self {
+        self.sma_timed_from_with_warmup(
+            symbol,
+            source,
+            aggregation,
+            windows,
+            WarmupPolicy::FullWindow,
+        )
+    }
+
+    pub fn sma_timed_from_with_warmup(
+        self,
+        symbol: impl Into<String>,
+        source: ValueSource,
+        aggregation: Duration,
+        windows: impl IntoIterator<Item = Duration>,
+        warmup_policy: WarmupPolicy,
+    ) -> Self {
         self.indicator(IndicatorDef::symbol(
             symbol,
             IndicatorSpec::SmaTimed {
                 source,
                 time_windows: TimeWindows::new(aggregation, windows.into_iter().collect()),
+                warmup_policy,
             },
         ))
     }
@@ -98,10 +183,21 @@ impl FeatureSetBuilder {
         aggregation: Duration,
         windows: impl IntoIterator<Item = Duration>,
     ) -> Self {
+        self.obv_timed_with_warmup(symbol, aggregation, windows, WarmupPolicy::FullWindow)
+    }
+
+    pub fn obv_timed_with_warmup(
+        self,
+        symbol: impl Into<String>,
+        aggregation: Duration,
+        windows: impl IntoIterator<Item = Duration>,
+        warmup_policy: WarmupPolicy,
+    ) -> Self {
         self.indicator(IndicatorDef::symbol(
             symbol,
             IndicatorSpec::ObvTimed {
                 time_windows: TimeWindows::new(aggregation, windows.into_iter().collect()),
+                warmup_policy,
             },
         ))
     }
@@ -112,11 +208,22 @@ impl FeatureSetBuilder {
         aggregation: Duration,
         window: Duration,
     ) -> Self {
+        self.trade_count_timed_with_warmup(symbol, aggregation, window, WarmupPolicy::FullWindow)
+    }
+
+    pub fn trade_count_timed_with_warmup(
+        self,
+        symbol: impl Into<String>,
+        aggregation: Duration,
+        window: Duration,
+        warmup_policy: WarmupPolicy,
+    ) -> Self {
         self.indicator(IndicatorDef::symbol(
             symbol,
             IndicatorSpec::TradeCountTimed {
                 aggregation,
                 window,
+                warmup_policy,
             },
         ))
     }

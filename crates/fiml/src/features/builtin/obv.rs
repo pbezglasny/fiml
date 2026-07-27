@@ -7,7 +7,7 @@ use crate::features::definition::MAX_OUTPUTS_PER_INDICATOR;
 use crate::features::event::Event;
 use crate::indicators::{ObvBucket, OnBalanceVolumeTimed};
 use crate::vectors::FeatureVector;
-use crate::{FimlError, Float, HeapRingBuffer, Result, Symbol};
+use crate::{FimlError, Float, HeapRingBuffer, Result, Symbol, WarmupPolicy};
 
 pub struct ObvTimedFeature<F: Float> {
     symbol: Symbol,
@@ -43,6 +43,18 @@ impl<F: Float> ObvTimedFeature<F> {
             });
         }
     }
+
+    pub(in crate::features) fn observe<O: FeatureVector<F = F>>(
+        &mut self,
+        timestamp: i64,
+        output: &mut O,
+    ) {
+        if self.obv.observe(timestamp) {
+            write_outputs(self.output_span, output, |index| {
+                self.obv.window_value(index)
+            });
+        }
+    }
 }
 
 pub(crate) fn build_timed<F: Float>(
@@ -50,6 +62,7 @@ pub(crate) fn build_timed<F: Float>(
     aggregation: Duration,
     periods: &[usize],
     max_period: usize,
+    warmup_policy: WarmupPolicy,
     output_span: OutputSpan,
 ) -> Result<BuiltinFeature<F>> {
     debug_assert_eq!(periods.len(), output_span.count);
@@ -61,7 +74,7 @@ pub(crate) fn build_timed<F: Float>(
             HeapRingBuffer<ObvBucket<F>>,
             F,
             MAX_OUTPUTS_PER_INDICATOR,
-        >::new_heap(aggregation, capacity)?;
+        >::new_heap(aggregation, capacity, warmup_policy)?;
     for &period in periods {
         obv.add_window_with_periods(period)?;
     }
@@ -90,7 +103,12 @@ mod tests {
             HeapRingBuffer<ObvBucket<f64>>,
             f64,
             MAX_OUTPUTS_PER_INDICATOR,
-        > = OnBalanceVolumeTimed::new_heap(Duration::from_millis(1_000), 3).unwrap();
+        > = OnBalanceVolumeTimed::new_heap(
+            Duration::from_millis(1_000),
+            3,
+            WarmupPolicy::FirstValue,
+        )
+        .unwrap();
         obv.add_window_with_periods(2).unwrap();
 
         let mut feat = ObvTimedFeature::new(aapl, obv, OutputSpan { start: 0, count: 1 });

@@ -35,6 +35,8 @@ where
     feature_vector: V,
     features: [MaybeUninit<BuiltinFeature<F>>; M],
     feature_count: usize,
+    timed_features: [usize; M],
+    timed_feature_count: usize,
     groups: [(usize, usize); FEATURE_GROUP_COUNT],
     names: Box<[String]>,
     last_timestamp: Option<i64>,
@@ -47,8 +49,11 @@ where
     V: FeatureVector<F = F>,
 {
     /// Compile `feature_set` into the caller-provided fixed-capacity storage.
-    pub fn from_feature_set(cells: V, feature_set: &FeatureSet) -> Result<Self> {
+    pub fn from_feature_set(mut cells: V, feature_set: &FeatureSet) -> Result<Self> {
         let compilation = compile(feature_set, cells.len(), M)?;
+        for index in 0..cells.len() {
+            cells.set_value_at(index, F::NAN);
+        }
         Ok(Self::from_compilation(cells, compilation))
     }
 
@@ -89,10 +94,22 @@ where
             features[position].write(entry.feature);
         }
 
+        let mut timed_features = [0; M];
+        let mut timed_feature_count = 0;
+        for (index, slot) in features.iter().enumerate().take(feature_count) {
+            let feature = unsafe { slot.assume_init_ref() };
+            if feature.observes_time() {
+                timed_features[timed_feature_count] = index;
+                timed_feature_count += 1;
+            }
+        }
+
         Self {
             feature_vector: cells,
             features,
             feature_count,
+            timed_features,
+            timed_feature_count,
             groups,
             names: compilation.names,
             last_timestamp: None,
@@ -107,6 +124,15 @@ where
         for slot in &mut self.features[start..start + len] {
             let feature = unsafe { slot.assume_init_mut() };
             feature.update(event, &mut self.feature_vector);
+        }
+    }
+
+    #[inline]
+    fn observe_timed_features(&mut self, event: &Event<F>) {
+        for timed_index in 0..self.timed_feature_count {
+            let feature_index = self.timed_features[timed_index];
+            let feature = unsafe { self.features[feature_index].assume_init_mut() };
+            feature.observe(event, &mut self.feature_vector);
         }
     }
 }
@@ -127,6 +153,7 @@ where
         self.validate_dispatch(event)?;
         self.run_group(self.groups[event.kind() as usize], event);
         self.run_group(self.groups[EVERY_EVENT_GROUP], event);
+        self.observe_timed_features(event);
         self.last_timestamp = Some(event.timestamp());
         Ok(())
     }
@@ -169,7 +196,7 @@ mod tests {
 
     use super::*;
     use crate::features::{IndicatorDef, IndicatorSpec, TimeWindows, TradeSide, ValueSource};
-    use crate::{ArrayFeatureVector, FeatureVector, symbols};
+    use crate::{ArrayFeatureVector, FeatureVector, WarmupPolicy, symbols};
 
     type Vector<const N: usize, const M: usize> =
         IndicatorFeatureVector<f64, ArrayFeatureVector<f64, N>, M>;
@@ -186,6 +213,7 @@ mod tests {
                 IndicatorSpec::Sma {
                     source: ValueSource::Price,
                     windows: vec![5, 2],
+                    warmup_policy: WarmupPolicy::FullWindow,
                 },
             ),
             IndicatorDef::global(IndicatorSpec::DayOfWeek),
@@ -264,6 +292,7 @@ mod tests {
                     Duration::from_secs(1),
                     vec![Duration::from_secs(2), Duration::from_secs(3)],
                 ),
+                warmup_policy: WarmupPolicy::FullWindow,
             },
         )]);
         let vector: Vector<2, 1> =
@@ -272,6 +301,57 @@ mod tests {
 
         assert_eq!(vector.feature_count, 1);
         assert_eq!(vector.feature_names().len(), 2);
+    }
+
+    #[test]
+    fn timed_features_warm_and_expire_on_every_event() {
+        let feature_set = FeatureSet::builder()
+            .trade_count_timed("AAPL", Duration::from_secs(1), Duration::from_secs(2))
+            .build();
+        let mut vector: Vector<1, 1> =
+            IndicatorFeatureVector::from_feature_set(ArrayFeatureVector::new(), &feature_set)
+                .unwrap();
+        let aapl = symbols::intern("AAPL");
+        let googl = symbols::intern("GOOGL");
+
+        assert!(vector.feature_vector().values()[0].is_nan());
+        vector
+            .dispatch(&Event::trade(aapl, 100.0, 1.0, 0, None))
+            .unwrap();
+        vector
+            .dispatch(&Event::trade(aapl, 101.0, 1.0, 1_000, None))
+            .unwrap();
+        assert!(vector.feature_vector().values()[0].is_nan());
+
+        vector.dispatch(&Event::time(2_000)).unwrap();
+        assert_eq!(vector.feature_vector().values(), [1.0]);
+
+        vector
+            .dispatch(&Event::trade(googl, 50.0, 1.0, 3_000, None))
+            .unwrap();
+        assert_eq!(vector.feature_vector().values(), [0.0]);
+    }
+
+    #[test]
+    fn timed_sma_reverts_to_nan_when_its_ready_window_becomes_empty() {
+        let feature_set = FeatureSet::builder()
+            .sma_timed_with_warmup(
+                "AAPL",
+                Duration::from_secs(1),
+                [Duration::from_secs(2)],
+                WarmupPolicy::FirstValue,
+            )
+            .build();
+        let mut vector: Vector<1, 1> =
+            IndicatorFeatureVector::from_feature_set(ArrayFeatureVector::new(), &feature_set)
+                .unwrap();
+        let aapl = symbols::intern("AAPL");
+
+        vector.dispatch(&Event::price(aapl, 10.0, 0)).unwrap();
+        assert_eq!(vector.feature_vector().values(), [10.0]);
+
+        vector.dispatch(&Event::time(2_000)).unwrap();
+        assert!(vector.feature_vector().values()[0].is_nan());
     }
 
     #[test]
@@ -296,6 +376,7 @@ mod tests {
             IndicatorSpec::Sma {
                 source: ValueSource::Price,
                 windows: vec![2],
+                warmup_policy: WarmupPolicy::FullWindow,
             },
         )]);
         let mut vector: Vector<1, 1> =

@@ -9,7 +9,8 @@
           "windows": [
             2,
             4
-          ]
+          ],
+          "warmup_policy": "full_window"
         }
       }
     },
@@ -20,7 +21,8 @@
           "source": "trade_price",
           "windows": [
             2
-          ]
+          ],
+          "warmup_policy": "full_window"
         }
       }
     },
@@ -35,7 +37,8 @@
           "window": {
             "secs": 60,
             "nanos": 0
-          }
+          },
+          "warmup_policy": "full_window"
         }
       }
     },
@@ -47,7 +50,8 @@
           "windows": [
             2,
             4
-          ]
+          ],
+          "warmup_policy": "full_window"
         }
       }
     },
@@ -58,7 +62,8 @@
           "source": "trade_price",
           "windows": [
             2
-          ]
+          ],
+          "warmup_policy": "full_window"
         }
       }
     },
@@ -73,7 +78,8 @@
           "window": {
             "secs": 60,
             "nanos": 0
-          }
+          },
+          "warmup_policy": "full_window"
         }
       }
     },

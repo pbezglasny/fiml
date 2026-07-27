@@ -12,7 +12,7 @@ use std::time::Duration;
 use fiml::{
     Event, FEATURE_SET_FORMAT_VERSION, FeatureExtractor as CoreFeatureExtractor,
     FeatureSet as CoreFeatureSet, IndicatorDef, IndicatorFeatures, IndicatorSpec, Symbol,
-    TimeWindows, TradeSide, ValueSource, symbols,
+    TimeWindows, TradeSide, ValueSource, WarmupPolicy as CoreWarmupPolicy, symbols,
 };
 use numpy::ndarray::Array2;
 use numpy::{Element, IntoPyArray, PyArray1, PyReadonlyArray1};
@@ -33,6 +33,29 @@ const KIND_TIME: u8 = 4;
 /// Trade-side codes for optional `side` payloads on trade events.
 const SIDE_AGGRESSOR_BUY: u8 = 0;
 const SIDE_AGGRESSOR_SELL: u8 = 1;
+
+/// Window-indicator warm-up behavior.
+#[pyclass(
+    name = "WarmupPolicy",
+    eq,
+    eq_int,
+    frozen,
+    rename_all = "SCREAMING_SNAKE_CASE"
+)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PyWarmupPolicy {
+    FirstValue,
+    FullWindow,
+}
+
+impl From<PyWarmupPolicy> for CoreWarmupPolicy {
+    fn from(value: PyWarmupPolicy) -> Self {
+        match value {
+            PyWarmupPolicy::FirstValue => Self::FirstValue,
+            PyWarmupPolicy::FullWindow => Self::FullWindow,
+        }
+    }
+}
 
 /// Parse a duration string such as `"500ms"`, `"1s"`, `"5m"` or `"1h"`.
 /// `field` names the argument in the error message.
@@ -167,60 +190,96 @@ impl FeatureSet {
     }
 
     /// Grouped simple moving averages over ordered sample windows.
-    #[pyo3(signature = (symbol, windows, *, source="price"))]
+    #[pyo3(signature = (
+        symbol,
+        windows,
+        *,
+        source="price",
+        warmup=PyWarmupPolicy::FullWindow
+    ))]
     fn sma<'py>(
         mut slf: PyRefMut<'py, Self>,
         symbol: &str,
         windows: Vec<usize>,
         source: &str,
+        warmup: PyWarmupPolicy,
     ) -> PyResult<PyRefMut<'py, Self>> {
         slf.push_symbol(
             symbol,
             IndicatorSpec::Sma {
                 source: parse_value_source("source", source)?,
                 windows,
+                warmup_policy: warmup.into(),
             },
         );
         Ok(slf)
     }
 
     /// Grouped exponential moving averages over ordered sample windows.
-    #[pyo3(signature = (symbol, windows, *, source="price"))]
+    #[pyo3(signature = (
+        symbol,
+        windows,
+        *,
+        source="price",
+        warmup=PyWarmupPolicy::FullWindow
+    ))]
     fn ema<'py>(
         mut slf: PyRefMut<'py, Self>,
         symbol: &str,
         windows: Vec<usize>,
         source: &str,
+        warmup: PyWarmupPolicy,
     ) -> PyResult<PyRefMut<'py, Self>> {
         slf.push_symbol(
             symbol,
             IndicatorSpec::Ema {
                 source: parse_value_source("source", source)?,
                 windows,
+                warmup_policy: warmup.into(),
             },
         );
         Ok(slf)
     }
 
     /// Grouped cumulative-volume-delta windows over classified trades.
-    #[pyo3(signature = (symbol, windows))]
+    #[pyo3(signature = (
+        symbol,
+        windows,
+        *,
+        warmup=PyWarmupPolicy::FullWindow
+    ))]
     fn cvd<'py>(
         mut slf: PyRefMut<'py, Self>,
         symbol: &str,
         windows: Vec<usize>,
+        warmup: PyWarmupPolicy,
     ) -> PyResult<PyRefMut<'py, Self>> {
-        slf.push_symbol(symbol, IndicatorSpec::Cvd { windows });
+        slf.push_symbol(
+            symbol,
+            IndicatorSpec::Cvd {
+                windows,
+                warmup_policy: warmup.into(),
+            },
+        );
         Ok(slf)
     }
 
     /// Grouped time-bucketed moving averages over ordered duration windows.
-    #[pyo3(signature = (symbol, aggregation, windows, *, source="price"))]
+    #[pyo3(signature = (
+        symbol,
+        aggregation,
+        windows,
+        *,
+        source="price",
+        warmup=PyWarmupPolicy::FullWindow
+    ))]
     fn sma_timed<'py>(
         mut slf: PyRefMut<'py, Self>,
         symbol: &str,
         aggregation: &str,
         windows: Vec<String>,
         source: &str,
+        warmup: PyWarmupPolicy,
     ) -> PyResult<PyRefMut<'py, Self>> {
         slf.push_symbol(
             symbol,
@@ -230,18 +289,26 @@ impl FeatureSet {
                     parse_duration("aggregation", aggregation)?,
                     parse_durations("windows", windows)?,
                 ),
+                warmup_policy: warmup.into(),
             },
         );
         Ok(slf)
     }
 
     /// Grouped time-bucketed on-balance-volume windows.
-    #[pyo3(signature = (symbol, aggregation, windows))]
+    #[pyo3(signature = (
+        symbol,
+        aggregation,
+        windows,
+        *,
+        warmup=PyWarmupPolicy::FullWindow
+    ))]
     fn obv_timed<'py>(
         mut slf: PyRefMut<'py, Self>,
         symbol: &str,
         aggregation: &str,
         windows: Vec<String>,
+        warmup: PyWarmupPolicy,
     ) -> PyResult<PyRefMut<'py, Self>> {
         slf.push_symbol(
             symbol,
@@ -250,6 +317,7 @@ impl FeatureSet {
                     parse_duration("aggregation", aggregation)?,
                     parse_durations("windows", windows)?,
                 ),
+                warmup_policy: warmup.into(),
             },
         );
         Ok(slf)
@@ -257,18 +325,26 @@ impl FeatureSet {
 
     /// Rolling count of `symbol` trades over a `window`, bucketed by
     /// `aggregation` (duration strings).
-    #[pyo3(signature = (symbol, aggregation, window))]
+    #[pyo3(signature = (
+        symbol,
+        aggregation,
+        window,
+        *,
+        warmup=PyWarmupPolicy::FullWindow
+    ))]
     fn trade_count_timed<'py>(
         mut slf: PyRefMut<'py, Self>,
         symbol: &str,
         aggregation: &str,
         window: &str,
+        warmup: PyWarmupPolicy,
     ) -> PyResult<PyRefMut<'py, Self>> {
         slf.push_symbol(
             symbol,
             IndicatorSpec::TradeCountTimed {
                 aggregation: parse_duration("aggregation", aggregation)?,
                 window: parse_duration("window", window)?,
+                warmup_policy: warmup.into(),
             },
         );
         Ok(slf)
@@ -555,8 +631,8 @@ impl FeatureExtractor {
         self.n_features
     }
 
-    /// Current feature values in output order. A cell is NaN until its feature
-    /// has produced a first value (warmup).
+    /// Current feature values in output order. A window cell is NaN until its
+    /// configured warm-up policy is satisfied and a current value exists.
     fn values(&self, py: Python<'_>) -> Py<PyAny> {
         match self.output_dtype {
             OutputDtype::Float32 => {
@@ -713,6 +789,7 @@ impl FeatureExtractor {
 
 #[pymodule]
 fn _fiml(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add_class::<PyWarmupPolicy>()?;
     m.add_class::<FeatureSet>()?;
     m.add_class::<FeatureExtractor>()?;
     m.add("FEATURE_SET_FORMAT_VERSION", FEATURE_SET_FORMAT_VERSION)?;

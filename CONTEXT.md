@@ -115,9 +115,27 @@ may allocate. A compiled extractor preallocates its required state; event
 dispatch, indicator updates, and output-cell writes perform no per-event
 allocation.
 
-## Partial sample-window SMA
+## Warm-up policy
 
-A sample-count simple moving average whose configured period has not yet been
-filled. After at least one matching sample, it averages the available
-`min(samples_seen, period)` samples. Whether feature outputs should instead
-remain NaN until a complete window is ready is a separate warm-up policy.
+The configured rule that determines when a window indicator's output becomes
+ready. `FirstValue` becomes ready after its first matching input.
+`FullWindow` becomes ready after a sample window receives its configured number
+of matching inputs, or after global event time covers a timed window's full
+duration. One policy applies to every output of a grouped indicator, while each
+output becomes ready according to its own window.
+
+## Indicator readiness
+
+Monotonic state recording whether an indicator output has completed its
+configured warm-up. Readiness latches until the indicator is reset or
+reconstructed. It is independent of current-value availability: a warmed-up
+timed SMA can have no samples in its current window and therefore expose a
+missing value while remaining ready.
+
+## Missing feature value
+
+An output for which no current numeric value is available. Standalone
+indicators represent it as `None`; floating-point feature-vector cells represent
+it as NaN. Missing values include outputs still warming up and a warmed-up timed
+average whose current window is empty. Timed counts and timed cumulative values
+use numeric zero for an observed empty window.

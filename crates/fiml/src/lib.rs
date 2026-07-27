@@ -20,7 +20,7 @@ pub use ring_buffer::{
     HeapRingBuffer, RingBuffer, StackRingBuffer, new_heap_ring_buffer, new_stack_ring_buffer,
 };
 pub use symbols::Symbol;
-pub use types::Float;
+pub use types::{Float, WarmupPolicy};
 pub use vectors::{ArrayFeatureVector, FeatureVector, VecFeatureVector};
 
 pub type Result<T> = std::result::Result<T, FimlError>;

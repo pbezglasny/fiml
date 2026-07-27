@@ -1,6 +1,6 @@
 # ADR 0003: Define sample-SMA partial-window semantics
 
-Status: accepted  
+Status: superseded by ADR 0004
 Date: 2026-07-25
 
 ## Context

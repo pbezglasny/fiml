@@ -59,7 +59,7 @@ def main() -> None:
     print(batch)
 
     # Exact equality, not approximate: identical feature set + identical code
-    # path. equal_nan covers warmup cells, which read NaN until first write.
+    # path. equal_nan covers cells that are still warming up or unavailable.
     assert np.array_equal(batch, streaming, equal_nan=True), (
         "batch and streaming outputs diverged"
     )
@@ -113,7 +113,12 @@ def check_event_kinds() -> None:
     mutating extractor state (rows are validated before any dispatch).
     """
     extractor = fiml.FeatureExtractor(
-        fiml.FeatureSet().trade_count_timed("BTCUSDT", aggregation="1s", window="60s")
+        fiml.FeatureSet().trade_count_timed(
+            "BTCUSDT",
+            aggregation="1s",
+            window="60s",
+            warmup=fiml.WarmupPolicy.FIRST_VALUE,
+        )
     )
     btc = extractor.symbol("BTCUSDT")
 
