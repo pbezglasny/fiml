@@ -1,0 +1,483 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "fiml FeatureSet",
+  "description": "A versioned, ordered feature definition shared by Python training and Rust serving.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "indicators"
+  ],
+  "properties": {
+    "version": {
+      "description": "A stable feature-set format version compatible with the current 1.x loader. Writers emit 1.0.0.",
+      "type": "string",
+      "pattern": "^1\\.(0|[1-9][0-9]*)(?:\\.(0|[1-9][0-9]*))?(?:\\+[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?$",
+      "examples": [
+        "1.0.0"
+      ]
+    },
+    "indicators": {
+      "description": "Indicator definitions in feature-vector output order.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/indicatorDefinition"
+      }
+    }
+  },
+  "$defs": {
+    "indicatorDefinition": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/smaDefinition"
+        },
+        {
+          "$ref": "#/$defs/emaDefinition"
+        },
+        {
+          "$ref": "#/$defs/cvdDefinition"
+        },
+        {
+          "$ref": "#/$defs/smaTimedDefinition"
+        },
+        {
+          "$ref": "#/$defs/obvTimedDefinition"
+        },
+        {
+          "$ref": "#/$defs/tradeCountTimedDefinition"
+        },
+        {
+          "$ref": "#/$defs/dayOfWeekDefinition"
+        },
+        {
+          "$ref": "#/$defs/timeSinceFirstEventOfDayDefinition"
+        }
+      ]
+    },
+    "marketSymbol": {
+      "description": "The non-empty symbol observed by a market indicator.",
+      "type": "string",
+      "minLength": 1
+    },
+    "valueSource": {
+      "description": "The numeric event field consumed by a moving average.",
+      "type": "string",
+      "enum": [
+        "price",
+        "volume",
+        "trade_price",
+        "trade_volume"
+      ]
+    },
+    "warmupPolicy": {
+      "description": "When a window indicator starts exposing values.",
+      "type": "string",
+      "enum": [
+        "first_value",
+        "full_window"
+      ]
+    },
+    "sampleWindows": {
+      "description": "Ordered, unique sample counts. Each entry owns one adjacent output cell.",
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 16,
+      "uniqueItems": true,
+      "items": {
+        "type": "integer",
+        "minimum": 1
+      }
+    },
+    "duration": {
+      "description": "A Rust Duration serialized by serde. Supported feature sets use whole-millisecond precision.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "secs",
+        "nanos"
+      ],
+      "properties": {
+        "secs": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 18446744073709551615
+        },
+        "nanos": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 999999999,
+          "multipleOf": 1000000
+        }
+      }
+    },
+    "positiveDuration": {
+      "description": "A whole-millisecond duration of at least one millisecond.",
+      "allOf": [
+        {
+          "$ref": "#/$defs/duration"
+        },
+        {
+          "anyOf": [
+            {
+              "properties": {
+                "secs": {
+                  "minimum": 1
+                }
+              }
+            },
+            {
+              "properties": {
+                "nanos": {
+                  "minimum": 1000000
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "timeWindows": {
+      "description": "Bucket aggregation and ordered rolling windows. Every window must be at least, and an exact multiple of, aggregation; that relationship is checked during compilation.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "aggregation",
+        "windows"
+      ],
+      "properties": {
+        "aggregation": {
+          "$ref": "#/$defs/positiveDuration"
+        },
+        "windows": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 16,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/positiveDuration"
+          }
+        }
+      }
+    },
+    "smaPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source",
+        "windows",
+        "warmup_policy"
+      ],
+      "properties": {
+        "source": {
+          "$ref": "#/$defs/valueSource"
+        },
+        "windows": {
+          "$ref": "#/$defs/sampleWindows"
+        },
+        "warmup_policy": {
+          "$ref": "#/$defs/warmupPolicy"
+        }
+      }
+    },
+    "emaPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source",
+        "windows",
+        "warmup_policy"
+      ],
+      "properties": {
+        "source": {
+          "$ref": "#/$defs/valueSource"
+        },
+        "windows": {
+          "$ref": "#/$defs/sampleWindows"
+        },
+        "warmup_policy": {
+          "$ref": "#/$defs/warmupPolicy"
+        }
+      }
+    },
+    "cvdPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "windows",
+        "warmup_policy"
+      ],
+      "properties": {
+        "windows": {
+          "$ref": "#/$defs/sampleWindows"
+        },
+        "warmup_policy": {
+          "$ref": "#/$defs/warmupPolicy"
+        }
+      }
+    },
+    "smaTimedPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source",
+        "time_windows",
+        "warmup_policy"
+      ],
+      "properties": {
+        "source": {
+          "$ref": "#/$defs/valueSource"
+        },
+        "time_windows": {
+          "$ref": "#/$defs/timeWindows"
+        },
+        "warmup_policy": {
+          "$ref": "#/$defs/warmupPolicy"
+        }
+      }
+    },
+    "obvTimedPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "time_windows",
+        "warmup_policy"
+      ],
+      "properties": {
+        "time_windows": {
+          "$ref": "#/$defs/timeWindows"
+        },
+        "warmup_policy": {
+          "$ref": "#/$defs/warmupPolicy"
+        }
+      }
+    },
+    "tradeCountTimedPayload": {
+      "description": "The window must be at least, and an exact multiple of, aggregation; that relationship is checked during compilation.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "aggregation",
+        "window",
+        "warmup_policy"
+      ],
+      "properties": {
+        "aggregation": {
+          "$ref": "#/$defs/positiveDuration"
+        },
+        "window": {
+          "$ref": "#/$defs/positiveDuration"
+        },
+        "warmup_policy": {
+          "$ref": "#/$defs/warmupPolicy"
+        }
+      }
+    },
+    "timeSinceFirstEventOfDayPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "utc_offset_millis"
+      ],
+      "properties": {
+        "utc_offset_millis": {
+          "description": "A fixed UTC offset from -14h through +14h in whole minutes.",
+          "type": "integer",
+          "minimum": -50400000,
+          "maximum": 50400000,
+          "multipleOf": 60000
+        }
+      }
+    },
+    "smaDefinition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "symbol",
+        "indicator"
+      ],
+      "properties": {
+        "symbol": {
+          "$ref": "#/$defs/marketSymbol"
+        },
+        "indicator": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "Sma"
+          ],
+          "properties": {
+            "Sma": {
+              "$ref": "#/$defs/smaPayload"
+            }
+          }
+        }
+      }
+    },
+    "emaDefinition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "symbol",
+        "indicator"
+      ],
+      "properties": {
+        "symbol": {
+          "$ref": "#/$defs/marketSymbol"
+        },
+        "indicator": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "Ema"
+          ],
+          "properties": {
+            "Ema": {
+              "$ref": "#/$defs/emaPayload"
+            }
+          }
+        }
+      }
+    },
+    "cvdDefinition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "symbol",
+        "indicator"
+      ],
+      "properties": {
+        "symbol": {
+          "$ref": "#/$defs/marketSymbol"
+        },
+        "indicator": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "Cvd"
+          ],
+          "properties": {
+            "Cvd": {
+              "$ref": "#/$defs/cvdPayload"
+            }
+          }
+        }
+      }
+    },
+    "smaTimedDefinition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "symbol",
+        "indicator"
+      ],
+      "properties": {
+        "symbol": {
+          "$ref": "#/$defs/marketSymbol"
+        },
+        "indicator": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "SmaTimed"
+          ],
+          "properties": {
+            "SmaTimed": {
+              "$ref": "#/$defs/smaTimedPayload"
+            }
+          }
+        }
+      }
+    },
+    "obvTimedDefinition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "symbol",
+        "indicator"
+      ],
+      "properties": {
+        "symbol": {
+          "$ref": "#/$defs/marketSymbol"
+        },
+        "indicator": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "ObvTimed"
+          ],
+          "properties": {
+            "ObvTimed": {
+              "$ref": "#/$defs/obvTimedPayload"
+            }
+          }
+        }
+      }
+    },
+    "tradeCountTimedDefinition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "symbol",
+        "indicator"
+      ],
+      "properties": {
+        "symbol": {
+          "$ref": "#/$defs/marketSymbol"
+        },
+        "indicator": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "TradeCountTimed"
+          ],
+          "properties": {
+            "TradeCountTimed": {
+              "$ref": "#/$defs/tradeCountTimedPayload"
+            }
+          }
+        }
+      }
+    },
+    "dayOfWeekDefinition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "symbol",
+        "indicator"
+      ],
+      "properties": {
+        "symbol": {
+          "type": "null"
+        },
+        "indicator": {
+          "const": "DayOfWeek"
+        }
+      }
+    },
+    "timeSinceFirstEventOfDayDefinition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "symbol",
+        "indicator"
+      ],
+      "properties": {
+        "symbol": {
+          "type": "null"
+        },
+        "indicator": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "TimeSinceFirstEventOfDay"
+          ],
+          "properties": {
+            "TimeSinceFirstEventOfDay": {
+              "$ref": "#/$defs/timeSinceFirstEventOfDayPayload"
+            }
+          }
+        }
+      }
+    }
+  }
+}
