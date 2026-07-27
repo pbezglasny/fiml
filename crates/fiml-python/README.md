@@ -188,6 +188,13 @@ version. Serialization emits full SemVer. Deserialization also accepts short
 forms such as `1.0` and compatible stable versions with the same major version;
 prerelease artifacts require an exact matching prerelease loader.
 
+The complete machine-readable contract is available as a
+[JSON Schema](../../docs/feature-set.schema.json). It describes supported
+feature sets and rejects undocumented fields. Extractor compilation remains the
+authority for collection-wide uniqueness, platform-dependent numeric limits,
+and relationships JSON Schema cannot express, such as timed windows being at
+least and exact multiples of their aggregation.
+
 Builder methods: `sma`, `ema`, `cvd`, `sma_timed`, `obv_timed`,
 `trade_count_timed`, `day_of_week`, and `time_since_first_event_of_day`
 (fixed-offset `tz`, default `"UTC"`). SMA, EMA, CVD, timed SMA, and timed OBV

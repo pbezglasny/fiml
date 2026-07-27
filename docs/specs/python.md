@@ -97,6 +97,12 @@ package version. Writers emit full SemVer. Readers also accept short forms such
 as `1.0` and accept stable artifacts with the same major version; prerelease
 artifacts require an exact matching prerelease loader.
 
+The complete supported format is defined by the machine-readable
+[FeatureSet JSON Schema](../feature-set.schema.json). Extractor compilation
+additionally checks collection-wide uniqueness, platform-dependent numeric
+limits, and relationships the schema cannot express, such as timed windows
+being at least and exact multiples of aggregation.
+
 ### 3b. Python builder ✅
 
 ```python

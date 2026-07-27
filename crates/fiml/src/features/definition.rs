@@ -322,6 +322,165 @@ mod serde_tests {
     }
 
     #[test]
+    fn checked_in_feature_set_schema_is_valid_json() {
+        let schema: serde_json::Value =
+            serde_json::from_str(include_str!("../../../../docs/feature-set.schema.json")).unwrap();
+
+        assert_eq!(
+            schema["$schema"],
+            "https://json-schema.org/draft/2020-12/schema"
+        );
+        assert_eq!(schema["title"], "fiml FeatureSet");
+    }
+
+    #[test]
+    fn serialization_shape_covers_every_indicator_variant() {
+        let feature_set = FeatureSet::builder()
+            .sma_from_with_warmup(
+                "BTCUSDT",
+                ValueSource::Volume,
+                [2, 4],
+                crate::WarmupPolicy::FullWindow,
+            )
+            .ema_from_with_warmup(
+                "ETHUSDT",
+                ValueSource::TradePrice,
+                [3],
+                crate::WarmupPolicy::FirstValue,
+            )
+            .cvd_with_warmup("BTCUSDT", [5], crate::WarmupPolicy::FullWindow)
+            .sma_timed_from_with_warmup(
+                "ETHUSDT",
+                ValueSource::TradeVolume,
+                Duration::from_secs(1),
+                [Duration::from_secs(2)],
+                crate::WarmupPolicy::FirstValue,
+            )
+            .obv_timed_with_warmup(
+                "BTCUSDT",
+                Duration::from_millis(1),
+                [Duration::from_secs(30)],
+                crate::WarmupPolicy::FullWindow,
+            )
+            .trade_count_timed_with_warmup(
+                "BTCUSDT",
+                Duration::from_millis(10),
+                Duration::from_secs(60),
+                crate::WarmupPolicy::FirstValue,
+            )
+            .day_of_week()
+            .time_since_first_event_of_day(3_600_000)
+            .build();
+
+        assert_eq!(
+            serde_json::to_value(feature_set).unwrap(),
+            serde_json::json!({
+                "version": FEATURE_SET_FORMAT_VERSION,
+                "indicators": [
+                    {
+                        "symbol": "BTCUSDT",
+                        "indicator": {
+                            "Sma": {
+                                "source": "volume",
+                                "windows": [2, 4],
+                                "warmup_policy": "full_window"
+                            }
+                        }
+                    },
+                    {
+                        "symbol": "ETHUSDT",
+                        "indicator": {
+                            "Ema": {
+                                "source": "trade_price",
+                                "windows": [3],
+                                "warmup_policy": "first_value"
+                            }
+                        }
+                    },
+                    {
+                        "symbol": "BTCUSDT",
+                        "indicator": {
+                            "Cvd": {
+                                "windows": [5],
+                                "warmup_policy": "full_window"
+                            }
+                        }
+                    },
+                    {
+                        "symbol": "ETHUSDT",
+                        "indicator": {
+                            "SmaTimed": {
+                                "source": "trade_volume",
+                                "time_windows": {
+                                    "aggregation": {
+                                        "secs": 1,
+                                        "nanos": 0
+                                    },
+                                    "windows": [
+                                        {
+                                            "secs": 2,
+                                            "nanos": 0
+                                        }
+                                    ]
+                                },
+                                "warmup_policy": "first_value"
+                            }
+                        }
+                    },
+                    {
+                        "symbol": "BTCUSDT",
+                        "indicator": {
+                            "ObvTimed": {
+                                "time_windows": {
+                                    "aggregation": {
+                                        "secs": 0,
+                                        "nanos": 1_000_000
+                                    },
+                                    "windows": [
+                                        {
+                                            "secs": 30,
+                                            "nanos": 0
+                                        }
+                                    ]
+                                },
+                                "warmup_policy": "full_window"
+                            }
+                        }
+                    },
+                    {
+                        "symbol": "BTCUSDT",
+                        "indicator": {
+                            "TradeCountTimed": {
+                                "aggregation": {
+                                    "secs": 0,
+                                    "nanos": 10_000_000
+                                },
+                                "window": {
+                                    "secs": 60,
+                                    "nanos": 0
+                                },
+                                "warmup_policy": "first_value"
+                            }
+                        }
+                    },
+                    {
+                        "symbol": null,
+                        "indicator": "DayOfWeek"
+                    },
+                    {
+                        "symbol": null,
+                        "indicator": {
+                            "TimeSinceFirstEventOfDay": {
+                                "utc_offset_millis": 3_600_000
+                            }
+                        }
+                    }
+                ]
+            })
+        );
+    }
+
+    #[test]
     fn cvd_spec_round_trips_with_grouped_windows() {
         let feature_set = FeatureSet::builder()
             .cvd_with_warmup("BTCUSDT", [10, 50], crate::WarmupPolicy::FirstValue)
