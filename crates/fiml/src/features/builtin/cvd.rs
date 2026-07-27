@@ -5,7 +5,7 @@ use crate::features::definition::MAX_OUTPUTS_PER_INDICATOR;
 use crate::features::event::Event;
 use crate::indicators::CumulativeVolumeDelta;
 use crate::vectors::FeatureVector;
-use crate::{Float, HeapRingBuffer, Result, Symbol};
+use crate::{Float, HeapRingBuffer, Result, Symbol, WarmupPolicy};
 
 pub struct CvdFeature<F: Float> {
     symbol: Symbol,
@@ -44,6 +44,7 @@ impl<F: Float> CvdFeature<F> {
 pub(crate) fn build<F: Float>(
     symbol: Symbol,
     windows: &[usize],
+    warmup_policy: WarmupPolicy,
     output_span: OutputSpan,
 ) -> Result<BuiltinFeature<F>> {
     debug_assert_eq!(windows.len(), output_span.count);
@@ -51,6 +52,7 @@ pub(crate) fn build<F: Float>(
     let mut cvd =
         CumulativeVolumeDelta::<HeapRingBuffer<F>, F, MAX_OUTPUTS_PER_INDICATOR>::new_heap(
             max_window,
+            warmup_policy,
         );
     for &window in windows {
         cvd.add_window(window)?;
@@ -72,11 +74,17 @@ mod tests {
     fn grouped_cvd_uses_trade_side_and_ignores_unclassified_trades() {
         let aapl = symbols::intern("AAPL");
         let googl = symbols::intern("GOOGL");
-        let mut feature =
-            match build::<f64>(aapl, &[1, 2], OutputSpan { start: 0, count: 2 }).unwrap() {
-                BuiltinFeature::Cvd(feature) => feature,
-                _ => unreachable!(),
-            };
+        let mut feature = match build::<f64>(
+            aapl,
+            &[1, 2],
+            WarmupPolicy::FirstValue,
+            OutputSpan { start: 0, count: 2 },
+        )
+        .unwrap()
+        {
+            BuiltinFeature::Cvd(feature) => feature,
+            _ => unreachable!(),
+        };
         let mut output = ArrayFeatureVector::<f64, 2>::new();
 
         feature.update(

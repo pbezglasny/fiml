@@ -14,7 +14,12 @@ def count_name(symbol):
 def trade_counts(*symbols):
     feature_set = fiml.FeatureSet()
     for symbol in symbols:
-        feature_set.trade_count_timed(symbol, aggregation="1ms", window="10s")
+        feature_set.trade_count_timed(
+            symbol,
+            aggregation="1ms",
+            window="10s",
+            warmup=fiml.WarmupPolicy.FIRST_VALUE,
+        )
     return feature_set
 
 
@@ -54,8 +59,18 @@ def test_compute_features_returns_one_multi_symbol_snapshot_per_trade():
 def test_grouped_sma_and_ema_can_consume_trade_price_and_volume():
     feature_set = (
         fiml.FeatureSet()
-        .sma("BTCUSDT", [2, 3], source="trade_price")
-        .ema("BTCUSDT", [2], source="trade_volume")
+        .sma(
+            "BTCUSDT",
+            [2, 3],
+            source="trade_price",
+            warmup=fiml.WarmupPolicy.FIRST_VALUE,
+        )
+        .ema(
+            "BTCUSDT",
+            [2],
+            source="trade_volume",
+            warmup=fiml.WarmupPolicy.FIRST_VALUE,
+        )
     )
     assert feature_set.indicator_count() == 2
     assert feature_set.output_count() == 3
@@ -83,7 +98,9 @@ def test_grouped_sma_and_ema_can_consume_trade_price_and_volume():
 
 
 def test_cvd_uses_aggressor_side_codes():
-    feature_set = fiml.FeatureSet().cvd("BTCUSDT", [1, 2])
+    feature_set = fiml.FeatureSet().cvd(
+        "BTCUSDT", [1, 2], warmup=fiml.WarmupPolicy.FIRST_VALUE
+    )
     extractor = fiml.FeatureExtractor(feature_set)
     source = trades(
         side=np.array(
@@ -123,6 +140,32 @@ def test_invalid_trade_side_is_rejected_before_dispatch():
         )
 
     assert np.isnan(extractor.values()[0])
+
+
+def test_python_warmup_enum_matches_default_and_first_value_policies():
+    assert fiml.WarmupPolicy.FIRST_VALUE != fiml.WarmupPolicy.FULL_WINDOW
+
+    default_extractor = fiml.FeatureExtractor(
+        fiml.FeatureSet().sma("BTCUSDT", [2], source="trade_price")
+    )
+    partial_extractor = fiml.FeatureExtractor(
+        fiml.FeatureSet().sma(
+            "BTCUSDT",
+            [2],
+            source="trade_price",
+            warmup=fiml.WarmupPolicy.FIRST_VALUE,
+        )
+    )
+    btc = default_extractor.symbol("BTCUSDT")
+    partial_btc = partial_extractor.symbol("BTCUSDT")
+
+    default_extractor.update(fiml.KIND_TRADE, btc, 0, price=10.0, volume=1.0)
+    partial_extractor.update(
+        fiml.KIND_TRADE, partial_btc, 0, price=10.0, volume=1.0
+    )
+
+    assert np.isnan(default_extractor.values()[0])
+    assert partial_extractor.values()[0] == 10.0
 
 
 def test_moving_average_source_is_validated():
@@ -307,6 +350,10 @@ def test_feature_set_json_emits_and_accepts_compatible_semantic_versions():
     payload = json.loads(trade_counts("BTCUSDT").to_json())
     assert fiml.FEATURE_SET_FORMAT_VERSION == "1.0.0"
     assert payload["version"] == fiml.FEATURE_SET_FORMAT_VERSION
+    assert (
+        payload["indicators"][0]["indicator"]["TradeCountTimed"]["warmup_policy"]
+        == "first_value"
+    )
 
     for version in ["1.0", "1.99.3"]:
         payload["version"] = version

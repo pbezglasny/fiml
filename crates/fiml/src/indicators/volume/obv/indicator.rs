@@ -4,11 +4,12 @@ use std::time::Duration;
 use crate::ring_buffer::{
     HeapRingBuffer, RingBuffer, StackRingBuffer, new_heap_ring_buffer, new_stack_ring_buffer,
 };
-use crate::{FimlError, Float, Result};
+use crate::{FimlError, Float, Result, WarmupPolicy};
 
 struct ObvWindowTimed<F: Float> {
     duration: i64,
     value: F,
+    ready: bool,
     /// Front-relative index of the oldest bucket still inside this window.
     /// Buckets before it are already expired and subtracted from `value`; since
     /// the ring only grows at the back, expiry resumes from this cursor instead
@@ -45,6 +46,9 @@ where
     millis_aggregation: i64,
     windows: [MaybeUninit<ObvWindowTimed<F>>; WINDOWS],
     window_count: usize,
+    warmup_policy: WarmupPolicy,
+    first_timestamp: Option<i64>,
+    last_observed_timestamp: Option<i64>,
 }
 
 impl<const N: usize, F, const WINDOWS: usize>
@@ -52,14 +56,14 @@ impl<const N: usize, F, const WINDOWS: usize>
 where
     F: Float,
 {
-    pub fn new_stack(aggregation: Duration) -> Result<Self> {
+    pub fn new_stack(aggregation: Duration, warmup_policy: WarmupPolicy) -> Result<Self> {
         if N == 0 {
             return Err(FimlError::InvalidArgument(
                 "Ring buffer capacity must be greater than 0".to_string(),
             ));
         }
         let stack_data = new_stack_ring_buffer::<N, ObvBucket<F>>();
-        Self::new_with_buffer(stack_data, aggregation, N)
+        Self::new_with_buffer(stack_data, aggregation, N, warmup_policy)
     }
 }
 
@@ -67,14 +71,18 @@ impl<F, const WINDOWS: usize> OnBalanceVolumeTimed<HeapRingBuffer<ObvBucket<F>>,
 where
     F: Float,
 {
-    pub fn new_heap(aggregation: Duration, capacity: usize) -> Result<Self> {
+    pub fn new_heap(
+        aggregation: Duration,
+        capacity: usize,
+        warmup_policy: WarmupPolicy,
+    ) -> Result<Self> {
         if capacity == 0 {
             return Err(FimlError::InvalidArgument(
                 "Ring buffer capacity must be greater than 0".to_string(),
             ));
         }
         let heap_data = new_heap_ring_buffer::<ObvBucket<F>>(capacity);
-        Self::new_with_buffer(heap_data, aggregation, capacity)
+        Self::new_with_buffer(heap_data, aggregation, capacity, warmup_policy)
     }
 }
 
@@ -83,7 +91,12 @@ where
     R: RingBuffer<Item = ObvBucket<F>>,
     F: Float,
 {
-    fn new_with_buffer(data: R, aggregation: Duration, capacity: usize) -> Result<Self> {
+    fn new_with_buffer(
+        data: R,
+        aggregation: Duration,
+        capacity: usize,
+        warmup_policy: WarmupPolicy,
+    ) -> Result<Self> {
         if capacity == 0 {
             return Err(FimlError::InvalidArgument(
                 "Ring buffer capacity must be greater than 0".to_string(),
@@ -110,6 +123,9 @@ where
             millis_aggregation,
             windows: [const { MaybeUninit::<ObvWindowTimed<F>>::uninit() }; WINDOWS],
             window_count: 0,
+            warmup_policy,
+            first_timestamp: None,
+            last_observed_timestamp: None,
         })
     }
 
@@ -148,6 +164,7 @@ where
         self.windows[self.window_count].write(ObvWindowTimed {
             duration,
             value: F::ZERO,
+            ready: false,
             front_offset: 0,
         });
         self.window_count += 1;
@@ -225,7 +242,43 @@ where
         }
     }
 
+    fn update_readiness(&mut self, now: i64) {
+        let first_timestamp = self.first_timestamp;
+        for window_index in 0..self.window_count {
+            let window = unsafe { self.windows[window_index].assume_init_mut() };
+            if !window.ready {
+                window.ready = match (self.warmup_policy, first_timestamp) {
+                    (WarmupPolicy::FirstValue, Some(_)) => true,
+                    (WarmupPolicy::FullWindow, Some(first)) => {
+                        now.saturating_sub(first) >= window.duration
+                    }
+                    (_, None) => false,
+                };
+            }
+        }
+    }
+
+    /// Advance the indicator to `now` without recording a new trade.
+    ///
+    /// This expires old buckets and may complete full-window warm-up when an
+    /// unrelated event advances global event time. Returns `true` when the
+    /// timestamp was newly observed, or `false` when it was already processed.
+    pub(crate) fn observe(&mut self, now: i64) -> bool {
+        if self.last_observed_timestamp == Some(now) {
+            return false;
+        }
+        self.last_observed_timestamp = Some(now);
+        self.expire_old_buckets(self.bucket_start(now));
+        self.update_readiness(now);
+        true
+    }
+
     pub(crate) fn update_inner(&mut self, price: F, volume: F, now: i64) {
+        if self.first_timestamp.is_none() {
+            self.first_timestamp = Some(now);
+            self.update_readiness(now);
+        }
+        let _ = self.observe(now);
         let insert_bucket_start = self.bucket_start(now);
 
         // are we in the same bucket as the last trade? if so, update the last bucket instead of
@@ -246,7 +299,6 @@ where
             self.data.push_back(bucket);
             self.add_delta_to_windows(delta);
         } else {
-            self.expire_old_buckets(insert_bucket_start);
             let previous_close = self.data.peek_back().map(|bucket| bucket.close_price);
             let sign = Self::sign(previous_close, price);
             let bucket = ObvBucket {
@@ -271,11 +323,23 @@ where
     }
 
     pub fn window_value(&self, window_idx: usize) -> Option<F> {
-        if window_idx >= self.window_count {
+        if !self.is_ready_at(window_idx) {
             return None;
         }
         let window = unsafe { self.windows[window_idx].assume_init_ref() };
         Some(window.value)
+    }
+
+    pub fn is_ready_at(&self, index: usize) -> bool {
+        if index >= self.window_count {
+            return false;
+        }
+        let window = unsafe { self.windows[index].assume_init_ref() };
+        window.ready
+    }
+
+    pub fn is_ready(&self) -> bool {
+        self.window_count > 0 && (0..self.window_count).all(|index| self.is_ready_at(index))
     }
 }
 
@@ -290,7 +354,12 @@ mod tests {
     #[test]
     fn first_trade_initializes_price_without_volume_delta() {
         let mut obv: OnBalanceVolumeTimed<HeapRingBuffer<ObvBucket<f64>>, f64, 1> =
-            OnBalanceVolumeTimed::new_heap(Duration::from_millis(1_000), 3).unwrap();
+            OnBalanceVolumeTimed::new_heap(
+                Duration::from_millis(1_000),
+                3,
+                WarmupPolicy::FirstValue,
+            )
+            .unwrap();
         obv.add_window_with_periods(2).unwrap();
 
         obv.update_inner(100.0, 10.0, 0);
@@ -299,9 +368,40 @@ mod tests {
     }
 
     #[test]
+    fn full_window_readiness_advances_with_time_and_empty_window_is_zero() {
+        let mut obv: OnBalanceVolumeTimed<HeapRingBuffer<ObvBucket<f64>>, f64, 1> =
+            OnBalanceVolumeTimed::new_heap(
+                Duration::from_millis(1_000),
+                3,
+                WarmupPolicy::FullWindow,
+            )
+            .unwrap();
+        obv.add_window_with_periods(2).unwrap();
+
+        obv.update_inner(100.0, 10.0, 0);
+        obv.update_inner(101.0, 7.0, 1_000);
+        assert!(obv.observe(1_999));
+        assert!(!obv.is_ready());
+        assert_eq!(obv.window_value(0), None);
+
+        assert!(obv.observe(2_000));
+        assert!(obv.is_ready());
+        assert_eq!(obv.window_value(0), Some(7.0));
+
+        assert!(obv.observe(3_000));
+        assert!(obv.is_ready());
+        assert_eq!(obv.window_value(0), Some(0.0));
+    }
+
+    #[test]
     fn rising_falling_and_equal_prices_create_signed_volume() {
         let mut obv: OnBalanceVolumeTimed<HeapRingBuffer<ObvBucket<f64>>, f64, 1> =
-            OnBalanceVolumeTimed::new_heap(Duration::from_millis(1_000), 5).unwrap();
+            OnBalanceVolumeTimed::new_heap(
+                Duration::from_millis(1_000),
+                5,
+                WarmupPolicy::FirstValue,
+            )
+            .unwrap();
         obv.add_window_with_periods(4).unwrap();
 
         obv.update_inner(100.0, 10.0, 0);
@@ -315,7 +415,12 @@ mod tests {
     #[test]
     fn first_bucket_keeps_zero_delta_for_same_bucket_trades() {
         let mut obv: OnBalanceVolumeTimed<HeapRingBuffer<ObvBucket<f64>>, f64, 1> =
-            OnBalanceVolumeTimed::new_heap(Duration::from_millis(1_000), 3).unwrap();
+            OnBalanceVolumeTimed::new_heap(
+                Duration::from_millis(1_000),
+                3,
+                WarmupPolicy::FirstValue,
+            )
+            .unwrap();
         obv.add_window_with_periods(2).unwrap();
 
         obv.update_inner(100.0, 10.0, 0);
@@ -328,7 +433,12 @@ mod tests {
     #[test]
     fn same_bucket_update_recomputes_aggregate_delta() {
         let mut obv: OnBalanceVolumeTimed<HeapRingBuffer<ObvBucket<f64>>, f64, 1> =
-            OnBalanceVolumeTimed::new_heap(Duration::from_millis(1_000), 3).unwrap();
+            OnBalanceVolumeTimed::new_heap(
+                Duration::from_millis(1_000),
+                3,
+                WarmupPolicy::FirstValue,
+            )
+            .unwrap();
         obv.add_window_with_periods(2).unwrap();
 
         obv.update_inner(100.0, 10.0, 0);
@@ -343,7 +453,12 @@ mod tests {
     #[test]
     fn bucket_delta_compares_close_prices_not_average_prices() {
         let mut obv: OnBalanceVolumeTimed<HeapRingBuffer<ObvBucket<f64>>, f64, 1> =
-            OnBalanceVolumeTimed::new_heap(Duration::from_millis(1_000), 3).unwrap();
+            OnBalanceVolumeTimed::new_heap(
+                Duration::from_millis(1_000),
+                3,
+                WarmupPolicy::FirstValue,
+            )
+            .unwrap();
         obv.add_window_with_periods(2).unwrap();
 
         obv.update_inner(100.0, 1.0, 0);
@@ -356,7 +471,12 @@ mod tests {
     #[test]
     fn old_buckets_expire_from_window_sum() {
         let mut obv: OnBalanceVolumeTimed<HeapRingBuffer<ObvBucket<f64>>, f64, 1> =
-            OnBalanceVolumeTimed::new_heap(Duration::from_millis(1_000), 3).unwrap();
+            OnBalanceVolumeTimed::new_heap(
+                Duration::from_millis(1_000),
+                3,
+                WarmupPolicy::FirstValue,
+            )
+            .unwrap();
         obv.add_window_with_periods(2).unwrap();
 
         obv.update_inner(100.0, 10.0, 0);
@@ -370,7 +490,12 @@ mod tests {
     #[test]
     fn multiple_windows_share_one_indicator() {
         let mut obv: OnBalanceVolumeTimed<HeapRingBuffer<ObvBucket<f64>>, f64, 2> =
-            OnBalanceVolumeTimed::new_heap(Duration::from_millis(1_000), 4).unwrap();
+            OnBalanceVolumeTimed::new_heap(
+                Duration::from_millis(1_000),
+                4,
+                WarmupPolicy::FirstValue,
+            )
+            .unwrap();
         obv.add_window_with_periods(1).unwrap();
         obv.add_window_with_periods(3).unwrap();
 
@@ -388,7 +513,12 @@ mod tests {
         // Capacity is well above both periods, so buckets stay in the ring for
         // several trades after expiring and the front is evicted repeatedly.
         let mut obv: OnBalanceVolumeTimed<HeapRingBuffer<ObvBucket<f64>>, f64, 2> =
-            OnBalanceVolumeTimed::new_heap(Duration::from_millis(1_000), 5).unwrap();
+            OnBalanceVolumeTimed::new_heap(
+                Duration::from_millis(1_000),
+                5,
+                WarmupPolicy::FirstValue,
+            )
+            .unwrap();
         obv.add_window_with_periods(2).unwrap();
         obv.add_window_with_periods(4).unwrap();
 
@@ -407,7 +537,12 @@ mod tests {
     #[test]
     fn rejects_window_after_data_has_been_added() {
         let mut obv: OnBalanceVolumeTimed<HeapRingBuffer<ObvBucket<f64>>, f64, 2> =
-            OnBalanceVolumeTimed::new_heap(Duration::from_millis(1_000), 4).unwrap();
+            OnBalanceVolumeTimed::new_heap(
+                Duration::from_millis(1_000),
+                4,
+                WarmupPolicy::FirstValue,
+            )
+            .unwrap();
         obv.add_window_with_periods(2).unwrap();
 
         obv.update_inner(100.0, 10.0, 0);
@@ -419,15 +554,16 @@ mod tests {
     #[test]
     fn rejects_invalid_configuration() {
         let zero_aggregation: Result<OnBalanceVolumeTimed<HeapRingBuffer<ObvBucket<f64>>, f64, 1>> =
-            OnBalanceVolumeTimed::new_heap(Duration::ZERO, 2);
+            OnBalanceVolumeTimed::new_heap(Duration::ZERO, 2, WarmupPolicy::FirstValue);
         assert!(zero_aggregation.is_err());
 
         let zero_capacity: Result<OnBalanceVolumeTimed<HeapRingBuffer<ObvBucket<f64>>, f64, 1>> =
-            OnBalanceVolumeTimed::new_heap(Duration::from_millis(1), 0);
+            OnBalanceVolumeTimed::new_heap(Duration::from_millis(1), 0, WarmupPolicy::FirstValue);
         assert!(zero_capacity.is_err());
 
         let mut obv: OnBalanceVolumeTimed<HeapRingBuffer<ObvBucket<f64>>, f64, 1> =
-            OnBalanceVolumeTimed::new_heap(Duration::from_millis(1), 2).unwrap();
+            OnBalanceVolumeTimed::new_heap(Duration::from_millis(1), 2, WarmupPolicy::FirstValue)
+                .unwrap();
         assert!(obv.add_window_with_periods(0).is_err());
         assert!(obv.add_window_with_periods(2).is_err());
         assert!(obv.add_window_with_periods(1).is_ok());

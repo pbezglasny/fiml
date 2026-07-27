@@ -4,7 +4,7 @@ use std::time::Duration;
 use std::borrow::Cow;
 
 use crate::features::event::{Event, EventKind, FeatureRoute};
-use crate::{Float, Symbol};
+use crate::{Float, Symbol, WarmupPolicy};
 
 /// Maximum number of adjacent outputs one runtime indicator may own.
 pub const MAX_OUTPUTS_PER_INDICATOR: usize = 16;
@@ -85,24 +85,30 @@ pub enum IndicatorSpec {
     Sma {
         source: ValueSource,
         windows: Vec<usize>,
+        warmup_policy: WarmupPolicy,
     },
     Ema {
         source: ValueSource,
         windows: Vec<usize>,
+        warmup_policy: WarmupPolicy,
     },
     Cvd {
         windows: Vec<usize>,
+        warmup_policy: WarmupPolicy,
     },
     SmaTimed {
         source: ValueSource,
         time_windows: TimeWindows,
+        warmup_policy: WarmupPolicy,
     },
     ObvTimed {
         time_windows: TimeWindows,
+        warmup_policy: WarmupPolicy,
     },
     TradeCountTimed {
         aggregation: Duration,
         window: Duration,
+        warmup_policy: WarmupPolicy,
     },
     DayOfWeek,
     TimeSinceFirstEventOfDay {
@@ -113,10 +119,10 @@ pub enum IndicatorSpec {
 impl IndicatorSpec {
     pub fn output_count(&self) -> usize {
         match self {
-            Self::Sma { windows, .. } | Self::Ema { windows, .. } | Self::Cvd { windows } => {
+            Self::Sma { windows, .. } | Self::Ema { windows, .. } | Self::Cvd { windows, .. } => {
                 windows.len()
             }
-            Self::SmaTimed { time_windows, .. } | Self::ObvTimed { time_windows } => {
+            Self::SmaTimed { time_windows, .. } | Self::ObvTimed { time_windows, .. } => {
                 time_windows.windows.len()
             }
             Self::TradeCountTimed { .. }
@@ -317,11 +323,14 @@ mod serde_tests {
 
     #[test]
     fn cvd_spec_round_trips_with_grouped_windows() {
-        let feature_set = FeatureSet::builder().cvd("BTCUSDT", [10, 50]).build();
+        let feature_set = FeatureSet::builder()
+            .cvd_with_warmup("BTCUSDT", [10, 50], crate::WarmupPolicy::FirstValue)
+            .build();
 
         let json = serde_json::to_string(&feature_set).unwrap();
         let restored: FeatureSet = serde_json::from_str(&json).unwrap();
 
+        assert!(json.contains(r#""warmup_policy":"first_value""#));
         assert_eq!(restored, feature_set);
     }
 

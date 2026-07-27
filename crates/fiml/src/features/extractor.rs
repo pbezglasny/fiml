@@ -50,10 +50,7 @@ macro_rules! dynamic_extractor {
 
                 $(
                     if indicator_count <= $capacity {
-                        let mut cells = VecFeatureVector::new(output_count);
-                        for index in 0..output_count {
-                            cells.set_value_at(index, f64::NAN);
-                        }
+                        let cells = VecFeatureVector::new(output_count);
                         return Ok(Self::$variant(Box::new(
                             IndicatorFeatureVector::from_feature_set(cells, feature_set)?,
                         )));
@@ -164,7 +161,7 @@ impl FeatureExtractor {
 #[cfg(test)]
 mod tests {
     use crate::features::{IndicatorDef, IndicatorSpec, ValueSource};
-    use crate::{Event, IndicatorFeatures, symbols};
+    use crate::{Event, IndicatorFeatures, WarmupPolicy, symbols};
 
     use super::*;
 
@@ -174,6 +171,7 @@ mod tests {
             IndicatorSpec::Sma {
                 source: ValueSource::Price,
                 windows: vec![2, 5],
+                warmup_policy: WarmupPolicy::FullWindow,
             },
         )])
     }
@@ -204,17 +202,18 @@ mod tests {
     }
 
     #[test]
-    fn sample_sma_emits_partial_mean_during_warmup() {
+    fn sample_sma_stays_nan_until_each_full_window_is_ready() {
         let mut extractor = FeatureExtractor::from_feature_set(&feature_set()).unwrap();
         let aapl = symbols::intern("AAPL");
 
         assert!(extractor.values().iter().all(|value| value.is_nan()));
 
         extractor.dispatch(&Event::price(aapl, 100.0, 0)).unwrap();
-        assert_eq!(extractor.values(), [100.0, 100.0]);
+        assert!(extractor.values().iter().all(|value| value.is_nan()));
 
         extractor.dispatch(&Event::price(aapl, 102.0, 1)).unwrap();
-        assert_eq!(extractor.values(), [101.0, 101.0]);
+        assert_eq!(extractor.values()[0], 101.0);
+        assert!(extractor.values()[1].is_nan());
     }
 
     #[test]

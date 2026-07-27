@@ -7,7 +7,7 @@ use crate::features::definition::{MAX_OUTPUTS_PER_INDICATOR, ValueSource};
 use crate::features::event::Event;
 use crate::indicators::{SimpleMovingAverage, SimpleMovingAverageTimed};
 use crate::vectors::FeatureVector;
-use crate::{FimlError, Float, HeapRingBuffer, Result, Symbol};
+use crate::{FimlError, Float, HeapRingBuffer, Result, Symbol, WarmupPolicy};
 
 pub struct SmaFeature<F: Float> {
     symbol: Symbol,
@@ -75,18 +75,30 @@ impl<F: Float> SmaTimedFeature<F> {
             write_outputs(self.output_span, output, |index| self.sma.value_at(index));
         }
     }
+
+    pub(in crate::features) fn observe<O: FeatureVector<F = F>>(
+        &mut self,
+        timestamp: i64,
+        output: &mut O,
+    ) {
+        if self.sma.observe(timestamp) {
+            write_outputs(self.output_span, output, |index| self.sma.value_at(index));
+        }
+    }
 }
 
 pub(crate) fn build<F: Float>(
     symbol: Symbol,
     source: ValueSource,
     windows: &[usize],
+    warmup_policy: WarmupPolicy,
     output_span: OutputSpan,
 ) -> Result<BuiltinFeature<F>> {
     debug_assert_eq!(windows.len(), output_span.count);
     let max_window = windows.iter().copied().max().unwrap_or(0);
     let mut sma = SimpleMovingAverage::<HeapRingBuffer<F>, F, MAX_OUTPUTS_PER_INDICATOR>::new_heap(
         max_window,
+        warmup_policy,
     );
     for &window in windows {
         sma.add_window(window)?;
@@ -105,6 +117,7 @@ pub(crate) fn build_timed<F: Float>(
     aggregation: Duration,
     periods: &[usize],
     max_period: usize,
+    warmup_policy: WarmupPolicy,
     output_span: OutputSpan,
 ) -> Result<BuiltinFeature<F>> {
     debug_assert_eq!(periods.len(), output_span.count);
@@ -115,7 +128,7 @@ pub(crate) fn build_timed<F: Float>(
         HeapRingBuffer<(i64, F)>,
         F,
         MAX_OUTPUTS_PER_INDICATOR,
-    >::new_heap(aggregation, capacity)?;
+    >::new_heap(aggregation, capacity, warmup_policy)?;
     for &period in periods {
         sma.add_window_with_periods(period)?;
     }
@@ -143,6 +156,7 @@ mod tests {
             symbol,
             ValueSource::Price,
             &[2, 3],
+            WarmupPolicy::FullWindow,
             OutputSpan { start: 0, count: 2 },
         )
         .unwrap()
@@ -167,6 +181,7 @@ mod tests {
             symbol,
             ValueSource::TradeVolume,
             &[2],
+            WarmupPolicy::FullWindow,
             OutputSpan { start: 0, count: 1 },
         )
         .unwrap()

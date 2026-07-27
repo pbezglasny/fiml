@@ -74,6 +74,12 @@ ready, and expose the warm-up length per column to Python (e.g. `extractor.warmu
 so training code can slice deterministically instead of guessing. `write_outputs` already
 skips `None`, so most of the plumbing exists.
 
+**Resolved 2026-07-26.** Window indicators now store a serialized
+`WarmupPolicy`; builders default to `FullWindow`, while `FirstValue` preserves
+partial outputs explicitly. Indicators own monotonic readiness and return
+`None` for unready or unavailable values, and compiled floating output cells use
+NaN. Per-feature-vector `all_ready()` remains deferred by design. See ADR 0004.
+
 ### 1.3 Time-based windows never decay without a matching event
 
 `TradeCountTimed`, `ObvTimed` and `SmaTimed` only expire buckets inside `update_inner`
@@ -102,6 +108,11 @@ Recommendation: add a refresh hook (`fn observe(&mut self, now: i64, output: &mu
 runs for every dispatch on timed features — expire buckets against `now` and rewrite the
 output cells — and route timed indicators into the every-event group as well as their kind
 group. This is also the fix that makes multi-symbol batch extraction correct.
+
+**Resolved 2026-07-26.** Compiled vectors retain fixed-capacity indexes of timed
+features and call their allocation-free observation hook on every dispatch.
+Elapsed-time readiness, bucket expiry, and output refresh therefore advance on
+events of other kinds and symbols without duplicating matching-event refreshes.
 
 ### 1.4 One non-finite input poisons a feature permanently
 

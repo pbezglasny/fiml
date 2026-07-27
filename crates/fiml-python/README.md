@@ -114,11 +114,12 @@ feats.head()                            # one snapshot after every trade
 
 `feats` preserves the input index and starts with copied `symbol` and `ts`
 columns, followed by `extractor.feature_names()`. The feature columns are ready
-to feed to lightgbm/xgboost/catboost/sklearn. Cells are **NaN until their
-indicator first produces a value**. A sample-window SMA produces a partial mean
-from its first matching sample: before its period is full, it averages the
-samples available so far. Gradient-boosting libraries handle NaN natively; drop
-or mask those rows for models that don't.
+to feed to lightgbm/xgboost/catboost/sklearn. Window indicators default to
+`fiml.WarmupPolicy.FULL_WINDOW`, so each cell remains **NaN until its complete
+sample or time window is ready**. Pass
+`warmup=fiml.WarmupPolicy.FIRST_VALUE` to a builder method when partial values
+are desired. Gradient-boosting libraries handle NaN natively; drop or mask
+those rows for models that don't.
 
 Column mappings remain configurable when a frame uses other names:
 
@@ -162,11 +163,13 @@ extractor = fiml.FeatureExtractor.from_json(
   "indicators": [
     { "symbol": "BTCUSDT",
       "indicator": { "Sma": {
-        "source": "trade_price", "windows": [12, 24]
+        "source": "trade_price", "windows": [12, 24],
+        "warmup_policy": "full_window"
       } } },
     { "symbol": "BTCUSDT",
       "indicator": { "Ema": {
-        "source": "trade_price", "windows": [12]
+        "source": "trade_price", "windows": [12],
+        "warmup_policy": "full_window"
       } } },
     { "symbol": "BTCUSDT",
       "indicator": { "ObvTimed": { "time_windows": {
@@ -175,7 +178,7 @@ extractor = fiml.FeatureExtractor.from_json(
           { "secs": 30, "nanos": 0 },
           { "secs": 60, "nanos": 0 }
         ]
-      } } } }
+      }, "warmup_policy": "full_window" } } }
   ]
 }
 ```
@@ -190,7 +193,8 @@ Builder methods: `sma`, `ema`, `cvd`, `sma_timed`, `obv_timed`,
 (fixed-offset `tz`, default `"UTC"`). SMA, EMA, CVD, timed SMA, and timed OBV
 accept ordered window lists; each list becomes one runtime indicator with
 adjacent output cells. Durations are strings (`"500ms"`, `"1s"`, `"5m"`,
-`"1h"`).
+`"1h"`). Every window builder accepts a keyword-only `warmup` enum; its default
+is `fiml.WarmupPolicy.FULL_WINDOW`.
 
 Moving averages accept a keyword-only `source` of `"price"`, `"volume"`,
 `"trade_price"`, or `"trade_volume"` (default `"price"`). Use a trade source
@@ -242,7 +246,7 @@ To guarantee identical output between Python (batch) and Rust (live):
 1. **f64 calculation state on both sides.** The extractor calculates in `f64`;
    choose `output_dtype="float64"` when comparing exact Python/Rust output.
 2. **Same `FeatureSet` JSON** — same periods, aggregation/window durations,
-   symbol names, and feature order.
+   warm-up policies, symbol names, and feature order.
 3. **Replay the full event stream in the same order with the same millisecond
    timestamps.** Do not downsample or skip rows: timed indicators (`SmaTimed`,
    `ObvTimed`, `TradeCountTimed`) bucket by timestamp.

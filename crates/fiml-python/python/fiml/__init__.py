@@ -18,12 +18,14 @@ from ._fiml import (
     KIND_TIME,
     SIDE_AGGRESSOR_BUY,
     SIDE_AGGRESSOR_SELL,
+    WarmupPolicy,
 )
 from ._fiml import FeatureExtractor as _FeatureExtractor
 
 __all__ = [
     "FeatureExtractor",
     "FeatureSet",
+    "WarmupPolicy",
     "FEATURE_SET_FORMAT_VERSION",
     "KIND_PRICE",
     "KIND_VOLUME",

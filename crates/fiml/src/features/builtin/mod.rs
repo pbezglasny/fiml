@@ -51,6 +51,24 @@ impl<F: Float> Feature<F> for BuiltinFeature<F> {
     }
 }
 
+impl<F: Float> BuiltinFeature<F> {
+    pub(crate) fn observes_time(&self) -> bool {
+        matches!(
+            self,
+            Self::SmaTimed(_) | Self::ObvTimed(_) | Self::TradeCountTimed(_)
+        )
+    }
+
+    pub(crate) fn observe<O: FeatureVector<F = F>>(&mut self, event: &Event<F>, output: &mut O) {
+        match self {
+            Self::SmaTimed(sma) => sma.observe(event.timestamp(), output),
+            Self::ObvTimed(obv) => obv.observe(event.timestamp(), output),
+            Self::TradeCountTimed(count) => count.observe(event.timestamp(), output),
+            _ => {}
+        }
+    }
+}
+
 #[inline]
 pub(crate) fn write_outputs<F, O>(
     span: OutputSpan,
@@ -61,8 +79,9 @@ pub(crate) fn write_outputs<F, O>(
     O: FeatureVector<F = F>,
 {
     for output_index in 0..span.count {
-        if let Some(value) = value_at(output_index) {
-            output.set_value_at(span.start + output_index, value);
-        }
+        output.set_value_at(
+            span.start + output_index,
+            value_at(output_index).unwrap_or(F::NAN),
+        );
     }
 }

@@ -1,6 +1,6 @@
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use fiml::indicators::SimpleMovingAverage;
-use fiml::{HeapRingBuffer, StackRingBuffer};
+use fiml::{HeapRingBuffer, StackRingBuffer, WarmupPolicy};
 use std::hint::black_box;
 
 const N_POINTS: usize = 10_000;
@@ -30,7 +30,7 @@ fn bench_sma_update(c: &mut Criterion) {
             group.bench_function(id, |b| {
                 b.iter(|| {
                     let mut sma: SimpleMovingAverage<StackRingBuffer<$period, f64>, f64, $windows> =
-                        SimpleMovingAverage::new_stack();
+                        SimpleMovingAverage::new_stack(WarmupPolicy::FirstValue);
                     for w in 1..=$windows {
                         sma.add_window(w * ($period / $windows).max(1)).unwrap();
                     }
@@ -54,7 +54,7 @@ fn bench_sma_update(c: &mut Criterion) {
             group.bench_function(id, |b| {
                 b.iter(|| {
                     let mut sma: SimpleMovingAverage<HeapRingBuffer<f64>, f64, $windows> =
-                        SimpleMovingAverage::new_heap($period);
+                        SimpleMovingAverage::new_heap($period, WarmupPolicy::FirstValue);
                     for w in 1..=$windows {
                         sma.add_window(w * ($period / $windows).max(1)).unwrap();
                     }
@@ -86,7 +86,7 @@ fn bench_sma_steady_state(c: &mut Criterion) {
         b.iter_batched(
             || {
                 let mut sma: SimpleMovingAverage<StackRingBuffer<200, f64>, f64, 3> =
-                    SimpleMovingAverage::new_stack();
+                    SimpleMovingAverage::new_stack(WarmupPolicy::FirstValue);
                 sma.add_window(50).unwrap();
                 sma.add_window(100).unwrap();
                 sma.add_window(200).unwrap();
@@ -110,7 +110,7 @@ fn bench_sma_steady_state(c: &mut Criterion) {
         b.iter_batched(
             || {
                 let mut sma: SimpleMovingAverage<HeapRingBuffer<f64>, f64, 3> =
-                    SimpleMovingAverage::new_heap(200);
+                    SimpleMovingAverage::new_heap(200, WarmupPolicy::FirstValue);
                 sma.add_window(50).unwrap();
                 sma.add_window(100).unwrap();
                 sma.add_window(200).unwrap();

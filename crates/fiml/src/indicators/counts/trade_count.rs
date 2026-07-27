@@ -2,7 +2,7 @@ use std::marker::PhantomData;
 use std::time::Duration;
 
 use crate::ring_buffer::{HeapRingBuffer, RingBuffer, new_heap_ring_buffer};
-use crate::{FimlError, Float, Result};
+use crate::{FimlError, Float, Result, WarmupPolicy};
 
 /// One fixed-duration bucket: the trades that fell into `[timestamp, timestamp +
 /// aggregation)`, counted.
@@ -31,6 +31,10 @@ where
     /// Front-relative index of the oldest bucket still inside the window. Buckets
     /// before it have expired and were already subtracted from `window_count`.
     front_offset: usize,
+    warmup_policy: WarmupPolicy,
+    first_timestamp: Option<i64>,
+    last_observed_timestamp: Option<i64>,
+    ready: bool,
     _marker: PhantomData<F>,
 }
 
@@ -41,7 +45,11 @@ where
     /// Build a heap-backed timed trade counter over `window`, bucketed by
     /// `aggregation`. Both durations are in milliseconds; `window` must be a
     /// non-zero multiple of a non-zero `aggregation`.
-    pub fn new_heap(aggregation: Duration, window: Duration) -> Result<Self> {
+    pub fn new_heap(
+        aggregation: Duration,
+        window: Duration,
+        warmup_policy: WarmupPolicy,
+    ) -> Result<Self> {
         let periods = validate_durations(aggregation, window)?;
         // One extra slot so the oldest bucket has expired from the window before
         // the ring evicts it (mirrors the OBV invariant).
@@ -63,6 +71,10 @@ where
             })?,
             window_count: 0,
             front_offset: 0,
+            warmup_policy,
+            first_timestamp: None,
+            last_observed_timestamp: None,
+            ready: false,
             _marker: PhantomData,
         })
     }
@@ -92,6 +104,11 @@ where
 
     /// Record one trade at `now` (epoch milliseconds).
     pub(crate) fn update_inner(&mut self, now: i64) {
+        if self.first_timestamp.is_none() {
+            self.first_timestamp = Some(now);
+            self.update_readiness(now);
+        }
+        let _ = self.observe(now);
         let insert_bucket_start = self.bucket_start(now);
 
         // Same bucket as the last trade? Increment its count in place.
@@ -105,7 +122,6 @@ where
             self.data.push_back(bucket);
             self.window_count += 1;
         } else {
-            self.expire_old_buckets(insert_bucket_start);
             let bucket = CountBucket {
                 timestamp: insert_bucket_start,
                 count: 1,
@@ -119,6 +135,33 @@ where
         }
     }
 
+    fn update_readiness(&mut self, now: i64) {
+        if !self.ready {
+            self.ready = match (self.warmup_policy, self.first_timestamp) {
+                (WarmupPolicy::FirstValue, Some(_)) => true,
+                (WarmupPolicy::FullWindow, Some(first)) => {
+                    now.saturating_sub(first) >= self.window_duration
+                }
+                (_, None) => false,
+            };
+        }
+    }
+
+    /// Advance the indicator to `now` without recording a new trade.
+    ///
+    /// This expires old buckets and may complete full-window warm-up when an
+    /// unrelated event advances global event time. Returns `true` when the
+    /// timestamp was newly observed, or `false` when it was already processed.
+    pub(crate) fn observe(&mut self, now: i64) -> bool {
+        if self.last_observed_timestamp == Some(now) {
+            return false;
+        }
+        self.last_observed_timestamp = Some(now);
+        self.expire_old_buckets(self.bucket_start(now));
+        self.update_readiness(now);
+        true
+    }
+
     /// Record one trade at the current wall-clock time.
     pub fn update(&mut self) {
         let now = std::time::SystemTime::now()
@@ -129,8 +172,17 @@ where
     }
 
     /// Current rolling trade count over the window.
-    pub fn window_value(&self) -> F {
-        F::from_usize(self.window_count as usize)
+    pub fn window_value(&self) -> Option<F> {
+        self.ready
+            .then(|| F::from_usize(self.window_count as usize))
+    }
+
+    pub fn is_ready_at(&self, index: usize) -> bool {
+        index == 0 && self.ready
+    }
+
+    pub fn is_ready(&self) -> bool {
+        self.ready
     }
 }
 
@@ -184,35 +236,72 @@ mod tests {
     #[test]
     fn counts_trades_in_the_same_bucket() {
         let mut counter: TradeCountTimed<HeapRingBuffer<CountBucket>, f64> =
-            TradeCountTimed::new_heap(Duration::from_millis(1_000), Duration::from_millis(2_000))
-                .unwrap();
+            TradeCountTimed::new_heap(
+                Duration::from_millis(1_000),
+                Duration::from_millis(2_000),
+                WarmupPolicy::FirstValue,
+            )
+            .unwrap();
 
         counter.update_inner(0);
         counter.update_inner(100);
         counter.update_inner(900);
 
-        assert!(approx_eq(counter.window_value(), 3.0));
+        assert!(approx_eq(counter.window_value().unwrap(), 3.0));
+    }
+
+    #[test]
+    fn full_window_readiness_advances_with_time_and_empty_window_is_zero() {
+        let mut counter: TradeCountTimed<HeapRingBuffer<CountBucket>, f64> =
+            TradeCountTimed::new_heap(
+                Duration::from_millis(1_000),
+                Duration::from_millis(2_000),
+                WarmupPolicy::FullWindow,
+            )
+            .unwrap();
+
+        counter.update_inner(0);
+        counter.update_inner(1_000);
+        assert!(counter.observe(1_999));
+        assert!(!counter.is_ready());
+        assert_eq!(counter.window_value(), None);
+
+        assert!(counter.observe(2_000));
+        assert!(counter.is_ready());
+        assert_eq!(counter.window_value(), Some(1.0));
+
+        assert!(counter.observe(3_000));
+        assert!(counter.is_ready());
+        assert_eq!(counter.window_value(), Some(0.0));
     }
 
     #[test]
     fn sums_counts_across_buckets_in_window() {
         let mut counter: TradeCountTimed<HeapRingBuffer<CountBucket>, f64> =
-            TradeCountTimed::new_heap(Duration::from_millis(1_000), Duration::from_millis(3_000))
-                .unwrap();
+            TradeCountTimed::new_heap(
+                Duration::from_millis(1_000),
+                Duration::from_millis(3_000),
+                WarmupPolicy::FirstValue,
+            )
+            .unwrap();
 
         counter.update_inner(0); // bucket 0
         counter.update_inner(1_000); // bucket 1
         counter.update_inner(1_500); // bucket 1
         counter.update_inner(2_000); // bucket 2
 
-        assert!(approx_eq(counter.window_value(), 4.0));
+        assert!(approx_eq(counter.window_value().unwrap(), 4.0));
     }
 
     #[test]
     fn old_buckets_expire_from_window() {
         let mut counter: TradeCountTimed<HeapRingBuffer<CountBucket>, f64> =
-            TradeCountTimed::new_heap(Duration::from_millis(1_000), Duration::from_millis(2_000))
-                .unwrap();
+            TradeCountTimed::new_heap(
+                Duration::from_millis(1_000),
+                Duration::from_millis(2_000),
+                WarmupPolicy::FirstValue,
+            )
+            .unwrap();
 
         counter.update_inner(0); // bucket 0
         counter.update_inner(1_000); // bucket 1
@@ -220,21 +309,25 @@ mod tests {
         counter.update_inner(3_000); // bucket 3 -> bucket 1 now outside window
 
         // Window keeps the last two buckets (2 and 3): one trade each.
-        assert!(approx_eq(counter.window_value(), 2.0));
+        assert!(approx_eq(counter.window_value().unwrap(), 2.0));
     }
 
     #[test]
     fn survives_ring_eviction() {
         let mut counter: TradeCountTimed<HeapRingBuffer<CountBucket>, f64> =
-            TradeCountTimed::new_heap(Duration::from_millis(1_000), Duration::from_millis(2_000))
-                .unwrap();
+            TradeCountTimed::new_heap(
+                Duration::from_millis(1_000),
+                Duration::from_millis(2_000),
+                WarmupPolicy::FirstValue,
+            )
+            .unwrap();
 
         for i in 0..10 {
             counter.update_inner(i * 1_000);
         }
 
         // Only the last two buckets remain inside the 2s window.
-        assert!(approx_eq(counter.window_value(), 2.0));
+        assert!(approx_eq(counter.window_value().unwrap(), 2.0));
     }
 
     #[test]
@@ -242,14 +335,16 @@ mod tests {
         assert!(
             TradeCountTimed::<HeapRingBuffer<CountBucket>, f64>::new_heap(
                 Duration::ZERO,
-                Duration::from_millis(1_000)
+                Duration::from_millis(1_000),
+                WarmupPolicy::FirstValue,
             )
             .is_err()
         );
         assert!(
             TradeCountTimed::<HeapRingBuffer<CountBucket>, f64>::new_heap(
                 Duration::from_millis(1_000),
-                Duration::from_millis(1_500)
+                Duration::from_millis(1_500),
+                WarmupPolicy::FirstValue,
             )
             .is_err()
         );
