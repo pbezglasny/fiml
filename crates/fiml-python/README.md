@@ -160,33 +160,46 @@ extractor = fiml.FeatureExtractor.from_json(
 ```json
 {
   "version": "1.0.0",
-  "indicators": [
-    { "symbol": "BTCUSDT",
-      "indicator": { "Sma": {
-        "source": "trade_price", "windows": [12, 24],
-        "warmup_policy": "full_window"
-      } } },
-    { "symbol": "BTCUSDT",
-      "indicator": { "Ema": {
-        "source": "trade_price", "windows": [12],
-        "warmup_policy": "full_window"
-      } } },
-    { "symbol": "BTCUSDT",
-      "indicator": { "ObvTimed": { "time_windows": {
-        "aggregation": { "secs": 0, "nanos": 1000000 },
-        "windows": [
-          { "secs": 30, "nanos": 0 },
-          { "secs": 60, "nanos": 0 }
-        ]
-      }, "warmup_policy": "full_window" } } }
-  ]
+  "features": [
+    {
+      "symbol": "btcusdt",
+      "indicators": [
+        {
+          "name": "ema",
+          "options": {
+            "source": "trade_price",
+            "windows": [12],
+            "warmup_policy": "full_window"
+          }
+        },
+        {
+          "name": "obv_timed",
+          "options": {
+            "aggregation": "1ms",
+            "windows": ["30s", "1m"],
+            "warmup_policy": "full_window"
+          }
+        },
+        {
+          "name": "sma",
+          "options": {
+            "source": "trade_price",
+            "windows": [12, 24],
+            "warmup_policy": "full_window"
+          }
+        }
+      ]
+    }
+  ],
+  "options": {}
 }
 ```
 
 `version` identifies the feature-set schema independently of the package
 version. Serialization emits full SemVer. Deserialization also accepts short
-forms such as `1.0` and compatible stable versions with the same major version;
-prerelease artifacts require an exact matching prerelease loader.
+forms such as `1.0` and compatible `1.0.x` patch versions. Future minor,
+different major, and prerelease versions are rejected until explicitly
+supported.
 
 The complete machine-readable contract is available as a
 [JSON Schema](../../docs/feature-set.schema.json). It describes supported
@@ -206,7 +219,9 @@ is `fiml.WarmupPolicy.FULL_WINDOW`.
 Moving averages accept a keyword-only `source` of `"price"`, `"volume"`,
 `"trade_price"`, or `"trade_volume"` (default `"price"`). Use a trade source
 with `compute_features`. Output names are generated canonically at compilation,
-for example `BTCUSDT:trade_price:sma:12`; arbitrary aliases are not supported.
+for example `btcusdt:trade_price:sma:12`; arbitrary aliases are not supported.
+ASCII symbol identity is case-insensitive throughout the library and canonical
+names use lowercase symbols.
 
 ## Low-level event API
 

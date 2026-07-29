@@ -206,7 +206,7 @@ mod tests {
     }
 
     #[test]
-    fn grouped_outputs_keep_definition_and_window_order() {
+    fn grouped_outputs_use_canonical_group_and_authored_window_order() {
         let feature_set = FeatureSet::new(vec![
             IndicatorDef::symbol(
                 "AAPL",
@@ -231,12 +231,12 @@ mod tests {
 
         assert_eq!(
             vector.feature_names(),
-            ["AAPL:price:sma:5", "AAPL:price:sma:2", "clock:day_of_week"]
+            ["clock:day_of_week", "aapl:price:sma:5", "aapl:price:sma:2"]
         );
-        assert!(approx_eq(vector.feature_vector().values()[0], 3.0));
-        assert!(approx_eq(vector.feature_vector().values()[1], 4.5));
-        assert!(approx_eq(vector.feature_vector().values()[2], 5.0));
-        assert_eq!(vector.index_of("AAPL:price:sma:2"), Some(1));
+        assert!(approx_eq(vector.feature_vector().values()[0], 5.0));
+        assert!(approx_eq(vector.feature_vector().values()[1], 3.0));
+        assert!(approx_eq(vector.feature_vector().values()[2], 4.5));
+        assert_eq!(vector.index_of("aapl:price:sma:2"), Some(2));
     }
 
     #[test]
@@ -277,7 +277,7 @@ mod tests {
 
         assert_eq!(
             vector.feature_names(),
-            ["AAPL:trade:cvd:2", "AAPL:trade:cvd:3"]
+            ["aapl:trade:cvd:2", "aapl:trade:cvd:3"]
         );
         assert_eq!(vector.feature_vector().values(), [4.0, 14.0]);
     }

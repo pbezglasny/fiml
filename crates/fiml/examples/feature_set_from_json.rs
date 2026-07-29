@@ -34,7 +34,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("columns: {:?}", extractor.feature_names());
 
     let symbol_names: BTreeSet<_> = feature_set
-        .indicators
+        .indicators()
         .iter()
         .filter_map(|definition| definition.symbol.as_deref())
         .collect();

@@ -72,30 +72,45 @@ extractor = fiml.FeatureExtractor.from_json(json_str)   # or fiml.FeatureSet.fro
 ```json
 {
   "version": "1.0.0",
-  "indicators": [
-    { "symbol": "BTCUSDT",
-      "indicator": { "Sma": {
-        "source": "trade_price", "windows": [12, 24],
-        "warmup_policy": "full_window"
-      } } },
-    { "symbol": "BTCUSDT",
-      "indicator": { "Ema": {
-        "source": "trade_price", "windows": [12],
-        "warmup_policy": "full_window"
-      } } },
-    { "symbol": "BTCUSDT",
-      "indicator": { "ObvTimed": { "time_windows": {
-        "aggregation": { "secs": 1, "nanos": 0 },
-        "windows": [{ "secs": 2, "nanos": 0 }]
-      }, "warmup_policy": "full_window" } } }
-  ]
+  "features": [
+    {
+      "symbol": "btcusdt",
+      "indicators": [
+        {
+          "name": "ema",
+          "options": {
+            "source": "trade_price",
+            "windows": [12],
+            "warmup_policy": "full_window"
+          }
+        },
+        {
+          "name": "obv_timed",
+          "options": {
+            "aggregation": "1s",
+            "windows": ["2s"],
+            "warmup_policy": "full_window"
+          }
+        },
+        {
+          "name": "sma",
+          "options": {
+            "source": "trade_price",
+            "windows": [12, 24],
+            "warmup_policy": "full_window"
+          }
+        }
+      ]
+    }
+  ],
+  "options": {}
 }
 ```
 
 The required `version` is the feature-set schema version, independent of the
 package version. Writers emit full SemVer. Readers also accept short forms such
-as `1.0` and accept stable artifacts with the same major version; prerelease
-artifacts require an exact matching prerelease loader.
+as `1.0` and compatible `1.0.x` patch versions. Future minor, different major,
+and prerelease versions are rejected until explicitly supported.
 
 The complete supported format is defined by the machine-readable
 [FeatureSet JSON Schema](../feature-set.schema.json). Extractor compilation

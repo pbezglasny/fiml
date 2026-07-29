@@ -12,24 +12,30 @@ use fiml::{Event, FeatureExtractor, FeatureSet, IndicatorFeatures, symbols};
 
 const FEATURE_SET_JSON: &str = r#"{
     "version": "1.0.0",
-    "indicators": [
+    "features": [
         {
-            "symbol": "BTCUSDT",
-            "indicator": { "Sma": {
-                "source": "price",
-                "windows": [3],
-                "warmup_policy": "full_window"
-            } }
-        },
-        {
-            "symbol": "BTCUSDT",
-            "indicator": { "Ema": {
-                "source": "price",
-                "windows": [3],
-                "warmup_policy": "full_window"
-            } }
+            "symbol": "btcusdt",
+            "indicators": [
+                {
+                    "name": "ema",
+                    "options": {
+                        "source": "price",
+                        "windows": [3],
+                        "warmup_policy": "full_window"
+                    }
+                },
+                {
+                    "name": "sma",
+                    "options": {
+                        "source": "price",
+                        "windows": [3],
+                        "warmup_policy": "full_window"
+                    }
+                }
+            ]
         }
-    ]
+    ],
+    "options": {}
 }"#;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {

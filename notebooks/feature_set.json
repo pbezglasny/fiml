@@ -1,91 +1,82 @@
 {
   "version": "1.0.0",
-  "indicators": [
+  "features": [
     {
-      "symbol": "BTCUSDT",
-      "indicator": {
-        "Sma": {
-          "source": "trade_price",
-          "windows": [
-            2,
-            4
-          ],
-          "warmup_policy": "full_window"
+      "indicators": [
+        {
+          "name": "day_of_week",
+          "options": {}
         }
-      }
+      ]
     },
     {
-      "symbol": "BTCUSDT",
-      "indicator": {
-        "Ema": {
-          "source": "trade_price",
-          "windows": [
-            2
-          ],
-          "warmup_policy": "full_window"
+      "symbol": "btcusdt",
+      "indicators": [
+        {
+          "name": "ema",
+          "options": {
+            "source": "trade_price",
+            "windows": [
+              2
+            ],
+            "warmup_policy": "full_window"
+          }
+        },
+        {
+          "name": "sma",
+          "options": {
+            "source": "trade_price",
+            "windows": [
+              2,
+              4
+            ],
+            "warmup_policy": "full_window"
+          }
+        },
+        {
+          "name": "trade_count_timed",
+          "options": {
+            "aggregation": "1ms",
+            "window": "1m",
+            "warmup_policy": "full_window"
+          }
         }
-      }
+      ]
     },
     {
-      "symbol": "BTCUSDT",
-      "indicator": {
-        "TradeCountTimed": {
-          "aggregation": {
-            "secs": 0,
-            "nanos": 1000000
-          },
-          "window": {
-            "secs": 60,
-            "nanos": 0
-          },
-          "warmup_policy": "full_window"
+      "symbol": "ethusdt",
+      "indicators": [
+        {
+          "name": "ema",
+          "options": {
+            "source": "trade_price",
+            "windows": [
+              2
+            ],
+            "warmup_policy": "full_window"
+          }
+        },
+        {
+          "name": "sma",
+          "options": {
+            "source": "trade_price",
+            "windows": [
+              2,
+              4
+            ],
+            "warmup_policy": "full_window"
+          }
+        },
+        {
+          "name": "trade_count_timed",
+          "options": {
+            "aggregation": "1ms",
+            "window": "1m",
+            "warmup_policy": "full_window"
+          }
         }
-      }
-    },
-    {
-      "symbol": "ETHUSDT",
-      "indicator": {
-        "Sma": {
-          "source": "trade_price",
-          "windows": [
-            2,
-            4
-          ],
-          "warmup_policy": "full_window"
-        }
-      }
-    },
-    {
-      "symbol": "ETHUSDT",
-      "indicator": {
-        "Ema": {
-          "source": "trade_price",
-          "windows": [
-            2
-          ],
-          "warmup_policy": "full_window"
-        }
-      }
-    },
-    {
-      "symbol": "ETHUSDT",
-      "indicator": {
-        "TradeCountTimed": {
-          "aggregation": {
-            "secs": 0,
-            "nanos": 1000000
-          },
-          "window": {
-            "secs": 60,
-            "nanos": 0
-          },
-          "warmup_policy": "full_window"
-        }
-      }
-    },
-    {
-      "symbol": null,
-      "indicator": "DayOfWeek"
+      ]
     }
-  ]
+  ],
+  "options": {}
 }
