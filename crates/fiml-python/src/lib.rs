@@ -120,15 +120,17 @@ fn parse_tz(tz: &str) -> PyResult<i64> {
     if rest.is_empty() {
         return Ok(0);
     }
-    let (sign, body) = match rest.split_at(1) {
-        ("+", body) => (1, body),
-        ("-", body) => (-1, body),
-        _ => return Err(invalid()),
+    let (sign, body) = if let Some(body) = rest.strip_prefix('+') {
+        (1, body)
+    } else if let Some(body) = rest.strip_prefix('-') {
+        (-1, body)
+    } else {
+        return Err(invalid());
     };
     let (hours, minutes) = body.split_once(':').unwrap_or((body, "0"));
     let hours: i64 = hours.parse().map_err(|_| invalid())?;
     let minutes: i64 = minutes.parse().map_err(|_| invalid())?;
-    if hours > 14 || minutes > 59 {
+    if hours < 0 || minutes < 0 || hours > 14 || minutes > 59 || (hours == 14 && minutes != 0) {
         return Err(invalid());
     }
     Ok(sign * (hours * 3_600_000 + minutes * 60_000))
@@ -148,12 +150,11 @@ pub struct FeatureSet {
 impl FeatureSet {
     fn push_symbol(&mut self, symbol: &str, indicator: IndicatorSpec) {
         self.inner
-            .indicators
-            .push(IndicatorDef::symbol(symbol, indicator));
+            .add_indicator(IndicatorDef::symbol(symbol, indicator));
     }
 
     fn push_global(&mut self, indicator: IndicatorSpec) {
-        self.inner.indicators.push(IndicatorDef::global(indicator));
+        self.inner.add_indicator(IndicatorDef::global(indicator));
     }
 }
 

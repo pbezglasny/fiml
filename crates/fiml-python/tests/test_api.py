@@ -8,7 +8,7 @@ import fiml
 
 
 def count_name(symbol):
-    return f"{symbol}:trade:count_timed:1ms:10000ms"
+    return f"{symbol.lower()}:trade:count_timed:1ms:10000ms"
 
 
 def trade_counts(*symbols):
@@ -87,14 +87,14 @@ def test_grouped_sma_and_ema_can_consume_trade_price_and_volume():
     result = extractor.compute_features(source)
 
     assert extractor.feature_names() == [
-        "BTCUSDT:trade_price:sma:2",
-        "BTCUSDT:trade_price:sma:3",
-        "BTCUSDT:trade_volume:ema:2",
+        "btcusdt:trade_volume:ema:2",
+        "btcusdt:trade_price:sma:2",
+        "btcusdt:trade_price:sma:3",
     ]
     np.testing.assert_allclose(
-        result["BTCUSDT:trade_price:sma:2"], [1.0, 1.05, 1.15, 1.1]
+        result["btcusdt:trade_price:sma:2"], [1.0, 1.05, 1.15, 1.1]
     )
-    assert not result["BTCUSDT:trade_volume:ema:2"].isna().any()
+    assert not result["btcusdt:trade_volume:ema:2"].isna().any()
 
 
 def test_cvd_uses_aggressor_side_codes():
@@ -116,8 +116,8 @@ def test_cvd_uses_aggressor_side_codes():
     result = extractor.compute_features(source, side="side")
 
     assert extractor.feature_names() == [
-        "BTCUSDT:trade:cvd:1",
-        "BTCUSDT:trade:cvd:2",
+        "btcusdt:trade:cvd:1",
+        "btcusdt:trade:cvd:2",
     ]
     np.testing.assert_equal(
         result[extractor.feature_names()].to_numpy(),
@@ -198,6 +198,12 @@ def test_global_clock_features_have_no_symbol():
         "clock:day_of_week",
         "clock:time_since_first_event_of_day:7200000ms",
     ]
+
+
+@pytest.mark.parametrize("tz", ["é", "UTC+14:30", "+-1"])
+def test_fixed_utc_offset_rejects_invalid_text_without_panicking(tz):
+    with pytest.raises(ValueError, match="invalid `tz`"):
+        fiml.FeatureSet().time_since_first_event_of_day(tz)
 
 
 def test_custom_column_names_are_preserved():
@@ -351,11 +357,16 @@ def test_feature_set_json_emits_and_accepts_compatible_semantic_versions():
     assert fiml.FEATURE_SET_FORMAT_VERSION == "1.0.0"
     assert payload["version"] == fiml.FEATURE_SET_FORMAT_VERSION
     assert (
-        payload["indicators"][0]["indicator"]["TradeCountTimed"]["warmup_policy"]
+        payload["features"][0]["indicators"][0]["options"]["warmup_policy"]
         == "first_value"
     )
+    assert payload["features"][0]["symbol"] == "btcusdt"
+    assert payload["features"][0]["indicators"][0]["name"] == "trade_count_timed"
+    assert payload["features"][0]["indicators"][0]["options"]["aggregation"] == "1ms"
+    assert payload["features"][0]["indicators"][0]["options"]["window"] == "10s"
+    assert payload["options"] == {}
 
-    for version in ["1.0", "1.99.3"]:
+    for version in ["1.0", "1.0.9"]:
         payload["version"] = version
         restored = fiml.FeatureSet.from_json(json.dumps(payload))
         assert restored.indicator_count() == 1
@@ -364,10 +375,23 @@ def test_feature_set_json_emits_and_accepts_compatible_semantic_versions():
 @pytest.mark.parametrize(
     ("payload", "message"),
     [
-        ({"indicators": []}, "missing field.*version"),
-        ({"version": "release-1", "indicators": []}, "invalid feature set version"),
-        ({"version": "2.0", "indicators": []}, "unsupported feature set version"),
-        ({"version": "1.1.0-beta.1", "indicators": []}, "unsupported feature set version"),
+        ({"features": [], "options": {}}, "missing field.*version"),
+        (
+            {"version": "release-1", "features": [], "options": {}},
+            "invalid feature set version",
+        ),
+        (
+            {"version": "1.1.0", "features": [], "options": {}},
+            "unsupported feature set version",
+        ),
+        (
+            {"version": "2.0", "features": [], "options": {}},
+            "unsupported feature set version",
+        ),
+        (
+            {"version": "1.0.0-beta.1", "features": [], "options": {}},
+            "unsupported feature set version",
+        ),
     ],
 )
 @pytest.mark.parametrize(
@@ -376,3 +400,13 @@ def test_feature_set_json_emits_and_accepts_compatible_semantic_versions():
 def test_json_loaders_reject_incompatible_versions(loader, payload, message):
     with pytest.raises(ValueError, match=message):
         loader(json.dumps(payload))
+
+
+def test_symbol_identity_is_case_insensitive_across_configuration_and_events():
+    extractor = fiml.FeatureExtractor(trade_counts("BTCUSDT"))
+
+    assert extractor.symbol("BTCUSDT") == extractor.symbol("btcusdt")
+    result = extractor.compute_features(
+        trades(symbol=["btcusdt", "BtCuSdT", "BTCUSDT"])
+    )
+    np.testing.assert_array_equal(result[count_name("BTCUSDT")], [1.0, 2.0, 3.0])

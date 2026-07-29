@@ -1,7 +1,5 @@
+use std::cmp::Ordering;
 use std::time::Duration;
-
-#[cfg(feature = "serde")]
-use std::borrow::Cow;
 
 use crate::features::event::{Event, EventKind, FeatureRoute};
 use crate::{Float, Symbol, WarmupPolicy};
@@ -9,17 +7,8 @@ use crate::{Float, Symbol, WarmupPolicy};
 /// Maximum number of adjacent outputs one runtime indicator may own.
 pub const MAX_OUTPUTS_PER_INDICATOR: usize = 16;
 
-/// Semantic version emitted in serialized [`FeatureSet`] JSON artifacts.
-#[cfg(feature = "serde")]
-pub const FEATURE_SET_FORMAT_VERSION: &str = "1.0.0";
-
 /// Numeric event field consumed by a moving average.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-#[cfg_attr(
-    feature = "serde",
-    derive(serde::Serialize, serde::Deserialize),
-    serde(rename_all = "snake_case")
-)]
 pub enum ValueSource {
     #[default]
     Price,
@@ -63,7 +52,6 @@ impl ValueSource {
 
 /// Bucket aggregation and ordered rolling windows for a timed indicator.
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct TimeWindows {
     pub aggregation: Duration,
     pub windows: Vec<Duration>,
@@ -80,7 +68,6 @@ impl TimeWindows {
 
 /// Structured configuration for one runtime indicator instance.
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum IndicatorSpec {
     Sma {
         source: ValueSource,
@@ -156,6 +143,69 @@ impl IndicatorSpec {
         }
     }
 
+    pub(crate) fn canonical_name(&self) -> &'static str {
+        match self {
+            Self::Sma { .. } => "sma",
+            Self::Ema { .. } => "ema",
+            Self::Cvd { .. } => "cvd",
+            Self::SmaTimed { .. } => "sma_timed",
+            Self::ObvTimed { .. } => "obv_timed",
+            Self::TradeCountTimed { .. } => "trade_count_timed",
+            Self::DayOfWeek => "day_of_week",
+            Self::TimeSinceFirstEventOfDay { .. } => "time_since_first_event_of_day",
+        }
+    }
+
+    fn identity_cmp(&self, other: &Self) -> Ordering {
+        match (self, other) {
+            (
+                Self::Sma { source: left, .. } | Self::Ema { source: left, .. },
+                Self::Sma { source: right, .. } | Self::Ema { source: right, .. },
+            ) => left.canonical_name().cmp(right.canonical_name()),
+            (
+                Self::SmaTimed {
+                    source: left_source,
+                    time_windows: left_windows,
+                    ..
+                },
+                Self::SmaTimed {
+                    source: right_source,
+                    time_windows: right_windows,
+                    ..
+                },
+            ) => left_source
+                .canonical_name()
+                .cmp(right_source.canonical_name())
+                .then_with(|| left_windows.aggregation.cmp(&right_windows.aggregation)),
+            (
+                Self::ObvTimed {
+                    time_windows: left, ..
+                },
+                Self::ObvTimed {
+                    time_windows: right,
+                    ..
+                },
+            ) => left.aggregation.cmp(&right.aggregation),
+            (
+                Self::TradeCountTimed {
+                    aggregation: left, ..
+                },
+                Self::TradeCountTimed {
+                    aggregation: right, ..
+                },
+            ) => left.cmp(right),
+            (
+                Self::TimeSinceFirstEventOfDay {
+                    utc_offset_millis: left,
+                },
+                Self::TimeSinceFirstEventOfDay {
+                    utc_offset_millis: right,
+                },
+            ) => left.cmp(right),
+            _ => Ordering::Equal,
+        }
+    }
+
     pub(crate) fn is_global(&self) -> bool {
         matches!(
             self,
@@ -166,7 +216,6 @@ impl IndicatorSpec {
 
 /// One user-authored runtime indicator definition.
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct IndicatorDef {
     /// Symbol name for market indicators. Global clock indicators use `None`.
     pub symbol: Option<String>,
@@ -175,8 +224,9 @@ pub struct IndicatorDef {
 
 impl IndicatorDef {
     pub fn symbol(symbol: impl Into<String>, indicator: IndicatorSpec) -> Self {
+        let symbol = symbol.into();
         Self {
-            symbol: Some(symbol.into()),
+            symbol: Some(crate::symbols::normalize_name(&symbol).into_owned()),
             indicator,
         }
     }
@@ -187,112 +237,51 @@ impl IndicatorDef {
             indicator,
         }
     }
-}
 
-/// Ordered, serializable definitions for a complete extractor.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct FeatureSet {
-    pub indicators: Vec<IndicatorDef>,
-}
-
-#[cfg(feature = "serde")]
-#[derive(serde::Serialize)]
-struct VersionedFeatureSetRef<'a> {
-    version: &'static str,
-    indicators: &'a [IndicatorDef],
-}
-
-#[cfg(feature = "serde")]
-#[derive(serde::Deserialize)]
-struct VersionedFeatureSet<'a> {
-    #[serde(borrow)]
-    version: Cow<'a, str>,
-    indicators: Vec<IndicatorDef>,
-}
-
-#[cfg(feature = "serde")]
-impl serde::Serialize for FeatureSet {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        serde::Serialize::serialize(
-            &VersionedFeatureSetRef {
-                version: FEATURE_SET_FORMAT_VERSION,
-                indicators: &self.indicators,
-            },
-            serializer,
-        )
-    }
-}
-
-#[cfg(feature = "serde")]
-impl<'de> serde::Deserialize<'de> for FeatureSet {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let serialized: VersionedFeatureSet<'de> = serde::Deserialize::deserialize(deserializer)?;
-        validate_feature_set_version(&serialized.version).map_err(serde::de::Error::custom)?;
-        Ok(Self {
-            indicators: serialized.indicators,
-        })
-    }
-}
-
-#[cfg(feature = "serde")]
-fn parse_feature_set_version(version: &str) -> Result<semver::Version, semver::Error> {
-    match semver::Version::parse(version) {
-        Ok(version) => Ok(version),
-        Err(original_error) => {
-            let suffix_start = version.find(['-', '+']).unwrap_or(version.len());
-            let (core, suffix) = version.split_at(suffix_start);
-            if core.bytes().filter(|byte| *byte == b'.').count() != 1 {
-                return Err(original_error);
-            }
-
-            semver::Version::parse(&format!("{core}.0{suffix}"))
+    fn normalize_symbol(&mut self) {
+        if let Some(symbol) = &mut self.symbol {
+            symbol.make_ascii_lowercase();
         }
     }
+
+    fn canonical_cmp(&self, other: &Self) -> Ordering {
+        self.symbol
+            .cmp(&other.symbol)
+            .then_with(|| {
+                self.indicator
+                    .canonical_name()
+                    .cmp(other.indicator.canonical_name())
+            })
+            .then_with(|| self.indicator.identity_cmp(&other.indicator))
+    }
 }
 
-#[cfg(feature = "serde")]
-fn feature_set_versions_are_compatible(
-    artifact: &semver::Version,
-    supported: &semver::Version,
-) -> bool {
-    if artifact.major != supported.major {
-        return false;
-    }
-    if artifact.pre.is_empty() {
-        return true;
-    }
-
-    !supported.pre.is_empty()
-        && artifact.minor == supported.minor
-        && artifact.patch == supported.patch
-        && artifact.pre == supported.pre
-}
-
-#[cfg(feature = "serde")]
-fn validate_feature_set_version(version: &str) -> Result<(), String> {
-    let artifact = parse_feature_set_version(version)
-        .map_err(|error| format!("invalid feature set version {version:?}: {error}"))?;
-    let supported = semver::Version::parse(FEATURE_SET_FORMAT_VERSION)
-        .expect("the feature set format version constant must be valid SemVer");
-    if feature_set_versions_are_compatible(&artifact, &supported) {
-        Ok(())
-    } else {
-        Err(format!(
-            "unsupported feature set version {version:?}; this library supports stable version {}.x",
-            supported.major
-        ))
-    }
+/// Canonically ordered, serializable definitions for a complete extractor.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct FeatureSet {
+    pub(crate) indicators: Vec<IndicatorDef>,
 }
 
 impl FeatureSet {
-    pub fn new(indicators: Vec<IndicatorDef>) -> Self {
+    pub fn new(mut indicators: Vec<IndicatorDef>) -> Self {
+        for definition in &mut indicators {
+            definition.normalize_symbol();
+        }
+        indicators.sort_by(IndicatorDef::canonical_cmp);
         Self { indicators }
+    }
+
+    /// Add one definition while preserving canonical feature-vector order.
+    pub fn add_indicator(&mut self, mut definition: IndicatorDef) {
+        definition.normalize_symbol();
+        let index = self
+            .indicators
+            .partition_point(|existing| existing.canonical_cmp(&definition).is_le());
+        self.indicators.insert(index, definition);
+    }
+
+    pub fn indicators(&self) -> &[IndicatorDef] {
+        &self.indicators
     }
 
     pub fn indicator_count(&self) -> usize {
@@ -307,242 +296,62 @@ impl FeatureSet {
     }
 }
 
-#[cfg(all(test, feature = "serde"))]
-mod serde_tests {
+#[cfg(test)]
+mod tests {
     use super::*;
 
-    #[test]
-    fn serialization_emits_current_version_before_indicators() {
-        let json = serde_json::to_string(&FeatureSet::default()).unwrap();
-
-        assert_eq!(
-            json,
-            format!(r#"{{"version":"{FEATURE_SET_FORMAT_VERSION}","indicators":[]}}"#)
-        );
-    }
-
-    #[test]
-    fn checked_in_feature_set_schema_is_valid_json() {
-        let schema: serde_json::Value =
-            serde_json::from_str(include_str!("../../../../docs/feature-set.schema.json")).unwrap();
-
-        assert_eq!(
-            schema["$schema"],
-            "https://json-schema.org/draft/2020-12/schema"
-        );
-        assert_eq!(schema["title"], "fiml FeatureSet");
-    }
-
-    #[test]
-    fn serialization_shape_covers_every_indicator_variant() {
-        let feature_set = FeatureSet::builder()
-            .sma_from_with_warmup(
-                "BTCUSDT",
-                ValueSource::Volume,
-                [2, 4],
-                crate::WarmupPolicy::FullWindow,
-            )
-            .ema_from_with_warmup(
-                "ETHUSDT",
-                ValueSource::TradePrice,
-                [3],
-                crate::WarmupPolicy::FirstValue,
-            )
-            .cvd_with_warmup("BTCUSDT", [5], crate::WarmupPolicy::FullWindow)
-            .sma_timed_from_with_warmup(
-                "ETHUSDT",
-                ValueSource::TradeVolume,
-                Duration::from_secs(1),
-                [Duration::from_secs(2)],
-                crate::WarmupPolicy::FirstValue,
-            )
-            .obv_timed_with_warmup(
-                "BTCUSDT",
-                Duration::from_millis(1),
-                [Duration::from_secs(30)],
-                crate::WarmupPolicy::FullWindow,
-            )
-            .trade_count_timed_with_warmup(
-                "BTCUSDT",
-                Duration::from_millis(10),
-                Duration::from_secs(60),
-                crate::WarmupPolicy::FirstValue,
-            )
-            .day_of_week()
-            .time_since_first_event_of_day(3_600_000)
-            .build();
-
-        assert_eq!(
-            serde_json::to_value(feature_set).unwrap(),
-            serde_json::json!({
-                "version": FEATURE_SET_FORMAT_VERSION,
-                "indicators": [
-                    {
-                        "symbol": "BTCUSDT",
-                        "indicator": {
-                            "Sma": {
-                                "source": "volume",
-                                "windows": [2, 4],
-                                "warmup_policy": "full_window"
-                            }
-                        }
-                    },
-                    {
-                        "symbol": "ETHUSDT",
-                        "indicator": {
-                            "Ema": {
-                                "source": "trade_price",
-                                "windows": [3],
-                                "warmup_policy": "first_value"
-                            }
-                        }
-                    },
-                    {
-                        "symbol": "BTCUSDT",
-                        "indicator": {
-                            "Cvd": {
-                                "windows": [5],
-                                "warmup_policy": "full_window"
-                            }
-                        }
-                    },
-                    {
-                        "symbol": "ETHUSDT",
-                        "indicator": {
-                            "SmaTimed": {
-                                "source": "trade_volume",
-                                "time_windows": {
-                                    "aggregation": {
-                                        "secs": 1,
-                                        "nanos": 0
-                                    },
-                                    "windows": [
-                                        {
-                                            "secs": 2,
-                                            "nanos": 0
-                                        }
-                                    ]
-                                },
-                                "warmup_policy": "first_value"
-                            }
-                        }
-                    },
-                    {
-                        "symbol": "BTCUSDT",
-                        "indicator": {
-                            "ObvTimed": {
-                                "time_windows": {
-                                    "aggregation": {
-                                        "secs": 0,
-                                        "nanos": 1_000_000
-                                    },
-                                    "windows": [
-                                        {
-                                            "secs": 30,
-                                            "nanos": 0
-                                        }
-                                    ]
-                                },
-                                "warmup_policy": "full_window"
-                            }
-                        }
-                    },
-                    {
-                        "symbol": "BTCUSDT",
-                        "indicator": {
-                            "TradeCountTimed": {
-                                "aggregation": {
-                                    "secs": 0,
-                                    "nanos": 10_000_000
-                                },
-                                "window": {
-                                    "secs": 60,
-                                    "nanos": 0
-                                },
-                                "warmup_policy": "first_value"
-                            }
-                        }
-                    },
-                    {
-                        "symbol": null,
-                        "indicator": "DayOfWeek"
-                    },
-                    {
-                        "symbol": null,
-                        "indicator": {
-                            "TimeSinceFirstEventOfDay": {
-                                "utc_offset_millis": 3_600_000
-                            }
-                        }
-                    }
-                ]
-            })
-        );
-    }
-
-    #[test]
-    fn cvd_spec_round_trips_with_grouped_windows() {
-        let feature_set = FeatureSet::builder()
-            .cvd_with_warmup("BTCUSDT", [10, 50], crate::WarmupPolicy::FirstValue)
-            .build();
-
-        let json = serde_json::to_string(&feature_set).unwrap();
-        let restored: FeatureSet = serde_json::from_str(&json).unwrap();
-
-        assert!(json.contains(r#""warmup_policy":"first_value""#));
-        assert_eq!(restored, feature_set);
-    }
-
-    #[test]
-    fn deserialization_accepts_short_and_same_major_stable_versions() {
-        for version in ["1.0", "1.0.0", "1.99.3"] {
-            let json = format!(r#"{{"version":"{version}","indicators":[]}}"#);
-            let feature_set: FeatureSet = serde_json::from_str(&json).unwrap();
-            assert!(feature_set.indicators.is_empty());
+    fn sample(source: ValueSource) -> IndicatorSpec {
+        IndicatorSpec::Sma {
+            source,
+            windows: vec![2],
+            warmup_policy: WarmupPolicy::FullWindow,
         }
     }
 
     #[test]
-    fn deserialization_rejects_missing_malformed_and_different_major_versions() {
-        let cases = [
-            (r#"{"indicators":[]}"#, "missing field `version`"),
-            (
-                r#"{"version":"release-1","indicators":[]}"#,
-                "invalid feature set version",
+    fn feature_set_order_uses_scope_kind_and_identity() {
+        let feature_set = FeatureSet::new(vec![
+            IndicatorDef::symbol(
+                "Z",
+                IndicatorSpec::Ema {
+                    source: ValueSource::Price,
+                    windows: vec![2],
+                    warmup_policy: WarmupPolicy::FullWindow,
+                },
             ),
-            (
-                r#"{"version":"2.0","indicators":[]}"#,
-                "unsupported feature set version",
-            ),
-        ];
+            IndicatorDef::symbol("A", sample(ValueSource::Volume)),
+            IndicatorDef::global(IndicatorSpec::TimeSinceFirstEventOfDay {
+                utc_offset_millis: 3_600_000,
+            }),
+            IndicatorDef::symbol("Z", sample(ValueSource::Price)),
+            IndicatorDef::global(IndicatorSpec::DayOfWeek),
+            IndicatorDef::symbol("A", sample(ValueSource::Price)),
+        ]);
 
-        for (json, expected) in cases {
-            let error = serde_json::from_str::<FeatureSet>(json).unwrap_err();
-            assert!(
-                error.to_string().contains(expected),
-                "expected {expected:?} in {error}"
-            );
-        }
-    }
-
-    #[test]
-    fn prerelease_artifacts_require_the_exact_supported_prerelease() {
-        let supported = parse_feature_set_version("1.1.0-beta.2+loader").unwrap();
-
-        for compatible in ["1.1-beta.2", "1.1.0-beta.2+artifact"] {
-            let artifact = parse_feature_set_version(compatible).unwrap();
-            assert!(feature_set_versions_are_compatible(&artifact, &supported));
-        }
-        for incompatible in ["1.1.0-alpha.1", "1.1.0-beta.1", "1.2.0-beta.2"] {
-            let artifact = parse_feature_set_version(incompatible).unwrap();
-            assert!(!feature_set_versions_are_compatible(&artifact, &supported));
-        }
-
-        let stable_supported = parse_feature_set_version("1.1.0").unwrap();
-        let prerelease = parse_feature_set_version("1.1.0-beta.2").unwrap();
-        assert!(!feature_set_versions_are_compatible(
-            &prerelease,
-            &stable_supported
+        let definitions = feature_set.indicators();
+        assert!(matches!(definitions[0].indicator, IndicatorSpec::DayOfWeek));
+        assert!(matches!(
+            definitions[1].indicator,
+            IndicatorSpec::TimeSinceFirstEventOfDay { .. }
         ));
+        assert_eq!(definitions[2].symbol.as_deref(), Some("a"));
+        assert!(matches!(
+            definitions[2].indicator,
+            IndicatorSpec::Sma {
+                source: ValueSource::Price,
+                ..
+            }
+        ));
+        assert!(matches!(
+            definitions[3].indicator,
+            IndicatorSpec::Sma {
+                source: ValueSource::Volume,
+                ..
+            }
+        ));
+        assert_eq!(definitions[4].symbol.as_deref(), Some("z"));
+        assert_eq!(definitions[5].symbol.as_deref(), Some("z"));
+        assert_eq!(definitions[4].indicator.canonical_name(), "ema");
+        assert_eq!(definitions[5].indicator.canonical_name(), "sma");
     }
 }

@@ -8,7 +8,7 @@ use crate::features::definition::{
 /// Fluent cold-path builder for a reusable [`FeatureSet`].
 #[derive(Debug, Clone, Default)]
 pub struct FeatureSetBuilder {
-    feature_set: FeatureSet,
+    indicators: Vec<IndicatorDef>,
 }
 
 impl FeatureSetBuilder {
@@ -17,7 +17,7 @@ impl FeatureSetBuilder {
     }
 
     pub fn indicator(mut self, definition: IndicatorDef) -> Self {
-        self.feature_set.indicators.push(definition);
+        self.indicators.push(definition);
         self
     }
 
@@ -239,7 +239,7 @@ impl FeatureSetBuilder {
     }
 
     pub fn build(self) -> FeatureSet {
-        self.feature_set
+        FeatureSet::new(self.indicators)
     }
 }
 

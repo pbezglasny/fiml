@@ -533,7 +533,7 @@ mod tests {
 
         assert_eq!(
             compile_names(&feature_set).unwrap(),
-            ["A%25B%3AC:price:sma:2"]
+            ["a%25b%3Ac:price:sma:2"]
         );
     }
 
@@ -543,7 +543,7 @@ mod tests {
 
         assert_eq!(
             compile_names(&feature_set).unwrap(),
-            ["BTCUSDT:trade:cvd:2", "BTCUSDT:trade:cvd:5"]
+            ["btcusdt:trade:cvd:2", "btcusdt:trade:cvd:5"]
         );
 
         let duplicate = FeatureSet::builder()

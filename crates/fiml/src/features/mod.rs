@@ -6,6 +6,8 @@ mod event;
 mod extractor;
 pub(crate) mod indicator_vector;
 mod pipeline;
+#[cfg(feature = "serde")]
+mod serialization;
 pub mod transformers;
 
 pub use builder::FeatureSetBuilder;
@@ -13,8 +15,6 @@ pub use builtin::BuiltinFeature;
 pub use builtin::{
     CvdFeature, DayOfWeek, EmaFeature, ObvTimedFeature, SmaFeature, SmaTimedFeature,
 };
-#[cfg(feature = "serde")]
-pub use definition::FEATURE_SET_FORMAT_VERSION;
 pub use definition::{
     FeatureSet, IndicatorDef, IndicatorSpec, MAX_OUTPUTS_PER_INDICATOR, TimeWindows, ValueSource,
 };
@@ -25,3 +25,5 @@ pub use event::{
 pub use extractor::{DispatchSequenceError, FeatureExtractor};
 pub use indicator_vector::{Feature, IndicatorFeatureVector, IndicatorFeatures};
 pub use pipeline::Pipeline;
+#[cfg(feature = "serde")]
+pub use serialization::FEATURE_SET_FORMAT_VERSION;

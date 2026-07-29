@@ -195,9 +195,9 @@ mod tests {
 
         assert_eq!(
             extractor.feature_names(),
-            ["AAPL:price:sma:2", "AAPL:price:sma:5"]
+            ["aapl:price:sma:2", "aapl:price:sma:5"]
         );
-        assert_eq!(extractor.index_of("AAPL:price:sma:5"), Some(1));
+        assert_eq!(extractor.index_of("aapl:price:sma:5"), Some(1));
         assert_eq!(extractor.values(), [4.5, 3.0]);
     }
 

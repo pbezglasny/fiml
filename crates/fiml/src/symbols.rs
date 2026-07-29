@@ -1,4 +1,5 @@
 use std::{
+    borrow::Cow,
     collections::HashMap,
     fmt,
     sync::{Arc, LazyLock, Mutex},
@@ -50,8 +51,17 @@ impl SymbolInterner {
 static SYMBOL_INTERNER: LazyLock<Mutex<SymbolInterner>> =
     LazyLock::new(|| Mutex::new(SymbolInterner::new()));
 
+pub(crate) fn normalize_name(symbol_name: &str) -> Cow<'_, str> {
+    if symbol_name.bytes().any(|byte| byte.is_ascii_uppercase()) {
+        Cow::Owned(symbol_name.to_ascii_lowercase())
+    } else {
+        Cow::Borrowed(symbol_name)
+    }
+}
+
 pub fn intern(symbol_name: &str) -> Symbol {
-    SYMBOL_INTERNER.lock().unwrap().intern(symbol_name)
+    let normalized = normalize_name(symbol_name);
+    SYMBOL_INTERNER.lock().unwrap().intern(&normalized)
 }
 
 pub fn resolve(symbol: Symbol) -> Option<String> {
@@ -60,4 +70,26 @@ pub fn resolve(symbol: Symbol) -> Option<String> {
         .unwrap()
         .resolve(symbol)
         .map(|s| s.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ascii_symbol_identity_is_case_insensitive() {
+        let uppercase = intern("BTCUSDT");
+        let mixed_case = intern("BtcUsdt");
+        let lowercase = intern("btcusdt");
+
+        assert_eq!(uppercase, mixed_case);
+        assert_eq!(mixed_case, lowercase);
+        assert_eq!(resolve(uppercase).as_deref(), Some("btcusdt"));
+    }
+
+    #[test]
+    fn non_ascii_characters_are_not_case_folded() {
+        assert_ne!(intern("ÄBC"), intern("äbc"));
+        assert_eq!(resolve(intern("ÄBC")).as_deref(), Some("Äbc"));
+    }
 }
