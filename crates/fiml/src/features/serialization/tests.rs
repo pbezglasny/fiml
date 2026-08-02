@@ -298,7 +298,7 @@ fn deserialization_rejects_invalid_group_shapes() {
 
 #[test]
 fn serialization_rejects_invalid_group_scope() {
-    let feature_set = FeatureSet::new(vec![crate::IndicatorDef {
+    let feature_set = FeatureSet::new(vec![crate::ScopedIndicator {
         symbol: Some("btcusdt".to_owned()),
         indicator: IndicatorSpec::DayOfWeek,
     }]);

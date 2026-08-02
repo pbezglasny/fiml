@@ -37,7 +37,7 @@ The construction flow is:
 FeatureSet or fluent builder
         |
         v
-ordered IndicatorDef values
+ordered ScopedIndicator values
         |
         v
 validation and compilation
@@ -61,9 +61,9 @@ No compatibility shims will be retained for the old builders or JSON schema.
 
 ## Definition model
 
-`FeatureSet` is an ordered collection of `IndicatorDef` values.
+`FeatureSet` is an ordered collection of `ScopedIndicator` values.
 
-An `IndicatorDef` contains:
+A `ScopedIndicator` contains:
 
 - a symbol name for symbol-scoped indicators;
 - one `IndicatorSpec`;
@@ -268,7 +268,7 @@ allocation.
 
 The feature layer is organized by responsibility:
 
-- `features/definition.rs` owns `FeatureSet`, `IndicatorDef`, `IndicatorSpec`,
+- `features/definition.rs` owns `FeatureSet`, `ScopedIndicator`, `IndicatorSpec`,
   `ValueSource`, `TimeWindows`, and canonical-name definitions.
 - `features/builder.rs` owns fluent construction of definitions.
 - `features/compiler.rs` owns validation, output spans, routing metadata,

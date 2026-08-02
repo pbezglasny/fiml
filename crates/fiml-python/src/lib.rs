@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use fiml::{
     Event, FEATURE_SET_FORMAT_VERSION, FeatureExtractor as CoreFeatureExtractor,
-    FeatureSet as CoreFeatureSet, IndicatorDef, IndicatorFeatures, IndicatorSpec, Symbol,
+    FeatureSet as CoreFeatureSet, IndicatorFeatures, IndicatorSpec, ScopedIndicator, Symbol,
     TimeWindows, TradeSide, ValueSource, WarmupPolicy as CoreWarmupPolicy, symbols,
 };
 use numpy::ndarray::Array2;
@@ -150,11 +150,11 @@ pub struct FeatureSet {
 impl FeatureSet {
     fn push_symbol(&mut self, symbol: &str, indicator: IndicatorSpec) {
         self.inner
-            .add_indicator(IndicatorDef::symbol(symbol, indicator));
+            .add_indicator(ScopedIndicator::symbol(symbol, indicator));
     }
 
     fn push_global(&mut self, indicator: IndicatorSpec) {
-        self.inner.add_indicator(IndicatorDef::global(indicator));
+        self.inner.add_indicator(ScopedIndicator::global(indicator));
     }
 }
 

@@ -160,13 +160,13 @@ impl FeatureExtractor {
 
 #[cfg(test)]
 mod tests {
-    use crate::features::{IndicatorDef, IndicatorSpec, ValueSource};
+    use crate::features::{IndicatorSpec, ScopedIndicator, ValueSource};
     use crate::{Event, IndicatorFeatures, WarmupPolicy, symbols};
 
     use super::*;
 
     fn feature_set() -> FeatureSet {
-        FeatureSet::new(vec![IndicatorDef::symbol(
+        FeatureSet::new(vec![ScopedIndicator::symbol(
             "AAPL",
             IndicatorSpec::Sma {
                 source: ValueSource::Price,

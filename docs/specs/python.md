@@ -350,7 +350,7 @@ This work is no longer binding-only. To deliver the full-dataframe guarantee:
    **seconds** while the contract is **milliseconds** (§8.5). Fixed: divisor is
    `86_400_000`. ✅
 5. **Unify definitions and compilation in the Rust core:** ✅
-   - `FeatureSet` contains grouped `IndicatorDef` values and `IndicatorSpec`
+   - `FeatureSet` contains grouped `ScopedIndicator` values and `IndicatorSpec`
      stores ordered output windows.
    - `DynIndicatorEngine::from_spec` → `from_feature_set`; binding
      `Engine.from_spec_json` → `FeatureExtractor.from_json`; added

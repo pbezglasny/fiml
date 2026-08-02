@@ -195,7 +195,7 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
-    use crate::features::{IndicatorDef, IndicatorSpec, TimeWindows, TradeSide, ValueSource};
+    use crate::features::{IndicatorSpec, ScopedIndicator, TimeWindows, TradeSide, ValueSource};
     use crate::{ArrayFeatureVector, FeatureVector, WarmupPolicy, symbols};
 
     type Vector<const N: usize, const M: usize> =
@@ -208,7 +208,7 @@ mod tests {
     #[test]
     fn grouped_outputs_use_canonical_group_and_authored_window_order() {
         let feature_set = FeatureSet::new(vec![
-            IndicatorDef::symbol(
+            ScopedIndicator::symbol(
                 "AAPL",
                 IndicatorSpec::Sma {
                     source: ValueSource::Price,
@@ -216,7 +216,7 @@ mod tests {
                     warmup_policy: WarmupPolicy::FullWindow,
                 },
             ),
-            IndicatorDef::global(IndicatorSpec::DayOfWeek),
+            ScopedIndicator::global(IndicatorSpec::DayOfWeek),
         ]);
         let mut vector: Vector<3, 2> =
             IndicatorFeatureVector::from_feature_set(ArrayFeatureVector::new(), &feature_set)
@@ -284,7 +284,7 @@ mod tests {
 
     #[test]
     fn timed_group_uses_one_runtime_indicator() {
-        let feature_set = FeatureSet::new(vec![IndicatorDef::symbol(
+        let feature_set = FeatureSet::new(vec![ScopedIndicator::symbol(
             "AAPL",
             IndicatorSpec::SmaTimed {
                 source: ValueSource::Price,
@@ -356,7 +356,7 @@ mod tests {
 
     #[test]
     fn output_storage_must_match_exactly() {
-        let feature_set = FeatureSet::new(vec![IndicatorDef::global(IndicatorSpec::DayOfWeek)]);
+        let feature_set = FeatureSet::new(vec![ScopedIndicator::global(IndicatorSpec::DayOfWeek)]);
         let result: Result<Vector<2, 1>> =
             IndicatorFeatureVector::from_feature_set(ArrayFeatureVector::new(), &feature_set);
 
@@ -371,7 +371,7 @@ mod tests {
 
     #[test]
     fn global_watermark_covers_unconsumed_events() {
-        let feature_set = FeatureSet::new(vec![IndicatorDef::symbol(
+        let feature_set = FeatureSet::new(vec![ScopedIndicator::symbol(
             "AAPL",
             IndicatorSpec::Sma {
                 source: ValueSource::Price,

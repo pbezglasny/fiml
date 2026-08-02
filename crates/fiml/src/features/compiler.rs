@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use crate::features::builtin::{self, BuiltinFeature};
 use crate::features::definition::{
-    FeatureSet, IndicatorDef, IndicatorSpec, MAX_OUTPUTS_PER_INDICATOR, TimeWindows, ValueSource,
+    FeatureSet, IndicatorSpec, MAX_OUTPUTS_PER_INDICATOR, ScopedIndicator, TimeWindows, ValueSource,
 };
 use crate::features::event::FeatureRoute;
 use crate::{FimlError, Float, Result, Symbol, symbols};
@@ -101,7 +101,7 @@ pub(crate) fn compile<F: Float>(
     })
 }
 
-fn validate_symbol_scope(index: usize, definition: &IndicatorDef) -> Result<Option<Symbol>> {
+fn validate_symbol_scope(index: usize, definition: &ScopedIndicator) -> Result<Option<Symbol>> {
     match (&definition.symbol, definition.indicator.is_global()) {
         (None, true) => Ok(None),
         (Some(_), true) => {
@@ -119,7 +119,7 @@ fn validate_symbol_scope(index: usize, definition: &IndicatorDef) -> Result<Opti
 
 fn compile_definition<F: Float>(
     index: usize,
-    definition: &IndicatorDef,
+    definition: &ScopedIndicator,
     symbol: Option<Symbol>,
     span: OutputSpan,
 ) -> Result<(BuiltinFeature<F>, IndicatorIdentity, Vec<String>)> {
@@ -299,7 +299,7 @@ fn compile_definition<F: Float>(
 
 fn validate_sample_windows(
     index: usize,
-    definition: &IndicatorDef,
+    definition: &ScopedIndicator,
     windows: &[usize],
     is_sma: bool,
 ) -> Result<()> {
@@ -323,7 +323,11 @@ fn validate_sample_windows(
     Ok(())
 }
 
-fn validate_output_windows<T>(index: usize, definition: &IndicatorDef, windows: &[T]) -> Result<()>
+fn validate_output_windows<T>(
+    index: usize,
+    definition: &ScopedIndicator,
+    windows: &[T],
+) -> Result<()>
 where
     T: Eq + std::hash::Hash + std::fmt::Debug,
 {
@@ -362,7 +366,7 @@ struct ValidatedTimeWindows {
 
 fn validate_time_windows(
     index: usize,
-    definition: &IndicatorDef,
+    definition: &ScopedIndicator,
     time_windows: &TimeWindows,
 ) -> Result<ValidatedTimeWindows> {
     validate_output_windows(index, definition, &time_windows.windows)?;
@@ -422,7 +426,7 @@ fn validate_time_windows(
 
 fn duration_millis(
     index: usize,
-    definition: &IndicatorDef,
+    definition: &ScopedIndicator,
     field: &str,
     duration: Duration,
 ) -> Result<i64> {
@@ -444,7 +448,7 @@ fn duration_millis(
 
 fn validate_utc_offset(
     index: usize,
-    definition: &IndicatorDef,
+    definition: &ScopedIndicator,
     utc_offset_millis: i64,
 ) -> Result<()> {
     const MINUTE_MILLIS: i64 = 60_000;
@@ -477,13 +481,13 @@ fn escape_symbol_segment(symbol: &str) -> String {
     symbol.replace('%', "%25").replace(':', "%3A")
 }
 
-fn contextualize(index: usize, definition: &IndicatorDef, error: FimlError) -> FimlError {
+fn contextualize(index: usize, definition: &ScopedIndicator, error: FimlError) -> FimlError {
     invalid_definition_error(index, definition, error.to_string())
 }
 
 fn invalid_definition<T>(
     index: usize,
-    definition: &IndicatorDef,
+    definition: &ScopedIndicator,
     reason: impl Into<String>,
 ) -> Result<T> {
     Err(invalid_definition_error(index, definition, reason))
@@ -491,7 +495,7 @@ fn invalid_definition<T>(
 
 fn invalid_definition_error(
     index: usize,
-    definition: &IndicatorDef,
+    definition: &ScopedIndicator,
     reason: impl Into<String>,
 ) -> FimlError {
     let symbol = definition
@@ -508,7 +512,7 @@ fn invalid_definition_error(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::features::{IndicatorDef, IndicatorSpec};
+    use crate::features::{IndicatorSpec, ScopedIndicator};
 
     fn compile_names(feature_set: &FeatureSet) -> Result<Vec<String>> {
         Ok(compile::<f64>(
@@ -522,7 +526,7 @@ mod tests {
 
     #[test]
     fn canonical_names_escape_reserved_symbol_characters() {
-        let feature_set = FeatureSet::new(vec![IndicatorDef::symbol(
+        let feature_set = FeatureSet::new(vec![ScopedIndicator::symbol(
             "A%B:C",
             IndicatorSpec::Sma {
                 source: ValueSource::Price,
@@ -564,7 +568,7 @@ mod tests {
     #[test]
     fn duplicate_identity_requires_grouped_windows() {
         let feature_set = FeatureSet::new(vec![
-            IndicatorDef::symbol(
+            ScopedIndicator::symbol(
                 "AAPL",
                 IndicatorSpec::Sma {
                     source: ValueSource::Price,
@@ -572,7 +576,7 @@ mod tests {
                     warmup_policy: crate::WarmupPolicy::FullWindow,
                 },
             ),
-            IndicatorDef::symbol(
+            ScopedIndicator::symbol(
                 "AAPL",
                 IndicatorSpec::Sma {
                     source: ValueSource::Price,
@@ -593,7 +597,7 @@ mod tests {
 
     #[test]
     fn timed_windows_require_exact_multiples_and_millisecond_precision() {
-        let non_multiple = FeatureSet::new(vec![IndicatorDef::symbol(
+        let non_multiple = FeatureSet::new(vec![ScopedIndicator::symbol(
             "AAPL",
             IndicatorSpec::SmaTimed {
                 source: ValueSource::Price,
@@ -604,7 +608,7 @@ mod tests {
                 warmup_policy: crate::WarmupPolicy::FullWindow,
             },
         )]);
-        let sub_millisecond = FeatureSet::new(vec![IndicatorDef::symbol(
+        let sub_millisecond = FeatureSet::new(vec![ScopedIndicator::symbol(
             "AAPL",
             IndicatorSpec::SmaTimed {
                 source: ValueSource::Price,
@@ -623,7 +627,7 @@ mod tests {
     #[test]
     fn clock_offset_is_bounded_and_uses_whole_minutes() {
         for offset in [14 * 60 * 60_000 + 60_000, 1] {
-            let feature_set = FeatureSet::new(vec![IndicatorDef::global(
+            let feature_set = FeatureSet::new(vec![ScopedIndicator::global(
                 IndicatorSpec::TimeSinceFirstEventOfDay {
                     utc_offset_millis: offset,
                 },

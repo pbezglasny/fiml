@@ -8,14 +8,20 @@ use self::options::{
     SampleOptionsRef, SmaTimedOptions, SmaTimedOptionsRef, TimeSinceFirstEventOfDayOptions,
     TimeSinceFirstEventOfDayOptionsRef, TradeCountTimedOptions, TradeCountTimedOptionsRef,
 };
-use crate::features::definition::{IndicatorDef, IndicatorSpec, TimeWindows};
+use crate::features::definition::{IndicatorSpec, ScopedIndicator, TimeWindows};
 
+/// Borrowing serialization adapter for a feature group's indicator array.
+///
+/// Serializes only the [`IndicatorSpec`] from each [`ScopedIndicator`]; the
+/// enclosing feature group represents their shared symbol or global scope.
+/// Each item is mapped through [`IndicatorRef`] without creating a temporary
+/// owned collection.
 pub(super) struct IndicatorsRef<'a> {
-    definitions: &'a [IndicatorDef],
+    definitions: &'a [ScopedIndicator],
 }
 
 impl<'a> IndicatorsRef<'a> {
-    pub(super) fn new(definitions: &'a [IndicatorDef]) -> Self {
+    pub(super) fn new(definitions: &'a [ScopedIndicator]) -> Self {
         Self { definitions }
     }
 }
@@ -33,6 +39,11 @@ impl Serialize for IndicatorsRef<'_> {
     }
 }
 
+/// Borrowing serialization adapter for [`IndicatorSpec`].
+///
+/// Maps each in-memory indicator variant to the feature-set wire object with
+/// `name` and `options` fields without cloning its window collections. This
+/// type is serialization-only; deserialization uses [`IndicatorWire`].
 #[derive(Serialize)]
 #[serde(tag = "name", content = "options", rename_all = "snake_case")]
 enum IndicatorRef<'a> {

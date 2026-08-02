@@ -71,7 +71,7 @@ That use must not be confused with a feature cell.
 
 ### Indicator definition
 
-One user-authored indicator configuration, represented by `IndicatorDef`. It
+One user-authored indicator configuration, represented by `ScopedIndicator`. It
 combines an optional symbol scope with one indicator specification. A definition
 may produce several adjacent feature cells.
 
@@ -86,7 +86,7 @@ definition.
 ### Indicator specification
 
 The structured kind and options of an indicator, represented by `IndicatorSpec`.
-It excludes the symbol/global scope stored by `IndicatorDef`. *Indicator spec*
+It excludes the symbol/global scope stored by `ScopedIndicator`. *Indicator spec*
 is the common abbreviation.
 
 ### Runtime indicator instance
