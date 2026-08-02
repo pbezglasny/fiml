@@ -16,7 +16,7 @@ pub use builtin::{
     CvdFeature, DayOfWeek, EmaFeature, ObvTimedFeature, SmaFeature, SmaTimedFeature,
 };
 pub use definition::{
-    FeatureSet, IndicatorDef, IndicatorSpec, MAX_OUTPUTS_PER_INDICATOR, TimeWindows, ValueSource,
+    FeatureSet, IndicatorSpec, MAX_OUTPUTS_PER_INDICATOR, ScopedIndicator, TimeWindows, ValueSource,
 };
 pub use event::{
     EVENT_KIND_COUNT, Event, EventKind, OrderBookUpdate, PriceUpdate, TimeUpdate, TradeSide,

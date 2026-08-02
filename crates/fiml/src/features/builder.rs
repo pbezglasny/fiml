@@ -2,13 +2,13 @@ use std::time::Duration;
 
 use crate::WarmupPolicy;
 use crate::features::definition::{
-    FeatureSet, IndicatorDef, IndicatorSpec, TimeWindows, ValueSource,
+    FeatureSet, IndicatorSpec, ScopedIndicator, TimeWindows, ValueSource,
 };
 
 /// Fluent cold-path builder for a reusable [`FeatureSet`].
 #[derive(Debug, Clone, Default)]
 pub struct FeatureSetBuilder {
-    indicators: Vec<IndicatorDef>,
+    indicators: Vec<ScopedIndicator>,
 }
 
 impl FeatureSetBuilder {
@@ -16,7 +16,7 @@ impl FeatureSetBuilder {
         Self::default()
     }
 
-    pub fn indicator(mut self, definition: IndicatorDef) -> Self {
+    pub fn indicator(mut self, definition: ScopedIndicator) -> Self {
         self.indicators.push(definition);
         self
     }
@@ -50,7 +50,7 @@ impl FeatureSetBuilder {
         windows: impl IntoIterator<Item = usize>,
         warmup_policy: WarmupPolicy,
     ) -> Self {
-        self.indicator(IndicatorDef::symbol(
+        self.indicator(ScopedIndicator::symbol(
             symbol,
             IndicatorSpec::Sma {
                 source,
@@ -89,7 +89,7 @@ impl FeatureSetBuilder {
         windows: impl IntoIterator<Item = usize>,
         warmup_policy: WarmupPolicy,
     ) -> Self {
-        self.indicator(IndicatorDef::symbol(
+        self.indicator(ScopedIndicator::symbol(
             symbol,
             IndicatorSpec::Ema {
                 source,
@@ -109,7 +109,7 @@ impl FeatureSetBuilder {
         windows: impl IntoIterator<Item = usize>,
         warmup_policy: WarmupPolicy,
     ) -> Self {
-        self.indicator(IndicatorDef::symbol(
+        self.indicator(ScopedIndicator::symbol(
             symbol,
             IndicatorSpec::Cvd {
                 windows: windows.into_iter().collect(),
@@ -167,7 +167,7 @@ impl FeatureSetBuilder {
         windows: impl IntoIterator<Item = Duration>,
         warmup_policy: WarmupPolicy,
     ) -> Self {
-        self.indicator(IndicatorDef::symbol(
+        self.indicator(ScopedIndicator::symbol(
             symbol,
             IndicatorSpec::SmaTimed {
                 source,
@@ -193,7 +193,7 @@ impl FeatureSetBuilder {
         windows: impl IntoIterator<Item = Duration>,
         warmup_policy: WarmupPolicy,
     ) -> Self {
-        self.indicator(IndicatorDef::symbol(
+        self.indicator(ScopedIndicator::symbol(
             symbol,
             IndicatorSpec::ObvTimed {
                 time_windows: TimeWindows::new(aggregation, windows.into_iter().collect()),
@@ -218,7 +218,7 @@ impl FeatureSetBuilder {
         window: Duration,
         warmup_policy: WarmupPolicy,
     ) -> Self {
-        self.indicator(IndicatorDef::symbol(
+        self.indicator(ScopedIndicator::symbol(
             symbol,
             IndicatorSpec::TradeCountTimed {
                 aggregation,
@@ -229,11 +229,11 @@ impl FeatureSetBuilder {
     }
 
     pub fn day_of_week(self) -> Self {
-        self.indicator(IndicatorDef::global(IndicatorSpec::DayOfWeek))
+        self.indicator(ScopedIndicator::global(IndicatorSpec::DayOfWeek))
     }
 
     pub fn time_since_first_event_of_day(self, utc_offset_millis: i64) -> Self {
-        self.indicator(IndicatorDef::global(
+        self.indicator(ScopedIndicator::global(
             IndicatorSpec::TimeSinceFirstEventOfDay { utc_offset_millis },
         ))
     }

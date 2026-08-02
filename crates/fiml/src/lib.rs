@@ -11,9 +11,9 @@ use std::{error::Error, fmt::Display};
 pub use features::FEATURE_SET_FORMAT_VERSION;
 pub use features::{
     DispatchSequenceError, Event, EventKind, Feature, FeatureExtractor, FeatureSet,
-    FeatureSetBuilder, IndicatorDef, IndicatorFeatureVector, IndicatorFeatures, IndicatorSpec,
-    MAX_OUTPUTS_PER_INDICATOR, OrderBookUpdate, PriceUpdate, TimeUpdate, TimeWindows, TradeSide,
-    TradeUpdate, ValueSource, VolumeUpdate,
+    FeatureSetBuilder, IndicatorFeatureVector, IndicatorFeatures, IndicatorSpec,
+    MAX_OUTPUTS_PER_INDICATOR, OrderBookUpdate, PriceUpdate, ScopedIndicator, TimeUpdate,
+    TimeWindows, TradeSide, TradeUpdate, ValueSource, VolumeUpdate,
 };
 pub use indicators::{CumulativeVolumeDelta, ObvBucket, OnBalanceVolumeTimed};
 pub use ring_buffer::{

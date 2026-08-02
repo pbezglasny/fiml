@@ -2,14 +2,14 @@ use serde::ser::{Error as _, SerializeSeq};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use super::indicator::{IndicatorWire, IndicatorsRef};
-use crate::features::definition::{IndicatorDef, IndicatorSpec};
+use crate::features::definition::{IndicatorSpec, ScopedIndicator};
 
 pub(super) struct FeatureGroupsRef<'a> {
-    definitions: &'a [IndicatorDef],
+    definitions: &'a [ScopedIndicator],
 }
 
 impl<'a> FeatureGroupsRef<'a> {
-    pub(super) fn new(definitions: &'a [IndicatorDef]) -> Self {
+    pub(super) fn new(definitions: &'a [ScopedIndicator]) -> Self {
         Self { definitions }
     }
 }
@@ -80,7 +80,7 @@ impl FeatureGroup {
     pub(super) fn into_definitions(
         mut self,
         index: usize,
-    ) -> Result<(Option<String>, Vec<IndicatorDef>), String> {
+    ) -> Result<(Option<String>, Vec<ScopedIndicator>), String> {
         if self.indicators.is_empty() {
             return Err(format!(
                 "feature group at index {index} must contain at least one indicator"
@@ -116,8 +116,8 @@ impl FeatureGroup {
             }
 
             definitions.push(match &self.symbol {
-                Some(symbol) => IndicatorDef::symbol(symbol, indicator),
-                None => IndicatorDef::global(indicator),
+                Some(symbol) => ScopedIndicator::symbol(symbol, indicator),
+                None => ScopedIndicator::global(indicator),
             });
         }
 

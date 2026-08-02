@@ -214,15 +214,15 @@ impl IndicatorSpec {
     }
 }
 
-/// One user-authored runtime indicator definition.
+/// An indicator specification paired with its symbol or global scope.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct IndicatorDef {
+pub struct ScopedIndicator {
     /// Symbol name for market indicators. Global clock indicators use `None`.
     pub symbol: Option<String>,
     pub indicator: IndicatorSpec,
 }
 
-impl IndicatorDef {
+impl ScopedIndicator {
     pub fn symbol(symbol: impl Into<String>, indicator: IndicatorSpec) -> Self {
         let symbol = symbol.into();
         Self {
@@ -259,20 +259,20 @@ impl IndicatorDef {
 /// Canonically ordered, serializable definitions for a complete extractor.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct FeatureSet {
-    pub(crate) indicators: Vec<IndicatorDef>,
+    pub(crate) indicators: Vec<ScopedIndicator>,
 }
 
 impl FeatureSet {
-    pub fn new(mut indicators: Vec<IndicatorDef>) -> Self {
+    pub fn new(mut indicators: Vec<ScopedIndicator>) -> Self {
         for definition in &mut indicators {
             definition.normalize_symbol();
         }
-        indicators.sort_by(IndicatorDef::canonical_cmp);
+        indicators.sort_by(ScopedIndicator::canonical_cmp);
         Self { indicators }
     }
 
     /// Add one definition while preserving canonical feature-vector order.
-    pub fn add_indicator(&mut self, mut definition: IndicatorDef) {
+    pub fn add_indicator(&mut self, mut definition: ScopedIndicator) {
         definition.normalize_symbol();
         let index = self
             .indicators
@@ -280,7 +280,7 @@ impl FeatureSet {
         self.indicators.insert(index, definition);
     }
 
-    pub fn indicators(&self) -> &[IndicatorDef] {
+    pub fn indicators(&self) -> &[ScopedIndicator] {
         &self.indicators
     }
 
@@ -311,7 +311,7 @@ mod tests {
     #[test]
     fn feature_set_order_uses_scope_kind_and_identity() {
         let feature_set = FeatureSet::new(vec![
-            IndicatorDef::symbol(
+            ScopedIndicator::symbol(
                 "Z",
                 IndicatorSpec::Ema {
                     source: ValueSource::Price,
@@ -319,13 +319,13 @@ mod tests {
                     warmup_policy: WarmupPolicy::FullWindow,
                 },
             ),
-            IndicatorDef::symbol("A", sample(ValueSource::Volume)),
-            IndicatorDef::global(IndicatorSpec::TimeSinceFirstEventOfDay {
+            ScopedIndicator::symbol("A", sample(ValueSource::Volume)),
+            ScopedIndicator::global(IndicatorSpec::TimeSinceFirstEventOfDay {
                 utc_offset_millis: 3_600_000,
             }),
-            IndicatorDef::symbol("Z", sample(ValueSource::Price)),
-            IndicatorDef::global(IndicatorSpec::DayOfWeek),
-            IndicatorDef::symbol("A", sample(ValueSource::Price)),
+            ScopedIndicator::symbol("Z", sample(ValueSource::Price)),
+            ScopedIndicator::global(IndicatorSpec::DayOfWeek),
+            ScopedIndicator::symbol("A", sample(ValueSource::Price)),
         ]);
 
         let definitions = feature_set.indicators();
