@@ -5,7 +5,6 @@ use std::{
 };
 
 use rust_decimal::Decimal;
-use serde::de;
 
 pub type OrderBookUpdateId = u64;
 
@@ -35,22 +34,26 @@ pub enum Side {
 
 #[derive(Clone)]
 pub struct OrderBookLevelUpdate {
-    timestamp: i64,
-    update_id: OrderBookUpdateId,
-    side: Side,
-    price: Decimal,
-    size: Decimal,
+    pub side: Side,
+    pub price: Decimal,
+    pub size: Decimal,
+}
+
+#[derive(Clone)]
+pub struct OrderBookDelta {
+    pub update_id: OrderBookUpdateId,
+    pub changes: Vec<OrderBookLevelUpdate>,
 }
 
 pub struct OrderBookSnapshot {
-    timestamp: i64,
-    last_update_id: OrderBookUpdateId,
-    bids: Vec<OrderBookLevel>,
-    asks: Vec<OrderBookLevel>,
+    pub timestamp: i64,
+    pub last_update_id: OrderBookUpdateId,
+    pub bids: Vec<OrderBookLevel>,
+    pub asks: Vec<OrderBookLevel>,
 }
 
 pub enum OrderBookUpdate {
-    Delta(OrderBookLevelUpdate),
+    Delta(OrderBookDelta),
     Snapshot(OrderBookSnapshot),
 }
 
@@ -188,7 +191,7 @@ pub enum UpdatePolicy {
     /// Update IDs must increase, but gaps are allowed and do not desynchronize the book.
     Monotonic,
     /// Every update ID must equal `last_update_id + 1`; a gap desynchronizes the book.
-    Continious,
+    Contiguous,
 }
 
 /// Result of applying of udpate to order book
@@ -211,6 +214,7 @@ pub enum OrderBookUpdateError {
     BuffurCapacityExceeded {
         capacity: usize,
     },
+    StaleSnapshot,
 }
 
 pub enum SyncState {
@@ -222,6 +226,15 @@ pub enum SyncState {
     RequareResync { last_update_id: OrderBookUpdateId },
 }
 
+fn apply_delta_update(bids: &mut BookSide, asks: &mut BookSide, delta: &OrderBookDelta) {
+    for level_update in &delta.changes {
+        match level_update.side {
+            Side::Bid => bids.update_level(level_update.price, level_update.size),
+            Side::Ask => asks.update_level(level_update.price, level_update.size),
+        }
+    }
+}
+
 /// Order Book implemtation.
 /// It supposed to store monotonic updates, updates that come out of order will be rejected
 pub struct OrderBook {
@@ -229,10 +242,11 @@ pub struct OrderBook {
     asks: BookSide,
     sync_state: SyncState,
     policy: UpdatePolicy,
-    update_buffer: VecDeque<OrderBookLevelUpdate>,
+    update_buffer: VecDeque<OrderBookDelta>,
     buffer_size: usize,
     last_snapshot_timestamp: Option<i64>,
-    last_udpate_id: OrderBookUpdateId,
+    last_update_id: OrderBookUpdateId,
+    last_snapshot_update_id: OrderBookUpdateId,
 }
 
 impl OrderBook {
@@ -250,30 +264,25 @@ impl OrderBook {
             update_buffer: VecDeque::with_capacity(buffer_size),
             buffer_size,
             last_snapshot_timestamp: None,
-            last_udpate_id: 0,
-        }
-    }
-
-    fn apply_delta_update(&mut self, update: &OrderBookLevelUpdate) {
-        match update.side {
-            Side::Bid => self.bids.update_level(update.price, update.size),
-            Side::Ask => self.asks.update_level(update.price, update.size),
+            last_update_id: 0,
+            last_snapshot_update_id: 0,
         }
     }
 
     fn apply_update_queue(&mut self) {
         self.update_buffer
-            .retain(|update| update.update_id > self.last_udpate_id);
-        for delta_update in &self.update_buffer {
-            match delta_update.side {
-                Side::Bid => self
-                    .bids
-                    .update_level(delta_update.price, delta_update.size),
-                Side::Ask => self
-                    .asks
-                    .update_level(delta_update.price, delta_update.size),
-            }
-            self.last_udpate_id = delta_update.update_id;
+            .retain(|update| update.update_id > self.last_snapshot_update_id);
+
+        let Self {
+            bids,
+            asks,
+            update_buffer,
+            last_update_id,
+            ..
+        } = self;
+        for delta in update_buffer {
+            apply_delta_update(bids, asks, delta);
+            *last_update_id = delta.update_id;
         }
     }
 
@@ -281,7 +290,8 @@ impl OrderBook {
         self.bids.apply_snapshot(snaphot.bids);
         self.asks.apply_snapshot(snaphot.asks);
         self.last_snapshot_timestamp = Some(snaphot.timestamp);
-        self.last_udpate_id = snaphot.last_update_id;
+        self.last_update_id = snaphot.last_update_id;
+        self.last_snapshot_update_id = snaphot.last_update_id;
         self.apply_update_queue();
     }
 
@@ -296,17 +306,17 @@ impl OrderBook {
                     return Ok(UpdateOutcome::Buffered);
                 }
                 SyncState::Live { last_update_id: _ } => {
-                    if delta_update.update_id < self.last_udpate_id {
+                    if delta_update.update_id <= self.last_update_id {
                         match self.policy {
                             UpdatePolicy::Monotonic => {
                                 return Ok(UpdateOutcome::IgnoredStale);
                             }
-                            UpdatePolicy::Continious => {
+                            UpdatePolicy::Contiguous => {
                                 self.sync_state = SyncState::RequareResync {
-                                    last_update_id: self.last_udpate_id,
+                                    last_update_id: self.last_update_id,
                                 };
                                 return Err(OrderBookUpdateError::SequenceGap {
-                                    expected: self.last_udpate_id + 1,
+                                    expected: self.last_update_id + 1,
                                     received: delta_update.update_id,
                                 });
                             }
@@ -317,12 +327,16 @@ impl OrderBook {
                             capacity: self.buffer_size,
                         });
                     }
-                    self.apply_delta_update(&delta_update);
+                    let Self { bids, asks, .. } = self;
+                    apply_delta_update(bids, asks, &delta_update);
                     self.update_buffer.push_back(delta_update);
                     return Ok(UpdateOutcome::Applied);
                 }
             },
             OrderBookUpdate::Snapshot(snapshot) => {
+                if snapshot.last_update_id <= self.last_snapshot_update_id {
+                    return Err(OrderBookUpdateError::StaleSnapshot);
+                }
                 self.apply_snapshot(snapshot);
                 Ok(UpdateOutcome::Applied)
             }
@@ -330,11 +344,15 @@ impl OrderBook {
     }
 
     pub fn last_udpate_id(&self) -> OrderBookUpdateId {
-        self.last_udpate_id
+        self.last_update_id
     }
 
     pub fn last_snapshot_timestamp(&self) -> Option<i64> {
         self.last_snapshot_timestamp
+    }
+
+    pub fn last_snapshot_update_id(&self) -> OrderBookUpdateId {
+        self.last_snapshot_update_id
     }
 
     fn book_side(&self, side: Side) -> &BookSide {
