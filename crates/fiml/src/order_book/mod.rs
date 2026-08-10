@@ -567,6 +567,21 @@ mod tests {
         }
     }
 
+    fn bid_delta(update_id: OrderBookUpdateId, size: Decimal) -> OrderBookUpdate {
+        OrderBookUpdate::Delta(OrderBookDelta {
+            update_id,
+            changes: vec![OrderBookLevelUpdate::new(Side::Bid, dec!(100), size)],
+        })
+    }
+
+    fn bid_snapshot(last_update_id: OrderBookUpdateId, size: Decimal) -> OrderBookUpdate {
+        OrderBookUpdate::Snapshot(OrderBookSnapshot {
+            last_update_id,
+            bids: vec![OrderBookLevel::new(dec!(100), size)],
+            asks: Vec::new(),
+        })
+    }
+
     #[test]
     fn one_delta_applies_multiple_bid_and_ask_changes() {
         let mut book = OrderBook::new(UpdatePolicy::Monotonic, 4);
@@ -883,5 +898,151 @@ mod tests {
         assert_eq!(book.last_update_id(), Some(0));
         assert_eq!(book.last_snapshot_update_id(), Some(0));
         assert_eq!(book.level(Side::Bid, dec!(100)), Some(dec!(1)));
+    }
+
+    #[test]
+    fn duplicate_delta_is_ignored_without_mutation() {
+        let mut book = OrderBook::new(UpdatePolicy::Contiguous, 4);
+
+        apply_successfully(&mut book, bid_snapshot(100, dec!(1)));
+        apply_successfully(&mut book, bid_delta(101, dec!(2)));
+
+        let outcome = apply_successfully(&mut book, bid_delta(101, dec!(9)));
+
+        assert!(matches!(outcome, UpdateOutcome::IgnoredStale));
+        assert!(matches!(book.sync_state, SyncState::Live));
+        assert_eq!(book.level(Side::Bid, dec!(100)), Some(dec!(2)));
+        assert_eq!(book.last_update_id(), Some(101));
+        assert_eq!(book.last_snapshot_update_id(), Some(100));
+        assert_eq!(book.update_buffer.len(), 1);
+        assert_eq!(
+            book.update_buffer
+                .front()
+                .and_then(|delta| delta.changes.first())
+                .map(|change| change.size),
+            Some(dec!(2))
+        );
+    }
+
+    #[test]
+    fn stale_delta_is_ignored_without_mutation() {
+        let mut book = OrderBook::new(UpdatePolicy::Contiguous, 4);
+
+        apply_successfully(&mut book, bid_snapshot(100, dec!(1)));
+        apply_successfully(&mut book, bid_delta(101, dec!(2)));
+
+        let outcome = apply_successfully(&mut book, bid_delta(99, dec!(9)));
+
+        assert!(matches!(outcome, UpdateOutcome::IgnoredStale));
+        assert!(matches!(book.sync_state, SyncState::Live));
+        assert_eq!(book.level(Side::Bid, dec!(100)), Some(dec!(2)));
+        assert_eq!(book.last_update_id(), Some(101));
+        assert_eq!(book.last_snapshot_update_id(), Some(100));
+        assert_eq!(book.update_buffer.len(), 1);
+        assert_eq!(
+            book.update_buffer.front().map(|delta| delta.update_id),
+            Some(101)
+        );
+    }
+
+    #[test]
+    fn stale_snapshots_are_rejected_without_mutation() {
+        let mut book = OrderBook::new(UpdatePolicy::Contiguous, 4);
+
+        apply_successfully(&mut book, bid_snapshot(100, dec!(1)));
+        apply_successfully(&mut book, bid_delta(101, dec!(2)));
+
+        let equal_snapshot_result = book.apply_update(bid_snapshot(100, dec!(9)));
+        assert!(matches!(
+            equal_snapshot_result,
+            Err(OrderBookUpdateError::StaleSnapshot)
+        ));
+
+        let older_snapshot_result = book.apply_update(bid_snapshot(99, dec!(8)));
+        assert!(matches!(
+            older_snapshot_result,
+            Err(OrderBookUpdateError::StaleSnapshot)
+        ));
+
+        assert!(matches!(book.sync_state, SyncState::Live));
+        assert_eq!(book.level(Side::Bid, dec!(100)), Some(dec!(2)));
+        assert_eq!(book.last_update_id(), Some(101));
+        assert_eq!(book.last_snapshot_update_id(), Some(100));
+        assert_eq!(book.update_buffer.len(), 1);
+        assert_eq!(
+            book.update_buffer.front().map(|delta| delta.update_id),
+            Some(101)
+        );
+    }
+
+    #[test]
+    fn snapshot_older_than_visible_book_replays_uncovered_history() {
+        let mut book = OrderBook::new(UpdatePolicy::Contiguous, 8);
+
+        apply_successfully(&mut book, bid_snapshot(100, dec!(1)));
+        apply_successfully(&mut book, bid_delta(101, dec!(2)));
+        apply_successfully(&mut book, bid_delta(102, dec!(3)));
+        apply_successfully(&mut book, bid_delta(103, dec!(4)));
+
+        let outcome = apply_successfully(&mut book, bid_snapshot(102, dec!(30)));
+
+        assert!(matches!(outcome, UpdateOutcome::Applied));
+        assert!(matches!(book.sync_state, SyncState::Live));
+        assert_eq!(book.level(Side::Bid, dec!(100)), Some(dec!(4)));
+        assert_eq!(book.last_update_id(), Some(103));
+        assert_eq!(book.last_snapshot_update_id(), Some(102));
+        assert_eq!(book.update_buffer.len(), 1);
+        assert_eq!(
+            book.update_buffer.front().map(|delta| delta.update_id),
+            Some(103)
+        );
+    }
+
+    #[test]
+    fn history_capacity_is_enforced_before_first_snapshot() {
+        let mut book = OrderBook::new(UpdatePolicy::Monotonic, 1);
+
+        let outcome = apply_successfully(&mut book, bid_delta(1, dec!(1)));
+        assert!(matches!(outcome, UpdateOutcome::Buffered));
+
+        let result = book.apply_update(bid_delta(2, dec!(2)));
+        assert!(matches!(
+            result,
+            Err(OrderBookUpdateError::BufferCapacityExceeded { capacity: 1 })
+        ));
+
+        assert!(matches!(book.sync_state, SyncState::RequireResync));
+        assert_eq!(book.level(Side::Bid, dec!(100)), None);
+        assert_eq!(book.last_update_id(), None);
+        assert_eq!(book.last_snapshot_update_id(), None);
+        assert_eq!(book.update_buffer.len(), 1);
+        assert_eq!(
+            book.update_buffer.front().map(|delta| delta.update_id),
+            Some(1)
+        );
+    }
+
+    #[test]
+    fn history_capacity_is_enforced_before_live_book_mutation() {
+        let mut book = OrderBook::new(UpdatePolicy::Monotonic, 1);
+
+        apply_successfully(&mut book, bid_snapshot(100, dec!(1)));
+        apply_successfully(&mut book, bid_delta(101, dec!(2)));
+
+        let result = book.apply_update(bid_delta(102, dec!(3)));
+        assert!(matches!(
+            result,
+            Err(OrderBookUpdateError::BufferCapacityExceeded { capacity: 1 })
+        ));
+
+        assert!(matches!(book.sync_state, SyncState::RequireResync));
+        assert_eq!(book.level(Side::Bid, dec!(100)), Some(dec!(2)));
+        assert_eq!(book.last_update_id(), Some(101));
+        assert_eq!(book.last_snapshot_update_id(), Some(100));
+        assert_eq!(book.update_buffer.len(), 1);
+        assert_eq!(
+            book.update_buffer.front().map(|delta| delta.update_id),
+            Some(101)
+        );
     }
 }
