@@ -148,7 +148,7 @@ impl BookSide {
     }
 
     fn depth_until_total_size(&self, size: Decimal) -> Option<DepthUntilSizeResult> {
-        if self.levels.is_empty() {
+        if self.levels.is_empty() || size < Decimal::ZERO {
             return None;
         }
         let mut total_size = Decimal::ZERO;
@@ -173,21 +173,13 @@ impl BookSide {
         })
     }
 
-    fn volume_between_prices(
-        &self,
-        from_price: Decimal,
-        to_price: Decimal,
-    ) -> Result<Decimal, FimlError> {
+    fn volume_between_prices(&self, from_price: Decimal, to_price: Decimal) -> Decimal {
         let from_key = BookSideKey::new(self.side, from_price);
         let to_key = BookSideKey::new(self.side, to_price);
-        if from_key >= to_key {
-            return Err(FimlError::InvalidArgument("".to_string()));
-        }
-        Ok(self
-            .levels
+        self.levels
             .range((Included(from_key), Excluded(to_key)))
             .map(|(_, size)| size)
-            .sum())
+            .sum()
     }
 
     fn top_n_size(&self, n: usize) -> Decimal {
@@ -228,7 +220,15 @@ pub enum OrderBookUpdateError {
     BufferCapacityExceeded {
         capacity: usize,
     },
-    StaleSnapshot,
+    StaleSnapshot {
+        current_snapshot_update_id: OrderBookUpdateId,
+        received_snapshot_update_id: OrderBookUpdateId,
+    },
+    InvalidUpdate {
+        side: Side,
+        price: Decimal,
+        size: Decimal,
+    },
 }
 
 pub enum SyncState {
@@ -261,8 +261,45 @@ fn has_contiguous_gap(
     }
 }
 
+fn validate_level_update_deltas(update_delta: &OrderBookDelta) -> Result<(), OrderBookUpdateError> {
+    for delta in &update_delta.changes {
+        if delta.price < Decimal::ZERO || delta.size < Decimal::ZERO {
+            return Err(OrderBookUpdateError::InvalidUpdate {
+                side: delta.side,
+                price: delta.price,
+                size: delta.size,
+            });
+        }
+    }
+    Ok(())
+}
+
+fn validate_snapshot_update(snapshot: &OrderBookSnapshot) -> Result<(), OrderBookUpdateError> {
+    fn validate_side(
+        side_levels: &[OrderBookLevel],
+        side: Side,
+    ) -> Result<(), OrderBookUpdateError> {
+        for level in side_levels {
+            if level.price < Decimal::ZERO || level.size < Decimal::ZERO {
+                return Err(OrderBookUpdateError::InvalidUpdate {
+                    side,
+                    price: level.price,
+                    size: level.size,
+                });
+            }
+        }
+        Ok(())
+    }
+    validate_side(&snapshot.bids, Side::Bid)?;
+    validate_side(&snapshot.asks, Side::Ask)?;
+    Ok(())
+}
+
 /// Order book implementation.
 /// It supposed to store monotonic updates, updates that come out of order will be rejected
+///
+/// Current implementation does not handle overflow of maximal values of UpdateId and could causes errors.
+/// User supposed to check provided update_id passed into `apply_update` method
 pub struct OrderBook {
     bids: BookSide,
     asks: BookSide,
@@ -296,7 +333,7 @@ impl OrderBook {
     /// Check if update buffer if full.
     /// Return Ok if it has empty capacity
     /// Otherwise set sync_state to RequireResync and return Err
-    fn ensure_history_buffer_capacity_or_change_sync_state(
+    fn validate_history_buffer_capacity_or_change_sync_state(
         &mut self,
     ) -> Result<(), OrderBookUpdateError> {
         if self.update_buffer.len() == self.buffer_size {
@@ -384,12 +421,14 @@ impl OrderBook {
         }
     }
 
+    /// Update order book by passing delta or entire snapshot of order book
     pub fn apply_update(
         &mut self,
         update: OrderBookUpdate,
     ) -> Result<UpdateOutcome, OrderBookUpdateError> {
         match update {
             OrderBookUpdate::Delta(delta) => {
+                validate_level_update_deltas(&delta)?;
                 if let Some(previous_update_id) =
                     self.update_buffer.back().map(|delta| delta.update_id)
                 {
@@ -397,13 +436,13 @@ impl OrderBook {
                         return Ok(UpdateOutcome::IgnoredStale);
                     }
                     if has_contiguous_gap(self.policy, Some(previous_update_id), delta.update_id) {
-                        self.ensure_history_buffer_capacity_or_change_sync_state()?;
+                        self.validate_history_buffer_capacity_or_change_sync_state()?;
                         return self.handle_contiguous_gap(previous_update_id, delta);
                     }
                 }
                 match self.sync_state {
                     SyncState::AwaitingSnapshot | SyncState::RequireResync => {
-                        self.ensure_history_buffer_capacity_or_change_sync_state()?;
+                        self.validate_history_buffer_capacity_or_change_sync_state()?;
                         self.update_buffer.push_back(delta);
                         Ok(UpdateOutcome::Buffered)
                     }
@@ -411,7 +450,7 @@ impl OrderBook {
                         if delta.update_id <= self.last_update_id.unwrap_or(0) {
                             return Ok(UpdateOutcome::IgnoredStale);
                         }
-                        self.ensure_history_buffer_capacity_or_change_sync_state()?;
+                        self.validate_history_buffer_capacity_or_change_sync_state()?;
                         if has_contiguous_gap(self.policy, self.last_update_id, delta.update_id) {
                             return self
                                 .handle_contiguous_gap(self.last_update_id.unwrap_or(0), delta);
@@ -425,10 +464,14 @@ impl OrderBook {
                 }
             }
             OrderBookUpdate::Snapshot(snapshot) => {
+                validate_snapshot_update(&snapshot)?;
                 if let Some(previous_snapshot_id) = self.last_snapshot_update_id
                     && snapshot.last_update_id <= previous_snapshot_id
                 {
-                    return Err(OrderBookUpdateError::StaleSnapshot);
+                    return Err(OrderBookUpdateError::StaleSnapshot {
+                        current_snapshot_update_id: previous_snapshot_id,
+                        received_snapshot_update_id: snapshot.last_update_id,
+                    });
                 }
                 self.apply_snapshot(snapshot)
             }
@@ -517,8 +560,20 @@ impl OrderBook {
         from_price: Decimal,
         to_price: Decimal,
     ) -> Result<Decimal, FimlError> {
-        self.book_side(side)
-            .volume_between_prices(from_price, to_price)
+        if from_price >= to_price {
+            return Err(FimlError::InvalidArgument(
+                "From price should less than to_price".to_string(),
+            ));
+        }
+        if matches!(side, Side::Bid) {
+            Ok(self
+                .book_side(side)
+                .volume_between_prices(to_price, from_price))
+        } else {
+            Ok(self
+                .book_side(side)
+                .volume_between_prices(from_price, to_price))
+        }
     }
 
     /// Weighted mid price with values
@@ -955,13 +1010,19 @@ mod tests {
         let equal_snapshot_result = book.apply_update(bid_snapshot(100, dec!(9)));
         assert!(matches!(
             equal_snapshot_result,
-            Err(OrderBookUpdateError::StaleSnapshot)
+            Err(OrderBookUpdateError::StaleSnapshot {
+                current_snapshot_update_id: 100,
+                received_snapshot_update_id: 100,
+            })
         ));
 
         let older_snapshot_result = book.apply_update(bid_snapshot(99, dec!(8)));
         assert!(matches!(
             older_snapshot_result,
-            Err(OrderBookUpdateError::StaleSnapshot)
+            Err(OrderBookUpdateError::StaleSnapshot {
+                current_snapshot_update_id: 100,
+                received_snapshot_update_id: 99,
+            })
         ));
 
         assert!(matches!(book.sync_state, SyncState::Live));
@@ -1044,5 +1105,130 @@ mod tests {
             book.update_buffer.front().map(|delta| delta.update_id),
             Some(101)
         );
+    }
+
+    #[test]
+    fn negative_delta_values_are_rejected_atomically() {
+        let mut book = OrderBook::new(UpdatePolicy::Contiguous, 8);
+
+        apply_successfully(
+            &mut book,
+            OrderBookUpdate::Snapshot(OrderBookSnapshot {
+                last_update_id: 100,
+                bids: vec![OrderBookLevel::new(dec!(100), dec!(1))],
+                asks: vec![OrderBookLevel::new(dec!(101), dec!(2))],
+            }),
+        );
+
+        let negative_size_result = book.apply_update(OrderBookUpdate::Delta(OrderBookDelta {
+            update_id: 101,
+            changes: vec![
+                OrderBookLevelUpdate::new(Side::Bid, dec!(100), dec!(9)),
+                OrderBookLevelUpdate::new(Side::Ask, dec!(101), dec!(-1)),
+            ],
+        }));
+        assert!(matches!(
+            negative_size_result,
+            Err(OrderBookUpdateError::InvalidUpdate {
+                side: Side::Ask,
+                price,
+                size,
+            }) if price == dec!(101) && size == dec!(-1)
+        ));
+
+        let negative_price_result = book.apply_update(OrderBookUpdate::Delta(OrderBookDelta {
+            update_id: 101,
+            changes: vec![
+                OrderBookLevelUpdate::new(Side::Ask, dec!(101), dec!(9)),
+                OrderBookLevelUpdate::new(Side::Bid, dec!(-1), dec!(1)),
+            ],
+        }));
+        assert!(matches!(
+            negative_price_result,
+            Err(OrderBookUpdateError::InvalidUpdate {
+                side: Side::Bid,
+                price,
+                size,
+            }) if price == dec!(-1) && size == dec!(1)
+        ));
+
+        assert_eq!(book.level(Side::Bid, dec!(100)), Some(dec!(1)));
+        assert_eq!(book.level(Side::Ask, dec!(101)), Some(dec!(2)));
+        assert_eq!(book.last_update_id(), Some(100));
+        assert_eq!(book.last_snapshot_update_id(), Some(100));
+
+        let outcome = apply_successfully(&mut book, bid_delta(101, dec!(3)));
+        assert!(matches!(outcome, UpdateOutcome::Applied));
+        assert_eq!(book.level(Side::Bid, dec!(100)), Some(dec!(3)));
+        assert_eq!(book.last_update_id(), Some(101));
+    }
+
+    #[test]
+    fn negative_snapshot_values_are_rejected_atomically() {
+        let mut book = OrderBook::new(UpdatePolicy::Contiguous, 8);
+
+        apply_successfully(
+            &mut book,
+            OrderBookUpdate::Snapshot(OrderBookSnapshot {
+                last_update_id: 100,
+                bids: vec![OrderBookLevel::new(dec!(100), dec!(1))],
+                asks: vec![OrderBookLevel::new(dec!(101), dec!(2))],
+            }),
+        );
+        apply_successfully(&mut book, bid_delta(101, dec!(2)));
+        apply_successfully(&mut book, bid_delta(102, dec!(3)));
+
+        let negative_size_result =
+            book.apply_update(OrderBookUpdate::Snapshot(OrderBookSnapshot {
+                last_update_id: 101,
+                bids: vec![OrderBookLevel::new(dec!(90), dec!(9))],
+                asks: vec![OrderBookLevel::new(dec!(101), dec!(-1))],
+            }));
+        assert!(matches!(
+            negative_size_result,
+            Err(OrderBookUpdateError::InvalidUpdate {
+                side: Side::Ask,
+                price,
+                size,
+            }) if price == dec!(101) && size == dec!(-1)
+        ));
+
+        let negative_price_result =
+            book.apply_update(OrderBookUpdate::Snapshot(OrderBookSnapshot {
+                last_update_id: 101,
+                bids: vec![
+                    OrderBookLevel::new(dec!(90), dec!(9)),
+                    OrderBookLevel::new(dec!(-1), dec!(1)),
+                ],
+                asks: Vec::new(),
+            }));
+        assert!(matches!(
+            negative_price_result,
+            Err(OrderBookUpdateError::InvalidUpdate {
+                side: Side::Bid,
+                price,
+                size,
+            }) if price == dec!(-1) && size == dec!(1)
+        ));
+
+        assert_eq!(book.level(Side::Bid, dec!(100)), Some(dec!(3)));
+        assert_eq!(book.level(Side::Ask, dec!(101)), Some(dec!(2)));
+        assert_eq!(book.level(Side::Bid, dec!(90)), None);
+        assert_eq!(book.last_update_id(), Some(102));
+        assert_eq!(book.last_snapshot_update_id(), Some(100));
+
+        let outcome = apply_successfully(
+            &mut book,
+            OrderBookUpdate::Snapshot(OrderBookSnapshot {
+                last_update_id: 101,
+                bids: vec![OrderBookLevel::new(dec!(100), dec!(20))],
+                asks: vec![OrderBookLevel::new(dec!(101), dec!(5))],
+            }),
+        );
+        assert!(matches!(outcome, UpdateOutcome::Applied));
+        assert_eq!(book.level(Side::Bid, dec!(100)), Some(dec!(3)));
+        assert_eq!(book.level(Side::Ask, dec!(101)), Some(dec!(5)));
+        assert_eq!(book.last_update_id(), Some(102));
+        assert_eq!(book.last_snapshot_update_id(), Some(101));
     }
 }
