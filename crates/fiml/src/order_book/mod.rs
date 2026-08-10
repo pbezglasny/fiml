@@ -129,12 +129,11 @@ impl BookSide {
             .cloned()
     }
 
-    fn top_n(&self, n: usize) -> Vec<OrderBookLevel> {
+    fn top_n(&self, n: usize) -> impl Iterator<Item = OrderBookLevel> {
         self.levels
             .iter()
             .take(n)
             .map(|(key, size)| OrderBookLevel::new(key.price, *size))
-            .collect()
     }
 
     fn depth_until_price(&self, price: Decimal) -> Decimal {
@@ -475,7 +474,7 @@ impl OrderBook {
     }
 
     /// Returns the top N price levels for the specified side.
-    pub fn top_n(&self, side: Side, n: usize) -> Vec<OrderBookLevel> {
+    pub fn top_n(&self, side: Side, n: usize) -> impl Iterator<Item = OrderBookLevel> {
         self.book_side(side).top_n(n)
     }
 
