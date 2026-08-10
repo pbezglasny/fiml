@@ -561,9 +561,10 @@ impl OrderBook {
         to_price: Decimal,
     ) -> Result<Decimal, FimlError> {
         if from_price >= to_price {
-            return Err(FimlError::InvalidArgument(
-                "From price should less than to_price".to_string(),
-            ));
+            return Err(FimlError::InvalidPriceRange {
+                from_price,
+                to_price,
+            });
         }
         if matches!(side, Side::Bid) {
             Ok(self
@@ -1230,5 +1231,26 @@ mod tests {
         assert_eq!(book.level(Side::Ask, dec!(101)), Some(dec!(5)));
         assert_eq!(book.last_update_id(), Some(102));
         assert_eq!(book.last_snapshot_update_id(), Some(101));
+    }
+
+    #[test]
+    fn invalid_volume_price_range_reports_its_bounds() {
+        let book = OrderBook::new(UpdatePolicy::Monotonic, 1);
+
+        let error = book
+            .volume_between_prices(Side::Ask, dec!(101), dec!(100))
+            .expect_err("reversed price bounds must be rejected");
+
+        assert!(matches!(
+            &error,
+            FimlError::InvalidPriceRange {
+                from_price,
+                to_price,
+            } if *from_price == dec!(101) && *to_price == dec!(100)
+        ));
+        assert_eq!(
+            error.to_string(),
+            "invalid price range: from price 101 must be less than to price 100"
+        );
     }
 }

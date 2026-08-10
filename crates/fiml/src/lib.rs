@@ -8,6 +8,8 @@ mod vectors;
 
 use std::{error::Error, fmt::Display};
 
+use rust_decimal::Decimal;
+
 #[cfg(feature = "serde")]
 pub use features::FEATURE_SET_FORMAT_VERSION;
 pub use features::{
@@ -30,6 +32,10 @@ pub type Result<T> = std::result::Result<T, FimlError>;
 #[non_exhaustive]
 pub enum FimlError {
     InvalidArgument(String),
+    InvalidPriceRange {
+        from_price: Decimal,
+        to_price: Decimal,
+    },
     InvalidIndicatorDefinition {
         index: usize,
         reason: String,
@@ -58,6 +64,13 @@ impl Display for FimlError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             FimlError::InvalidArgument(msg) => write!(f, "invalid argument: {}", msg),
+            FimlError::InvalidPriceRange {
+                from_price,
+                to_price,
+            } => write!(
+                f,
+                "invalid price range: from price {from_price} must be less than to price {to_price}"
+            ),
             FimlError::InvalidIndicatorDefinition { index, reason } => {
                 write!(f, "invalid indicator definition at index {index}: {reason}")
             }
