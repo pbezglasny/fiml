@@ -67,10 +67,7 @@ struct BookSideKey {
 
 impl PartialOrd for BookSideKey {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        match self.side {
-            Side::Bid => Some(self.price.cmp(&other.price).reverse()),
-            Side::Ask => Some(self.price.cmp(&other.price)),
-        }
+        Some(self.cmp(other))
     }
 }
 
@@ -189,6 +186,7 @@ impl BookSide {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
 pub enum UpdatePolicy {
     /// Update IDs must increase, but gaps are allowed and do not desynchronize the book.
     Monotonic,
@@ -227,10 +225,10 @@ pub enum OrderBookUpdateError {
 pub enum SyncState {
     /// No snapshot has been applied yet; incoming deltas are buffered.
     AwaitingSnapshot,
-    /// The visible order book is synchronized through `last_update_id`.
-    Live { last_update_id: OrderBookUpdateId },
+    /// The visible order book is synchronized.
+    Live,
     /// Update continuity was lost; a fresh snapshot is required to restore synchronization.
-    RequareResync { last_update_id: OrderBookUpdateId },
+    RequareResync,
 }
 
 fn apply_delta_update(bids: &mut BookSide, asks: &mut BookSide, delta: &OrderBookDelta) {
@@ -255,6 +253,14 @@ pub struct OrderBook {
     last_snapshot_update_id: OrderBookUpdateId,
 }
 
+fn has_contiguous_gap(
+    policy: UpdatePolicy,
+    previous_update_id: OrderBookUpdateId,
+    received_update_id: OrderBookUpdateId,
+) -> bool {
+    matches!(policy, UpdatePolicy::Contiguous) && received_update_id != previous_update_id + 1
+}
+
 impl OrderBook {
     /// Create new order book instance
     /// Arguments:
@@ -274,19 +280,63 @@ impl OrderBook {
         }
     }
 
-    fn check_buffer_capacity(&mut self) -> Result<(), OrderBookUpdateError> {
+    /// Check if update buffer if full.
+    /// Return Ok if it has empty capacity
+    /// Otherwise set sync_state to RequareResync and return Err
+    fn ensure_history_buffer_capacity_or_change_sync_state(
+        &mut self,
+    ) -> Result<(), OrderBookUpdateError> {
         if self.update_buffer.len() == self.buffer_size {
+            self.sync_state = SyncState::RequareResync;
             return Err(OrderBookUpdateError::BuffurCapacityExceeded {
                 capacity: self.buffer_size,
             });
         }
-        self.sync_state = SyncState::RequareResync {
-            last_update_id: self.last_update_id,
-        };
         Ok(())
     }
 
-    fn replay_history_after_snapshot(&mut self) -> Result<UpdateOutcome, OrderBookUpdateError> {
+    fn handle_contiguous_gap(
+        &mut self,
+        previous_update_id: OrderBookUpdateId,
+        delta: OrderBookDelta,
+    ) -> Result<UpdateOutcome, OrderBookUpdateError> {
+        if matches!(self.sync_state, SyncState::Live) {
+            self.sync_state = SyncState::RequareResync;
+        }
+
+        let delta_update_id = delta.update_id;
+        self.update_buffer.push_back(delta);
+        Err(OrderBookUpdateError::SequenceGap {
+            expected: previous_update_id + 1,
+            received: delta_update_id,
+        })
+    }
+
+    fn validate_history_after_snapshot_contiguous(
+        &self,
+        new_snapshot_update_id: OrderBookUpdateId,
+    ) -> Result<(), OrderBookUpdateError> {
+        if matches!(self.policy, UpdatePolicy::Monotonic) {
+            return Ok(());
+        }
+        let mut prev_id = new_snapshot_update_id;
+        for delta in &self.update_buffer {
+            if delta.update_id <= new_snapshot_update_id {
+                continue;
+            }
+            if has_contiguous_gap(self.policy, prev_id, delta.update_id) {
+                return Err(OrderBookUpdateError::SnapshotHistoryGap {
+                    snapshot_update_id: new_snapshot_update_id,
+                    expected_next_id: prev_id + 1,
+                    received: delta.update_id,
+                });
+            }
+            prev_id = delta.update_id;
+        }
+        Ok(())
+    }
+
+    fn replay_history_after_snapshot(&mut self) {
         self.update_buffer
             .retain(|update| update.update_id > self.last_snapshot_update_id);
 
@@ -295,44 +345,31 @@ impl OrderBook {
             asks,
             update_buffer,
             last_update_id,
-            last_snapshot_update_id,
-            policy,
             ..
         } = self;
         for delta in update_buffer {
-            if matches!(policy, UpdatePolicy::Contiguous) && delta.update_id != *last_update_id + 1
-            {
-                return Err(OrderBookUpdateError::SnapshotHistoryGap {
-                    snapshot_update_id: *last_snapshot_update_id,
-                    expected_next_id: *last_update_id + 1,
-                    received: delta.update_id,
-                });
-            }
             apply_delta_update(bids, asks, delta);
             *last_update_id = delta.update_id;
         }
-        Ok(UpdateOutcome::Applied)
     }
 
     fn apply_snapshot(
         &mut self,
-        snaphot: OrderBookSnapshot,
+        snapshot: OrderBookSnapshot,
     ) -> Result<UpdateOutcome, OrderBookUpdateError> {
-        self.bids.apply_snapshot(snaphot.bids);
-        self.asks.apply_snapshot(snaphot.asks);
-        self.last_update_id = snaphot.last_update_id;
-        self.last_snapshot_update_id = snaphot.last_update_id;
-        let history_result = self.replay_history_after_snapshot();
-        if let Err(OrderBookUpdateError::SnapshotHistoryGap { .. }) = history_result {
-            self.sync_state = SyncState::RequareResync {
-                last_update_id: self.last_update_id,
-            };
+        self.validate_history_after_snapshot_contiguous(snapshot.last_update_id)?;
+        let was_resync = matches!(self.sync_state, SyncState::RequareResync);
+        self.bids.apply_snapshot(snapshot.bids);
+        self.asks.apply_snapshot(snapshot.asks);
+        self.last_update_id = snapshot.last_update_id;
+        self.last_snapshot_update_id = snapshot.last_update_id;
+        self.replay_history_after_snapshot();
+        self.sync_state = SyncState::Live;
+        if was_resync {
+            Ok(UpdateOutcome::Resynchronized)
         } else {
-            self.sync_state = SyncState::Live {
-                last_update_id: self.last_update_id,
-            }
-        };
-        history_result
+            Ok(UpdateOutcome::Applied)
+        }
     }
 
     pub fn apply_update(
@@ -341,51 +378,30 @@ impl OrderBook {
     ) -> Result<UpdateOutcome, OrderBookUpdateError> {
         match update {
             OrderBookUpdate::Delta(delta) => {
-                self.check_buffer_capacity()?;
                 if let Some(previous_update_id) =
                     self.update_buffer.back().map(|delta| delta.update_id)
                 {
                     if delta.update_id <= previous_update_id {
                         return Ok(UpdateOutcome::IgnoredStale);
                     }
-                    if matches!(self.policy, UpdatePolicy::Contiguous)
-                        && delta.update_id != previous_update_id + 1
-                    {
-                        if matches!(self.sync_state, SyncState::Live { .. }) {
-                            self.sync_state = SyncState::RequareResync {
-                                last_update_id: self.last_update_id,
-                            };
-                        }
-
-                        let delta_update_id = delta.update_id;
-                        self.update_buffer.push_back(delta);
-                        return Err(OrderBookUpdateError::SequenceGap {
-                            expected: previous_update_id + 1,
-                            received: delta_update_id,
-                        });
+                    if has_contiguous_gap(self.policy, previous_update_id, delta.update_id) {
+                        self.ensure_history_buffer_capacity_or_change_sync_state()?;
+                        return self.handle_contiguous_gap(previous_update_id, delta);
                     }
                 }
                 match self.sync_state {
-                    SyncState::AwaitingSnapshot
-                    | SyncState::RequareResync { last_update_id: _ } => {
+                    SyncState::AwaitingSnapshot | SyncState::RequareResync => {
+                        self.ensure_history_buffer_capacity_or_change_sync_state()?;
                         self.update_buffer.push_back(delta);
                         Ok(UpdateOutcome::Buffered)
                     }
-                    SyncState::Live { last_update_id: _ } => {
+                    SyncState::Live => {
                         if delta.update_id <= self.last_update_id {
                             return Ok(UpdateOutcome::IgnoredStale);
                         }
-                        if matches!(self.policy, UpdatePolicy::Contiguous)
-                            && delta.update_id != self.last_update_id + 1
-                        {
-                            self.sync_state = SyncState::RequareResync {
-                                last_update_id: self.last_update_id,
-                            };
-
-                            return Err(OrderBookUpdateError::SequenceGap {
-                                expected: self.last_update_id + 1,
-                                received: delta.update_id,
-                            });
+                        self.ensure_history_buffer_capacity_or_change_sync_state()?;
+                        if has_contiguous_gap(self.policy, self.last_update_id, delta.update_id) {
+                            return self.handle_contiguous_gap(self.last_update_id, delta);
                         }
                         let Self { bids, asks, .. } = self;
                         apply_delta_update(bids, asks, &delta);
