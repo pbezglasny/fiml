@@ -616,4 +616,181 @@ mod tests {
         assert_eq!(book.level(Side::Ask, dec!(101)), None);
         assert_eq!(book.last_udpate_id(), 201);
     }
+
+    #[test]
+    fn snapshot_history_gap_is_rejected_without_mutation() {
+        let mut book = OrderBook::new(UpdatePolicy::Contiguous, 4);
+
+        let outcome = apply_successfully(
+            &mut book,
+            OrderBookUpdate::Snapshot(OrderBookSnapshot {
+                last_update_id: 100,
+                bids: vec![OrderBookLevel::new(dec!(100), dec!(1))],
+                asks: vec![OrderBookLevel::new(dec!(101), dec!(2))],
+            }),
+        );
+        assert!(matches!(outcome, UpdateOutcome::Applied));
+
+        let gap_result = book.apply_update(OrderBookUpdate::Delta(OrderBookDelta {
+            update_id: 103,
+            changes: vec![OrderBookLevelUpdate::new(Side::Bid, dec!(100), dec!(3))],
+        }));
+        assert!(matches!(
+            gap_result,
+            Err(OrderBookUpdateError::SequenceGap {
+                expected: 101,
+                received: 103,
+            })
+        ));
+
+        let snapshot_result = book.apply_update(OrderBookUpdate::Snapshot(OrderBookSnapshot {
+            last_update_id: 101,
+            bids: vec![OrderBookLevel::new(dec!(90), dec!(9))],
+            asks: Vec::new(),
+        }));
+        assert!(matches!(
+            snapshot_result,
+            Err(OrderBookUpdateError::SnapshotHistoryGap {
+                snapshot_update_id: 101,
+                expected_next_id: 102,
+                received: 103,
+            })
+        ));
+
+        assert!(matches!(book.sync_state, SyncState::RequareResync));
+        assert_eq!(book.level(Side::Bid, dec!(100)), Some(dec!(1)));
+        assert_eq!(book.level(Side::Bid, dec!(90)), None);
+        assert_eq!(book.level(Side::Ask, dec!(101)), Some(dec!(2)));
+        assert_eq!(book.last_udpate_id(), 100);
+        assert_eq!(book.last_snapshot_update_id(), 100);
+        assert_eq!(book.update_buffer.len(), 1);
+        assert_eq!(
+            book.update_buffer.front().map(|delta| delta.update_id),
+            Some(103)
+        );
+    }
+
+    #[test]
+    fn newer_snapshot_covers_gap_and_replays_remaining_delta() {
+        let mut book = OrderBook::new(UpdatePolicy::Contiguous, 4);
+
+        apply_successfully(
+            &mut book,
+            OrderBookUpdate::Snapshot(OrderBookSnapshot {
+                last_update_id: 100,
+                bids: vec![OrderBookLevel::new(dec!(100), dec!(1))],
+                asks: Vec::new(),
+            }),
+        );
+        apply_successfully(
+            &mut book,
+            OrderBookUpdate::Delta(OrderBookDelta {
+                update_id: 101,
+                changes: vec![OrderBookLevelUpdate::new(Side::Bid, dec!(100), dec!(2))],
+            }),
+        );
+
+        let gap_result = book.apply_update(OrderBookUpdate::Delta(OrderBookDelta {
+            update_id: 103,
+            changes: vec![OrderBookLevelUpdate::new(Side::Bid, dec!(100), dec!(4))],
+        }));
+        assert!(matches!(
+            gap_result,
+            Err(OrderBookUpdateError::SequenceGap {
+                expected: 102,
+                received: 103,
+            })
+        ));
+
+        let outcome = apply_successfully(
+            &mut book,
+            OrderBookUpdate::Snapshot(OrderBookSnapshot {
+                last_update_id: 102,
+                bids: vec![OrderBookLevel::new(dec!(100), dec!(3))],
+                asks: Vec::new(),
+            }),
+        );
+
+        assert!(matches!(outcome, UpdateOutcome::Resynchronized));
+        assert!(matches!(book.sync_state, SyncState::Live));
+        assert_eq!(book.level(Side::Bid, dec!(100)), Some(dec!(4)));
+        assert_eq!(book.last_udpate_id(), 103);
+        assert_eq!(book.last_snapshot_update_id(), 102);
+        assert_eq!(book.update_buffer.len(), 1);
+        assert_eq!(
+            book.update_buffer.front().map(|delta| delta.update_id),
+            Some(103)
+        );
+    }
+
+    #[test]
+    fn monotonic_snapshot_replays_non_contiguous_history() {
+        let mut book = OrderBook::new(UpdatePolicy::Monotonic, 4);
+
+        apply_successfully(
+            &mut book,
+            OrderBookUpdate::Delta(OrderBookDelta {
+                update_id: 101,
+                changes: vec![OrderBookLevelUpdate::new(Side::Bid, dec!(100), dec!(1))],
+            }),
+        );
+        apply_successfully(
+            &mut book,
+            OrderBookUpdate::Delta(OrderBookDelta {
+                update_id: 103,
+                changes: vec![OrderBookLevelUpdate::new(Side::Bid, dec!(100), dec!(3))],
+            }),
+        );
+
+        let outcome = apply_successfully(
+            &mut book,
+            OrderBookUpdate::Snapshot(OrderBookSnapshot {
+                last_update_id: 100,
+                bids: Vec::new(),
+                asks: Vec::new(),
+            }),
+        );
+
+        assert!(matches!(outcome, UpdateOutcome::Applied));
+        assert!(matches!(book.sync_state, SyncState::Live));
+        assert_eq!(book.level(Side::Bid, dec!(100)), Some(dec!(3)));
+        assert_eq!(book.last_udpate_id(), 103);
+    }
+
+    #[test]
+    fn newer_snapshot_applied_while_live_remains_live() {
+        let mut book = OrderBook::new(UpdatePolicy::Contiguous, 4);
+
+        apply_successfully(
+            &mut book,
+            OrderBookUpdate::Snapshot(OrderBookSnapshot {
+                last_update_id: 100,
+                bids: vec![OrderBookLevel::new(dec!(100), dec!(1))],
+                asks: Vec::new(),
+            }),
+        );
+        apply_successfully(
+            &mut book,
+            OrderBookUpdate::Delta(OrderBookDelta {
+                update_id: 101,
+                changes: vec![OrderBookLevelUpdate::new(Side::Bid, dec!(100), dec!(2))],
+            }),
+        );
+
+        let outcome = apply_successfully(
+            &mut book,
+            OrderBookUpdate::Snapshot(OrderBookSnapshot {
+                last_update_id: 101,
+                bids: vec![OrderBookLevel::new(dec!(100), dec!(5))],
+                asks: Vec::new(),
+            }),
+        );
+
+        assert!(matches!(outcome, UpdateOutcome::Applied));
+        assert!(matches!(book.sync_state, SyncState::Live));
+        assert_eq!(book.level(Side::Bid, dec!(100)), Some(dec!(5)));
+        assert_eq!(book.last_udpate_id(), 101);
+        assert_eq!(book.last_snapshot_update_id(), 101);
+        assert!(book.update_buffer.is_empty());
+    }
 }
