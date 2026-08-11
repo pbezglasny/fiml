@@ -104,39 +104,11 @@ where
 mod tests {
     use super::*;
     use crate::features::transformers::StandardScaler;
-    use crate::{ArrayFeatureVector, FeatureVector};
+    use crate::{ArrayFeatureVector, FeatureSet, IndicatorFeatureVector};
 
-    struct TestIndicators {
-        cells: ArrayFeatureVector<f64, 1>,
-    }
-
-    impl TestIndicators {
-        fn new(value: f64) -> Self {
-            let mut cells = ArrayFeatureVector::new();
-            cells.set_value_at(0, value);
-            Self { cells }
-        }
-    }
-
-    impl IndicatorFeatures for TestIndicators {
-        type F = f64;
-        type FeatureVector = ArrayFeatureVector<f64, 1>;
-
-        fn feature_vector(&self) -> &Self::FeatureVector {
-            &self.cells
-        }
-
-        fn dispatch(&mut self, _event: &Event<Self::F>) -> Result<()> {
-            Ok(())
-        }
-
-        fn validate_dispatch(&self, _event: &Event<Self::F>) -> Result<()> {
-            Ok(())
-        }
-
-        fn index_of(&self, _canonical_name: &str) -> Option<usize> {
-            None
-        }
+    fn test_indicators() -> IndicatorFeatureVector<f64, ArrayFeatureVector<f64, 1>, 1> {
+        let feature_set = FeatureSet::builder().day_of_week().build();
+        IndicatorFeatureVector::from_feature_set(ArrayFeatureVector::new(), &feature_set).unwrap()
     }
 
     fn approx_eq(a: f64, b: f64) -> bool {
@@ -145,15 +117,16 @@ mod tests {
 
     #[test]
     fn values_returns_indicator_output_without_transformers() {
-        let pipeline: Pipeline<
+        let mut pipeline: Pipeline<
             _,
             StandardScaler<f64, ArrayFeatureVector<f64, 1>, 1>,
             f64,
             ArrayFeatureVector<f64, 1>,
             0,
-        > = Pipeline::new(TestIndicators::new(10.0));
+        > = Pipeline::new(test_indicators());
+        pipeline.dispatch(&Event::time(0)).unwrap();
 
-        assert!(approx_eq(pipeline.values()[0], 10.0));
+        assert!(approx_eq(pipeline.values()[0], 4.0));
     }
 
     #[test]
@@ -164,13 +137,13 @@ mod tests {
             f64,
             ArrayFeatureVector<f64, 1>,
             2,
-        > = Pipeline::new(TestIndicators::new(10.0));
+        > = Pipeline::new(test_indicators());
         pipeline
             .add_transformer(StandardScaler::new(
                 [0],
                 [0],
-                2.0,
-                2.0,
+                0.0,
+                1.0,
                 ArrayFeatureVector::<f64, 1>::new(),
             ))
             .unwrap();
@@ -184,9 +157,7 @@ mod tests {
             ))
             .unwrap();
 
-        pipeline
-            .dispatch(&Event::price(crate::symbols::intern("TEST"), 0.0, 0))
-            .unwrap();
+        pipeline.dispatch(&Event::time(0)).unwrap();
 
         assert!(approx_eq(pipeline.values()[0], 1.5));
     }

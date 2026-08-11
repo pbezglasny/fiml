@@ -1,7 +1,6 @@
 use std::time::Duration;
 
-use crate::features::BuiltinFeature;
-use crate::features::builtin::write_outputs;
+use crate::features::builtin::{IndicatorAdapter, write_outputs};
 use crate::features::compiler::OutputSpan;
 use crate::features::definition::{MAX_OUTPUTS_PER_INDICATOR, ValueSource};
 use crate::features::event::Event;
@@ -9,7 +8,7 @@ use crate::indicators::{SimpleMovingAverage, SimpleMovingAverageTimed};
 use crate::vectors::FeatureVector;
 use crate::{FimlError, Float, HeapRingBuffer, Result, Symbol, WarmupPolicy};
 
-pub struct SmaFeature<F: Float> {
+pub(crate) struct SmaFeature<F: Float> {
     symbol: Symbol,
     source: ValueSource,
     sma: SimpleMovingAverage<HeapRingBuffer<F>, F, MAX_OUTPUTS_PER_INDICATOR>,
@@ -43,7 +42,7 @@ impl<F: Float> SmaFeature<F> {
     }
 }
 
-pub struct SmaTimedFeature<F: Float> {
+pub(crate) struct SmaTimedFeature<F: Float> {
     symbol: Symbol,
     source: ValueSource,
     sma: SimpleMovingAverageTimed<HeapRingBuffer<(i64, F)>, F, MAX_OUTPUTS_PER_INDICATOR>,
@@ -93,7 +92,7 @@ pub(crate) fn build<F: Float>(
     windows: &[usize],
     warmup_policy: WarmupPolicy,
     output_span: OutputSpan,
-) -> Result<BuiltinFeature<F>> {
+) -> Result<IndicatorAdapter<F>> {
     debug_assert_eq!(windows.len(), output_span.count);
     let max_window = windows.iter().copied().max().unwrap_or(0);
     let mut sma = SimpleMovingAverage::<HeapRingBuffer<F>, F, MAX_OUTPUTS_PER_INDICATOR>::new_heap(
@@ -103,7 +102,7 @@ pub(crate) fn build<F: Float>(
     for &window in windows {
         sma.add_window(window)?;
     }
-    Ok(BuiltinFeature::Sma(SmaFeature::new(
+    Ok(IndicatorAdapter::Sma(SmaFeature::new(
         symbol,
         source,
         sma,
@@ -119,7 +118,7 @@ pub(crate) fn build_timed<F: Float>(
     max_period: usize,
     warmup_policy: WarmupPolicy,
     output_span: OutputSpan,
-) -> Result<BuiltinFeature<F>> {
+) -> Result<IndicatorAdapter<F>> {
     debug_assert_eq!(periods.len(), output_span.count);
     let capacity = max_period
         .checked_add(1)
@@ -132,7 +131,7 @@ pub(crate) fn build_timed<F: Float>(
     for &period in periods {
         sma.add_window_with_periods(period)?;
     }
-    Ok(BuiltinFeature::SmaTimed(SmaTimedFeature::new(
+    Ok(IndicatorAdapter::SmaTimed(SmaTimedFeature::new(
         symbol,
         source,
         sma,
@@ -161,7 +160,7 @@ mod tests {
         )
         .unwrap()
         {
-            BuiltinFeature::Sma(feature) => feature,
+            IndicatorAdapter::Sma(feature) => feature,
             _ => unreachable!(),
         };
         let mut output = ArrayFeatureVector::<f64, 2>::new();
@@ -186,7 +185,7 @@ mod tests {
         )
         .unwrap()
         {
-            BuiltinFeature::Sma(feature) => feature,
+            IndicatorAdapter::Sma(feature) => feature,
             _ => unreachable!(),
         };
         let mut output = ArrayFeatureVector::<f64, 1>::new();

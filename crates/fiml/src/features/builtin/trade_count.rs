@@ -1,7 +1,6 @@
 use std::time::Duration;
 
-use crate::features::BuiltinFeature;
-use crate::features::builtin::write_outputs;
+use crate::features::builtin::{IndicatorAdapter, write_outputs};
 use crate::features::compiler::OutputSpan;
 use crate::features::event::Event;
 use crate::indicators::{CountBucket, TradeCountTimed};
@@ -10,7 +9,7 @@ use crate::{Float, HeapRingBuffer, Result, Symbol, WarmupPolicy};
 
 /// Rolling count of trades over a time window, wired to one output cell. Reacts
 /// to [`Trade`](EventKind::Trade) events for its symbol.
-pub struct TradeCountTimedFeature<F: Float> {
+pub(crate) struct TradeCountTimedFeature<F: Float> {
     symbol: Symbol,
     counter: TradeCountTimed<HeapRingBuffer<CountBucket>, F>,
     output_span: OutputSpan,
@@ -60,13 +59,13 @@ pub(crate) fn build<F: Float>(
     window: Duration,
     warmup_policy: WarmupPolicy,
     output_span: OutputSpan,
-) -> Result<BuiltinFeature<F>> {
+) -> Result<IndicatorAdapter<F>> {
     let counter = TradeCountTimed::<HeapRingBuffer<CountBucket>, F>::new_heap(
         aggregation,
         window,
         warmup_policy,
     )?;
-    Ok(BuiltinFeature::TradeCountTimed(
+    Ok(IndicatorAdapter::TradeCountTimed(
         TradeCountTimedFeature::new(symbol, counter, output_span),
     ))
 }

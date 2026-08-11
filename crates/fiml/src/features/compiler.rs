@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 use std::time::Duration;
 
-use crate::features::builtin::{self, BuiltinFeature};
+use crate::features::builtin::{self, IndicatorAdapter};
 use crate::features::definition::{
     FeatureSet, IndicatorSpec, MAX_OUTPUTS_PER_INDICATOR, ScopedIndicator, TimeWindows, ValueSource,
 };
@@ -16,7 +16,7 @@ pub(crate) struct OutputSpan {
 }
 
 pub(crate) struct CompiledFeature<F: Float> {
-    pub(crate) feature: BuiltinFeature<F>,
+    pub(crate) feature: IndicatorAdapter<F>,
     pub(crate) route: FeatureRoute,
 }
 
@@ -122,7 +122,7 @@ fn compile_definition<F: Float>(
     definition: &ScopedIndicator,
     symbol: Option<Symbol>,
     span: OutputSpan,
-) -> Result<(BuiltinFeature<F>, IndicatorIdentity, Vec<String>)> {
+) -> Result<(IndicatorAdapter<F>, IndicatorIdentity, Vec<String>)> {
     let symbol_name = definition.symbol.as_deref();
     match &definition.indicator {
         IndicatorSpec::Sma {

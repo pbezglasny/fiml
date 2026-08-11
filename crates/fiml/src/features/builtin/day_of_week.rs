@@ -1,5 +1,5 @@
 use crate::Float;
-use crate::features::BuiltinFeature;
+use crate::features::builtin::IndicatorAdapter;
 use crate::features::compiler::OutputSpan;
 use crate::features::event::Event;
 use crate::vectors::FeatureVector;
@@ -11,7 +11,7 @@ const MILLIS_PER_DAY: i64 = 86_400_000;
 /// Day-of-week feature. Writes `0 = Sunday ..= 6 = Saturday` derived from the
 /// event timestamp to its output cell. An every-event clock feature: it refreshes
 /// from each event's timestamp regardless of kind, so it has a value on every row.
-pub struct DayOfWeek {
+pub(crate) struct DayOfWeek {
     output_span: OutputSpan,
 }
 
@@ -21,7 +21,7 @@ impl DayOfWeek {
         Self { output_span }
     }
 
-    pub fn update<F: Float, O: FeatureVector<F = F>>(&mut self, timestamp: i64, output: &mut O) {
+    fn update<F: Float, O: FeatureVector<F = F>>(&mut self, timestamp: i64, output: &mut O) {
         // Unix epoch (1970-01-01) was a Thursday, index 4 in a Sunday-based week.
         let days = timestamp.div_euclid(MILLIS_PER_DAY);
         let dow = (days + 4).rem_euclid(7);
@@ -37,8 +37,8 @@ impl DayOfWeek {
     }
 }
 
-pub(crate) fn build<F: Float>(output_span: OutputSpan) -> BuiltinFeature<F> {
-    BuiltinFeature::DayOfWeek(DayOfWeek::new(output_span))
+pub(crate) fn build<F: Float>(output_span: OutputSpan) -> IndicatorAdapter<F> {
+    IndicatorAdapter::DayOfWeek(DayOfWeek::new(output_span))
 }
 
 #[cfg(test)]

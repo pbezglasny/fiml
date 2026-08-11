@@ -1,19 +1,22 @@
 use std::marker::PhantomData;
 use std::mem::MaybeUninit;
 
-use crate::features::builtin::BuiltinFeature;
+use crate::features::builtin::IndicatorAdapter;
 use crate::features::compiler::{Compilation, compile};
 use crate::features::definition::FeatureSet;
 use crate::features::event::{EVERY_EVENT_GROUP, Event, FEATURE_GROUP_COUNT};
 use crate::vectors::FeatureVector;
 use crate::{FimlError, Float, Result};
 
-/// Runtime update contract implemented by each concrete feature adapter.
-pub trait Feature<F: Float> {
-    fn update<O: FeatureVector<F = F>>(&mut self, event: &Event<F>, output: &mut O);
+mod sealed {
+    pub trait Sealed {}
 }
 
-pub trait IndicatorFeatures {
+/// Shared interface implemented by the library's static and runtime-sized extractors.
+///
+/// This trait is sealed: downstream crates can use its methods but cannot provide
+/// custom extractor implementations.
+pub trait IndicatorFeatures: sealed::Sealed {
     type F: Float;
     type FeatureVector: FeatureVector<F = Self::F>;
 
@@ -33,7 +36,7 @@ where
     V: FeatureVector<F = F>,
 {
     feature_vector: V,
-    features: [MaybeUninit<BuiltinFeature<F>>; M],
+    features: [MaybeUninit<IndicatorAdapter<F>>; M],
     feature_count: usize,
     timed_features: [usize; M],
     timed_feature_count: usize,
@@ -176,6 +179,15 @@ where
         self.names.iter().position(|name| name == canonical_name)
     }
 }
+
+impl<F, V, const M: usize> sealed::Sealed for IndicatorFeatureVector<F, V, M>
+where
+    F: Float,
+    V: FeatureVector<F = F>,
+{
+}
+
+impl sealed::Sealed for crate::features::extractor::FeatureExtractor {}
 
 impl<F, V, const M: usize> Drop for IndicatorFeatureVector<F, V, M>
 where

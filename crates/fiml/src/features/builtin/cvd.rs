@@ -1,5 +1,4 @@
-use crate::features::BuiltinFeature;
-use crate::features::builtin::write_outputs;
+use crate::features::builtin::{IndicatorAdapter, write_outputs};
 use crate::features::compiler::OutputSpan;
 use crate::features::definition::MAX_OUTPUTS_PER_INDICATOR;
 use crate::features::event::Event;
@@ -7,7 +6,7 @@ use crate::indicators::CumulativeVolumeDelta;
 use crate::vectors::FeatureVector;
 use crate::{Float, HeapRingBuffer, Result, Symbol, WarmupPolicy};
 
-pub struct CvdFeature<F: Float> {
+pub(crate) struct CvdFeature<F: Float> {
     symbol: Symbol,
     cvd: CumulativeVolumeDelta<HeapRingBuffer<F>, F, MAX_OUTPUTS_PER_INDICATOR>,
     output_span: OutputSpan,
@@ -46,7 +45,7 @@ pub(crate) fn build<F: Float>(
     windows: &[usize],
     warmup_policy: WarmupPolicy,
     output_span: OutputSpan,
-) -> Result<BuiltinFeature<F>> {
+) -> Result<IndicatorAdapter<F>> {
     debug_assert_eq!(windows.len(), output_span.count);
     let max_window = windows.iter().copied().max().unwrap_or(0);
     let mut cvd =
@@ -57,7 +56,7 @@ pub(crate) fn build<F: Float>(
     for &window in windows {
         cvd.add_window(window)?;
     }
-    Ok(BuiltinFeature::Cvd(CvdFeature::new(
+    Ok(IndicatorAdapter::Cvd(CvdFeature::new(
         symbol,
         cvd,
         output_span,
@@ -82,7 +81,7 @@ mod tests {
         )
         .unwrap()
         {
-            BuiltinFeature::Cvd(feature) => feature,
+            IndicatorAdapter::Cvd(feature) => feature,
             _ => unreachable!(),
         };
         let mut output = ArrayFeatureVector::<f64, 2>::new();

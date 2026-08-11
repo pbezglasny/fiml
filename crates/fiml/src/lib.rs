@@ -13,10 +13,10 @@ use rust_decimal::Decimal;
 #[cfg(feature = "serde")]
 pub use features::FEATURE_SET_FORMAT_VERSION;
 pub use features::{
-    DispatchSequenceError, Event, EventKind, Feature, FeatureExtractor, FeatureSet,
-    FeatureSetBuilder, IndicatorFeatureVector, IndicatorFeatures, IndicatorSpec,
-    MAX_OUTPUTS_PER_INDICATOR, OrderBookUpdate, PriceUpdate, ScopedIndicator, TimeUpdate,
-    TimeWindows, TradeSide, TradeUpdate, ValueSource, VolumeUpdate,
+    DispatchSequenceError, Event, EventKind, FeatureExtractor, FeatureSet, FeatureSetBuilder,
+    IndicatorFeatureVector, IndicatorFeatures, IndicatorSpec, MAX_OUTPUTS_PER_INDICATOR,
+    OrderBookUpdate, PriceUpdate, ScopedIndicator, TimeUpdate, TimeWindows, TradeSide, TradeUpdate,
+    ValueSource, VolumeUpdate,
 };
 pub use indicators::{CumulativeVolumeDelta, ObvBucket, OnBalanceVolumeTimed};
 pub use ring_buffer::{

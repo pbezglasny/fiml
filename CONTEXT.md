@@ -97,6 +97,14 @@ canonical names and output spans, constructs runtime indicator adapters, and
 moves them into fixed-capacity storage. Compilation may allocate temporary
 metadata; event dispatch may not.
 
+## Indicator adapter
+
+An internal runtime value that binds one standalone indicator calculation to
+its event route, symbol or global scope, value source, and output span. The
+library owns the closed adapter enum; it is not a downstream extension point.
+One adapter represents one indicator instance and may write several adjacent
+feature-vector cells.
+
 ## Global clock feature
 
 A feature derived from every event timestamp rather than a symbol-specific
