@@ -1,7 +1,6 @@
 use std::time::Duration;
 
-use crate::features::BuiltinFeature;
-use crate::features::builtin::write_outputs;
+use crate::features::builtin::{IndicatorAdapter, write_outputs};
 use crate::features::compiler::OutputSpan;
 use crate::features::definition::MAX_OUTPUTS_PER_INDICATOR;
 use crate::features::event::Event;
@@ -9,7 +8,7 @@ use crate::indicators::{ObvBucket, OnBalanceVolumeTimed};
 use crate::vectors::FeatureVector;
 use crate::{FimlError, Float, HeapRingBuffer, Result, Symbol, WarmupPolicy};
 
-pub struct ObvTimedFeature<F: Float> {
+pub(crate) struct ObvTimedFeature<F: Float> {
     symbol: Symbol,
     obv: OnBalanceVolumeTimed<HeapRingBuffer<ObvBucket<F>>, F, MAX_OUTPUTS_PER_INDICATOR>,
     output_span: OutputSpan,
@@ -64,7 +63,7 @@ pub(crate) fn build_timed<F: Float>(
     max_period: usize,
     warmup_policy: WarmupPolicy,
     output_span: OutputSpan,
-) -> Result<BuiltinFeature<F>> {
+) -> Result<IndicatorAdapter<F>> {
     debug_assert_eq!(periods.len(), output_span.count);
     let capacity = max_period
         .checked_add(1)
@@ -78,7 +77,7 @@ pub(crate) fn build_timed<F: Float>(
     for &period in periods {
         obv.add_window_with_periods(period)?;
     }
-    Ok(BuiltinFeature::ObvTimed(ObvTimedFeature::new(
+    Ok(IndicatorAdapter::ObvTimed(ObvTimedFeature::new(
         symbol,
         obv,
         output_span,

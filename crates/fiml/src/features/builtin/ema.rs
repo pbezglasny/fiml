@@ -1,5 +1,4 @@
-use crate::features::BuiltinFeature;
-use crate::features::builtin::write_outputs;
+use crate::features::builtin::{IndicatorAdapter, write_outputs};
 use crate::features::compiler::OutputSpan;
 use crate::features::definition::{MAX_OUTPUTS_PER_INDICATOR, ValueSource};
 use crate::features::event::Event;
@@ -7,7 +6,7 @@ use crate::indicators::ExponentialMovingAverage;
 use crate::vectors::FeatureVector;
 use crate::{Float, Result, Symbol, WarmupPolicy};
 
-pub struct EmaFeature<F: Float> {
+pub(crate) struct EmaFeature<F: Float> {
     symbol: Symbol,
     source: ValueSource,
     ema: ExponentialMovingAverage<F, MAX_OUTPUTS_PER_INDICATOR>,
@@ -47,13 +46,13 @@ pub(crate) fn build<F: Float>(
     windows: &[usize],
     warmup_policy: WarmupPolicy,
     output_span: OutputSpan,
-) -> Result<BuiltinFeature<F>> {
+) -> Result<IndicatorAdapter<F>> {
     debug_assert_eq!(windows.len(), output_span.count);
     let mut ema = ExponentialMovingAverage::<F, MAX_OUTPUTS_PER_INDICATOR>::new(warmup_policy);
     for &window in windows {
         ema.add_window(window)?;
     }
-    Ok(BuiltinFeature::Ema(EmaFeature::new(
+    Ok(IndicatorAdapter::Ema(EmaFeature::new(
         symbol,
         source,
         ema,

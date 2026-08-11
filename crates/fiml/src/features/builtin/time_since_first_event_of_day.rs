@@ -1,5 +1,5 @@
 use crate::Float;
-use crate::features::BuiltinFeature;
+use crate::features::builtin::IndicatorAdapter;
 use crate::features::compiler::OutputSpan;
 use crate::features::event::Event;
 use crate::vectors::FeatureVector;
@@ -13,7 +13,7 @@ const MILLIS_PER_DAY: i64 = 86_400_000;
 /// An every-event clock feature: it refreshes from each event's timestamp
 /// regardless of kind. The day boundary uses a fixed UTC offset
 /// (`utc_offset_millis`, `0` = UTC).
-pub struct TimeSinceFirstEventOfDay {
+pub(crate) struct TimeSinceFirstEventOfDay {
     output_span: OutputSpan,
     /// Timezone offset applied before computing the day boundary, in milliseconds.
     utc_offset_millis: i64,
@@ -35,7 +35,7 @@ impl TimeSinceFirstEventOfDay {
         }
     }
 
-    pub fn update<F: Float, O: FeatureVector<F = F>>(&mut self, timestamp: i64, output: &mut O) {
+    fn update<F: Float, O: FeatureVector<F = F>>(&mut self, timestamp: i64, output: &mut O) {
         let day = (i128::from(timestamp) + i128::from(self.utc_offset_millis))
             .div_euclid(i128::from(MILLIS_PER_DAY));
         if self.current_day != Some(day) {
@@ -58,8 +58,8 @@ impl TimeSinceFirstEventOfDay {
 pub(crate) fn build<F: Float>(
     utc_offset_millis: i64,
     output_span: OutputSpan,
-) -> BuiltinFeature<F> {
-    BuiltinFeature::TimeSinceFirstEventOfDay(TimeSinceFirstEventOfDay::new(
+) -> IndicatorAdapter<F> {
+    IndicatorAdapter::TimeSinceFirstEventOfDay(TimeSinceFirstEventOfDay::new(
         output_span,
         utc_offset_millis,
     ))

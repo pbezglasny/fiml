@@ -1,7 +1,6 @@
 use crate::Float;
 use crate::features::compiler::OutputSpan;
 use crate::features::event::Event;
-use crate::features::indicator_vector::Feature;
 use crate::vectors::FeatureVector;
 
 pub(crate) mod cvd;
@@ -12,20 +11,18 @@ pub(crate) mod sma;
 pub(crate) mod time_since_first_event_of_day;
 pub(crate) mod trade_count;
 
-pub use cvd::CvdFeature;
-pub use day_of_week::DayOfWeek;
-pub use ema::EmaFeature;
-pub use obv::ObvTimedFeature;
-pub use sma::{SmaFeature, SmaTimedFeature};
-pub use time_since_first_event_of_day::TimeSinceFirstEventOfDay;
-pub use trade_count::TradeCountTimedFeature;
+use cvd::CvdFeature;
+use day_of_week::DayOfWeek;
+use ema::EmaFeature;
+use obv::ObvTimedFeature;
+use sma::{SmaFeature, SmaTimedFeature};
+use time_since_first_event_of_day::TimeSinceFirstEventOfDay;
+use trade_count::TradeCountTimedFeature;
 
-/// Closed enum of features shipped by the library.
+/// Closed runtime adapter enum for indicators shipped by the library.
 ///
-/// Dispatched statically: each [`update`](Feature::update) is a `match` of
-/// direct calls, no `Box` and no vtable. Users needing custom features wrap
-/// this in their own enum (see the module docs).
-pub enum BuiltinFeature<F: Float> {
+/// Dispatch is a match of direct calls, with no `Box` or vtable.
+pub(crate) enum IndicatorAdapter<F: Float> {
     Cvd(CvdFeature<F>),
     Sma(SmaFeature<F>),
     Ema(EmaFeature<F>),
@@ -36,22 +33,20 @@ pub enum BuiltinFeature<F: Float> {
     TimeSinceFirstEventOfDay(TimeSinceFirstEventOfDay),
 }
 
-impl<F: Float> Feature<F> for BuiltinFeature<F> {
-    fn update<O: FeatureVector<F = F>>(&mut self, event: &Event<F>, output: &mut O) {
+impl<F: Float> IndicatorAdapter<F> {
+    pub(crate) fn update<O: FeatureVector<F = F>>(&mut self, event: &Event<F>, output: &mut O) {
         match self {
-            BuiltinFeature::Cvd(cvd) => cvd.update(event, output),
-            BuiltinFeature::Sma(sma) => sma.update(event, output),
-            BuiltinFeature::Ema(ema) => ema.update(event, output),
-            BuiltinFeature::SmaTimed(sma) => sma.update(event, output),
-            BuiltinFeature::ObvTimed(obv) => obv.update(event, output),
-            BuiltinFeature::TradeCountTimed(count) => count.update(event, output),
-            BuiltinFeature::DayOfWeek(day_of_week) => day_of_week.update_event(event, output),
-            BuiltinFeature::TimeSinceFirstEventOfDay(clock) => clock.update_event(event, output),
+            Self::Cvd(cvd) => cvd.update(event, output),
+            Self::Sma(sma) => sma.update(event, output),
+            Self::Ema(ema) => ema.update(event, output),
+            Self::SmaTimed(sma) => sma.update(event, output),
+            Self::ObvTimed(obv) => obv.update(event, output),
+            Self::TradeCountTimed(count) => count.update(event, output),
+            Self::DayOfWeek(day_of_week) => day_of_week.update_event(event, output),
+            Self::TimeSinceFirstEventOfDay(clock) => clock.update_event(event, output),
         }
     }
-}
 
-impl<F: Float> BuiltinFeature<F> {
     pub(crate) fn observes_time(&self) -> bool {
         matches!(
             self,
