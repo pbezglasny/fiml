@@ -148,7 +148,7 @@ impl BookSide {
     }
 
     fn depth_until_total_size(&self, size: Decimal) -> Option<DepthUntilSizeResult> {
-        if self.levels.is_empty() || size < Decimal::ZERO {
+        if self.levels.is_empty() || size <= Decimal::ZERO {
             return None;
         }
         let mut total_size = Decimal::ZERO;
@@ -166,20 +166,25 @@ impl BookSide {
                 break;
             }
         }
-        Some(DepthUntilSizeResult {
-            price_from,
-            price_to,
-            total_size,
-        })
+        if total_size < size {
+            None
+        } else {
+            Some(DepthUntilSizeResult {
+                price_from,
+                price_to,
+                total_size,
+            })
+        }
     }
 
     fn volume_between_prices(&self, from_price: Decimal, to_price: Decimal) -> Decimal {
         let from_key = BookSideKey::new(self.side, from_price);
         let to_key = BookSideKey::new(self.side, to_price);
-        self.levels
-            .range((Included(from_key), Excluded(to_key)))
-            .map(|(_, size)| size)
-            .sum()
+        let bounds = match self.side {
+            Side::Bid => (Excluded(to_key), Included(from_key)),
+            Side::Ask => (Included(from_key), Excluded(to_key)),
+        };
+        self.levels.range(bounds).map(|(_, size)| size).sum()
     }
 
     fn top_n_size(&self, n: usize) -> Decimal {
@@ -522,7 +527,13 @@ impl OrderBook {
     /// Returns the bid-ask spread expressed in basis points (1 bp = 0.01%).
     pub fn spread_bps(&self) -> Option<Decimal> {
         match (self.spread(), self.mid_price()) {
-            (Some(spread), Some(mid_price)) => Some((spread / mid_price) * Decimal::from(10000)),
+            (Some(spread), Some(mid_price)) => {
+                if mid_price == Decimal::ZERO {
+                    None
+                } else {
+                    Some((spread / mid_price) * Decimal::from(10000))
+                }
+            }
             _ => None,
         }
     }
@@ -566,15 +577,9 @@ impl OrderBook {
                 to_price,
             });
         }
-        if matches!(side, Side::Bid) {
-            Ok(self
-                .book_side(side)
-                .volume_between_prices(to_price, from_price))
-        } else {
-            Ok(self
-                .book_side(side)
-                .volume_between_prices(from_price, to_price))
-        }
+        Ok(self
+            .book_side(side)
+            .volume_between_prices(from_price, to_price))
     }
 
     /// Weighted mid price with values
@@ -636,6 +641,27 @@ mod tests {
             bids: vec![OrderBookLevel::new(dec!(100), size)],
             asks: Vec::new(),
         })
+    }
+
+    fn indicator_book() -> OrderBook {
+        let mut book = OrderBook::new(UpdatePolicy::Monotonic, 8);
+        apply_successfully(
+            &mut book,
+            OrderBookUpdate::Snapshot(OrderBookSnapshot {
+                last_update_id: 100,
+                bids: vec![
+                    OrderBookLevel::new(dec!(99), dec!(2)),
+                    OrderBookLevel::new(dec!(98), dec!(3)),
+                    OrderBookLevel::new(dec!(97), dec!(5)),
+                ],
+                asks: vec![
+                    OrderBookLevel::new(dec!(101), dec!(6)),
+                    OrderBookLevel::new(dec!(102), dec!(4)),
+                    OrderBookLevel::new(dec!(103), dec!(10)),
+                ],
+            }),
+        );
+        book
     }
 
     #[test]
@@ -1252,5 +1278,132 @@ mod tests {
             error.to_string(),
             "invalid price range: from price 101 must be less than to price 100"
         );
+    }
+
+    #[test]
+    fn volume_between_prices_uses_numeric_half_open_bounds_for_both_sides() {
+        let book = indicator_book();
+
+        let bid_volume = book
+            .volume_between_prices(Side::Bid, dec!(97), dec!(99))
+            .expect("valid bid range must be accepted");
+        let ask_volume = book
+            .volume_between_prices(Side::Ask, dec!(101), dec!(103))
+            .expect("valid ask range must be accepted");
+
+        assert_eq!(bid_volume, dec!(8));
+        assert_eq!(ask_volume, dec!(10));
+    }
+
+    #[test]
+    fn best_levels_and_top_n_follow_side_price_priority() {
+        let book = indicator_book();
+
+        let best_bid = book.best_bid().expect("fixture has bid levels");
+        let best_ask = book.best_ask().expect("fixture has ask levels");
+        let top_bids: Vec<_> = book
+            .top_n(Side::Bid, 2)
+            .map(|level| (level.price, level.size))
+            .collect();
+        let top_asks: Vec<_> = book
+            .top_n(Side::Ask, 2)
+            .map(|level| (level.price, level.size))
+            .collect();
+
+        assert_eq!((best_bid.price, best_bid.size), (dec!(99), dec!(2)));
+        assert_eq!((best_ask.price, best_ask.size), (dec!(101), dec!(6)));
+        assert_eq!(top_bids, vec![(dec!(99), dec!(2)), (dec!(98), dec!(3))]);
+        assert_eq!(top_asks, vec![(dec!(101), dec!(6)), (dec!(102), dec!(4))]);
+    }
+
+    #[test]
+    fn midpoint_and_spreads_use_the_best_prices() {
+        let book = indicator_book();
+
+        assert_eq!(book.mid_price(), Some(dec!(100)));
+        assert_eq!(book.spread(), Some(dec!(2)));
+        assert_eq!(book.spread_bps(), Some(dec!(200)));
+    }
+
+    #[test]
+    fn spread_bps_is_unavailable_for_a_zero_midpoint() {
+        let mut book = OrderBook::new(UpdatePolicy::Monotonic, 1);
+        apply_successfully(
+            &mut book,
+            OrderBookUpdate::Snapshot(OrderBookSnapshot {
+                last_update_id: 1,
+                bids: vec![OrderBookLevel::new(dec!(0), dec!(1))],
+                asks: vec![OrderBookLevel::new(dec!(0), dec!(1))],
+            }),
+        );
+
+        assert_eq!(book.mid_price(), Some(dec!(0)));
+        assert_eq!(book.spread_bps(), None);
+    }
+
+    #[test]
+    fn depth_until_price_accumulates_from_the_best_level() {
+        let book = indicator_book();
+
+        assert_eq!(book.depth_until_price(Side::Bid, dec!(98)), dec!(5));
+        assert_eq!(book.depth_until_price(Side::Ask, dec!(102)), dec!(10));
+    }
+
+    #[test]
+    fn depth_until_total_size_requires_positive_fillable_size() {
+        let book = indicator_book();
+
+        let bid_depth = book
+            .depth_until_total_size(Side::Bid, dec!(4))
+            .expect("five units across two bid levels fill the request");
+        let ask_depth = book
+            .depth_until_total_size(Side::Ask, dec!(7))
+            .expect("ten units across two ask levels fill the request");
+
+        assert_eq!(bid_depth.price_from, dec!(99));
+        assert_eq!(bid_depth.price_to, dec!(98));
+        assert_eq!(bid_depth.total_size, dec!(5));
+        assert_eq!(ask_depth.price_from, dec!(101));
+        assert_eq!(ask_depth.price_to, dec!(102));
+        assert_eq!(ask_depth.total_size, dec!(10));
+        assert!(book.depth_until_total_size(Side::Bid, dec!(0)).is_none());
+        assert!(book.depth_until_total_size(Side::Bid, dec!(-1)).is_none());
+        assert!(book.depth_until_total_size(Side::Bid, dec!(11)).is_none());
+    }
+
+    #[test]
+    fn weighted_mid_price_uses_best_level_sizes() {
+        let book = indicator_book();
+
+        assert_eq!(book.weighted_mid_price(), Some(dec!(100.5)));
+    }
+
+    #[test]
+    fn microprice_cross_weights_best_level_prices() {
+        let book = indicator_book();
+
+        assert_eq!(book.microprice(), Some(dec!(99.5)));
+    }
+
+    #[test]
+    fn imbalance_uses_the_requested_number_of_levels() {
+        let book = indicator_book();
+
+        assert_eq!(book.imbalance(1), Some(dec!(-0.5)));
+        assert_eq!(book.imbalance(0), None);
+    }
+
+    #[test]
+    fn price_and_size_indicators_are_unavailable_without_levels() {
+        let book = OrderBook::new(UpdatePolicy::Monotonic, 1);
+
+        assert!(book.best_bid().is_none());
+        assert!(book.best_ask().is_none());
+        assert_eq!(book.mid_price(), None);
+        assert_eq!(book.spread(), None);
+        assert_eq!(book.spread_bps(), None);
+        assert_eq!(book.weighted_mid_price(), None);
+        assert_eq!(book.microprice(), None);
+        assert_eq!(book.imbalance(1), None);
     }
 }
