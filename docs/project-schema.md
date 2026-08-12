@@ -2,8 +2,9 @@
 
 This document maps the production traits, structs, and enums in the `fiml`
 workspace. Test-only helper types are excluded. Serialization-only helper types
-are grouped because they form one private conversion layer rather than part of
-the runtime model.
+are excluded because the feature-set serialization module is currently not
+compiled. The remaining `serde` feature applies only to selected scalar/public
+types described below.
 
 Dependency notation used below:
 
@@ -40,6 +41,16 @@ The feature extractor and order-book subsystems share foundational numeric and
 error types, but the order book is not currently compiled into a feature
 adapter.
 
+### Active Cargo features and targets
+
+| Item | Current state |
+|---|---|
+| Core default features | Empty; the normal core build enables neither `serde` nor `tracing`. |
+| `serde` | Enables Serde only for `Symbol`, `WarmupPolicy`, and `EventKind`; it does not enable FeatureSet JSON. |
+| `tracing` | Enables the optional tracing dependency used for pipeline diagnostics. |
+| Rust examples | Automatic example discovery is disabled. `binance_trades` is the only explicitly registered example target. |
+| Python core dependency | `fiml-python` depends on `fiml` without optional core features. |
+
 ## Foundational traits
 
 ```mermaid
@@ -61,8 +72,11 @@ classDiagram
         <<trait>>
         type Item
         capacity()
+        len()
+        is_empty()
         push_back()
         pop_front()
+        pop_back()
         peek_*()
     }
     class StackRingBuffer
@@ -75,7 +89,13 @@ classDiagram
         type F: Float
         values()
         value_at()
+        capacity()
+        len()
+        is_empty()
         set_value_at()
+        try_set_value_at()
+        set_values_range()
+        try_set_values_range()
     }
     class ArrayFeatureVector
     class VecFeatureVector
@@ -88,6 +108,7 @@ classDiagram
         <<sealed trait>>
         type F: Float
         type FeatureVector
+        feature_vector()
         dispatch()
         validate_dispatch()
         index_of()
@@ -103,6 +124,7 @@ classDiagram
         type OutputVector
         transform()
         output_values()
+        output_values_mut()
     }
     class StandardScaler
     class ParallelTransformer
@@ -128,7 +150,8 @@ classDiagram
 flowchart LR
     Builder["FeatureSetBuilder"] -->|build| Set["FeatureSet"]
     Set *--|ordered Vec| Scoped["ScopedIndicator"]
-    Scoped *--|symbol: Option<String>| SymbolName["symbol name"]
+    Scoped o--|symbol: Option| Symbol["Symbol"]
+    Symbol --> Interner["global SymbolInterner"]
     Scoped *-- Spec["IndicatorSpec"]
     Spec o-- Source["ValueSource"]
     Spec o-- Windows["TimeWindows"]
@@ -149,8 +172,8 @@ The definition graph is cold-path configuration:
 | Type | Visibility | Owns or depends on |
 |---|---|---|
 | `FeatureSetBuilder` | Public | Accumulates `Vec<ScopedIndicator>` and produces `FeatureSet`. |
-| `FeatureSet` | Public | Owns the canonically ordered `Vec<ScopedIndicator>`; Serde support is feature-gated. |
-| `ScopedIndicator` | Public | Owns an optional symbol name and one `IndicatorSpec`. |
+| `FeatureSet` | Public | Owns the canonically ordered `Vec<ScopedIndicator>`; it does not currently implement Serde traits. |
+| `ScopedIndicator` | Public | Owns an `Option<Symbol>` and one `IndicatorSpec`; global indicators use `None`. |
 | `IndicatorSpec` | Public closed enum | Owns window lists, `ValueSource`, `TimeWindows`, and `WarmupPolicy` according to its variant. |
 | `TimeWindows` | Public | Owns one aggregation `Duration` and ordered window `Duration` values. |
 | `ValueSource` | Public | Maps a moving-average input field to `FeatureRoute` and extracts it from `Event<F>`. |
@@ -206,7 +229,10 @@ flowchart TB
 `FeatureRoute` selects one event-kind group or the every-event clock group.
 `Symbol` is a compact public handle produced by the private global
 `SymbolInterner`; symbol names are normalized and interned before hot-path
-dispatch.
+dispatch. ASCII identity is case-insensitive. `Symbol::GLOBAL` is the reserved
+ID `0`, resolves to `"__global__"`, and is available where a concrete global
+handle is useful; `ScopedIndicator` continues to represent global scope as
+`None`.
 
 The feature event named `features::event::OrderBookUpdate<F>` is only a
 top-of-book `{bid, ask}` payload. It is distinct from the snapshot/delta
@@ -325,49 +351,29 @@ outcomes, errors, sync state, and query results are public. `BookSide` and
 `OrderBookUpdateId` is the public `u64` alias shared by update, snapshot,
 sequence-state, and error types.
 
-## Serde feature-set boundary
+## Serde boundary
 
-This layer exists only with the core crate's `serde` feature.
+The optional core `serde` feature currently covers only three active types:
 
 ```mermaid
 flowchart LR
-    Set["FeatureSet"] -->|Serialize| SetRef["FeatureSetRef"]
-    SetRef --> GroupsRef["FeatureGroupsRef"]
-    GroupsRef --> GroupRef["FeatureGroupRef"]
-    GroupRef --> IndicatorsRef["IndicatorsRef"]
-    IndicatorsRef --> IndicatorRef["IndicatorRef"]
-    IndicatorRef --> RefOptions["borrowing *OptionsRef types"]
-    RefOptions --> ScalarRefs["DurationRef / DurationsRef / UtcOffsetRef"]
-
-    JSON["JSON"] -->|Deserialize| SetWire["FeatureSetWire"]
-    SetWire --> Group["FeatureGroup"]
-    Group --> IndicatorWire["IndicatorWire"]
-    IndicatorWire --> OwnedOptions["owned *Options types"]
-    OwnedOptions --> ScalarValues["DurationValue / UtcOffsetValue"]
-    IndicatorWire -->|convert| Spec["IndicatorSpec"]
-    Spec --> Set
+    Serde["serde feature"] --> Symbol["Symbol"]
+    Serde --> Warmup["WarmupPolicy"]
+    Serde --> Kind["EventKind"]
+    Symbol -->|string name| Interner["SymbolInterner"]
 ```
 
-Serialization uses borrowing adapters to avoid cloning definition/window
-collections. Deserialization uses owned strict wire types and then reconstructs
-the canonical `FeatureSet`.
+`Symbol` serializes to its normalized string and deserializes by interning the
+string. `WarmupPolicy` uses snake-case variant names, while `EventKind` uses its
+derived enum representation. `FeatureSet`, `ScopedIndicator`, and
+`IndicatorSpec` do not currently implement `Serialize` or `Deserialize`.
 
-The option families are:
-
-- `EmptyOptions`;
-- `SampleOptionsRef` / `SampleOptions`;
-- `CvdOptionsRef` / `CvdOptions`;
-- `SmaTimedOptionsRef` / `SmaTimedOptions`;
-- `ObvTimedOptionsRef` / `ObvTimedOptions`;
-- `TradeCountTimedOptionsRef` / `TradeCountTimedOptions`;
-- `TimeSinceFirstEventOfDayOptionsRef` /
-  `TimeSinceFirstEventOfDayOptions`;
-- wire enums `ValueSourceValue` and `WarmupPolicyValue`;
-- scalar adapters `DurationRef`, `DurationsRef`, `DurationValue`,
-  `UtcOffsetRef`, and `UtcOffsetValue`.
-
-`DurationDisplay` and `UtcOffsetDisplay` are private formatting helpers with no
-runtime role.
+The old private implementation remains under
+`crates/fiml/src/features/serialization/` as dormant source, but
+`features/mod.rs` does not declare that module. Its wire types, format version,
+and module tests are therefore not compiled or exposed. The JSON schema and old
+JSON examples remain as repository artifacts; `autoexamples = false` and the
+explicit Cargo example list keep those examples out of current build targets.
 
 ## Python binding boundary
 
@@ -387,13 +393,15 @@ flowchart LR
 | Binding type | Wraps or converts to | Purpose |
 |---|---|---|
 | `PyWarmupPolicy` (exported to Python as `WarmupPolicy`) | Core `WarmupPolicy` | Python enum conversion. |
-| Python `FeatureSet` | Core `FeatureSet` | Fluent configuration and JSON parity artifact. |
+| Python `FeatureSet` | Core `FeatureSet` | Fluent in-process configuration. |
 | Python `FeatureExtractor` | Core `FeatureExtractor` | Scalar update, batch replay, symbol-handle table, and output-dtype policy. |
 | `OutputDtype` | `Float32` or `Float64` | Internal output selection; calculation state remains `f64`. |
 | `OutputBuffer` | `Vec<f32>` or `Vec<f64>` | Internal row-major batch buffer converted into a NumPy array. |
 
 The binding constructs core `Event<f64>` values and calls the same sealed
-`IndicatorFeatures::dispatch` implementation used by Rust callers.
+`IndicatorFeatures::dispatch` implementation used by Rust callers. It depends
+on the core crate without enabling `serde`; there are currently no Python
+`to_json` or `from_json` entry points.
 
 ## Source map
 
@@ -402,6 +410,8 @@ The binding constructs core `Event<f64>` values and calls the same sealed
 | Numeric and warm-up types | [`crates/fiml/src/types.rs`](../crates/fiml/src/types.rs) |
 | Ring buffers | [`crates/fiml/src/ring_buffer.rs`](../crates/fiml/src/ring_buffer.rs) |
 | Feature vectors | [`crates/fiml/src/vectors.rs`](../crates/fiml/src/vectors.rs) |
+| Symbols and interner | [`crates/fiml/src/symbols.rs`](../crates/fiml/src/symbols.rs) |
+| Feature-set builder | [`crates/fiml/src/features/builder.rs`](../crates/fiml/src/features/builder.rs) |
 | Feature definitions | [`crates/fiml/src/features/definition.rs`](../crates/fiml/src/features/definition.rs) |
 | Events and routes | [`crates/fiml/src/features/event.rs`](../crates/fiml/src/features/event.rs) |
 | Compiler | [`crates/fiml/src/features/compiler.rs`](../crates/fiml/src/features/compiler.rs) |
@@ -410,6 +420,7 @@ The binding constructs core `Event<f64>` values and calls the same sealed
 | Internal adapters | [`crates/fiml/src/features/builtin/`](../crates/fiml/src/features/builtin/) |
 | Transformations and pipeline | [`crates/fiml/src/features/transformers/`](../crates/fiml/src/features/transformers/), [`crates/fiml/src/features/pipeline/mod.rs`](../crates/fiml/src/features/pipeline/mod.rs) |
 | Standalone indicators | [`crates/fiml/src/indicators/`](../crates/fiml/src/indicators/) |
-| Feature-set serialization | [`crates/fiml/src/features/serialization/`](../crates/fiml/src/features/serialization/) |
+| Dormant feature-set serialization source | [`crates/fiml/src/features/serialization/`](../crates/fiml/src/features/serialization/) (not declared by `features/mod.rs`) |
 | Order book | [`crates/fiml/src/order_book/`](../crates/fiml/src/order_book/) |
 | Python bindings | [`crates/fiml-python/src/lib.rs`](../crates/fiml-python/src/lib.rs) |
+| Python facade | [`crates/fiml-python/python/fiml/__init__.py`](../crates/fiml-python/python/fiml/__init__.py) |
