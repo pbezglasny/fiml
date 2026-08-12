@@ -48,11 +48,8 @@ where
             transformer.transform(input);
             let output_values = transformer.output_values();
             let output_idx = self.output_write_idx[i];
-            self.output.set_values_range(
-                output_idx,
-                output_values.capacity(),
-                output_values.values(),
-            );
+            self.output
+                .set_values_range(output_idx, output_values.len(), output_values.values());
         }
     }
 
@@ -101,6 +98,10 @@ mod tests {
         }
 
         fn capacity(&self) -> usize {
+            N
+        }
+
+        fn len(&self) -> usize {
             self.len
         }
 

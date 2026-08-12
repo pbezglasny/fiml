@@ -2,6 +2,7 @@ use serde::ser::{Error as _, SerializeSeq};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use super::indicator::{IndicatorWire, IndicatorsRef};
+use crate::Symbol;
 use crate::features::definition::{IndicatorSpec, ScopedIndicator};
 
 pub(super) struct FeatureGroupsRef<'a> {
@@ -22,10 +23,9 @@ impl Serialize for FeatureGroupsRef<'_> {
         let mut sequence = serializer.serialize_seq(None)?;
         let mut start = 0;
         while start < self.definitions.len() {
-            let symbol = self.definitions[start].symbol.as_deref();
+            let symbol = self.definitions[start].symbol;
             let mut end = start + 1;
-            while end < self.definitions.len() && self.definitions[end].symbol.as_deref() == symbol
-            {
+            while end < self.definitions.len() && self.definitions[end].symbol == symbol {
                 end += 1;
             }
             for definition in &self.definitions[start..end] {
@@ -41,11 +41,6 @@ impl Serialize for FeatureGroupsRef<'_> {
                             "global indicator {:?} for symbol {symbol:?} must omit the symbol",
                             definition.indicator.canonical_name()
                         )));
-                    }
-                    (Some(""), false) => {
-                        return Err(S::Error::custom(
-                            "symbol-scoped indicator requires a nonempty symbol",
-                        ));
                     }
                     _ => {}
                 }
@@ -64,7 +59,7 @@ impl Serialize for FeatureGroupsRef<'_> {
 #[serde(deny_unknown_fields)]
 struct FeatureGroupRef<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
-    symbol: Option<&'a str>,
+    symbol: Option<Symbol>,
     indicators: IndicatorsRef<'a>,
 }
 
@@ -72,7 +67,7 @@ struct FeatureGroupRef<'a> {
 #[serde(deny_unknown_fields)]
 pub(super) struct FeatureGroup {
     #[serde(default, deserialize_with = "deserialize_optional_symbol")]
-    symbol: Option<String>,
+    symbol: Option<Symbol>,
     indicators: Vec<IndicatorWire>,
 }
 

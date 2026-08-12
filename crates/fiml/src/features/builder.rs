@@ -1,9 +1,9 @@
 use std::time::Duration;
 
-use crate::WarmupPolicy;
 use crate::features::definition::{
     FeatureSet, IndicatorSpec, ScopedIndicator, TimeWindows, ValueSource,
 };
+use crate::{Symbol, WarmupPolicy};
 
 /// Fluent cold-path builder for a reusable [`FeatureSet`].
 #[derive(Debug, Clone, Default)]
@@ -21,13 +21,13 @@ impl FeatureSetBuilder {
         self
     }
 
-    pub fn sma(self, symbol: impl Into<String>, windows: impl IntoIterator<Item = usize>) -> Self {
+    pub fn sma(self, symbol: impl Into<Symbol>, windows: impl IntoIterator<Item = usize>) -> Self {
         self.sma_with_warmup(symbol, windows, WarmupPolicy::FullWindow)
     }
 
     pub fn sma_with_warmup(
         self,
-        symbol: impl Into<String>,
+        symbol: impl Into<Symbol>,
         windows: impl IntoIterator<Item = usize>,
         warmup_policy: WarmupPolicy,
     ) -> Self {
@@ -36,7 +36,7 @@ impl FeatureSetBuilder {
 
     pub fn sma_from(
         self,
-        symbol: impl Into<String>,
+        symbol: impl Into<Symbol>,
         source: ValueSource,
         windows: impl IntoIterator<Item = usize>,
     ) -> Self {
@@ -45,7 +45,7 @@ impl FeatureSetBuilder {
 
     pub fn sma_from_with_warmup(
         self,
-        symbol: impl Into<String>,
+        symbol: impl Into<Symbol>,
         source: ValueSource,
         windows: impl IntoIterator<Item = usize>,
         warmup_policy: WarmupPolicy,
@@ -60,13 +60,13 @@ impl FeatureSetBuilder {
         ))
     }
 
-    pub fn ema(self, symbol: impl Into<String>, windows: impl IntoIterator<Item = usize>) -> Self {
+    pub fn ema(self, symbol: impl Into<Symbol>, windows: impl IntoIterator<Item = usize>) -> Self {
         self.ema_with_warmup(symbol, windows, WarmupPolicy::FullWindow)
     }
 
     pub fn ema_with_warmup(
         self,
-        symbol: impl Into<String>,
+        symbol: impl Into<Symbol>,
         windows: impl IntoIterator<Item = usize>,
         warmup_policy: WarmupPolicy,
     ) -> Self {
@@ -75,7 +75,7 @@ impl FeatureSetBuilder {
 
     pub fn ema_from(
         self,
-        symbol: impl Into<String>,
+        symbol: impl Into<Symbol>,
         source: ValueSource,
         windows: impl IntoIterator<Item = usize>,
     ) -> Self {
@@ -84,7 +84,7 @@ impl FeatureSetBuilder {
 
     pub fn ema_from_with_warmup(
         self,
-        symbol: impl Into<String>,
+        symbol: impl Into<Symbol>,
         source: ValueSource,
         windows: impl IntoIterator<Item = usize>,
         warmup_policy: WarmupPolicy,
@@ -99,13 +99,13 @@ impl FeatureSetBuilder {
         ))
     }
 
-    pub fn cvd(self, symbol: impl Into<String>, windows: impl IntoIterator<Item = usize>) -> Self {
+    pub fn cvd(self, symbol: impl Into<Symbol>, windows: impl IntoIterator<Item = usize>) -> Self {
         self.cvd_with_warmup(symbol, windows, WarmupPolicy::FullWindow)
     }
 
     pub fn cvd_with_warmup(
         self,
-        symbol: impl Into<String>,
+        symbol: impl Into<Symbol>,
         windows: impl IntoIterator<Item = usize>,
         warmup_policy: WarmupPolicy,
     ) -> Self {
@@ -120,7 +120,7 @@ impl FeatureSetBuilder {
 
     pub fn sma_timed(
         self,
-        symbol: impl Into<String>,
+        symbol: impl Into<Symbol>,
         aggregation: Duration,
         windows: impl IntoIterator<Item = Duration>,
     ) -> Self {
@@ -129,7 +129,7 @@ impl FeatureSetBuilder {
 
     pub fn sma_timed_with_warmup(
         self,
-        symbol: impl Into<String>,
+        symbol: impl Into<Symbol>,
         aggregation: Duration,
         windows: impl IntoIterator<Item = Duration>,
         warmup_policy: WarmupPolicy,
@@ -145,7 +145,7 @@ impl FeatureSetBuilder {
 
     pub fn sma_timed_from(
         self,
-        symbol: impl Into<String>,
+        symbol: impl Into<Symbol>,
         source: ValueSource,
         aggregation: Duration,
         windows: impl IntoIterator<Item = Duration>,
@@ -161,7 +161,7 @@ impl FeatureSetBuilder {
 
     pub fn sma_timed_from_with_warmup(
         self,
-        symbol: impl Into<String>,
+        symbol: impl Into<Symbol>,
         source: ValueSource,
         aggregation: Duration,
         windows: impl IntoIterator<Item = Duration>,
@@ -179,7 +179,7 @@ impl FeatureSetBuilder {
 
     pub fn obv_timed(
         self,
-        symbol: impl Into<String>,
+        symbol: impl Into<Symbol>,
         aggregation: Duration,
         windows: impl IntoIterator<Item = Duration>,
     ) -> Self {
@@ -188,7 +188,7 @@ impl FeatureSetBuilder {
 
     pub fn obv_timed_with_warmup(
         self,
-        symbol: impl Into<String>,
+        symbol: impl Into<Symbol>,
         aggregation: Duration,
         windows: impl IntoIterator<Item = Duration>,
         warmup_policy: WarmupPolicy,
@@ -204,7 +204,7 @@ impl FeatureSetBuilder {
 
     pub fn trade_count_timed(
         self,
-        symbol: impl Into<String>,
+        symbol: impl Into<Symbol>,
         aggregation: Duration,
         window: Duration,
     ) -> Self {
@@ -213,7 +213,7 @@ impl FeatureSetBuilder {
 
     pub fn trade_count_timed_with_warmup(
         self,
-        symbol: impl Into<String>,
+        symbol: impl Into<Symbol>,
         aggregation: Duration,
         window: Duration,
         warmup_policy: WarmupPolicy,

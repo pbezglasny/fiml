@@ -227,16 +227,4 @@ mod tests {
         assert_eq!(error.index, 1);
         assert_eq!(extractor.last_timestamp(), Some(100));
     }
-
-    #[cfg(feature = "serde")]
-    #[test]
-    fn json_round_trip_preserves_grouping_and_output() {
-        let feature_set = feature_set();
-        let json = serde_json::to_string(&feature_set).unwrap();
-        let restored: FeatureSet = serde_json::from_str(&json).unwrap();
-
-        assert_eq!(restored, feature_set);
-        assert_eq!(restored.indicator_count(), 1);
-        assert_eq!(restored.output_count(), 2);
-    }
 }

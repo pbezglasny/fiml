@@ -37,8 +37,8 @@ async fn main() -> anyhow::Result<()> {
     let symbol = symbols::intern(&symbol_name);
 
     let feature_set = FeatureSet::builder()
-        .ema(&symbol_name, [12])
-        .sma(&symbol_name, [12])
+        .ema(symbol, [12])
+        .sma(symbol, [12])
         .build();
     let mut indicators = IndicatorFeatureVector::<f64, _, 2>::from_feature_set(
         ArrayFeatureVector::<f64, 2>::new(),

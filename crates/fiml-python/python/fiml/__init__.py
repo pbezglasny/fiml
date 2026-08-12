@@ -9,7 +9,6 @@ determinism rules.
 import numpy as np
 
 from ._fiml import (
-    FEATURE_SET_FORMAT_VERSION,
     FeatureSet,
     KIND_PRICE,
     KIND_VOLUME,
@@ -26,7 +25,6 @@ __all__ = [
     "FeatureExtractor",
     "FeatureSet",
     "WarmupPolicy",
-    "FEATURE_SET_FORMAT_VERSION",
     "KIND_PRICE",
     "KIND_VOLUME",
     "KIND_TRADE",
@@ -70,10 +68,9 @@ def _first_invalid(mask):
 class FeatureExtractor(_FeatureExtractor):
     """A configured, runnable feature extractor.
 
-    Construct from a :class:`FeatureSet` (``FeatureExtractor(fs)``) or from its
-    JSON parity artifact (``FeatureExtractor.from_json(json_str)``). Use
-    :meth:`compute_features` for DataFrame input, or the low-level
-    ``transform`` / ``update`` for raw event arrays.
+    Construct from a :class:`FeatureSet` (``FeatureExtractor(fs)``). Use
+    :meth:`compute_features` for DataFrame input, or the low-level ``transform``
+    / ``update`` for raw event arrays.
     """
 
     def __new__(cls, feature_set, output_dtype="float64"):
@@ -90,11 +87,6 @@ class FeatureExtractor(_FeatureExtractor):
         _FeatureExtractor.output_dtype.__set__(
             self, _normalize_output_dtype(value)
         )
-
-    @classmethod
-    def from_json(cls, json_str, output_dtype="float64"):
-        """Build an extractor from a ``FeatureSet`` JSON string."""
-        return cls(FeatureSet.from_json(json_str), output_dtype=output_dtype)
 
     def compute_features(
         self,

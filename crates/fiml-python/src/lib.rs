@@ -2,17 +2,16 @@
 //!
 //! The bindings deliberately run the *exact* Rust extractor: features are
 //! computed by replaying events through [`fiml::FeatureExtractor`]'s dispatch,
-//! the same code the live Rust environment uses. Build both sides from the same
-//! [`fiml::FeatureSet`] JSON and feed the same events in the same order to get
-//! identical output. Indicator state is always `f64`; Python arrays can be
-//! returned as `float32` or `float64`.
+//! the same code the live Rust environment uses. Feed both sides the same
+//! feature set and events in the same order to get identical output. Indicator
+//! state is always `f64`; Python arrays can be returned as `float32` or `float64`.
 
 use std::time::Duration;
 
 use fiml::{
-    Event, FEATURE_SET_FORMAT_VERSION, FeatureExtractor as CoreFeatureExtractor,
-    FeatureSet as CoreFeatureSet, IndicatorFeatures, IndicatorSpec, ScopedIndicator, Symbol,
-    TimeWindows, TradeSide, ValueSource, WarmupPolicy as CoreWarmupPolicy, symbols,
+    Event, FeatureExtractor as CoreFeatureExtractor, FeatureSet as CoreFeatureSet,
+    IndicatorFeatures, IndicatorSpec, ScopedIndicator, Symbol, TimeWindows, TradeSide, ValueSource,
+    WarmupPolicy as CoreWarmupPolicy, symbols,
 };
 use numpy::ndarray::Array2;
 use numpy::{Element, IntoPyArray, PyArray1, PyReadonlyArray1};
@@ -138,9 +137,8 @@ fn parse_tz(tz: &str) -> PyResult<i64> {
 
 /// Declarative feature set: the ordered list of features an extractor produces
 /// and the parity contract between Python (batch) and Rust (live). Author it
-/// with the fluent builder methods, then either construct a
-/// [`FeatureExtractor`] from it or `to_json()` it and save the JSON next to the
-/// trained model for Rust serving.
+/// with the fluent builder methods, then construct a [`FeatureExtractor`] from
+/// it.
 #[pyclass]
 #[derive(Default)]
 pub struct FeatureSet {
@@ -163,21 +161,6 @@ impl FeatureSet {
     #[new]
     fn new() -> Self {
         Self::default()
-    }
-
-    /// Load a feature set from its JSON form (see `to_json`).
-    #[staticmethod]
-    fn from_json(json: &str) -> PyResult<Self> {
-        let inner: CoreFeatureSet =
-            serde_json::from_str(json).map_err(|e| PyValueError::new_err(e.to_string()))?;
-        Ok(Self { inner })
-    }
-
-    /// Serialize to the versioned JSON parity artifact shared with Rust
-    /// serving. The top-level `version` defaults to
-    /// `FEATURE_SET_FORMAT_VERSION`.
-    fn to_json(&self) -> PyResult<String> {
-        serde_json::to_string(&self.inner).map_err(|e| PyValueError::new_err(e.to_string()))
     }
 
     /// Number of runtime indicator instances.
@@ -580,19 +563,6 @@ impl FeatureExtractor {
         ))
     }
 
-    /// Build an extractor from a `FeatureSet` JSON string (the parity contract
-    /// shared with the live Rust environment).
-    #[staticmethod]
-    #[pyo3(signature = (json, output_dtype="float64"))]
-    fn from_json(json: &str, output_dtype: &str) -> PyResult<Self> {
-        let feature_set: CoreFeatureSet =
-            serde_json::from_str(json).map_err(|e| PyValueError::new_err(e.to_string()))?;
-        Ok(Self::from_core(
-            build_core(&feature_set)?,
-            OutputDtype::parse(output_dtype)?,
-        ))
-    }
-
     /// Numeric dtype used by arrays returned to Python.
     #[getter]
     fn output_dtype(&self) -> &'static str {
@@ -793,7 +763,6 @@ fn _fiml(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyWarmupPolicy>()?;
     m.add_class::<FeatureSet>()?;
     m.add_class::<FeatureExtractor>()?;
-    m.add("FEATURE_SET_FORMAT_VERSION", FEATURE_SET_FORMAT_VERSION)?;
     m.add("KIND_PRICE", KIND_PRICE)?;
     m.add("KIND_VOLUME", KIND_VOLUME)?;
     m.add("KIND_TRADE", KIND_TRADE)?;

@@ -1,12 +1,9 @@
-import json
-import subprocess
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
 import fiml
-
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 TRADES_PATH = REPOSITORY_ROOT / "notebooks" / "trades.csv"
@@ -29,52 +26,36 @@ def build_feature_set(symbols):
     return feature_set
 
 
-def test_dataframe_features_match_rust_event_replay_exactly(tmp_path):
+def test_dataframe_features_match_low_level_event_replay_exactly():
     trades = pd.read_csv(
         TRADES_PATH,
         dtype={"symbol": "string", "ts": "int64", "price": "float64", "volume": "float64"},
     )
     symbols = list(dict.fromkeys(trades["symbol"]))
     feature_set = build_feature_set(symbols)
-    feature_set_path = tmp_path / "feature_set.json"
-    feature_set_path.write_text(feature_set.to_json(), encoding="utf-8")
 
     extractor = fiml.FeatureExtractor(feature_set, output_dtype="float64")
     dataframe_features = extractor.compute_features(trades)
 
-    completed = subprocess.run(
-        [
-            "cargo",
-            "run",
-            "--quiet",
-            "-p",
-            "fiml",
-            "--example",
-            "replay_trades",
-            "--features",
-            "serde",
-            "--",
-            str(TRADES_PATH),
-            str(feature_set_path),
-        ],
-        cwd=REPOSITORY_ROOT,
-        check=True,
-        capture_output=True,
-        text=True,
+    replay_extractor = fiml.FeatureExtractor(
+        build_feature_set(symbols), output_dtype="float64"
     )
-    replay = json.loads(completed.stdout)
+    symbol_ids = np.array(
+        [replay_extractor.symbol(symbol) for symbol in trades["symbol"]],
+        dtype=np.int64,
+    )
+    replay = replay_extractor.transform(
+        np.full(len(trades), fiml.KIND_TRADE, dtype=np.uint8),
+        symbol_ids,
+        trades["ts"].to_numpy(dtype=np.int64),
+        price=trades["price"].to_numpy(dtype=np.float64),
+        volume=trades["volume"].to_numpy(dtype=np.float64),
+    )
 
     feature_names = extractor.feature_names()
     expected = dataframe_features[feature_names].to_numpy(dtype=np.float64)
-    actual = np.array(
-        [
-            [np.nan if value is None else value for value in row]
-            for row in replay["values"]
-        ],
-        dtype=np.float64,
-    )
 
-    assert replay["feature_names"] == feature_names
-    assert actual.shape == (len(trades), feature_set.output_count())
-    assert actual.shape == expected.shape
-    assert np.array_equal(actual, expected, equal_nan=True)
+    assert replay_extractor.feature_names() == feature_names
+    assert replay.shape == (len(trades), feature_set.output_count())
+    assert replay.shape == expected.shape
+    assert np.array_equal(replay, expected, equal_nan=True)

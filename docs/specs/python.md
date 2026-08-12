@@ -20,13 +20,11 @@ Python. The whole value proposition is **train/serve parity**: feature generatio
 on historical data in Python and live computation in Rust produce **identical
 `float64` output on identical data**.
 
-The contract that guarantees this is a single **`FeatureSet`** describing the
-features. The same feature set builds the Python (batch) extractor and the
-Rust (live) extractor. Save it next to the trained model and load the same bytes in
-serving.
+The contract that guarantees this is an identical **`FeatureSet`** configuration
+describing the features in each environment.
 
 ```
-            FeatureSet (JSON)
+       FeatureSet configuration
            /                \
    Python extractor     Rust extractor
    (batch/training)     (live/serving)
@@ -52,73 +50,11 @@ Two layers feed events:
 
 Both go through the identical dispatch path, so they preserve parity.
 
-## 3. Authoring the feature set — two interchangeable ways
+## 3. Authoring the feature set
 
-Decision: support **both** JSON and a fluent Python builder. The builder must
-produce the **exact same `FeatureSet`** (it round-trips to the same JSON), so the
-save-and-replay parity contract holds no matter how the feature set was authored.
-
-### 3a. From JSON ✅
-
-```python
-import fiml
-
-json_str = open("features.json").read()
-extractor = fiml.FeatureExtractor.from_json(json_str)   # or fiml.FeatureSet.from_json(...)
-```
-
-`FeatureSet` JSON shape:
-
-```json
-{
-  "version": "1.0.0",
-  "features": [
-    {
-      "symbol": "btcusdt",
-      "indicators": [
-        {
-          "name": "ema",
-          "options": {
-            "source": "trade_price",
-            "windows": [12],
-            "warmup_policy": "full_window"
-          }
-        },
-        {
-          "name": "obv_timed",
-          "options": {
-            "aggregation": "1s",
-            "windows": ["2s"],
-            "warmup_policy": "full_window"
-          }
-        },
-        {
-          "name": "sma",
-          "options": {
-            "source": "trade_price",
-            "windows": [12, 24],
-            "warmup_policy": "full_window"
-          }
-        }
-      ]
-    }
-  ],
-  "options": {}
-}
-```
-
-The required `version` is the feature-set schema version, independent of the
-package version. Writers emit full SemVer. Readers also accept short forms such
-as `1.0` and compatible `1.0.x` patch versions. Future minor, different major,
-and prerelease versions are rejected until explicitly supported.
-
-The complete supported format is defined by the machine-readable
-[FeatureSet JSON Schema](../feature-set.schema.json). Extractor compilation
-additionally checks collection-wide uniqueness, platform-dependent numeric
-limits, and relationships the schema cannot express, such as timed windows
-being at least and exact multiples of aggregation.
-
-### 3b. Python builder ✅
+Feature-set JSON serialization is currently disabled while its format is being
+revised. Author feature sets with the fluent Python builder and pass them
+directly to the extractor.
 
 ```python
 fs = (fiml.FeatureSet()
@@ -127,8 +63,7 @@ fs = (fiml.FeatureSet()
       .obv_timed("BTCUSDT", aggregation="1s", windows=["2s"])
       .day_of_week())
 
-extractor = fiml.FeatureExtractor(fs)   # build directly from a FeatureSet
-fs.to_json()                      # == the JSON in 3a; saveable for Rust serving
+extractor = fiml.FeatureExtractor(fs)
 ```
 
 Builder methods mirror the grouped `IndicatorSpec` variants. Each call appends
@@ -138,7 +73,7 @@ are generated canonically during compilation; user aliases are not accepted.
 
 Moving averages accept `source="price"|"volume"|"trade_price"|"trade_volume"`,
 defaulting to `"price"`. Trade DataFrames require a trade source; the source is
-part of the serialized parity contract.
+part of the feature identity.
 
 ## 4. Symbols
 
@@ -332,8 +267,7 @@ fs = (fiml.FeatureSet()
       .trade_count_timed("BTCUSDT", aggregation="1s", window="60s"))
 ```
 
-Each maps to an `IndicatorSpec` variant and round-trips to JSON like every other
-feature (§3).
+Each maps to an `IndicatorSpec` variant.
 
 ## 12. Core changes required (touches `crates/fiml`) — all implemented ✅
 
@@ -352,15 +286,12 @@ This work is no longer binding-only. To deliver the full-dataframe guarantee:
 5. **Unify definitions and compilation in the Rust core:** ✅
    - `FeatureSet` contains grouped `ScopedIndicator` values and `IndicatorSpec`
      stores ordered output windows.
-   - `DynIndicatorEngine::from_spec` → `from_feature_set`; binding
-     `Engine.from_spec_json` → `FeatureExtractor.from_json`; added
-     `FeatureSet.from_json` / `to_json`.
-   - **JSON shape change:** the top-level key is `"indicators"` and arbitrary
-     names are removed. This changes saved parity files.
+   - `DynIndicatorEngine::from_spec` → `from_feature_set`.
+   - Feature-set JSON entry points were subsequently disabled while the format
+     is revised.
 6. **RENAME `Engine` → `FeatureExtractor`:** the Python binding class and the
    Rust runtime `DynIndicatorEngine` (`engine.rs` renamed to `extractor.rs`),
-   with constructors `from_feature_set` (Rust) / `FeatureExtractor(fs)` and
-   `from_json` (Python). ✅
+   with constructors `from_feature_set` (Rust) / `FeatureExtractor(fs)`. ✅
 
 ## Resolved decisions
 

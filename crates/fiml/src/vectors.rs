@@ -1,5 +1,7 @@
 use crate::{FimlError, Float, Result};
 
+/// Abstraction layer for feature vector.
+/// It supposed to set and get feature values
 pub trait FeatureVector {
     type F: Float;
 
@@ -10,17 +12,25 @@ pub trait FeatureVector {
     /// Return all values of feature vector of capacity length
     fn values(&self) -> &[Self::F];
 
-    /// Return capacity of feature vector
+    /// Return total capacity of feature vector
     fn capacity(&self) -> usize;
+
+    /// Return length of underlying collection of feaures.
+    /// Len supposed to be less of equal capacity
+    fn len(&self) -> usize;
+
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
 
     fn set_value_at(&mut self, index: usize, value: Self::F);
 
     fn try_set_value_at(&mut self, index: usize, value: Self::F) -> Result<()> {
-        if index >= self.capacity() {
+        if index >= self.len() {
             return Err(FimlError::InvalidArgument(format!(
                 "index {} is out of bounds for feature vector of len {}",
                 index,
-                self.capacity()
+                self.len()
             )));
         }
         self.set_value_at(index, value);
@@ -67,11 +77,21 @@ pub trait FeatureVector {
 
 pub struct ArrayFeatureVector<F: Float, const N: usize> {
     data: [F; N],
+    length: usize,
 }
 
 impl<F: Float, const N: usize> ArrayFeatureVector<F, N> {
+    /// Create new feature vector of capacity and length of N
     pub fn new() -> Self {
-        Self { data: [F::ZERO; N] }
+        Self::new_of_length(N)
+    }
+
+    /// Create new feature vector of capacity of N and provided length
+    pub fn new_of_length(length: usize) -> Self {
+        Self {
+            data: [F::ZERO; N],
+            length,
+        }
     }
 }
 
@@ -99,6 +119,10 @@ impl<F: Float, const N: usize> FeatureVector for ArrayFeatureVector<F, N> {
         N
     }
 
+    fn len(&self) -> usize {
+        self.length
+    }
+
     fn set_value_at(&mut self, index: usize, value: F) {
         self.data[index] = value;
     }
@@ -112,13 +136,21 @@ impl<F: Float, const N: usize> FeatureVector for ArrayFeatureVector<F, N> {
 /// allocation.
 pub struct VecFeatureVector<F: Float> {
     data: Vec<F>,
+    length: usize,
 }
 
 impl<F: Float> VecFeatureVector<F> {
-    /// Allocate `len` cells, all initialized to zero.
-    pub fn new(len: usize) -> Self {
+    /// Create feature vector of provided capacity and leghth of capacity
+    pub fn new(capacity: usize) -> Self {
+        Self::new_of_length(capacity, capacity)
+    }
+
+    /// Create feature vector of provided capacity and length
+    pub fn new_of_length(capacity: usize, length: usize) -> Self {
+        assert!(length <= capacity);
         Self {
-            data: vec![F::ZERO; len],
+            data: vec![F::ZERO; capacity],
+            length,
         }
     }
 }
@@ -136,6 +168,10 @@ impl<F: Float> FeatureVector for VecFeatureVector<F> {
 
     fn capacity(&self) -> usize {
         self.data.capacity()
+    }
+
+    fn len(&self) -> usize {
+        self.length
     }
 
     fn set_value_at(&mut self, index: usize, value: F) {
