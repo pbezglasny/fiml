@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use crate::features::builtin::{IndicatorAdapter, write_outputs};
+use crate::features::builtin::{IndicatorFeaturesEnum, write_outputs};
 use crate::features::compiler::OutputSpan;
 use crate::features::definition::MAX_OUTPUTS_PER_INDICATOR;
 use crate::features::event::Event;
@@ -63,7 +63,7 @@ pub(crate) fn build_timed<F: Float>(
     max_period: usize,
     warmup_policy: WarmupPolicy,
     output_span: OutputSpan,
-) -> Result<IndicatorAdapter<F>> {
+) -> Result<IndicatorFeaturesEnum<F>> {
     debug_assert_eq!(periods.len(), output_span.count);
     let capacity = max_period
         .checked_add(1)
@@ -77,7 +77,7 @@ pub(crate) fn build_timed<F: Float>(
     for &period in periods {
         obv.add_window_with_periods(period)?;
     }
-    Ok(IndicatorAdapter::ObvTimed(ObvTimedFeature::new(
+    Ok(IndicatorFeaturesEnum::ObvTimed(ObvTimedFeature::new(
         symbol,
         obv,
         output_span,

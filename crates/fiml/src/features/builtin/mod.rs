@@ -22,7 +22,7 @@ use trade_count::TradeCountTimedFeature;
 /// Closed runtime adapter enum for indicators shipped by the library.
 ///
 /// Dispatch is a match of direct calls, with no `Box` or vtable.
-pub(crate) enum IndicatorAdapter<F: Float> {
+pub(crate) enum IndicatorFeaturesEnum<F: Float> {
     Cvd(CvdFeature<F>),
     Sma(SmaFeature<F>),
     Ema(EmaFeature<F>),
@@ -33,7 +33,7 @@ pub(crate) enum IndicatorAdapter<F: Float> {
     TimeSinceFirstEventOfDay(TimeSinceFirstEventOfDay),
 }
 
-impl<F: Float> IndicatorAdapter<F> {
+impl<F: Float> IndicatorFeaturesEnum<F> {
     pub(crate) fn update<O: FeatureVector<F = F>>(&mut self, event: &Event<F>, output: &mut O) {
         match self {
             Self::Cvd(cvd) => cvd.update(event, output),

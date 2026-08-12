@@ -1,7 +1,7 @@
 use std::marker::PhantomData;
 use std::mem::MaybeUninit;
 
-use crate::features::builtin::IndicatorAdapter;
+use crate::features::builtin::IndicatorFeaturesEnum;
 use crate::features::compiler::{Compilation, compile};
 use crate::features::definition::FeatureSet;
 use crate::features::event::{EVERY_EVENT_GROUP, Event, FEATURE_GROUP_COUNT};
@@ -36,7 +36,7 @@ where
     V: FeatureVector<F = F>,
 {
     feature_vector: V,
-    features: [MaybeUninit<IndicatorAdapter<F>>; M],
+    features: [MaybeUninit<IndicatorFeaturesEnum<F>>; M],
     feature_count: usize,
     timed_features: [usize; M],
     timed_feature_count: usize,
