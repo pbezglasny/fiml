@@ -164,7 +164,7 @@ flowchart LR
     Compilation *--|Vec| Entry["CompiledFeature<F>"]
     Compilation *--|Box slice| Names["canonical names"]
     Entry *-- Route["FeatureRoute"]
-    Entry *-- Adapter["IndicatorAdapter<F>"]
+    Entry *-- Adapter["IndicatorFeaturesEnum<F>"]
 ```
 
 The definition graph is cold-path configuration:
@@ -180,15 +180,15 @@ The definition graph is cold-path configuration:
 | `OutputSpan` | Internal | Start/count of adjacent output cells assigned to one compiled indicator. |
 | `IndicatorIdentity` | Internal | Hash key used by the compiler to reject duplicate runtime indicators. |
 | `ValidatedTimeWindows` | Internal | Compiler result containing validated aggregation/window periods. |
-| `CompiledFeature<F>` | Internal | Owns one `IndicatorAdapter<F>` plus its `FeatureRoute`. |
+| `CompiledFeature<F>` | Internal | Owns one `IndicatorFeaturesEnum<F>` plus its `FeatureRoute`. |
 | `Compilation<F>` | Internal | Owns compiled entries and canonical output names before fixed-capacity placement. |
 
 ### Definition-to-runtime adapter mapping
 
 The compiler is the only construction path from `IndicatorSpec` to the closed
-`IndicatorAdapter` enum.
+`IndicatorFeaturesEnum` enum.
 
-| `IndicatorSpec` variant | `IndicatorAdapter` variant | Concrete internal adapter | Standalone calculation state | Route |
+| `IndicatorSpec` variant | `IndicatorFeaturesEnum` variant | Concrete internal adapter | Standalone calculation state | Route |
 |---|---|---|---|---|
 | `Sma` | `Sma` | `SmaFeature<F>` | `SimpleMovingAverage<HeapRingBuffer<F>, F, 16>` | Selected by `ValueSource` |
 | `Ema` | `Ema` | `EmaFeature<F>` | `ExponentialMovingAverage<F, 16>` | Selected by `ValueSource` |
@@ -199,7 +199,7 @@ The compiler is the only construction path from `IndicatorSpec` to the closed
 | `DayOfWeek` | `DayOfWeek` | `DayOfWeek` | Adapter owns its clock state directly | Every event |
 | `TimeSinceFirstEventOfDay` | `TimeSinceFirstEventOfDay` | `TimeSinceFirstEventOfDay` | Adapter owns its clock state directly | Every event |
 
-The concrete adapter structs and `IndicatorAdapter` are internal. Downstream
+The concrete adapter structs and `IndicatorFeaturesEnum` are internal. Downstream
 customization happens at `FeatureSet` configuration, standalone indicator,
 feature-vector, or transformation boundaries—not by adding extractor adapters.
 
@@ -244,7 +244,7 @@ top-of-book `{bid, ask}` payload. It is distinct from the snapshot/delta
 flowchart LR
     Set["FeatureSet"] -->|from_feature_set| IFV["IndicatorFeatureVector<F,V,M>"]
     Compilation["Compilation<F>"] --> IFV
-    IFV *--|M slots| Adapters["IndicatorAdapter<F>"]
+    IFV *--|M slots| Adapters["IndicatorFeaturesEnum<F>"]
     IFV *-- Output["V: FeatureVector<F=F>"]
     IFV *-- DispatchGroups["event-kind ranges"]
     IFV *-- Names["Box<[String]>"]
@@ -261,7 +261,7 @@ flowchart LR
 
 | Runtime type | Visibility | Important dependencies |
 |---|---|---|
-| `IndicatorFeatureVector<F, V, M>` | Public | Owns fixed-capacity `IndicatorAdapter<F>` storage, caller-provided `V: FeatureVector`, route ranges, timed-adapter indexes, names, and timestamp watermark. |
+| `IndicatorFeatureVector<F, V, M>` | Public | Owns fixed-capacity `IndicatorFeaturesEnum<F>` storage, caller-provided `V: FeatureVector`, route ranges, timed-adapter indexes, names, and timestamp watermark. |
 | `FeatureExtractor` | Public | Macro-generated enum with capacities 16 through 128; each variant boxes an `IndicatorFeatureVector<f64, VecFeatureVector<f64>, M>`. |
 | `DispatchSequenceError` | Public | Owns the failing event index and a `FimlError` for non-mutating batch validation. |
 | `Pipeline<I, T, F, V, N>` | Public | Owns `I: IndicatorFeatures` and up to `N` sequential `T: Transformation<OutputVector = V>` values. |

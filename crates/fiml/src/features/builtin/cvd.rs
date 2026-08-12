@@ -1,4 +1,4 @@
-use crate::features::builtin::{IndicatorAdapter, write_outputs};
+use crate::features::builtin::{IndicatorFeaturesEnum, write_outputs};
 use crate::features::compiler::OutputSpan;
 use crate::features::definition::MAX_OUTPUTS_PER_INDICATOR;
 use crate::features::event::Event;
@@ -45,7 +45,7 @@ pub(crate) fn build<F: Float>(
     windows: &[usize],
     warmup_policy: WarmupPolicy,
     output_span: OutputSpan,
-) -> Result<IndicatorAdapter<F>> {
+) -> Result<IndicatorFeaturesEnum<F>> {
     debug_assert_eq!(windows.len(), output_span.count);
     let max_window = windows.iter().copied().max().unwrap_or(0);
     let mut cvd =
@@ -56,7 +56,7 @@ pub(crate) fn build<F: Float>(
     for &window in windows {
         cvd.add_window(window)?;
     }
-    Ok(IndicatorAdapter::Cvd(CvdFeature::new(
+    Ok(IndicatorFeaturesEnum::Cvd(CvdFeature::new(
         symbol,
         cvd,
         output_span,
@@ -81,7 +81,7 @@ mod tests {
         )
         .unwrap()
         {
-            IndicatorAdapter::Cvd(feature) => feature,
+            IndicatorFeaturesEnum::Cvd(feature) => feature,
             _ => unreachable!(),
         };
         let mut output = ArrayFeatureVector::<f64, 2>::new();

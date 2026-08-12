@@ -30,7 +30,7 @@ adding it to the library's definition, compilation, serialization, builder, and
 feature-vector construction paths.
 
 The public `Feature<F>` trait is removed. The internal runtime enum is renamed
-from `BuiltinFeature` to `IndicatorAdapter` and receives an inherent update
+from `BuiltinFeature` to `IndicatorFeaturesEnum` and receives an inherent update
 method. It and its concrete adapter types are implementation details under
 `features/builtin/`; downstream crates cannot name or construct them.
 

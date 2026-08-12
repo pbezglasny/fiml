@@ -1,5 +1,5 @@
 use crate::Float;
-use crate::features::builtin::IndicatorAdapter;
+use crate::features::builtin::IndicatorFeaturesEnum;
 use crate::features::compiler::OutputSpan;
 use crate::features::event::Event;
 use crate::vectors::FeatureVector;
@@ -58,8 +58,8 @@ impl TimeSinceFirstEventOfDay {
 pub(crate) fn build<F: Float>(
     utc_offset_millis: i64,
     output_span: OutputSpan,
-) -> IndicatorAdapter<F> {
-    IndicatorAdapter::TimeSinceFirstEventOfDay(TimeSinceFirstEventOfDay::new(
+) -> IndicatorFeaturesEnum<F> {
+    IndicatorFeaturesEnum::TimeSinceFirstEventOfDay(TimeSinceFirstEventOfDay::new(
         output_span,
         utc_offset_millis,
     ))

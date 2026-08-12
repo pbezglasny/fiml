@@ -1,5 +1,5 @@
 use crate::Float;
-use crate::features::builtin::IndicatorAdapter;
+use crate::features::builtin::IndicatorFeaturesEnum;
 use crate::features::compiler::OutputSpan;
 use crate::features::event::Event;
 use crate::vectors::FeatureVector;
@@ -37,8 +37,8 @@ impl DayOfWeek {
     }
 }
 
-pub(crate) fn build<F: Float>(output_span: OutputSpan) -> IndicatorAdapter<F> {
-    IndicatorAdapter::DayOfWeek(DayOfWeek::new(output_span))
+pub(crate) fn build<F: Float>(output_span: OutputSpan) -> IndicatorFeaturesEnum<F> {
+    IndicatorFeaturesEnum::DayOfWeek(DayOfWeek::new(output_span))
 }
 
 #[cfg(test)]
