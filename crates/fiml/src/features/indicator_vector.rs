@@ -53,8 +53,8 @@ where
 {
     /// Compile `feature_set` into the caller-provided fixed-capacity storage.
     pub fn from_feature_set(mut cells: V, feature_set: &FeatureSet) -> Result<Self> {
-        let compilation = compile(feature_set, cells.len(), M)?;
-        for index in 0..cells.len() {
+        let compilation = compile(feature_set, cells.capacity(), M)?;
+        for index in 0..cells.capacity() {
             cells.set_value_at(index, F::NAN);
         }
         Ok(Self::from_compilation(cells, compilation))
@@ -76,7 +76,7 @@ where
     fn from_compilation(cells: V, compilation: Compilation<F>) -> Self {
         let feature_count = compilation.entries.len();
         debug_assert!(feature_count <= M);
-        debug_assert_eq!(compilation.names.len(), cells.len());
+        debug_assert_eq!(compilation.names.len(), cells.capacity());
 
         let mut groups = [(0usize, 0usize); FEATURE_GROUP_COUNT];
         for entry in &compilation.entries {

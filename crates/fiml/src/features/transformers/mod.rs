@@ -48,8 +48,11 @@ where
             transformer.transform(input);
             let output_values = transformer.output_values();
             let output_idx = self.output_write_idx[i];
-            self.output
-                .set_values_range(output_idx, output_values.len(), output_values.values());
+            self.output.set_values_range(
+                output_idx,
+                output_values.capacity(),
+                output_values.values(),
+            );
         }
     }
 
@@ -97,7 +100,7 @@ mod tests {
             unsafe { std::slice::from_raw_parts(self.data.as_ptr().cast::<f64>(), self.len) }
         }
 
-        fn len(&self) -> usize {
+        fn capacity(&self) -> usize {
             self.len
         }
 

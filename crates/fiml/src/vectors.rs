@@ -3,24 +3,24 @@ use crate::{FimlError, Float, Result};
 pub trait FeatureVector {
     type F: Float;
 
+    /// Return value value at index
+    /// Zero based indicies
     fn value_at(&self, index: usize) -> Option<Self::F>;
 
+    /// Return all values of feature vector of capacity length
     fn values(&self) -> &[Self::F];
 
-    fn len(&self) -> usize;
-
-    fn is_empty(&self) -> bool {
-        self.len() == 0
-    }
+    /// Return capacity of feature vector
+    fn capacity(&self) -> usize;
 
     fn set_value_at(&mut self, index: usize, value: Self::F);
 
     fn try_set_value_at(&mut self, index: usize, value: Self::F) -> Result<()> {
-        if index >= self.len() {
+        if index >= self.capacity() {
             return Err(FimlError::InvalidArgument(format!(
                 "index {} is out of bounds for feature vector of len {}",
                 index,
-                self.len()
+                self.capacity()
             )));
         }
         self.set_value_at(index, value);
@@ -52,12 +52,12 @@ pub trait FeatureVector {
                 insert_index_start, size
             )));
         };
-        if end > self.len() {
+        if end > self.capacity() {
             return Err(FimlError::InvalidArgument(format!(
                 "range {}..{} is out of bounds for feature vector of len {}",
                 insert_index_start,
                 end,
-                self.len()
+                self.capacity()
             )));
         }
         self.set_values_range(insert_index_start, size, values);
@@ -95,7 +95,7 @@ impl<F: Float, const N: usize> FeatureVector for ArrayFeatureVector<F, N> {
         &self.data
     }
 
-    fn len(&self) -> usize {
+    fn capacity(&self) -> usize {
         N
     }
 
@@ -134,8 +134,8 @@ impl<F: Float> FeatureVector for VecFeatureVector<F> {
         &self.data
     }
 
-    fn len(&self) -> usize {
-        self.data.len()
+    fn capacity(&self) -> usize {
+        self.data.capacity()
     }
 
     fn set_value_at(&mut self, index: usize, value: F) {
@@ -187,7 +187,7 @@ mod tests {
     fn vec_feature_vector_starts_zeroed_with_runtime_len() {
         let values = VecFeatureVector::<f64>::new(3);
 
-        assert_eq!(values.len(), 3);
+        assert_eq!(values.capacity(), 3);
         assert_eq!(values.values(), &[0.0, 0.0, 0.0]);
     }
 
