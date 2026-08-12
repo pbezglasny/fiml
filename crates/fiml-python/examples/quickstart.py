@@ -43,10 +43,8 @@ def main() -> None:
     # Batch path. Payload columns are keyword-only; KIND_PRICE reads `price`.
     batch = extractor.transform(kind, symbol, timestamp, price=prices)
 
-    # Streaming path: a fresh extractor stepped one event at a time. Built from
-    # the FeatureSet JSON round-trip — the parity artifact saved next to a
-    # trained model and loaded by Rust serving.
-    streaming_extractor = fiml.FeatureExtractor.from_json(fs.to_json())
+    # Streaming path: a fresh extractor stepped one event at a time.
+    streaming_extractor = fiml.FeatureExtractor(build_feature_set())
     streaming_extractor.symbol("BTCUSDT")
     streaming = np.empty_like(batch)
     for i in range(n):

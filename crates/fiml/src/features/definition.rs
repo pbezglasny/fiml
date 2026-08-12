@@ -219,15 +219,14 @@ impl IndicatorSpec {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScopedIndicator {
     /// Symbol name for market indicators. Global clock indicators use `None`.
-    pub symbol: Option<String>,
+    pub symbol: Option<Symbol>,
     pub indicator: IndicatorSpec,
 }
 
 impl ScopedIndicator {
-    pub fn symbol(symbol: impl Into<String>, indicator: IndicatorSpec) -> Self {
-        let symbol = symbol.into();
+    pub fn symbol(symbol: impl Into<Symbol>, indicator: IndicatorSpec) -> Self {
         Self {
-            symbol: Some(crate::symbols::normalize_name(&symbol).into_owned()),
+            symbol: Some(symbol.into()),
             indicator,
         }
     }
@@ -239,15 +238,10 @@ impl ScopedIndicator {
         }
     }
 
-    fn normalize_symbol(&mut self) {
-        if let Some(symbol) = &mut self.symbol {
-            symbol.make_ascii_lowercase();
-        }
-    }
-
     fn canonical_cmp(&self, other: &Self) -> Ordering {
         self.symbol
-            .cmp(&other.symbol)
+            .map(|s| s.resolve_as_string())
+            .cmp(&other.symbol.map(|s| s.resolve_as_string()))
             .then_with(|| {
                 self.indicator
                     .canonical_name()
@@ -257,7 +251,7 @@ impl ScopedIndicator {
     }
 }
 
-/// Canonically ordered, serializable definitions for a complete extractor.
+/// Canonically ordered definitions for a complete extractor.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct FeatureSet {
     pub(crate) indicators: Vec<ScopedIndicator>,
@@ -265,16 +259,12 @@ pub struct FeatureSet {
 
 impl FeatureSet {
     pub fn new(mut indicators: Vec<ScopedIndicator>) -> Self {
-        for definition in &mut indicators {
-            definition.normalize_symbol();
-        }
         indicators.sort_by(ScopedIndicator::canonical_cmp);
         Self { indicators }
     }
 
     /// Add one definition while preserving canonical feature-vector order.
-    pub fn add_indicator(&mut self, mut definition: ScopedIndicator) {
-        definition.normalize_symbol();
+    pub fn add_indicator(&mut self, definition: ScopedIndicator) {
         let index = self
             .indicators
             .partition_point(|existing| existing.canonical_cmp(&definition).is_le());
@@ -335,7 +325,7 @@ mod tests {
             definitions[1].indicator,
             IndicatorSpec::TimeSinceFirstEventOfDay { .. }
         ));
-        assert_eq!(definitions[2].symbol.as_deref(), Some("a"));
+        assert_eq!(definitions[2].symbol, Some(Symbol::new("a")));
         assert!(matches!(
             definitions[2].indicator,
             IndicatorSpec::Sma {
@@ -350,8 +340,8 @@ mod tests {
                 ..
             }
         ));
-        assert_eq!(definitions[4].symbol.as_deref(), Some("z"));
-        assert_eq!(definitions[5].symbol.as_deref(), Some("z"));
+        assert_eq!(definitions[4].symbol, Some(Symbol::new("z")));
+        assert_eq!(definitions[5].symbol, Some(Symbol::new("z")));
         assert_eq!(definitions[4].indicator.canonical_name(), "ema");
         assert_eq!(definitions[5].indicator.canonical_name(), "sma");
     }

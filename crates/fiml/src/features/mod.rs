@@ -6,8 +6,6 @@ mod event;
 mod extractor;
 pub(crate) mod indicator_vector;
 mod pipeline;
-#[cfg(feature = "serde")]
-mod serialization;
 pub mod transformers;
 
 pub use builder::FeatureSetBuilder;
@@ -21,5 +19,3 @@ pub use event::{
 pub use extractor::{DispatchSequenceError, FeatureExtractor};
 pub use indicator_vector::{IndicatorFeatureVector, IndicatorFeatures};
 pub use pipeline::Pipeline;
-#[cfg(feature = "serde")]
-pub use serialization::FEATURE_SET_FORMAT_VERSION;

@@ -6,7 +6,7 @@ use crate::features::definition::{
     FeatureSet, IndicatorSpec, MAX_OUTPUTS_PER_INDICATOR, ScopedIndicator, TimeWindows, ValueSource,
 };
 use crate::features::event::FeatureRoute;
-use crate::{FimlError, Float, Result, Symbol, symbols};
+use crate::{FimlError, Float, Result, Symbol};
 
 /// Contiguous output cells owned by one compiled indicator.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -110,10 +110,7 @@ fn validate_symbol_scope(index: usize, definition: &ScopedIndicator) -> Result<O
         (None, false) => {
             invalid_definition(index, definition, "is symbol-scoped and requires a symbol")
         }
-        (Some(symbol), false) if symbol.is_empty() => {
-            invalid_definition(index, definition, "symbol must not be empty")
-        }
-        (Some(symbol), false) => Ok(Some(symbols::intern(symbol))),
+        (Some(symbol), false) => Ok(Some(*symbol)),
     }
 }
 
@@ -123,7 +120,6 @@ fn compile_definition<F: Float>(
     symbol: Option<Symbol>,
     span: OutputSpan,
 ) -> Result<(IndicatorAdapter<F>, IndicatorIdentity, Vec<String>)> {
-    let symbol_name = definition.symbol.as_deref();
     match &definition.indicator {
         IndicatorSpec::Sma {
             source,
@@ -137,12 +133,7 @@ fn compile_definition<F: Float>(
             let names = windows
                 .iter()
                 .map(|window| {
-                    market_name(
-                        symbol_name.unwrap(),
-                        source.canonical_name(),
-                        "sma",
-                        &window.to_string(),
-                    )
+                    market_name(symbol, source.canonical_name(), "sma", &window.to_string())
                 })
                 .collect();
             Ok((feature, IndicatorIdentity::Sma(symbol, *source), names))
@@ -159,12 +150,7 @@ fn compile_definition<F: Float>(
             let names = windows
                 .iter()
                 .map(|window| {
-                    market_name(
-                        symbol_name.unwrap(),
-                        source.canonical_name(),
-                        "ema",
-                        &window.to_string(),
-                    )
+                    market_name(symbol, source.canonical_name(), "ema", &window.to_string())
                 })
                 .collect();
             Ok((feature, IndicatorIdentity::Ema(symbol, *source), names))
@@ -179,9 +165,7 @@ fn compile_definition<F: Float>(
                 .map_err(|error| contextualize(index, definition, error))?;
             let names = windows
                 .iter()
-                .map(|window| {
-                    market_name(symbol_name.unwrap(), "trade", "cvd", &window.to_string())
-                })
+                .map(|window| market_name(symbol, "trade", "cvd", &window.to_string()))
                 .collect();
             Ok((feature, IndicatorIdentity::Cvd(symbol), names))
         }
@@ -207,7 +191,7 @@ fn compile_definition<F: Float>(
                 .iter()
                 .map(|window| {
                     market_name(
-                        symbol_name.unwrap(),
+                        symbol,
                         source.canonical_name(),
                         "sma_timed",
                         &format!("{}ms:{window}ms", validated.aggregation_millis),
@@ -240,7 +224,7 @@ fn compile_definition<F: Float>(
                 .iter()
                 .map(|window| {
                     market_name(
-                        symbol_name.unwrap(),
+                        symbol,
                         "trade",
                         "obv_timed",
                         &format!("{}ms:{window}ms", validated.aggregation_millis),
@@ -265,7 +249,7 @@ fn compile_definition<F: Float>(
                 builtin::trade_count::build(symbol, *aggregation, *window, *warmup_policy, span)
                     .map_err(|error| contextualize(index, definition, error))?;
             let name = market_name(
-                symbol_name.unwrap(),
+                symbol,
                 "trade",
                 "count_timed",
                 &format!(
@@ -470,15 +454,10 @@ fn validate_utc_offset(
     Ok(())
 }
 
-fn market_name(symbol: &str, source: &str, indicator: &str, output: &str) -> String {
-    format!(
-        "{}:{source}:{indicator}:{output}",
-        escape_symbol_segment(symbol)
-    )
-}
-
-fn escape_symbol_segment(symbol: &str) -> String {
-    symbol.replace('%', "%25").replace(':', "%3A")
+fn market_name(symbol: Symbol, source: &str, indicator: &str, output: &str) -> String {
+    let symbol = symbol.resolve_as_string();
+    let escaped_symbol = symbol.replace('%', "%25").replace(':', "%3A");
+    format!("{escaped_symbol}:{source}:{indicator}:{output}")
 }
 
 fn contextualize(index: usize, definition: &ScopedIndicator, error: FimlError) -> FimlError {
@@ -500,7 +479,6 @@ fn invalid_definition_error(
 ) -> FimlError {
     let symbol = definition
         .symbol
-        .as_deref()
         .map(|symbol| format!(" for symbol {symbol:?}"))
         .unwrap_or_default();
     FimlError::InvalidIndicatorDefinition {

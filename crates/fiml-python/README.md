@@ -145,68 +145,11 @@ aggressors. The complete frame is validated before the extractor changes.
 columns. Calculation state remains `float64`. The property can be changed until
 the first event is processed and is then locked.
 
-## The parity contract: a shared feature set
+## Feature sets
 
-The feature set is described once by a `FeatureSet` and used by **both** sides.
-Save the JSON next to the trained model and load the same file in Rust serving:
-
-```python
-json_str = fs.to_json()                          # save next to the model
-extractor = fiml.FeatureExtractor.from_json(
-    json_str, output_dtype="float64"
-)                                                        # rebuild anywhere
-```
-
-```json
-{
-  "version": "1.0.0",
-  "features": [
-    {
-      "symbol": "btcusdt",
-      "indicators": [
-        {
-          "name": "ema",
-          "options": {
-            "source": "trade_price",
-            "windows": [12],
-            "warmup_policy": "full_window"
-          }
-        },
-        {
-          "name": "obv_timed",
-          "options": {
-            "aggregation": "1ms",
-            "windows": ["30s", "1m"],
-            "warmup_policy": "full_window"
-          }
-        },
-        {
-          "name": "sma",
-          "options": {
-            "source": "trade_price",
-            "windows": [12, 24],
-            "warmup_policy": "full_window"
-          }
-        }
-      ]
-    }
-  ],
-  "options": {}
-}
-```
-
-`version` identifies the feature-set schema independently of the package
-version. Serialization emits full SemVer. Deserialization also accepts short
-forms such as `1.0` and compatible `1.0.x` patch versions. Future minor,
-different major, and prerelease versions are rejected until explicitly
-supported.
-
-The complete machine-readable contract is available as a
-[JSON Schema](../../docs/feature-set.schema.json). It describes supported
-feature sets and rejects undocumented fields. Extractor compilation remains the
-authority for collection-wide uniqueness, platform-dependent numeric limits,
-and relationships JSON Schema cannot express, such as timed windows being at
-least and exact multiples of their aggregation.
+Feature sets are currently authored with the fluent `FeatureSet` builder and
+passed directly to `FeatureExtractor`. Feature-set JSON serialization is
+disabled while its format is being revised.
 
 Builder methods: `sma`, `ema`, `cvd`, `sma_timed`, `obv_timed`,
 `trade_count_timed`, `day_of_week`, and `time_since_first_event_of_day`
@@ -267,7 +210,7 @@ To guarantee identical output between Python (batch) and Rust (live):
 
 1. **f64 calculation state on both sides.** The extractor calculates in `f64`;
    choose `output_dtype="float64"` when comparing exact Python/Rust output.
-2. **Same `FeatureSet` JSON** — same periods, aggregation/window durations,
+2. **Same `FeatureSet` configuration** — same periods, aggregation/window durations,
    warm-up policies, symbol names, and feature order.
 3. **Replay the full event stream in the same order with the same millisecond
    timestamps.** Do not downsample or skip rows: timed indicators (`SmaTimed`,
