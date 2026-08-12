@@ -7,6 +7,7 @@ use crate::{Float, Symbol, WarmupPolicy};
 /// Maximum number of adjacent outputs one runtime indicator may own.
 pub const MAX_OUTPUTS_PER_INDICATOR: usize = 16;
 
+// TODO: in feature vector create array of indicies that subscribed on event
 /// Numeric event field consumed by a moving average.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum ValueSource {
