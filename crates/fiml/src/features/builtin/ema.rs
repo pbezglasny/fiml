@@ -1,7 +1,7 @@
+use crate::event::Event;
 use crate::features::builtin::{IndicatorFeaturesEnum, write_outputs};
 use crate::features::compiler::OutputSpan;
 use crate::features::definition::{MAX_OUTPUTS_PER_INDICATOR, ValueSource};
-use crate::features::event::Event;
 use crate::indicators::ExponentialMovingAverage;
 use crate::vectors::FeatureVector;
 use crate::{Float, Result, Symbol, WarmupPolicy};

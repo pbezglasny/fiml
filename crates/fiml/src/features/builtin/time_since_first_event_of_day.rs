@@ -1,7 +1,7 @@
 use crate::Float;
+use crate::event::Event;
 use crate::features::builtin::IndicatorFeaturesEnum;
 use crate::features::compiler::OutputSpan;
-use crate::features::event::Event;
 use crate::vectors::FeatureVector;
 
 /// Milliseconds in a day. Event timestamps are epoch milliseconds, so the

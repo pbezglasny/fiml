@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 /// Internek representation of Symbol string
 /// Symbol string are case insensitive
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct Symbol(u64);
+pub struct Symbol(u16);
 
 const GLOBAL_NAME: &str = "__global__";
 
@@ -19,8 +19,8 @@ impl Symbol {
     /// Dummy symbol for gloval indicators like current time etc
     pub const GLOBAL: Self = Self(0);
 
-    pub fn new(name: impl Into<String>) -> Self {
-        intern(name.into().as_str())
+    pub fn new(name: &str) -> Self {
+        intern(name)
     }
 
     pub fn resolve_as_string(&self) -> String {
@@ -40,7 +40,11 @@ impl fmt::Debug for Symbol {
 
 impl Display for Symbol {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.resolve_as_string())
+        if *self == Symbol::GLOBAL {
+            write!(f, "GLOBAL")
+        } else {
+            write!(f, "{}", self.resolve_as_string())
+        }
     }
 }
 
@@ -87,7 +91,7 @@ impl SymbolInterner {
         if let Some(&symbol) = self.name_to_id.get(lower_case_name.as_ref()) {
             return symbol;
         }
-        let id = self.id_to_normalize_name.len() as u64;
+        let id = self.id_to_normalize_name.len() as u16;
         let symbol = Symbol(id);
         let name_arc: Arc<str> = Arc::from(lower_case_name.as_ref());
         self.name_to_id.insert(name_arc.clone(), symbol);

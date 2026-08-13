@@ -1,6 +1,6 @@
 use std::mem::MaybeUninit;
 
-use crate::features::TradeSide;
+use crate::event::TradeSide;
 use crate::ring_buffer::{
     HeapRingBuffer, RingBuffer, StackRingBuffer, new_heap_ring_buffer, new_stack_ring_buffer,
 };
