@@ -210,7 +210,7 @@ flowchart TB
     Event["Event<F>"] --> Price["PriceUpdate<F>"]
     Event --> Volume["VolumeUpdate<F>"]
     Event --> Trade["TradeUpdate<F>"]
-    Event --> BookEvent["features::event::OrderBookUpdate<F>"]
+    Event --> BookEvent["event::OrderBookUpdate<F>"]
     Event --> Time["TimeUpdate"]
 
     Price --> Symbol["Symbol"]
@@ -234,7 +234,7 @@ ID `0`, resolves to `"__global__"`, and is available where a concrete global
 handle is useful; `ScopedIndicator` continues to represent global scope as
 `None`.
 
-The feature event named `features::event::OrderBookUpdate<F>` is only a
+The feature event named `event::OrderBookUpdate<F>` is only a
 top-of-book `{bid, ask}` payload. It is distinct from the snapshot/delta
 `order_book::OrderBookUpdate` enum described below.
 
@@ -413,7 +413,8 @@ on the core crate without enabling `serde`; there are currently no Python
 | Symbols and interner | [`crates/fiml/src/symbols.rs`](../crates/fiml/src/symbols.rs) |
 | Feature-set builder | [`crates/fiml/src/features/builder.rs`](../crates/fiml/src/features/builder.rs) |
 | Feature definitions | [`crates/fiml/src/features/definition.rs`](../crates/fiml/src/features/definition.rs) |
-| Events and routes | [`crates/fiml/src/features/event.rs`](../crates/fiml/src/features/event.rs) |
+| Events | [`crates/fiml/src/event.rs`](../crates/fiml/src/event.rs) |
+| Feature routing | [`crates/fiml/src/features/mod.rs`](../crates/fiml/src/features/mod.rs) |
 | Compiler | [`crates/fiml/src/features/compiler.rs`](../crates/fiml/src/features/compiler.rs) |
 | Runtime storage and sealed interface | [`crates/fiml/src/features/indicator_vector.rs`](../crates/fiml/src/features/indicator_vector.rs) |
 | Dynamic extractor | [`crates/fiml/src/features/extractor.rs`](../crates/fiml/src/features/extractor.rs) |

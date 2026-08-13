@@ -1,24 +1,12 @@
 use std::fmt;
 
-use crate::Float;
-use crate::Symbol;
+use crate::{Float, Symbol};
 
-/// Number of [`EventKind`] variants. Used to size the per-kind feature groups in
-/// [`IndicatorFeatureVector`](crate::features::IndicatorFeatureVector).
+/// Number of [`EventKind`] variants.
 pub const EVENT_KIND_COUNT: usize = 5;
 
-/// Number of dispatch groups: one per [`EventKind`] plus the "every-event" group
-/// that runs on every [`dispatch`](crate::features::IndicatorFeatures::dispatch)
-/// regardless of kind.
-pub const FEATURE_GROUP_COUNT: usize = EVENT_KIND_COUNT + 1;
-
-/// Index of the "every-event" group within the dispatch group table. It sits
-/// after all the per-kind groups (`0..EVENT_KIND_COUNT`).
-pub const EVERY_EVENT_GROUP: usize = EVENT_KIND_COUNT;
-
-/// Kind tag of an [`Event`], used to route an event to the features that
-/// subscribe to it. Discriminants must stay `0..EVENT_KIND_COUNT` and match the
-/// group order in the feature vector.
+/// Kind tag of an [`Event`]. Discriminants must stay in
+/// `0..EVENT_KIND_COUNT` so feature routing can use them as array indexes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum EventKind {
@@ -39,29 +27,6 @@ impl fmt::Display for EventKind {
             Self::Time => "time",
         };
         f.write_str(name)
-    }
-}
-
-/// Where a feature subscribes in the dispatch table: to a single [`EventKind`],
-/// or to **every** event. Clock features (`day_of_week`,
-/// `time_since_first_event_of_day`) subscribe to every event so they refresh
-/// from each event's timestamp, guaranteeing a value on every output row.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FeatureRoute {
-    /// Runs only for events of this kind.
-    Kind(EventKind),
-    /// Runs on every dispatch, whatever the event kind.
-    Every,
-}
-
-impl FeatureRoute {
-    /// Index of the dispatch group this route maps to: the kind's discriminant
-    /// for per-kind features, or [`EVERY_EVENT_GROUP`] for every-event features.
-    pub fn group_index(self) -> usize {
-        match self {
-            FeatureRoute::Kind(kind) => kind as usize,
-            FeatureRoute::Every => EVERY_EVENT_GROUP,
-        }
     }
 }
 
@@ -110,10 +75,7 @@ pub struct TimeUpdate {
     pub timestamp: i64,
 }
 
-/// An incoming change. Each variant carries only the payload its kind needs;
-/// new input streams are added as new variants rather than by widening a shared
-/// struct. A feature subscribes to exactly one [`EventKind`] and is only handed
-/// events of that kind.
+/// An incoming change. Each variant carries only the payload its kind needs.
 pub enum Event<F: Float> {
     Price(PriceUpdate<F>),
     Volume(VolumeUpdate<F>),
@@ -134,9 +96,7 @@ impl<F: Float> Event<F> {
         }
     }
 
-    /// Timestamp carried by this event, in epoch milliseconds. Every variant
-    /// carries one, so every-event (clock) features can derive calendar/day
-    /// values regardless of which stream the event came from.
+    /// Timestamp carried by this event, in epoch milliseconds.
     pub fn timestamp(&self) -> i64 {
         match self {
             Event::Price(p) => p.timestamp,
@@ -147,14 +107,14 @@ impl<F: Float> Event<F> {
         }
     }
 
-    /// Market symbol carried by this event, or `None` for the global time stream.
-    pub fn symbol(&self) -> Option<Symbol> {
+    /// Market symbol carried by this event. Time events use [`Symbol::GLOBAL`].
+    pub fn symbol(&self) -> Symbol {
         match self {
-            Event::Price(p) => Some(p.symbol),
-            Event::Volume(v) => Some(v.symbol),
-            Event::Trade(t) => Some(t.symbol),
-            Event::OrderBook(o) => Some(o.symbol),
-            Event::Time(_) => None,
+            Event::Price(p) => p.symbol,
+            Event::Volume(v) => v.symbol,
+            Event::Trade(t) => t.symbol,
+            Event::OrderBook(o) => o.symbol,
+            Event::Time(_) => Symbol::GLOBAL,
         }
     }
 

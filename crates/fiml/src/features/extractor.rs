@@ -2,8 +2,8 @@
 
 use std::fmt;
 
+use crate::event::Event;
 use crate::features::FeatureSet;
-use crate::features::event::Event;
 use crate::features::indicator_vector::{IndicatorFeatureVector, IndicatorFeatures};
 use crate::vectors::{FeatureVector, VecFeatureVector};
 use crate::{FimlError, Result};

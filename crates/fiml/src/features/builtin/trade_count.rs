@@ -1,8 +1,8 @@
 use std::time::Duration;
 
+use crate::event::Event;
 use crate::features::builtin::{IndicatorFeaturesEnum, write_outputs};
 use crate::features::compiler::OutputSpan;
-use crate::features::event::Event;
 use crate::indicators::{CountBucket, TradeCountTimed};
 use crate::vectors::FeatureVector;
 use crate::{Float, HeapRingBuffer, Result, Symbol, WarmupPolicy};

@@ -1,10 +1,11 @@
 use std::marker::PhantomData;
 use std::mem::MaybeUninit;
 
+use crate::event::Event;
 use crate::features::builtin::IndicatorFeaturesEnum;
 use crate::features::compiler::{Compilation, compile};
 use crate::features::definition::FeatureSet;
-use crate::features::event::{EVERY_EVENT_GROUP, Event, FEATURE_GROUP_COUNT};
+use crate::features::{EVERY_EVENT_GROUP, FEATURE_GROUP_COUNT};
 use crate::vectors::FeatureVector;
 use crate::{FimlError, Float, Result};
 
@@ -207,7 +208,8 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
-    use crate::features::{IndicatorSpec, ScopedIndicator, TimeWindows, TradeSide, ValueSource};
+    use crate::event::TradeSide;
+    use crate::features::{IndicatorSpec, ScopedIndicator, TimeWindows, ValueSource};
     use crate::{ArrayFeatureVector, FeatureVector, WarmupPolicy, symbols};
 
     type Vector<const N: usize, const M: usize> =

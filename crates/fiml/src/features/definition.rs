@@ -1,7 +1,8 @@
 use std::cmp::Ordering;
 use std::time::Duration;
 
-use crate::features::event::{Event, EventKind, FeatureRoute};
+use crate::event::{Event, EventKind};
+use crate::features::FeatureRoute;
 use crate::{Float, Symbol, WarmupPolicy};
 
 /// Maximum number of adjacent outputs one runtime indicator may own.

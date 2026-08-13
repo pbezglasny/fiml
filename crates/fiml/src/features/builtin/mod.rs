@@ -1,6 +1,6 @@
 use crate::Float;
+use crate::event::Event;
 use crate::features::compiler::OutputSpan;
-use crate::features::event::Event;
 use crate::vectors::FeatureVector;
 
 pub(crate) mod cvd;

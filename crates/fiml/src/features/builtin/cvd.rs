@@ -1,7 +1,7 @@
+use crate::event::Event;
 use crate::features::builtin::{IndicatorFeaturesEnum, write_outputs};
 use crate::features::compiler::OutputSpan;
 use crate::features::definition::MAX_OUTPUTS_PER_INDICATOR;
-use crate::features::event::Event;
 use crate::indicators::CumulativeVolumeDelta;
 use crate::vectors::FeatureVector;
 use crate::{Float, HeapRingBuffer, Result, Symbol, WarmupPolicy};
@@ -66,7 +66,7 @@ pub(crate) fn build<F: Float>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::features::TradeSide;
+    use crate::event::TradeSide;
     use crate::{ArrayFeatureVector, FeatureVector, symbols};
 
     #[test]

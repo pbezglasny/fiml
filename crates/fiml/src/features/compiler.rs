@@ -1,11 +1,11 @@
 use std::collections::HashSet;
 use std::time::Duration;
 
+use crate::features::FeatureRoute;
 use crate::features::builtin::{self, IndicatorFeaturesEnum};
 use crate::features::definition::{
     FeatureSet, IndicatorSpec, MAX_OUTPUTS_PER_INDICATOR, ScopedIndicator, TimeWindows, ValueSource,
 };
-use crate::features::event::FeatureRoute;
 use crate::{FimlError, Float, Result, Symbol};
 
 /// Contiguous output cells owned by one compiled indicator.

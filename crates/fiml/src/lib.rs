@@ -1,4 +1,6 @@
+pub mod event;
 pub mod features;
+mod indicator_feature_vector;
 pub mod indicators;
 pub mod order_book;
 mod ring_buffer;
@@ -10,11 +12,14 @@ use std::{error::Error, fmt::Display};
 
 use rust_decimal::Decimal;
 
+pub use event::{
+    EVENT_KIND_COUNT, Event, EventKind, OrderBookUpdate, PriceUpdate, TimeUpdate, TradeSide,
+    TradeUpdate, VolumeUpdate,
+};
 pub use features::{
-    DispatchSequenceError, Event, EventKind, FeatureExtractor, FeatureSet, FeatureSetBuilder,
-    IndicatorFeatureVector, IndicatorFeatures, IndicatorSpec, MAX_OUTPUTS_PER_INDICATOR,
-    OrderBookUpdate, PriceUpdate, ScopedIndicator, TimeUpdate, TimeWindows, TradeSide, TradeUpdate,
-    ValueSource, VolumeUpdate,
+    DispatchSequenceError, FeatureExtractor, FeatureSet, FeatureSetBuilder, IndicatorFeatureVector,
+    IndicatorFeatures, IndicatorSpec, MAX_OUTPUTS_PER_INDICATOR, ScopedIndicator, TimeWindows,
+    ValueSource,
 };
 pub use indicators::{CumulativeVolumeDelta, ObvBucket, OnBalanceVolumeTimed};
 pub use ring_buffer::{
@@ -51,7 +56,7 @@ pub enum FimlError {
         actual: usize,
     },
     TimestampOutOfOrder {
-        symbol: Option<Symbol>,
+        symbol: Symbol,
         event_kind: EventKind,
         timestamp: i64,
         previous_timestamp: i64,
@@ -94,13 +99,7 @@ impl Display for FimlError {
                 previous_timestamp,
             } => {
                 write!(f, "timestamp {timestamp} for {event_kind}")?;
-                if let Some(symbol) = symbol {
-                    write!(
-                        f,
-                        " event for symbol {}",
-                        symbols::resolve(*symbol).unwrap_or_else(|| format!("{symbol:?}"))
-                    )?;
-                }
+                write!(f, " event for symbol {}", symbol)?;
                 write!(
                     f,
                     " is earlier than previous timestamp {previous_timestamp}"
