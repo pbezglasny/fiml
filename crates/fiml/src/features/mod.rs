@@ -3,6 +3,9 @@ pub(crate) mod builtin;
 pub(crate) mod compiler;
 mod definition;
 mod extractor;
+mod feature_id;
+mod feature_key;
+mod feature_source;
 pub(crate) mod indicator_vector;
 mod pipeline;
 pub mod transformers;
@@ -37,5 +40,35 @@ pub use definition::{
     FeatureSet, IndicatorSpec, MAX_OUTPUTS_PER_INDICATOR, ScopedIndicator, TimeWindows, ValueSource,
 };
 pub use extractor::{DispatchSequenceError, FeatureExtractor};
+pub use feature_id::FeatureId;
+pub use feature_key::FeatureKey;
+pub use feature_source::{EventField, FeatureSource};
 pub use indicator_vector::{IndicatorFeatureVector, IndicatorFeatures};
 pub use pipeline::Pipeline;
+
+/// Declaration of one scalar output in a feature vector.
+///
+/// [`FeatureKey`] describes the calculation that produces the value, while
+/// [`FeatureId`] provides its stable user-facing name. Compatible definitions
+/// may be grouped into one runtime indicator; grouping does not change the ID
+/// used to locate each definition's scalar output.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct FeatureDefinition {
+    /// Complete structural identity of the calculation and scalar output.
+    pub key: FeatureKey,
+    /// Name used to find this output in a compiled feature-vector layout.
+    pub id: FeatureId,
+}
+
+impl FeatureDefinition {
+    /// Creates a feature definition with an explicit user-facing ID.
+    pub fn new(key: FeatureKey, id: FeatureId) -> Self {
+        Self { key, id }
+    }
+
+    /// Creates a feature definition whose ID is derived from its key.
+    pub fn with_default_id(key: FeatureKey) -> Self {
+        let id = FeatureId::from_feature_key(&key);
+        Self { key, id }
+    }
+}

@@ -495,7 +495,7 @@ impl FeatureExtractor {
                 timestamp,
                 side.map(parse_trade_side).transpose()?,
             ),
-            KIND_ORDERBOOK => Event::order_book(
+            KIND_ORDERBOOK => Event::order_book_delta(
                 self.symbol_at(symbol)?,
                 require("bid", bid)?,
                 require("ask", ask)?,

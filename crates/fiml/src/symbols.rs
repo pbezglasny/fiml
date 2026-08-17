@@ -8,6 +8,8 @@ use std::{
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
+pub const MAX_SYMBOL_NUMBER: u16 = 512;
+
 /// Internek representation of Symbol string
 /// Symbol string are case insensitive
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -92,6 +94,10 @@ impl SymbolInterner {
             return symbol;
         }
         let id = self.id_to_normalize_name.len() as u16;
+        assert!(
+            id < MAX_SYMBOL_NUMBER,
+            "Exceeded max number of supported symbols"
+        );
         let symbol = Symbol(id);
         let name_arc: Arc<str> = Arc::from(lower_case_name.as_ref());
         self.name_to_id.insert(name_arc.clone(), symbol);
