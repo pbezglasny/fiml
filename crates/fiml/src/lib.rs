@@ -13,13 +13,13 @@ use std::{error::Error, fmt::Display};
 use rust_decimal::Decimal;
 
 pub use event::{
-    EVENT_KIND_COUNT, Event, EventKind, OrderBookUpdate, PriceUpdate, TimeUpdate, TradeSide,
+    EVENT_KIND_COUNT, Event, EventKind, OrderBookDeltaUpdate, PriceUpdate, TimeUpdate, TradeSide,
     TradeUpdate, VolumeUpdate,
 };
 pub use features::{
-    DispatchSequenceError, FeatureExtractor, FeatureSet, FeatureSetBuilder, IndicatorFeatureVector,
-    IndicatorFeatures, IndicatorSpec, MAX_OUTPUTS_PER_INDICATOR, ScopedIndicator, TimeWindows,
-    ValueSource,
+    DispatchSequenceError, EventField, FeatureDefinition, FeatureExtractor, FeatureId, FeatureKey,
+    FeatureSet, FeatureSetBuilder, FeatureSource, IndicatorFeatureVector, IndicatorFeatures,
+    IndicatorSpec, MAX_OUTPUTS_PER_INDICATOR, ScopedIndicator, TimeWindows, ValueSource,
 };
 pub use indicators::{CumulativeVolumeDelta, ObvBucket, OnBalanceVolumeTimed};
 pub use ring_buffer::{

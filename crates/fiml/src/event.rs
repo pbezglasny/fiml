@@ -3,19 +3,23 @@ use std::fmt;
 use crate::{Float, Symbol};
 
 /// Number of [`EventKind`] variants.
-pub const EVENT_KIND_COUNT: usize = 5;
+pub const EVENT_KIND_COUNT: usize = 6;
 
 /// Kind tag of an [`Event`]. Discriminants must stay in
 /// `0..EVENT_KIND_COUNT` so feature routing can use them as array indexes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[repr(u8)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum EventKind {
     Price,
     Volume,
     Trade,
-    OrderBook,
+    OrderBookDelta,
+    OrderBookSnapshot,
     Time,
 }
+
+const _: () = assert!(EventKind::Time as usize + 1 == EVENT_KIND_COUNT);
 
 impl fmt::Display for EventKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -23,7 +27,8 @@ impl fmt::Display for EventKind {
             Self::Price => "price",
             Self::Volume => "volume",
             Self::Trade => "trade",
-            Self::OrderBook => "order book",
+            Self::OrderBookDelta => "order book delta",
+            Self::OrderBookSnapshot => "order book snapshot",
             Self::Time => "time",
         };
         f.write_str(name)
@@ -63,10 +68,16 @@ pub struct TradeUpdate<F: Float> {
 }
 
 /// An order-book change.
-pub struct OrderBookUpdate<F: Float> {
+pub struct OrderBookDeltaUpdate<F: Float> {
     pub symbol: Symbol,
     pub bid: F,
     pub ask: F,
+    pub timestamp: i64,
+}
+
+pub struct OrderBookSnapshot<F: Float> {
+    pub symbol: Symbol,
+    pub bids: F,
     pub timestamp: i64,
 }
 
@@ -80,7 +91,8 @@ pub enum Event<F: Float> {
     Price(PriceUpdate<F>),
     Volume(VolumeUpdate<F>),
     Trade(TradeUpdate<F>),
-    OrderBook(OrderBookUpdate<F>),
+    OrderBookDelta(OrderBookDeltaUpdate<F>),
+    OrderBookSnapshot(OrderBookSnapshot<F>),
     Time(TimeUpdate),
 }
 
@@ -91,7 +103,8 @@ impl<F: Float> Event<F> {
             Event::Price(_) => EventKind::Price,
             Event::Volume(_) => EventKind::Volume,
             Event::Trade(_) => EventKind::Trade,
-            Event::OrderBook(_) => EventKind::OrderBook,
+            Event::OrderBookDelta(_) => EventKind::OrderBookDelta,
+            Event::OrderBookSnapshot(_) => EventKind::OrderBookSnapshot,
             Event::Time(_) => EventKind::Time,
         }
     }
@@ -102,7 +115,8 @@ impl<F: Float> Event<F> {
             Event::Price(p) => p.timestamp,
             Event::Volume(v) => v.timestamp,
             Event::Trade(t) => t.timestamp,
-            Event::OrderBook(o) => o.timestamp,
+            Event::OrderBookDelta(o) => o.timestamp,
+            Event::OrderBookSnapshot(s) => s.timestamp,
             Event::Time(t) => t.timestamp,
         }
     }
@@ -113,7 +127,8 @@ impl<F: Float> Event<F> {
             Event::Price(p) => p.symbol,
             Event::Volume(v) => v.symbol,
             Event::Trade(t) => t.symbol,
-            Event::OrderBook(o) => o.symbol,
+            Event::OrderBookDelta(o) => o.symbol,
+            Event::OrderBookSnapshot(s) => s.symbol,
             Event::Time(_) => Symbol::GLOBAL,
         }
     }
@@ -150,13 +165,17 @@ impl<F: Float> Event<F> {
         })
     }
 
-    pub fn order_book(symbol: Symbol, bid: F, ask: F, timestamp: i64) -> Self {
-        Event::OrderBook(OrderBookUpdate {
+    pub fn order_book_delta(symbol: Symbol, bid: F, ask: F, timestamp: i64) -> Self {
+        Event::OrderBookDelta(OrderBookDeltaUpdate {
             symbol,
             bid,
             ask,
             timestamp,
         })
+    }
+
+    pub fn order_book_snapshot(_symbol: Symbol) -> Self {
+        todo!()
     }
 
     pub fn time(timestamp: i64) -> Self {

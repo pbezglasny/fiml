@@ -501,6 +501,7 @@ where
         }
     }
 
+    // TODO: add argument for timestamp instead of relay on system time
     pub fn update(&mut self, value: T) {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
