@@ -449,13 +449,13 @@ where
         true
     }
 
-    pub(crate) fn update_inner(&mut self, value: T, now: i64) {
+    pub fn update(&mut self, value: T, event_timestamp: i64) {
         if self.first_timestamp.is_none() {
-            self.first_timestamp = Some(now);
-            self.update_readiness(now);
+            self.first_timestamp = Some(event_timestamp);
+            self.update_readiness(event_timestamp);
         }
-        let _ = self.observe(now);
-        let bucket_start = self.bucket_start(now);
+        let _ = self.observe(event_timestamp);
+        let bucket_start = self.bucket_start(event_timestamp);
 
         let update_last_bucket = self
             .data
@@ -473,7 +473,7 @@ where
                 let window = unsafe { self.windows[i].assume_init_mut() };
                 if window.bucket_count > 0 {
                     window.sum = window.sum.sub(prev_value).add(new_value);
-                } else if prev_date + window.duration > now {
+                } else if prev_date + window.duration > event_timestamp {
                     window.sum = window.sum.add(new_value);
                     window.bucket_count = 1;
                 }
@@ -499,15 +499,6 @@ where
                 Self::update_moving_avg(window);
             }
         }
-    }
-
-    // TODO: add argument for timestamp instead of relay on system time
-    pub fn update(&mut self, value: T) {
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .expect("Time went backwards")
-            .as_millis() as i64;
-        self.update_inner(value, now);
     }
 
     /// Return value of i-th Window
@@ -731,8 +722,8 @@ mod tests {
         sma.add_window_with_duration(Duration::from_millis(3_000))
             .unwrap();
 
-        sma.update_inner(1.0, 0);
-        sma.update_inner(2.0, 1_000);
+        sma.update(1.0, 0);
+        sma.update(2.0, 1_000);
 
         assert!(approx_eq(timed_value_at(&sma, 0), 1.5));
     }
@@ -748,8 +739,8 @@ mod tests {
             .unwrap();
         sma.add_window_with_periods(2).unwrap();
 
-        sma.update_inner(10.0, 0);
-        sma.update_inner(20.0, 1_000);
+        sma.update(10.0, 0);
+        sma.update(20.0, 1_000);
         assert!(sma.observe(1_999));
         assert!(!sma.is_ready());
         assert_eq!(sma.value_at(0), None);
@@ -774,9 +765,9 @@ mod tests {
             .unwrap();
         sma.add_window_with_periods(2).unwrap();
 
-        sma.update_inner(10.0, 0);
-        sma.update_inner(20.0, 1_000);
-        sma.update_inner(30.0, 2_000);
+        sma.update(10.0, 0);
+        sma.update(20.0, 1_000);
+        sma.update(30.0, 2_000);
 
         assert_eq!(sma.data.capacity(), 3);
         assert_eq!(sma.data.len(), 3);
@@ -858,8 +849,8 @@ mod tests {
         sma.add_window_with_duration(Duration::from_millis(1_000))
             .unwrap();
 
-        sma.update_inner(10.0, 0);
-        sma.update_inner(20.0, 500);
+        sma.update(10.0, 0);
+        sma.update(20.0, 500);
 
         assert!(approx_eq(timed_value_at(&sma, 0), 15.0));
     }
@@ -876,8 +867,8 @@ mod tests {
         sma.add_window_with_duration(Duration::from_millis(2_000))
             .unwrap();
 
-        sma.update_inner(10.0, 999);
-        sma.update_inner(20.0, 1_000);
+        sma.update(10.0, 999);
+        sma.update(20.0, 1_000);
 
         assert_eq!(sma.data.len(), 2);
         assert!(approx_eq(timed_value_at(&sma, 0), 15.0));
@@ -895,9 +886,9 @@ mod tests {
         sma.add_window_with_duration(Duration::from_millis(1_000))
             .unwrap();
 
-        sma.update_inner(10.0, 0);
-        sma.update_inner(20.0, 1_000);
-        sma.update_inner(40.0, 1_500);
+        sma.update(10.0, 0);
+        sma.update(20.0, 1_000);
+        sma.update(40.0, 1_500);
 
         assert_eq!(timed_bucket_count(&sma, 0), 1);
         assert!(approx_eq(timed_value_at(&sma, 0), 30.0));
@@ -915,9 +906,9 @@ mod tests {
         sma.add_window_with_duration(Duration::from_millis(2_000))
             .unwrap();
 
-        sma.update_inner(10.0, 0);
-        sma.update_inner(20.0, 1_000);
-        sma.update_inner(30.0, 2_000);
+        sma.update(10.0, 0);
+        sma.update(20.0, 1_000);
+        sma.update(30.0, 2_000);
 
         assert!(approx_eq(timed_value_at(&sma, 0), 25.0));
     }
@@ -934,11 +925,11 @@ mod tests {
         sma.add_window_with_periods(1).unwrap();
         sma.add_window_with_periods(3).unwrap();
 
-        sma.update_inner(10.0, 0);
-        sma.update_inner(20.0, 1_000);
-        sma.update_inner(30.0, 2_000);
-        sma.update_inner(40.0, 2_500);
-        sma.update_inner(50.0, 3_000);
+        sma.update(10.0, 0);
+        sma.update(20.0, 1_000);
+        sma.update(30.0, 2_000);
+        sma.update(40.0, 2_500);
+        sma.update(50.0, 3_000);
 
         assert_eq!(timed_bucket_count(&sma, 0), 1);
         assert_eq!(timed_bucket_count(&sma, 1), 3);
@@ -957,10 +948,10 @@ mod tests {
             .unwrap();
         sma.add_window_with_periods(2).unwrap();
 
-        sma.update_inner(10.0, 0);
-        sma.update_inner(20.0, 1_000);
-        sma.update_inner(30.0, 2_000);
-        sma.update_inner(40.0, 3_000);
+        sma.update(10.0, 0);
+        sma.update(20.0, 1_000);
+        sma.update(30.0, 2_000);
+        sma.update(40.0, 3_000);
 
         assert_eq!(sma.data.len(), 3);
         assert_eq!(timed_bucket_count(&sma, 0), 2);
@@ -980,9 +971,9 @@ mod tests {
         assert!(sma.add_window_with_periods(3).is_err());
         sma.add_window_with_periods(2).unwrap();
 
-        sma.update_inner(10.0, 0);
-        sma.update_inner(20.0, 1_000);
-        sma.update_inner(30.0, 2_000);
+        sma.update(10.0, 0);
+        sma.update(20.0, 1_000);
+        sma.update(30.0, 2_000);
 
         assert_eq!(sma.data.capacity(), 3);
         assert_eq!(sma.data.len(), 3);

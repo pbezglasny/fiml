@@ -28,6 +28,10 @@ impl Symbol {
     pub fn resolve_as_string(&self) -> String {
         resolve(*self).unwrap()
     }
+
+    pub(crate) const fn index(self) -> usize {
+        self.0 as usize
+    }
 }
 
 impl fmt::Debug for Symbol {

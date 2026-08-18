@@ -103,13 +103,13 @@ where
     }
 
     /// Record one trade at `now` (epoch milliseconds).
-    pub(crate) fn update_inner(&mut self, now: i64) {
+    pub(crate) fn update(&mut self, event_timestamp: i64) {
         if self.first_timestamp.is_none() {
-            self.first_timestamp = Some(now);
-            self.update_readiness(now);
+            self.first_timestamp = Some(event_timestamp);
+            self.update_readiness(event_timestamp);
         }
-        let _ = self.observe(now);
-        let insert_bucket_start = self.bucket_start(now);
+        let _ = self.observe(event_timestamp);
+        let insert_bucket_start = self.bucket_start(event_timestamp);
 
         // Same bucket as the last trade? Increment its count in place.
         if self
@@ -160,15 +160,6 @@ where
         self.expire_old_buckets(self.bucket_start(now));
         self.update_readiness(now);
         true
-    }
-
-    /// Record one trade at the current wall-clock time.
-    pub fn update(&mut self) {
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .expect("Time went backwards")
-            .as_millis() as i64;
-        self.update_inner(now);
     }
 
     /// Current rolling trade count over the window.
@@ -243,9 +234,9 @@ mod tests {
             )
             .unwrap();
 
-        counter.update_inner(0);
-        counter.update_inner(100);
-        counter.update_inner(900);
+        counter.update(0);
+        counter.update(100);
+        counter.update(900);
 
         assert!(approx_eq(counter.window_value().unwrap(), 3.0));
     }
@@ -260,8 +251,8 @@ mod tests {
             )
             .unwrap();
 
-        counter.update_inner(0);
-        counter.update_inner(1_000);
+        counter.update(0);
+        counter.update(1_000);
         assert!(counter.observe(1_999));
         assert!(!counter.is_ready());
         assert_eq!(counter.window_value(), None);
@@ -285,10 +276,10 @@ mod tests {
             )
             .unwrap();
 
-        counter.update_inner(0); // bucket 0
-        counter.update_inner(1_000); // bucket 1
-        counter.update_inner(1_500); // bucket 1
-        counter.update_inner(2_000); // bucket 2
+        counter.update(0); // bucket 0
+        counter.update(1_000); // bucket 1
+        counter.update(1_500); // bucket 1
+        counter.update(2_000); // bucket 2
 
         assert!(approx_eq(counter.window_value().unwrap(), 4.0));
     }
@@ -303,10 +294,10 @@ mod tests {
             )
             .unwrap();
 
-        counter.update_inner(0); // bucket 0
-        counter.update_inner(1_000); // bucket 1
-        counter.update_inner(2_000); // bucket 2 -> bucket 0 now outside 2s window
-        counter.update_inner(3_000); // bucket 3 -> bucket 1 now outside window
+        counter.update(0); // bucket 0
+        counter.update(1_000); // bucket 1
+        counter.update(2_000); // bucket 2 -> bucket 0 now outside 2s window
+        counter.update(3_000); // bucket 3 -> bucket 1 now outside window
 
         // Window keeps the last two buckets (2 and 3): one trade each.
         assert!(approx_eq(counter.window_value().unwrap(), 2.0));
@@ -323,7 +314,7 @@ mod tests {
             .unwrap();
 
         for i in 0..10 {
-            counter.update_inner(i * 1_000);
+            counter.update(i * 1_000);
         }
 
         // Only the last two buckets remain inside the 2s window.

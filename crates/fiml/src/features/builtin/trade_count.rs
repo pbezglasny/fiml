@@ -37,7 +37,7 @@ impl<F: Float> TradeCountTimedFeature<F> {
         if let Event::Trade(trade) = event
             && trade.symbol == self.symbol
         {
-            self.counter.update_inner(trade.timestamp);
+            self.counter.update(trade.timestamp);
             write_outputs(self.output_span, output, |_| self.counter.window_value());
         }
     }

@@ -70,7 +70,7 @@ impl<F: Float> SmaTimedFeature<F> {
         output: &mut O,
     ) {
         if let Some(value) = self.source.value(event, self.symbol) {
-            self.sma.update_inner(value, event.timestamp());
+            self.sma.update(value, event.timestamp());
             write_outputs(self.output_span, output, |index| self.sma.value_at(index));
         }
     }
