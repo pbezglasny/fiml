@@ -71,18 +71,11 @@ impl<F: Float> SmaTimedFeature<F> {
     ) {
         if let Some(value) = self.source.value(event, self.symbol) {
             self.sma.update(value, event.timestamp());
-            write_outputs(self.output_span, output, |index| self.sma.value_at(index));
+        } else if !self.sma.observe(event.timestamp()) {
+            return;
         }
-    }
 
-    pub(in crate::features) fn observe<O: FeatureVector<F = F>>(
-        &mut self,
-        timestamp: i64,
-        output: &mut O,
-    ) {
-        if self.sma.observe(timestamp) {
-            write_outputs(self.output_span, output, |index| self.sma.value_at(index));
-        }
+        write_outputs(self.output_span, output, |index| self.sma.value_at(index));
     }
 }
 

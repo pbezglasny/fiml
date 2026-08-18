@@ -46,22 +46,6 @@ impl<F: Float> IndicatorFeaturesEnum<F> {
             Self::TimeSinceFirstEventOfDay(clock) => clock.update_event(event, output),
         }
     }
-
-    pub(crate) fn observes_time(&self) -> bool {
-        matches!(
-            self,
-            Self::SmaTimed(_) | Self::ObvTimed(_) | Self::TradeCountTimed(_)
-        )
-    }
-
-    pub(crate) fn observe<O: FeatureVector<F = F>>(&mut self, event: &Event<F>, output: &mut O) {
-        match self {
-            Self::SmaTimed(sma) => sma.observe(event.timestamp(), output),
-            Self::ObvTimed(obv) => obv.observe(event.timestamp(), output),
-            Self::TradeCountTimed(count) => count.observe(event.timestamp(), output),
-            _ => {}
-        }
-    }
 }
 
 #[inline]

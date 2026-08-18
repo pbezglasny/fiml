@@ -38,18 +38,11 @@ impl<F: Float> TradeCountTimedFeature<F> {
             && trade.symbol == self.symbol
         {
             self.counter.update(trade.timestamp);
-            write_outputs(self.output_span, output, |_| self.counter.window_value());
+        } else if !self.counter.observe(event.timestamp()) {
+            return;
         }
-    }
 
-    pub(in crate::features) fn observe<O: FeatureVector<F = F>>(
-        &mut self,
-        timestamp: i64,
-        output: &mut O,
-    ) {
-        if self.counter.observe(timestamp) {
-            write_outputs(self.output_span, output, |_| self.counter.window_value());
-        }
+        write_outputs(self.output_span, output, |_| self.counter.window_value());
     }
 }
 

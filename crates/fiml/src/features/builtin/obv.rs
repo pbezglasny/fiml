@@ -37,22 +37,13 @@ impl<F: Float> ObvTimedFeature<F> {
         {
             self.obv
                 .update_inner(trade.price, trade.volume, trade.timestamp);
-            write_outputs(self.output_span, output, |index| {
-                self.obv.window_value(index)
-            });
+        } else if !self.obv.observe(event.timestamp()) {
+            return;
         }
-    }
 
-    pub(in crate::features) fn observe<O: FeatureVector<F = F>>(
-        &mut self,
-        timestamp: i64,
-        output: &mut O,
-    ) {
-        if self.obv.observe(timestamp) {
-            write_outputs(self.output_span, output, |index| {
-                self.obv.window_value(index)
-            });
-        }
+        write_outputs(self.output_span, output, |index| {
+            self.obv.window_value(index)
+        });
     }
 }
 
@@ -94,7 +85,7 @@ mod tests {
     }
 
     #[test]
-    fn obv_timed_reacts_to_trade_events() {
+    fn obv_timed_ingests_matching_trades_and_observes_other_events() {
         let aapl = symbols::intern("AAPL");
         let googl = symbols::intern("GOOGL");
         let mut fv: ArrayFeatureVector<f64, 1> = ArrayFeatureVector::new();
@@ -118,6 +109,6 @@ mod tests {
         feat.update(&Event::trade(googl, 110.0, 99.0, 3_000, None), &mut fv);
         feat.update(&Event::time(3_000), &mut fv);
 
-        assert!(approx_eq(fv.values()[0], 5.0));
+        assert!(approx_eq(fv.values()[0], -2.0));
     }
 }
