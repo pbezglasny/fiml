@@ -122,13 +122,13 @@ impl IndicatorSpec {
 
     pub(crate) fn route(&self) -> FeatureRoute {
         match self {
-            Self::Sma { source, .. } | Self::Ema { source, .. } | Self::SmaTimed { source, .. } => {
-                source.route()
-            }
-            Self::Cvd { .. } | Self::ObvTimed { .. } | Self::TradeCountTimed { .. } => {
-                FeatureRoute::Kind(EventKind::Trade)
-            }
-            Self::DayOfWeek | Self::TimeSinceFirstEventOfDay { .. } => FeatureRoute::Every,
+            Self::Sma { source, .. } | Self::Ema { source, .. } => source.route(),
+            Self::Cvd { .. } => FeatureRoute::Kind(EventKind::Trade),
+            Self::SmaTimed { .. }
+            | Self::ObvTimed { .. }
+            | Self::TradeCountTimed { .. }
+            | Self::DayOfWeek
+            | Self::TimeSinceFirstEventOfDay { .. } => FeatureRoute::Every,
         }
     }
 

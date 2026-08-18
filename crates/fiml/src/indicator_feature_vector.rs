@@ -3,19 +3,16 @@ use crate::{EVENT_KIND_COUNT, Event, EventKind, FeatureVector, FimlError, Float,
 
 use std::marker::PhantomData;
 use std::mem::MaybeUninit;
-// Price,
-//     Volume,
-//     Trade,
-//     OrderBook,
-//     Time,
 
 #[derive(Clone, Copy, Default)]
-struct FeatureRange {
+struct SubscriberRange {
+    /// Index of the first entry in [`EventRouter::subscribers`].
     start: u16,
+    /// Number of consecutive entries in [`EventRouter::subscribers`].
     len: u16,
 }
 
-impl FeatureRange {
+impl SubscriberRange {
     fn as_slice(self, subscribers: &[u16]) -> &[u16] {
         let start = usize::from(self.start);
         let end = start + usize::from(self.len);
@@ -24,19 +21,71 @@ impl FeatureRange {
 }
 
 struct SymbolRouter {
-    price_subscribers: [FeatureRange; EVENT_KIND_COUNT],
+    /// Subscriber ranges for this symbol.
+    ///
+    /// Each array index is an [`EventKind`] converted to `usize`. Its value is
+    /// the range in [`EventRouter::subscribers`] containing the runtime feature
+    /// indices subscribed to that symbol and event kind.
+    event_subscribers: [SubscriberRange; EVENT_KIND_COUNT],
 }
 
+/// Maps an event's symbol and kind to the runtime features that consume it.
 struct EventRouter {
+    /// Maps interned symbols to their symbol-specific routers.
+    ///
+    /// Each array index is [`Symbol::index`]. Its value is either the index of
+    /// that symbol's [`SymbolRouter`] in [`Self::symbol_routers`] or `None` when
+    /// no feature subscribes to the symbol.
     symbol_to_index: Box<[Option<u16>]>,
+    /// Symbol-specific event routing tables.
+    ///
+    /// Each array index is the compact router index stored in
+    /// [`Self::symbol_to_index`]. Its value contains all event-kind subscriber
+    /// ranges configured for that symbol.
     symbol_routers: Box<[SymbolRouter]>,
+    /// Flattened runtime feature indices referenced by subscriber ranges.
+    ///
+    /// Each array index is a flattened subscriber position addressed by a
+    /// [`SubscriberRange`]. Its value is an index into
+    /// [`IndicatorFeatureVector::features`]. Entries belonging to one route are
+    /// stored contiguously.
+    subscribers: Box<[u16]>,
+    /// Range in [`Self::subscribers`] containing the runtime feature indices
+    /// invoked for every accepted event, including timed features.
+    always_subscribers: SubscriberRange,
 }
 
 impl EventRouter {
-    /// Return indecies of features that subscribed on this event type
+    pub(crate) fn new(
+        symbol_to_index: Box<[Option<u16>]>,
+        symbol_routers: Box<[SymbolRouter]>,
+        subscribers: Box<[u16]>,
+        always_subscribers: SubscriberRange,
+    ) -> Self {
+        Self {
+            symbol_to_index,
+            symbol_routers,
+            subscribers,
+            always_subscribers,
+        }
+    }
+
+    /// Returns runtime feature indices subscribed to this symbol and event kind.
     #[inline]
     fn route(&self, symbol: Symbol, event_kind: EventKind) -> &[u16] {
-        todo!()
+        let Some(symbol_router_index) = self.symbol_to_index.get(symbol.index()).copied().flatten()
+        else {
+            return &[];
+        };
+
+        let symbol_router = &self.symbol_routers[usize::from(symbol_router_index)];
+        symbol_router.event_subscribers[event_kind as usize].as_slice(&self.subscribers)
+    }
+
+    /// Returns runtime feature indices invoked for every accepted event.
+    #[inline]
+    fn always(&self) -> &[u16] {
+        self.always_subscribers.as_slice(&self.subscribers)
     }
 }
 
@@ -48,17 +97,15 @@ where
     feature_vector: V,
     features: [MaybeUninit<IndicatorFeaturesEnum<F>>; M],
     feature_count: usize,
-    /// Indicies of timed features, will require to update time
-    /// window at every update event
-    timed_features: [usize; M],
-    timed_feature_count: usize,
+    event_router: EventRouter,
 
     last_timestamp: Option<i64>,
     _marker: PhantomData<F>,
 }
 
 pub struct UpdateResult {
-    features_updated: usize,
+    /// Number of runtime feature handlers invoked for the accepted event.
+    pub features_updated: usize,
 }
 
 impl<F, V, const M: usize> IndicatorFeatureVector<F, V, M>
@@ -66,14 +113,116 @@ where
     F: Float,
     V: FeatureVector<F = F>,
 {
-    pub fn handle_event(&mut self, event: &Event<F>) -> Result<UpdateResult, FimlError> {
-        // take features that subscribed on this type of event
-        // call update of feature and store in vector
+    pub(crate) fn new() -> Self {
         todo!()
     }
 
-    /// Remove expired data from timed features
-    fn observe_timed_features(&self) {
-        todo!()
+    pub fn handle_event(&mut self, event: &Event<F>) -> Result<UpdateResult, FimlError> {
+        if let Some(previous_timestamp) = self.last_timestamp
+            && previous_timestamp > event.timestamp()
+        {
+            return Err(FimlError::TimestampOutOfOrder {
+                symbol: event.symbol(),
+                event_kind: event.kind(),
+                timestamp: event.timestamp(),
+                previous_timestamp,
+            });
+        }
+
+        let subscribed_features = self.event_router.route(event.symbol(), event.kind());
+        for &feature_index in subscribed_features {
+            // SAFETY: construction only registers indices in the initialized
+            // `features[..feature_count]` prefix.
+            let feature = unsafe { self.features[usize::from(feature_index)].assume_init_mut() };
+            feature.update(event, &mut self.feature_vector);
+        }
+
+        let always_features = self.event_router.always();
+        for &feature_index in always_features {
+            // SAFETY: construction only registers indices in the initialized
+            // `features[..feature_count]` prefix.
+            let feature = unsafe { self.features[usize::from(feature_index)].assume_init_mut() };
+            feature.update(event, &mut self.feature_vector);
+        }
+
+        self.last_timestamp = Some(event.timestamp());
+        Ok(UpdateResult {
+            features_updated: subscribed_features.len() + always_features.len(),
+        })
+    }
+
+    /// Return timestamp of last seen event
+    fn last_timestamp(&self) -> Option<i64> {
+        self.last_timestamp
+    }
+
+    /// Return feature vector
+    fn feature_vector(&self) -> &V {
+        &self.feature_vector
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn routes_runtime_feature_indices_by_symbol_and_event_kind() {
+        let btc = Symbol::new("router-btc");
+        let eth = Symbol::new("router-eth");
+        let symbol_count = btc.index().max(eth.index()) + 1;
+
+        let mut symbol_to_index = vec![None; symbol_count];
+        symbol_to_index[btc.index()] = Some(0);
+        symbol_to_index[eth.index()] = Some(1);
+
+        let mut btc_subscribers = [SubscriberRange::default(); EVENT_KIND_COUNT];
+        btc_subscribers[EventKind::Trade as usize] = SubscriberRange { start: 0, len: 2 };
+
+        let mut eth_subscribers = [SubscriberRange::default(); EVENT_KIND_COUNT];
+        eth_subscribers[EventKind::Price as usize] = SubscriberRange { start: 2, len: 1 };
+
+        let router = EventRouter {
+            symbol_to_index: symbol_to_index.into_boxed_slice(),
+            symbol_routers: vec![
+                SymbolRouter {
+                    event_subscribers: btc_subscribers,
+                },
+                SymbolRouter {
+                    event_subscribers: eth_subscribers,
+                },
+            ]
+            .into_boxed_slice(),
+            subscribers: vec![3, 7, 4, 8, 9].into_boxed_slice(),
+            always_subscribers: SubscriberRange { start: 3, len: 2 },
+        };
+
+        assert_eq!(router.route(btc, EventKind::Trade), [3, 7]);
+        assert_eq!(router.route(eth, EventKind::Price), [4]);
+        assert!(router.route(btc, EventKind::Price).is_empty());
+        assert_eq!(router.always(), [8, 9]);
+    }
+
+    #[test]
+    fn returns_empty_slice_for_unmapped_symbol() {
+        let configured = Symbol::new("router-configured");
+        let mut symbol_to_index = vec![None; configured.index() + 1];
+        symbol_to_index[configured.index()] = Some(0);
+
+        let router = EventRouter {
+            symbol_to_index: symbol_to_index.into_boxed_slice(),
+            symbol_routers: vec![SymbolRouter {
+                event_subscribers: [SubscriberRange::default(); EVENT_KIND_COUNT],
+            }]
+            .into_boxed_slice(),
+            subscribers: Box::new([]),
+            always_subscribers: SubscriberRange::default(),
+        };
+
+        assert!(
+            router
+                .route(Symbol::new("router-unmapped"), EventKind::Trade)
+                .is_empty()
+        );
     }
 }

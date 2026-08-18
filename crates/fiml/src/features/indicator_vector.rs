@@ -39,8 +39,6 @@ where
     feature_vector: V,
     features: [MaybeUninit<IndicatorFeaturesEnum<F>>; M],
     feature_count: usize,
-    timed_features: [usize; M],
-    timed_feature_count: usize,
     groups: [(usize, usize); FEATURE_GROUP_COUNT],
     names: Box<[String]>,
     last_timestamp: Option<i64>,
@@ -98,22 +96,10 @@ where
             features[position].write(entry.feature);
         }
 
-        let mut timed_features = [0; M];
-        let mut timed_feature_count = 0;
-        for (index, slot) in features.iter().enumerate().take(feature_count) {
-            let feature = unsafe { slot.assume_init_ref() };
-            if feature.observes_time() {
-                timed_features[timed_feature_count] = index;
-                timed_feature_count += 1;
-            }
-        }
-
         Self {
             feature_vector: cells,
             features,
             feature_count,
-            timed_features,
-            timed_feature_count,
             groups,
             names: compilation.names,
             last_timestamp: None,
@@ -128,15 +114,6 @@ where
         for slot in &mut self.features[start..start + len] {
             let feature = unsafe { slot.assume_init_mut() };
             feature.update(event, &mut self.feature_vector);
-        }
-    }
-
-    #[inline]
-    fn observe_timed_features(&mut self, event: &Event<F>) {
-        for timed_index in 0..self.timed_feature_count {
-            let feature_index = self.timed_features[timed_index];
-            let feature = unsafe { self.features[feature_index].assume_init_mut() };
-            feature.observe(event, &mut self.feature_vector);
         }
     }
 }
@@ -157,7 +134,6 @@ where
         self.validate_dispatch(event)?;
         self.run_group(self.groups[event.kind() as usize], event);
         self.run_group(self.groups[EVERY_EVENT_GROUP], event);
-        self.observe_timed_features(event);
         self.last_timestamp = Some(event.timestamp());
         Ok(())
     }
