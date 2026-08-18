@@ -2,10 +2,10 @@ use std::collections::HashSet;
 use std::time::Duration;
 
 use crate::features::FeatureRoute;
-use crate::features::builtin::{self, IndicatorFeaturesEnum};
 use crate::features::definition::{
     FeatureSet, IndicatorSpec, MAX_OUTPUTS_PER_INDICATOR, ScopedIndicator, TimeWindows, ValueSource,
 };
+use crate::features::derivation::{self, FeatureDerivation};
 use crate::{FimlError, Float, Result, Symbol};
 
 /// Contiguous output cells owned by one compiled indicator.
@@ -16,7 +16,7 @@ pub(crate) struct OutputSpan {
 }
 
 pub(crate) struct CompiledFeature<F: Float> {
-    pub(crate) feature: IndicatorFeaturesEnum<F>,
+    pub(crate) feature: FeatureDerivation<F>,
     pub(crate) route: FeatureRoute,
     pub(crate) output_span: OutputSpan,
 }
@@ -120,7 +120,7 @@ fn compile_definition<F: Float>(
     index: usize,
     definition: &ScopedIndicator,
     symbol: Option<Symbol>,
-) -> Result<(IndicatorFeaturesEnum<F>, IndicatorIdentity, Vec<String>)> {
+) -> Result<(FeatureDerivation<F>, IndicatorIdentity, Vec<String>)> {
     match &definition.indicator {
         IndicatorSpec::Sma {
             source,
@@ -129,7 +129,7 @@ fn compile_definition<F: Float>(
         } => {
             validate_sample_windows(index, definition, windows, true)?;
             let symbol = symbol.expect("validated symbol-scoped definition");
-            let feature = builtin::sma::build(symbol, *source, windows, *warmup_policy)
+            let feature = derivation::sma::build(symbol, *source, windows, *warmup_policy)
                 .map_err(|error| contextualize(index, definition, error))?;
             let names = windows
                 .iter()
@@ -146,7 +146,7 @@ fn compile_definition<F: Float>(
         } => {
             validate_sample_windows(index, definition, windows, false)?;
             let symbol = symbol.expect("validated symbol-scoped definition");
-            let feature = builtin::ema::build(symbol, *source, windows, *warmup_policy)
+            let feature = derivation::ema::build(symbol, *source, windows, *warmup_policy)
                 .map_err(|error| contextualize(index, definition, error))?;
             let names = windows
                 .iter()
@@ -162,7 +162,7 @@ fn compile_definition<F: Float>(
         } => {
             validate_sample_windows(index, definition, windows, true)?;
             let symbol = symbol.expect("validated symbol-scoped definition");
-            let feature = builtin::cvd::build(symbol, windows, *warmup_policy)
+            let feature = derivation::cvd::build(symbol, windows, *warmup_policy)
                 .map_err(|error| contextualize(index, definition, error))?;
             let names = windows
                 .iter()
@@ -177,7 +177,7 @@ fn compile_definition<F: Float>(
         } => {
             let validated = validate_time_windows(index, definition, time_windows)?;
             let symbol = symbol.expect("validated symbol-scoped definition");
-            let feature = builtin::sma::build_timed(
+            let feature = derivation::sma::build_timed(
                 symbol,
                 *source,
                 time_windows.aggregation,
@@ -210,7 +210,7 @@ fn compile_definition<F: Float>(
         } => {
             let validated = validate_time_windows(index, definition, time_windows)?;
             let symbol = symbol.expect("validated symbol-scoped definition");
-            let feature = builtin::obv::build_timed(
+            let feature = derivation::obv::build_timed(
                 symbol,
                 time_windows.aggregation,
                 &validated.periods,
@@ -245,7 +245,7 @@ fn compile_definition<F: Float>(
             let validated = validate_time_windows(index, definition, &time_windows)?;
             let symbol = symbol.expect("validated symbol-scoped definition");
             let feature =
-                builtin::trade_count::build(symbol, *aggregation, *window, *warmup_policy)
+                derivation::trade_count::build(symbol, *aggregation, *window, *warmup_policy)
                     .map_err(|error| contextualize(index, definition, error))?;
             let name = market_name(
                 symbol,
@@ -263,14 +263,14 @@ fn compile_definition<F: Float>(
             ))
         }
         IndicatorSpec::DayOfWeek => Ok((
-            builtin::day_of_week::build(),
+            derivation::day_of_week::build(),
             IndicatorIdentity::DayOfWeek,
             vec!["clock:day_of_week".to_string()],
         )),
         IndicatorSpec::TimeSinceFirstEventOfDay { utc_offset_millis } => {
             validate_utc_offset(index, definition, *utc_offset_millis)?;
             Ok((
-                builtin::time_since_first_event_of_day::build(*utc_offset_millis),
+                derivation::time_since_first_event_of_day::build(*utc_offset_millis),
                 IndicatorIdentity::TimeSinceFirstEventOfDay(*utc_offset_millis),
                 vec![format!(
                     "clock:time_since_first_event_of_day:{utc_offset_millis}ms"

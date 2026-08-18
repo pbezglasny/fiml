@@ -1,9 +1,9 @@
 use std::time::Duration;
 
 use crate::event::Event;
-use crate::features::builtin::{IndicatorFeaturesEnum, write_outputs};
 use crate::features::compiler::OutputSpan;
 use crate::features::definition::MAX_OUTPUTS_PER_INDICATOR;
+use crate::features::derivation::{FeatureDerivation, write_outputs};
 use crate::indicators::{ObvBucket, OnBalanceVolumeTimed};
 use crate::vectors::FeatureVector;
 use crate::{FimlError, Float, HeapRingBuffer, Result, Symbol, WarmupPolicy};
@@ -46,7 +46,7 @@ pub(crate) fn build_timed<F: Float>(
     periods: &[usize],
     max_period: usize,
     warmup_policy: WarmupPolicy,
-) -> Result<IndicatorFeaturesEnum<F>> {
+) -> Result<FeatureDerivation<F>> {
     let capacity = max_period
         .checked_add(1)
         .ok_or_else(|| FimlError::InvalidArgument("OBV timed period is too large".to_string()))?;
@@ -59,7 +59,7 @@ pub(crate) fn build_timed<F: Float>(
     for &period in periods {
         obv.add_window_with_periods(period)?;
     }
-    Ok(IndicatorFeaturesEnum::ObvTimed(ObvTimedFeature::new(
+    Ok(FeatureDerivation::ObvTimed(ObvTimedFeature::new(
         symbol, obv,
     )))
 }

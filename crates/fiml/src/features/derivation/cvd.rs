@@ -1,7 +1,7 @@
 use crate::event::Event;
-use crate::features::builtin::{IndicatorFeaturesEnum, write_outputs};
 use crate::features::compiler::OutputSpan;
 use crate::features::definition::MAX_OUTPUTS_PER_INDICATOR;
+use crate::features::derivation::{FeatureDerivation, write_outputs};
 use crate::indicators::CumulativeVolumeDelta;
 use crate::vectors::FeatureVector;
 use crate::{Float, HeapRingBuffer, Result, Symbol, WarmupPolicy};
@@ -39,7 +39,7 @@ pub(crate) fn build<F: Float>(
     symbol: Symbol,
     windows: &[usize],
     warmup_policy: WarmupPolicy,
-) -> Result<IndicatorFeaturesEnum<F>> {
+) -> Result<FeatureDerivation<F>> {
     let max_window = windows.iter().copied().max().unwrap_or(0);
     let mut cvd =
         CumulativeVolumeDelta::<HeapRingBuffer<F>, F, MAX_OUTPUTS_PER_INDICATOR>::new_heap(
@@ -49,7 +49,7 @@ pub(crate) fn build<F: Float>(
     for &window in windows {
         cvd.add_window(window)?;
     }
-    Ok(IndicatorFeaturesEnum::Cvd(CvdFeature::new(symbol, cvd)))
+    Ok(FeatureDerivation::Cvd(CvdFeature::new(symbol, cvd)))
 }
 
 #[cfg(test)]
@@ -63,7 +63,7 @@ mod tests {
         let aapl = symbols::intern("AAPL");
         let googl = symbols::intern("GOOGL");
         let mut feature = match build::<f64>(aapl, &[1, 2], WarmupPolicy::FirstValue).unwrap() {
-            IndicatorFeaturesEnum::Cvd(feature) => feature,
+            FeatureDerivation::Cvd(feature) => feature,
             _ => unreachable!(),
         };
         let mut output = ArrayFeatureVector::<f64, 2>::new();

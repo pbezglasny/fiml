@@ -1,5 +1,5 @@
-use crate::features::builtin::IndicatorFeaturesEnum;
 use crate::features::compiler::OutputSpan;
+use crate::features::derivation::FeatureDerivation;
 use crate::{EVENT_KIND_COUNT, Event, EventKind, FeatureVector, FimlError, Float, Symbol};
 
 use std::marker::PhantomData;
@@ -102,7 +102,7 @@ where
 {
     feature_vector: V,
     /// Runtime features stored in the initialized `[..feature_count]` prefix.
-    features: [MaybeUninit<IndicatorFeaturesEnum<F>>; M],
+    features: [MaybeUninit<FeatureDerivation<F>>; M],
     /// Output spans corresponding one-to-one with [`Self::features`].
     ///
     /// Each initialized array index is a runtime feature index. Its value is
@@ -177,7 +177,7 @@ where
     }
 
     fn update_subscribers(
-        features: &mut [MaybeUninit<IndicatorFeaturesEnum<F>>; M],
+        features: &mut [MaybeUninit<FeatureDerivation<F>>; M],
         output_spans: &[MaybeUninit<OutputSpan>; M],
         feature_vector: &mut V,
         subscribers: &[u16],
@@ -277,7 +277,7 @@ mod tests {
     #[test]
     fn passes_the_matching_output_span_to_the_feature() {
         let mut features = [const { MaybeUninit::uninit() }; 1];
-        features[0].write(crate::features::builtin::day_of_week::build());
+        features[0].write(crate::features::derivation::day_of_week::build());
 
         let mut output_spans = [const { MaybeUninit::uninit() }; 1];
         output_spans[0].write(OutputSpan { start: 1, count: 1 });

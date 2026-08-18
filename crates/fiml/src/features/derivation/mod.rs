@@ -19,10 +19,13 @@ use sma::{SmaFeature, SmaTimedFeature};
 use time_since_first_event_of_day::TimeSinceFirstEventOfDay;
 use trade_count::TradeCountTimedFeature;
 
-/// Closed runtime adapter enum for indicators shipped by the library.
+/// Closed set of feature derivations executed by
+/// [`FeatureExtractor`](crate::features::FeatureExtractor).
 ///
-/// Dispatch is a match of direct calls, with no `Box` or vtable.
-pub(crate) enum IndicatorFeaturesEnum<F: Float> {
+/// Each variant consumes events, updates its calculation state, and writes its
+/// current values into an assigned output span. Dispatch is a match of direct
+/// calls, with no `Box` or vtable.
+pub(crate) enum FeatureDerivation<F: Float> {
     Cvd(CvdFeature<F>),
     Sma(SmaFeature<F>),
     Ema(EmaFeature<F>),
@@ -33,7 +36,7 @@ pub(crate) enum IndicatorFeaturesEnum<F: Float> {
     TimeSinceFirstEventOfDay(TimeSinceFirstEventOfDay),
 }
 
-impl<F: Float> IndicatorFeaturesEnum<F> {
+impl<F: Float> FeatureDerivation<F> {
     pub(crate) fn update<O: FeatureVector<F = F>>(
         &mut self,
         event: &Event<F>,

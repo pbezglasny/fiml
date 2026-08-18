@@ -1,9 +1,9 @@
 use std::time::Duration;
 
 use crate::event::Event;
-use crate::features::builtin::{IndicatorFeaturesEnum, write_outputs};
 use crate::features::compiler::OutputSpan;
 use crate::features::definition::{MAX_OUTPUTS_PER_INDICATOR, ValueSource};
+use crate::features::derivation::{FeatureDerivation, write_outputs};
 use crate::indicators::{SimpleMovingAverage, SimpleMovingAverageTimed};
 use crate::vectors::FeatureVector;
 use crate::{FimlError, Float, HeapRingBuffer, Result, Symbol, WarmupPolicy};
@@ -80,7 +80,7 @@ pub(crate) fn build<F: Float>(
     source: ValueSource,
     windows: &[usize],
     warmup_policy: WarmupPolicy,
-) -> Result<IndicatorFeaturesEnum<F>> {
+) -> Result<FeatureDerivation<F>> {
     let max_window = windows.iter().copied().max().unwrap_or(0);
     let mut sma = SimpleMovingAverage::<HeapRingBuffer<F>, F, MAX_OUTPUTS_PER_INDICATOR>::new_heap(
         max_window,
@@ -89,9 +89,7 @@ pub(crate) fn build<F: Float>(
     for &window in windows {
         sma.add_window(window)?;
     }
-    Ok(IndicatorFeaturesEnum::Sma(SmaFeature::new(
-        symbol, source, sma,
-    )))
+    Ok(FeatureDerivation::Sma(SmaFeature::new(symbol, source, sma)))
 }
 
 pub(crate) fn build_timed<F: Float>(
@@ -101,7 +99,7 @@ pub(crate) fn build_timed<F: Float>(
     periods: &[usize],
     max_period: usize,
     warmup_policy: WarmupPolicy,
-) -> Result<IndicatorFeaturesEnum<F>> {
+) -> Result<FeatureDerivation<F>> {
     let capacity = max_period
         .checked_add(1)
         .ok_or_else(|| FimlError::InvalidArgument("SMA timed period is too large".to_string()))?;
@@ -113,7 +111,7 @@ pub(crate) fn build_timed<F: Float>(
     for &period in periods {
         sma.add_window_with_periods(period)?;
     }
-    Ok(IndicatorFeaturesEnum::SmaTimed(SmaTimedFeature::new(
+    Ok(FeatureDerivation::SmaTimed(SmaTimedFeature::new(
         symbol, source, sma,
     )))
 }
@@ -138,7 +136,7 @@ mod tests {
         )
         .unwrap()
         {
-            IndicatorFeaturesEnum::Sma(feature) => feature,
+            FeatureDerivation::Sma(feature) => feature,
             _ => unreachable!(),
         };
         let mut output = ArrayFeatureVector::<f64, 2>::new();
@@ -163,7 +161,7 @@ mod tests {
         )
         .unwrap()
         {
-            IndicatorFeaturesEnum::Sma(feature) => feature,
+            FeatureDerivation::Sma(feature) => feature,
             _ => unreachable!(),
         };
         let mut output = ArrayFeatureVector::<f64, 1>::new();

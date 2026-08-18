@@ -1,7 +1,8 @@
 mod builder;
-pub(crate) mod builtin;
 pub(crate) mod compiler;
 mod definition;
+pub(crate) mod derivation;
+mod feature_extractor;
 mod feature_id;
 mod feature_key;
 mod feature_source;
@@ -36,6 +37,7 @@ pub use builder::FeatureSetBuilder;
 pub use definition::{
     FeatureSet, IndicatorSpec, MAX_OUTPUTS_PER_INDICATOR, ScopedIndicator, TimeWindows, ValueSource,
 };
+pub use feature_extractor::{FeatureExtractor, UpdateResult};
 pub use feature_id::FeatureId;
 pub use feature_key::FeatureKey;
 pub use feature_source::{EventField, FeatureSource};
