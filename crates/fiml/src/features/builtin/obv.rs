@@ -11,25 +11,20 @@ use crate::{FimlError, Float, HeapRingBuffer, Result, Symbol, WarmupPolicy};
 pub(crate) struct ObvTimedFeature<F: Float> {
     symbol: Symbol,
     obv: OnBalanceVolumeTimed<HeapRingBuffer<ObvBucket<F>>, F, MAX_OUTPUTS_PER_INDICATOR>,
-    output_span: OutputSpan,
 }
 
 impl<F: Float> ObvTimedFeature<F> {
     pub(crate) fn new(
         symbol: Symbol,
         obv: OnBalanceVolumeTimed<HeapRingBuffer<ObvBucket<F>>, F, MAX_OUTPUTS_PER_INDICATOR>,
-        output_span: OutputSpan,
     ) -> Self {
-        Self {
-            symbol,
-            obv,
-            output_span,
-        }
+        Self { symbol, obv }
     }
 
     pub(in crate::features) fn update<O: FeatureVector<F = F>>(
         &mut self,
         event: &Event<F>,
+        output_span: OutputSpan,
         output: &mut O,
     ) {
         if let Event::Trade(trade) = event
@@ -41,9 +36,7 @@ impl<F: Float> ObvTimedFeature<F> {
             return;
         }
 
-        write_outputs(self.output_span, output, |index| {
-            self.obv.window_value(index)
-        });
+        write_outputs(output_span, output, |index| self.obv.window_value(index));
     }
 }
 
@@ -53,9 +46,7 @@ pub(crate) fn build_timed<F: Float>(
     periods: &[usize],
     max_period: usize,
     warmup_policy: WarmupPolicy,
-    output_span: OutputSpan,
 ) -> Result<IndicatorFeaturesEnum<F>> {
-    debug_assert_eq!(periods.len(), output_span.count);
     let capacity = max_period
         .checked_add(1)
         .ok_or_else(|| FimlError::InvalidArgument("OBV timed period is too large".to_string()))?;
@@ -69,9 +60,7 @@ pub(crate) fn build_timed<F: Float>(
         obv.add_window_with_periods(period)?;
     }
     Ok(IndicatorFeaturesEnum::ObvTimed(ObvTimedFeature::new(
-        symbol,
-        obv,
-        output_span,
+        symbol, obv,
     )))
 }
 
@@ -101,13 +90,30 @@ mod tests {
         .unwrap();
         obv.add_window_with_periods(2).unwrap();
 
-        let mut feat = ObvTimedFeature::new(aapl, obv, OutputSpan { start: 0, count: 1 });
-        feat.update(&Event::trade(aapl, 100.0, 10.0, 0, None), &mut fv);
-        feat.update(&Event::trade(aapl, 101.0, 7.0, 1_000, None), &mut fv);
-        feat.update(&Event::trade(aapl, 99.0, 2.0, 2_000, None), &mut fv);
-        feat.update(&Event::price(aapl, 200.0, 3_000), &mut fv);
-        feat.update(&Event::trade(googl, 110.0, 99.0, 3_000, None), &mut fv);
-        feat.update(&Event::time(3_000), &mut fv);
+        let mut feat = ObvTimedFeature::new(aapl, obv);
+        let output_span = OutputSpan { start: 0, count: 1 };
+        feat.update(
+            &Event::trade(aapl, 100.0, 10.0, 0, None),
+            output_span,
+            &mut fv,
+        );
+        feat.update(
+            &Event::trade(aapl, 101.0, 7.0, 1_000, None),
+            output_span,
+            &mut fv,
+        );
+        feat.update(
+            &Event::trade(aapl, 99.0, 2.0, 2_000, None),
+            output_span,
+            &mut fv,
+        );
+        feat.update(&Event::price(aapl, 200.0, 3_000), output_span, &mut fv);
+        feat.update(
+            &Event::trade(googl, 110.0, 99.0, 3_000, None),
+            output_span,
+            &mut fv,
+        );
+        feat.update(&Event::time(3_000), output_span, &mut fv);
 
         assert!(approx_eq(fv.values()[0], -2.0));
     }

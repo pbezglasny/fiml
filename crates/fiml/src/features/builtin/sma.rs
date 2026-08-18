@@ -12,7 +12,6 @@ pub(crate) struct SmaFeature<F: Float> {
     symbol: Symbol,
     source: ValueSource,
     sma: SimpleMovingAverage<HeapRingBuffer<F>, F, MAX_OUTPUTS_PER_INDICATOR>,
-    output_span: OutputSpan,
 }
 
 impl<F: Float> SmaFeature<F> {
@@ -20,24 +19,23 @@ impl<F: Float> SmaFeature<F> {
         symbol: Symbol,
         source: ValueSource,
         sma: SimpleMovingAverage<HeapRingBuffer<F>, F, MAX_OUTPUTS_PER_INDICATOR>,
-        output_span: OutputSpan,
     ) -> Self {
         Self {
             symbol,
             source,
             sma,
-            output_span,
         }
     }
 
     pub(in crate::features) fn update<O: FeatureVector<F = F>>(
         &mut self,
         event: &Event<F>,
+        output_span: OutputSpan,
         output: &mut O,
     ) {
         if let Some(value) = self.source.value(event, self.symbol) {
             self.sma.update(value);
-            write_outputs(self.output_span, output, |index| self.sma.value_at(index));
+            write_outputs(output_span, output, |index| self.sma.value_at(index));
         }
     }
 }
@@ -46,7 +44,6 @@ pub(crate) struct SmaTimedFeature<F: Float> {
     symbol: Symbol,
     source: ValueSource,
     sma: SimpleMovingAverageTimed<HeapRingBuffer<(i64, F)>, F, MAX_OUTPUTS_PER_INDICATOR>,
-    output_span: OutputSpan,
 }
 
 impl<F: Float> SmaTimedFeature<F> {
@@ -54,19 +51,18 @@ impl<F: Float> SmaTimedFeature<F> {
         symbol: Symbol,
         source: ValueSource,
         sma: SimpleMovingAverageTimed<HeapRingBuffer<(i64, F)>, F, MAX_OUTPUTS_PER_INDICATOR>,
-        output_span: OutputSpan,
     ) -> Self {
         Self {
             symbol,
             source,
             sma,
-            output_span,
         }
     }
 
     pub(in crate::features) fn update<O: FeatureVector<F = F>>(
         &mut self,
         event: &Event<F>,
+        output_span: OutputSpan,
         output: &mut O,
     ) {
         if let Some(value) = self.source.value(event, self.symbol) {
@@ -75,7 +71,7 @@ impl<F: Float> SmaTimedFeature<F> {
             return;
         }
 
-        write_outputs(self.output_span, output, |index| self.sma.value_at(index));
+        write_outputs(output_span, output, |index| self.sma.value_at(index));
     }
 }
 
@@ -84,9 +80,7 @@ pub(crate) fn build<F: Float>(
     source: ValueSource,
     windows: &[usize],
     warmup_policy: WarmupPolicy,
-    output_span: OutputSpan,
 ) -> Result<IndicatorFeaturesEnum<F>> {
-    debug_assert_eq!(windows.len(), output_span.count);
     let max_window = windows.iter().copied().max().unwrap_or(0);
     let mut sma = SimpleMovingAverage::<HeapRingBuffer<F>, F, MAX_OUTPUTS_PER_INDICATOR>::new_heap(
         max_window,
@@ -96,10 +90,7 @@ pub(crate) fn build<F: Float>(
         sma.add_window(window)?;
     }
     Ok(IndicatorFeaturesEnum::Sma(SmaFeature::new(
-        symbol,
-        source,
-        sma,
-        output_span,
+        symbol, source, sma,
     )))
 }
 
@@ -110,9 +101,7 @@ pub(crate) fn build_timed<F: Float>(
     periods: &[usize],
     max_period: usize,
     warmup_policy: WarmupPolicy,
-    output_span: OutputSpan,
 ) -> Result<IndicatorFeaturesEnum<F>> {
-    debug_assert_eq!(periods.len(), output_span.count);
     let capacity = max_period
         .checked_add(1)
         .ok_or_else(|| FimlError::InvalidArgument("SMA timed period is too large".to_string()))?;
@@ -125,10 +114,7 @@ pub(crate) fn build_timed<F: Float>(
         sma.add_window_with_periods(period)?;
     }
     Ok(IndicatorFeaturesEnum::SmaTimed(SmaTimedFeature::new(
-        symbol,
-        source,
-        sma,
-        output_span,
+        symbol, source, sma,
     )))
 }
 
@@ -149,7 +135,6 @@ mod tests {
             ValueSource::Price,
             &[2, 3],
             WarmupPolicy::FullWindow,
-            OutputSpan { start: 0, count: 2 },
         )
         .unwrap()
         {
@@ -157,9 +142,10 @@ mod tests {
             _ => unreachable!(),
         };
         let mut output = ArrayFeatureVector::<f64, 2>::new();
+        let output_span = OutputSpan { start: 0, count: 2 };
 
         for value in [1.0, 2.0, 3.0] {
-            feature.update(&Event::price(symbol, value, 0), &mut output);
+            feature.update(&Event::price(symbol, value, 0), output_span, &mut output);
         }
 
         assert!(approx_eq(output.values()[0], 2.5));
@@ -174,7 +160,6 @@ mod tests {
             ValueSource::TradeVolume,
             &[2],
             WarmupPolicy::FullWindow,
-            OutputSpan { start: 0, count: 1 },
         )
         .unwrap()
         {
@@ -182,9 +167,18 @@ mod tests {
             _ => unreachable!(),
         };
         let mut output = ArrayFeatureVector::<f64, 1>::new();
+        let output_span = OutputSpan { start: 0, count: 1 };
 
-        feature.update(&Event::trade(symbol, 100.0, 4.0, 0, None), &mut output);
-        feature.update(&Event::trade(symbol, 101.0, 6.0, 1, None), &mut output);
+        feature.update(
+            &Event::trade(symbol, 100.0, 4.0, 0, None),
+            output_span,
+            &mut output,
+        );
+        feature.update(
+            &Event::trade(symbol, 101.0, 6.0, 1, None),
+            output_span,
+            &mut output,
+        );
 
         assert!(approx_eq(output.values()[0], 5.0));
     }

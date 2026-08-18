@@ -9,25 +9,20 @@ use crate::{Float, HeapRingBuffer, Result, Symbol, WarmupPolicy};
 pub(crate) struct CvdFeature<F: Float> {
     symbol: Symbol,
     cvd: CumulativeVolumeDelta<HeapRingBuffer<F>, F, MAX_OUTPUTS_PER_INDICATOR>,
-    output_span: OutputSpan,
 }
 
 impl<F: Float> CvdFeature<F> {
     pub(crate) fn new(
         symbol: Symbol,
         cvd: CumulativeVolumeDelta<HeapRingBuffer<F>, F, MAX_OUTPUTS_PER_INDICATOR>,
-        output_span: OutputSpan,
     ) -> Self {
-        Self {
-            symbol,
-            cvd,
-            output_span,
-        }
+        Self { symbol, cvd }
     }
 
     pub(in crate::features) fn update<O: FeatureVector<F = F>>(
         &mut self,
         event: &Event<F>,
+        output_span: OutputSpan,
         output: &mut O,
     ) {
         if let Event::Trade(trade) = event
@@ -35,7 +30,7 @@ impl<F: Float> CvdFeature<F> {
             && let Some(side) = trade.side
         {
             self.cvd.update_inner(trade.volume, side);
-            write_outputs(self.output_span, output, |index| self.cvd.value_at(index));
+            write_outputs(output_span, output, |index| self.cvd.value_at(index));
         }
     }
 }
@@ -44,9 +39,7 @@ pub(crate) fn build<F: Float>(
     symbol: Symbol,
     windows: &[usize],
     warmup_policy: WarmupPolicy,
-    output_span: OutputSpan,
 ) -> Result<IndicatorFeaturesEnum<F>> {
-    debug_assert_eq!(windows.len(), output_span.count);
     let max_window = windows.iter().copied().max().unwrap_or(0);
     let mut cvd =
         CumulativeVolumeDelta::<HeapRingBuffer<F>, F, MAX_OUTPUTS_PER_INDICATOR>::new_heap(
@@ -56,11 +49,7 @@ pub(crate) fn build<F: Float>(
     for &window in windows {
         cvd.add_window(window)?;
     }
-    Ok(IndicatorFeaturesEnum::Cvd(CvdFeature::new(
-        symbol,
-        cvd,
-        output_span,
-    )))
+    Ok(IndicatorFeaturesEnum::Cvd(CvdFeature::new(symbol, cvd)))
 }
 
 #[cfg(test)]
@@ -73,34 +62,36 @@ mod tests {
     fn grouped_cvd_uses_trade_side_and_ignores_unclassified_trades() {
         let aapl = symbols::intern("AAPL");
         let googl = symbols::intern("GOOGL");
-        let mut feature = match build::<f64>(
-            aapl,
-            &[1, 2],
-            WarmupPolicy::FirstValue,
-            OutputSpan { start: 0, count: 2 },
-        )
-        .unwrap()
-        {
+        let mut feature = match build::<f64>(aapl, &[1, 2], WarmupPolicy::FirstValue).unwrap() {
             IndicatorFeaturesEnum::Cvd(feature) => feature,
             _ => unreachable!(),
         };
         let mut output = ArrayFeatureVector::<f64, 2>::new();
+        let output_span = OutputSpan { start: 0, count: 2 };
 
         feature.update(
             &Event::trade(aapl, 100.0, 10.0, 0, Some(TradeSide::AgressorBuy)),
+            output_span,
             &mut output,
         );
         feature.update(
             &Event::trade(aapl, 99.0, 3.0, 1, Some(TradeSide::AgressorSell)),
+            output_span,
             &mut output,
         );
-        feature.update(&Event::trade(aapl, 101.0, 50.0, 2, None), &mut output);
+        feature.update(
+            &Event::trade(aapl, 101.0, 50.0, 2, None),
+            output_span,
+            &mut output,
+        );
         feature.update(
             &Event::trade(googl, 200.0, 80.0, 3, Some(TradeSide::AgressorBuy)),
+            output_span,
             &mut output,
         );
         feature.update(
             &Event::trade(aapl, 102.0, 2.0, 4, Some(TradeSide::AgressorBuy)),
+            output_span,
             &mut output,
         );
 

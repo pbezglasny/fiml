@@ -1,6 +1,6 @@
 pub mod event;
+mod feature_extractor;
 pub mod features;
-mod indicator_feature_vector;
 pub mod indicators;
 pub mod order_book;
 mod ring_buffer;
@@ -16,10 +16,11 @@ pub use event::{
     EVENT_KIND_COUNT, Event, EventKind, OrderBookDeltaUpdate, PriceUpdate, TimeUpdate, TradeSide,
     TradeUpdate, VolumeUpdate,
 };
+pub use feature_extractor::{FeatureExtractor, UpdateResult};
 pub use features::{
-    DispatchSequenceError, EventField, FeatureDefinition, FeatureExtractor, FeatureId, FeatureKey,
-    FeatureSet, FeatureSetBuilder, FeatureSource, IndicatorFeatureVector, IndicatorFeatures,
-    IndicatorSpec, MAX_OUTPUTS_PER_INDICATOR, ScopedIndicator, TimeWindows, ValueSource,
+    EventField, FeatureDefinition, FeatureId, FeatureKey, FeatureSet, FeatureSetBuilder,
+    FeatureSource, IndicatorSpec, MAX_OUTPUTS_PER_INDICATOR, ScopedIndicator, TimeWindows,
+    ValueSource,
 };
 pub use indicators::{CumulativeVolumeDelta, ObvBucket, OnBalanceVolumeTimed};
 pub use ring_buffer::{
