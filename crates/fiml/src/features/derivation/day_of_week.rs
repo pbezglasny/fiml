@@ -1,7 +1,7 @@
 use crate::Float;
 use crate::event::Event;
-use crate::features::builtin::IndicatorFeaturesEnum;
 use crate::features::compiler::OutputSpan;
+use crate::features::derivation::FeatureDerivation;
 use crate::vectors::FeatureVector;
 
 /// Milliseconds in a day. Event timestamps are epoch milliseconds, so the
@@ -27,8 +27,8 @@ impl DayOfWeek {
     }
 }
 
-pub(crate) fn build<F: Float>() -> IndicatorFeaturesEnum<F> {
-    IndicatorFeaturesEnum::DayOfWeek(DayOfWeek)
+pub(crate) fn build<F: Float>() -> FeatureDerivation<F> {
+    FeatureDerivation::DayOfWeek(DayOfWeek)
 }
 
 #[cfg(test)]

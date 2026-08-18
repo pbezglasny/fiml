@@ -1,7 +1,7 @@
 use crate::event::Event;
-use crate::features::builtin::{IndicatorFeaturesEnum, write_outputs};
 use crate::features::compiler::OutputSpan;
 use crate::features::definition::{MAX_OUTPUTS_PER_INDICATOR, ValueSource};
+use crate::features::derivation::{FeatureDerivation, write_outputs};
 use crate::indicators::ExponentialMovingAverage;
 use crate::vectors::FeatureVector;
 use crate::{Float, Result, Symbol, WarmupPolicy};
@@ -43,14 +43,12 @@ pub(crate) fn build<F: Float>(
     source: ValueSource,
     windows: &[usize],
     warmup_policy: WarmupPolicy,
-) -> Result<IndicatorFeaturesEnum<F>> {
+) -> Result<FeatureDerivation<F>> {
     let mut ema = ExponentialMovingAverage::<F, MAX_OUTPUTS_PER_INDICATOR>::new(warmup_policy);
     for &window in windows {
         ema.add_window(window)?;
     }
-    Ok(IndicatorFeaturesEnum::Ema(EmaFeature::new(
-        symbol, source, ema,
-    )))
+    Ok(FeatureDerivation::Ema(EmaFeature::new(symbol, source, ema)))
 }
 
 #[cfg(test)]

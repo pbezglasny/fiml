@@ -1,0 +1,57 @@
+{
+  "version": "1.0",
+  "feature_vector_capacity": 128,
+  "feature_vector_length": 100,
+  "check_hash_sum": "123",
+  "features": [
+    {
+      "symbol": "__global__",
+      "indicators": [
+        {
+          "kind": "hour_of_day",
+          "options": {
+            "utc_offset": "0h"
+          }
+        }
+      ]
+    },
+    {
+      "symbol": "btcusd",
+      "indicators": [
+        {
+          "kind": "sma",
+          "source": "price",
+          "warmup_policy": "full_window",
+          "options": {
+            "windows": [
+              5,
+              10
+            ]
+          }
+        },
+        {
+          "kind": "sma",
+          "source": "volume",
+          "warmup_policy": "full_window",
+          "options": {
+            "windows": [
+              5,
+              10
+            ]
+          }
+        },
+        {
+          "kind": "cvd_timed",
+          "warmup_policy": "full_window",
+          "options": {
+            "aggregation": "100ms",
+            "windows": [
+              "5s",
+              "30s"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -1,7 +1,7 @@
 use crate::Float;
 use crate::event::Event;
-use crate::features::builtin::IndicatorFeaturesEnum;
 use crate::features::compiler::OutputSpan;
+use crate::features::derivation::FeatureDerivation;
 use crate::vectors::FeatureVector;
 
 /// Milliseconds in a day. Event timestamps are epoch milliseconds, so the
@@ -50,10 +50,8 @@ impl TimeSinceFirstEventOfDay {
     }
 }
 
-pub(crate) fn build<F: Float>(utc_offset_millis: i64) -> IndicatorFeaturesEnum<F> {
-    IndicatorFeaturesEnum::TimeSinceFirstEventOfDay(TimeSinceFirstEventOfDay::new(
-        utc_offset_millis,
-    ))
+pub(crate) fn build<F: Float>(utc_offset_millis: i64) -> FeatureDerivation<F> {
+    FeatureDerivation::TimeSinceFirstEventOfDay(TimeSinceFirstEventOfDay::new(utc_offset_millis))
 }
 
 #[cfg(test)]
