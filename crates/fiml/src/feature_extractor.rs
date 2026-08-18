@@ -1,4 +1,5 @@
 use crate::features::builtin::IndicatorFeaturesEnum;
+use crate::features::compiler::OutputSpan;
 use crate::{EVENT_KIND_COUNT, Event, EventKind, FeatureVector, FimlError, Float, Symbol};
 
 use std::marker::PhantomData;
@@ -47,7 +48,7 @@ struct EventRouter {
     ///
     /// Each array index is a flattened subscriber position addressed by a
     /// [`SubscriberRange`]. Its value is an index into
-    /// [`IndicatorFeatureVector::features`]. Entries belonging to one route are
+    /// [`FeatureExtractor::features`]. Entries belonging to one route are
     /// stored contiguously.
     subscribers: Box<[u16]>,
     /// Range in [`Self::subscribers`] containing the runtime feature indices
@@ -89,13 +90,25 @@ impl EventRouter {
     }
 }
 
-pub struct IndicatorFeatureVector<F, V, const M: usize>
+/// Stateful, fixed-capacity extractor that routes events to subscribed features.
+///
+/// The extractor owns the runtime feature state and the output feature vector.
+/// Handling an event updates the subscribed features directly in that vector
+/// without allocating on the event-processing path.
+pub struct FeatureExtractor<F, V, const M: usize>
 where
     F: Float,
     V: FeatureVector<F = F>,
 {
     feature_vector: V,
+    /// Runtime features stored in the initialized `[..feature_count]` prefix.
     features: [MaybeUninit<IndicatorFeaturesEnum<F>>; M],
+    /// Output spans corresponding one-to-one with [`Self::features`].
+    ///
+    /// Each initialized array index is a runtime feature index. Its value is
+    /// the contiguous range of feature-vector cells written by the feature at
+    /// the same index in [`Self::features`].
+    output_spans: [MaybeUninit<OutputSpan>; M],
     feature_count: usize,
     event_router: EventRouter,
 
@@ -108,7 +121,7 @@ pub struct UpdateResult {
     pub features_updated: usize,
 }
 
-impl<F, V, const M: usize> IndicatorFeatureVector<F, V, M>
+impl<F, V, const M: usize> FeatureExtractor<F, V, M>
 where
     F: Float,
     V: FeatureVector<F = F>,
@@ -130,20 +143,22 @@ where
         }
 
         let subscribed_features = self.event_router.route(event.symbol(), event.kind());
-        for &feature_index in subscribed_features {
-            // SAFETY: construction only registers indices in the initialized
-            // `features[..feature_count]` prefix.
-            let feature = unsafe { self.features[usize::from(feature_index)].assume_init_mut() };
-            feature.update(event, &mut self.feature_vector);
-        }
+        Self::update_subscribers(
+            &mut self.features,
+            &self.output_spans,
+            &mut self.feature_vector,
+            subscribed_features,
+            event,
+        );
 
         let always_features = self.event_router.always();
-        for &feature_index in always_features {
-            // SAFETY: construction only registers indices in the initialized
-            // `features[..feature_count]` prefix.
-            let feature = unsafe { self.features[usize::from(feature_index)].assume_init_mut() };
-            feature.update(event, &mut self.feature_vector);
-        }
+        Self::update_subscribers(
+            &mut self.features,
+            &self.output_spans,
+            &mut self.feature_vector,
+            always_features,
+            event,
+        );
 
         self.last_timestamp = Some(event.timestamp());
         Ok(UpdateResult {
@@ -152,19 +167,52 @@ where
     }
 
     /// Return timestamp of last seen event
-    fn last_timestamp(&self) -> Option<i64> {
+    pub fn last_timestamp(&self) -> Option<i64> {
         self.last_timestamp
     }
 
     /// Return feature vector
-    fn feature_vector(&self) -> &V {
+    pub fn feature_vector(&self) -> &V {
         &self.feature_vector
+    }
+
+    fn update_subscribers(
+        features: &mut [MaybeUninit<IndicatorFeaturesEnum<F>>; M],
+        output_spans: &[MaybeUninit<OutputSpan>; M],
+        feature_vector: &mut V,
+        subscribers: &[u16],
+        event: &Event<F>,
+    ) {
+        for &feature_index in subscribers {
+            let feature_index = usize::from(feature_index);
+
+            // SAFETY: construction initializes matching entries in `features`
+            // and `output_spans` before registering the index with the router.
+            let feature = unsafe { features[feature_index].assume_init_mut() };
+            let output_span = unsafe { *output_spans[feature_index].assume_init_ref() };
+            feature.update(event, output_span, feature_vector);
+        }
+    }
+}
+
+impl<F, V, const M: usize> Drop for FeatureExtractor<F, V, M>
+where
+    F: Float,
+    V: FeatureVector<F = F>,
+{
+    fn drop(&mut self) {
+        // SAFETY: construction initializes exactly the
+        // `features[..feature_count]` prefix.
+        for feature in &mut self.features[..self.feature_count] {
+            unsafe { feature.assume_init_drop() };
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{ArrayFeatureVector, FeatureVector};
 
     #[test]
     fn routes_runtime_feature_indices_by_symbol_and_event_kind() {
@@ -224,5 +272,36 @@ mod tests {
                 .route(Symbol::new("router-unmapped"), EventKind::Trade)
                 .is_empty()
         );
+    }
+
+    #[test]
+    fn passes_the_matching_output_span_to_the_feature() {
+        let mut features = [const { MaybeUninit::uninit() }; 1];
+        features[0].write(crate::features::builtin::day_of_week::build());
+
+        let mut output_spans = [const { MaybeUninit::uninit() }; 1];
+        output_spans[0].write(OutputSpan { start: 1, count: 1 });
+
+        let mut vector = FeatureExtractor::<f64, ArrayFeatureVector<f64, 2>, 1> {
+            feature_vector: ArrayFeatureVector::new(),
+            features,
+            output_spans,
+            feature_count: 1,
+            event_router: EventRouter {
+                symbol_to_index: Box::new([]),
+                symbol_routers: Box::new([]),
+                subscribers: vec![0].into_boxed_slice(),
+                always_subscribers: SubscriberRange { start: 0, len: 1 },
+            },
+            last_timestamp: None,
+            _marker: PhantomData,
+        };
+
+        let result = vector
+            .handle_event(&Event::time(1_609_459_200_000))
+            .unwrap();
+
+        assert_eq!(result.features_updated, 1);
+        assert_eq!(vector.feature_vector().values(), [0.0, 5.0]);
     }
 }

@@ -14,7 +14,6 @@ const MILLIS_PER_DAY: i64 = 86_400_000;
 /// regardless of kind. The day boundary uses a fixed UTC offset
 /// (`utc_offset_millis`, `0` = UTC).
 pub(crate) struct TimeSinceFirstEventOfDay {
-    output_span: OutputSpan,
     /// Timezone offset applied before computing the day boundary, in milliseconds.
     utc_offset_millis: i64,
     /// Day index (in the offset timezone) of the current day, or `None`
@@ -25,17 +24,21 @@ pub(crate) struct TimeSinceFirstEventOfDay {
 }
 
 impl TimeSinceFirstEventOfDay {
-    pub(crate) fn new(output_span: OutputSpan, utc_offset_millis: i64) -> Self {
-        debug_assert_eq!(output_span.count, 1);
+    pub(crate) fn new(utc_offset_millis: i64) -> Self {
         Self {
-            output_span,
             utc_offset_millis,
             current_day: None,
             first_event_timestamp: 0,
         }
     }
 
-    fn update<F: Float, O: FeatureVector<F = F>>(&mut self, timestamp: i64, output: &mut O) {
+    pub(in crate::features) fn update<F: Float, O: FeatureVector<F = F>>(
+        &mut self,
+        event: &Event<F>,
+        output_span: OutputSpan,
+        output: &mut O,
+    ) {
+        let timestamp = event.timestamp();
         let day = (i128::from(timestamp) + i128::from(self.utc_offset_millis))
             .div_euclid(i128::from(MILLIS_PER_DAY));
         if self.current_day != Some(day) {
@@ -43,24 +46,12 @@ impl TimeSinceFirstEventOfDay {
             self.first_event_timestamp = timestamp;
         }
         let elapsed = timestamp.saturating_sub(self.first_event_timestamp).max(0);
-        output.set_value_at(self.output_span.start, F::from_usize(elapsed as usize));
-    }
-
-    pub(in crate::features) fn update_event<F: Float, O: FeatureVector<F = F>>(
-        &mut self,
-        event: &Event<F>,
-        output: &mut O,
-    ) {
-        self.update(event.timestamp(), output);
+        output.set_value_at(output_span.start, F::from_usize(elapsed as usize));
     }
 }
 
-pub(crate) fn build<F: Float>(
-    utc_offset_millis: i64,
-    output_span: OutputSpan,
-) -> IndicatorFeaturesEnum<F> {
+pub(crate) fn build<F: Float>(utc_offset_millis: i64) -> IndicatorFeaturesEnum<F> {
     IndicatorFeaturesEnum::TimeSinceFirstEventOfDay(TimeSinceFirstEventOfDay::new(
-        output_span,
         utc_offset_millis,
     ))
 }
@@ -78,15 +69,20 @@ mod tests {
     fn measures_elapsed_since_first_event_of_the_day() {
         let aapl = symbols::intern("AAPL");
         let mut fv: ArrayFeatureVector<f64, 1> = ArrayFeatureVector::new();
-        let mut feat = TimeSinceFirstEventOfDay::new(OutputSpan { start: 0, count: 1 }, 0);
+        let mut feat = TimeSinceFirstEventOfDay::new(0);
+        let output_span = OutputSpan { start: 0, count: 1 };
 
         // First event of the day establishes the origin: elapsed is zero.
         let open = 1_609_459_200_000; // 2021-01-01 00:00:00 UTC
-        feat.update_event(&Event::price(aapl, 10.0, open), &mut fv);
+        feat.update(&Event::price(aapl, 10.0, open), output_span, &mut fv);
         assert!(approx_eq(fv.values()[0], 0.0));
 
         // Later same-day event: elapsed grows from the first event.
-        feat.update_event(&Event::trade(aapl, 11.0, 1.0, open + 5_000, None), &mut fv);
+        feat.update(
+            &Event::trade(aapl, 11.0, 1.0, open + 5_000, None),
+            output_span,
+            &mut fv,
+        );
         assert!(approx_eq(fv.values()[0], 5_000.0));
     }
 
@@ -94,17 +90,26 @@ mod tests {
     fn resets_at_the_next_day_boundary() {
         let aapl = symbols::intern("AAPL");
         let mut fv: ArrayFeatureVector<f64, 1> = ArrayFeatureVector::new();
-        let mut feat = TimeSinceFirstEventOfDay::new(OutputSpan { start: 0, count: 1 }, 0);
+        let mut feat = TimeSinceFirstEventOfDay::new(0);
+        let output_span = OutputSpan { start: 0, count: 1 };
 
         let open = 1_609_459_200_000; // 2021-01-01 00:00:00 UTC
-        feat.update_event(&Event::price(aapl, 10.0, open + 3_600_000), &mut fv);
+        feat.update(
+            &Event::price(aapl, 10.0, open + 3_600_000),
+            output_span,
+            &mut fv,
+        );
         assert!(approx_eq(fv.values()[0], 0.0)); // first event of day 1
 
         // First event of the next day establishes a new origin.
         let next_day = open + MILLIS_PER_DAY + 2_000;
-        feat.update_event(&Event::price(aapl, 12.0, next_day), &mut fv);
+        feat.update(&Event::price(aapl, 12.0, next_day), output_span, &mut fv);
         assert!(approx_eq(fv.values()[0], 0.0));
-        feat.update_event(&Event::price(aapl, 13.0, next_day + 1_000), &mut fv);
+        feat.update(
+            &Event::price(aapl, 13.0, next_day + 1_000),
+            output_span,
+            &mut fv,
+        );
         assert!(approx_eq(fv.values()[0], 1_000.0));
     }
 }

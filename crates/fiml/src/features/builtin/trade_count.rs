@@ -12,26 +12,20 @@ use crate::{Float, HeapRingBuffer, Result, Symbol, WarmupPolicy};
 pub(crate) struct TradeCountTimedFeature<F: Float> {
     symbol: Symbol,
     counter: TradeCountTimed<HeapRingBuffer<CountBucket>, F>,
-    output_span: OutputSpan,
 }
 
 impl<F: Float> TradeCountTimedFeature<F> {
     pub(crate) fn new(
         symbol: Symbol,
         counter: TradeCountTimed<HeapRingBuffer<CountBucket>, F>,
-        output_span: OutputSpan,
     ) -> Self {
-        debug_assert_eq!(output_span.count, 1);
-        Self {
-            symbol,
-            counter,
-            output_span,
-        }
+        Self { symbol, counter }
     }
 
     pub(in crate::features) fn update<O: FeatureVector<F = F>>(
         &mut self,
         event: &Event<F>,
+        output_span: OutputSpan,
         output: &mut O,
     ) {
         if let Event::Trade(trade) = event
@@ -42,7 +36,7 @@ impl<F: Float> TradeCountTimedFeature<F> {
             return;
         }
 
-        write_outputs(self.output_span, output, |_| self.counter.window_value());
+        write_outputs(output_span, output, |_| self.counter.window_value());
     }
 }
 
@@ -51,7 +45,6 @@ pub(crate) fn build<F: Float>(
     aggregation: Duration,
     window: Duration,
     warmup_policy: WarmupPolicy,
-    output_span: OutputSpan,
 ) -> Result<IndicatorFeaturesEnum<F>> {
     let counter = TradeCountTimed::<HeapRingBuffer<CountBucket>, F>::new_heap(
         aggregation,
@@ -59,7 +52,7 @@ pub(crate) fn build<F: Float>(
         warmup_policy,
     )?;
     Ok(IndicatorFeaturesEnum::TradeCountTimed(
-        TradeCountTimedFeature::new(symbol, counter, output_span),
+        TradeCountTimedFeature::new(symbol, counter),
     ))
 }
 
@@ -83,13 +76,25 @@ mod tests {
             WarmupPolicy::FirstValue,
         )
         .unwrap();
-        let mut feat =
-            TradeCountTimedFeature::new(aapl, counter, OutputSpan { start: 0, count: 1 });
+        let mut feat = TradeCountTimedFeature::new(aapl, counter);
+        let output_span = OutputSpan { start: 0, count: 1 };
 
-        feat.update(&Event::trade(aapl, 100.0, 1.0, 0, None), &mut fv);
-        feat.update(&Event::trade(aapl, 101.0, 1.0, 100, None), &mut fv);
-        feat.update(&Event::trade(googl, 50.0, 1.0, 200, None), &mut fv); // other symbol
-        feat.update(&Event::price(aapl, 102.0, 300), &mut fv); // other kind
+        feat.update(
+            &Event::trade(aapl, 100.0, 1.0, 0, None),
+            output_span,
+            &mut fv,
+        );
+        feat.update(
+            &Event::trade(aapl, 101.0, 1.0, 100, None),
+            output_span,
+            &mut fv,
+        );
+        feat.update(
+            &Event::trade(googl, 50.0, 1.0, 200, None),
+            output_span,
+            &mut fv,
+        ); // other symbol
+        feat.update(&Event::price(aapl, 102.0, 300), output_span, &mut fv); // other kind
 
         assert!(approx_eq(fv.values()[0], 2.0));
     }

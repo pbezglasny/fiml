@@ -18,6 +18,7 @@ pub(crate) struct OutputSpan {
 pub(crate) struct CompiledFeature<F: Float> {
     pub(crate) feature: IndicatorFeaturesEnum<F>,
     pub(crate) route: FeatureRoute,
+    pub(crate) output_span: OutputSpan,
 }
 
 pub(crate) struct Compilation<F: Float> {
@@ -70,7 +71,7 @@ pub(crate) fn compile<F: Float>(
             count: definition.indicator.output_count(),
         };
         let (feature, identity, definition_names) =
-            compile_definition::<F>(index, definition, symbol, span)?;
+            compile_definition::<F>(index, definition, symbol)?;
 
         if !identities.insert(identity) {
             return invalid_definition(
@@ -92,6 +93,7 @@ pub(crate) fn compile<F: Float>(
         entries.push(CompiledFeature {
             feature,
             route: definition.indicator.route(),
+            output_span: span,
         });
     }
 
@@ -118,7 +120,6 @@ fn compile_definition<F: Float>(
     index: usize,
     definition: &ScopedIndicator,
     symbol: Option<Symbol>,
-    span: OutputSpan,
 ) -> Result<(IndicatorFeaturesEnum<F>, IndicatorIdentity, Vec<String>)> {
     match &definition.indicator {
         IndicatorSpec::Sma {
@@ -128,7 +129,7 @@ fn compile_definition<F: Float>(
         } => {
             validate_sample_windows(index, definition, windows, true)?;
             let symbol = symbol.expect("validated symbol-scoped definition");
-            let feature = builtin::sma::build(symbol, *source, windows, *warmup_policy, span)
+            let feature = builtin::sma::build(symbol, *source, windows, *warmup_policy)
                 .map_err(|error| contextualize(index, definition, error))?;
             let names = windows
                 .iter()
@@ -145,7 +146,7 @@ fn compile_definition<F: Float>(
         } => {
             validate_sample_windows(index, definition, windows, false)?;
             let symbol = symbol.expect("validated symbol-scoped definition");
-            let feature = builtin::ema::build(symbol, *source, windows, *warmup_policy, span)
+            let feature = builtin::ema::build(symbol, *source, windows, *warmup_policy)
                 .map_err(|error| contextualize(index, definition, error))?;
             let names = windows
                 .iter()
@@ -161,7 +162,7 @@ fn compile_definition<F: Float>(
         } => {
             validate_sample_windows(index, definition, windows, true)?;
             let symbol = symbol.expect("validated symbol-scoped definition");
-            let feature = builtin::cvd::build(symbol, windows, *warmup_policy, span)
+            let feature = builtin::cvd::build(symbol, windows, *warmup_policy)
                 .map_err(|error| contextualize(index, definition, error))?;
             let names = windows
                 .iter()
@@ -183,7 +184,6 @@ fn compile_definition<F: Float>(
                 &validated.periods,
                 validated.max_period,
                 *warmup_policy,
-                span,
             )
             .map_err(|error| contextualize(index, definition, error))?;
             let names = validated
@@ -216,7 +216,6 @@ fn compile_definition<F: Float>(
                 &validated.periods,
                 validated.max_period,
                 *warmup_policy,
-                span,
             )
             .map_err(|error| contextualize(index, definition, error))?;
             let names = validated
@@ -246,7 +245,7 @@ fn compile_definition<F: Float>(
             let validated = validate_time_windows(index, definition, &time_windows)?;
             let symbol = symbol.expect("validated symbol-scoped definition");
             let feature =
-                builtin::trade_count::build(symbol, *aggregation, *window, *warmup_policy, span)
+                builtin::trade_count::build(symbol, *aggregation, *window, *warmup_policy)
                     .map_err(|error| contextualize(index, definition, error))?;
             let name = market_name(
                 symbol,
@@ -264,14 +263,14 @@ fn compile_definition<F: Float>(
             ))
         }
         IndicatorSpec::DayOfWeek => Ok((
-            builtin::day_of_week::build(span),
+            builtin::day_of_week::build(),
             IndicatorIdentity::DayOfWeek,
             vec!["clock:day_of_week".to_string()],
         )),
         IndicatorSpec::TimeSinceFirstEventOfDay { utc_offset_millis } => {
             validate_utc_offset(index, definition, *utc_offset_millis)?;
             Ok((
-                builtin::time_since_first_event_of_day::build(*utc_offset_millis, span),
+                builtin::time_since_first_event_of_day::build(*utc_offset_millis),
                 IndicatorIdentity::TimeSinceFirstEventOfDay(*utc_offset_millis),
                 vec![format!(
                     "clock:time_since_first_event_of_day:{utc_offset_millis}ms"
@@ -541,6 +540,36 @@ mod tests {
                 .build();
             assert!(compile_names(&invalid).is_err());
         }
+    }
+
+    #[test]
+    fn assigns_one_output_span_per_compiled_feature() {
+        let feature_set = FeatureSet::new(vec![
+            ScopedIndicator::symbol(
+                "AAPL",
+                IndicatorSpec::Sma {
+                    source: ValueSource::Price,
+                    windows: vec![2, 5],
+                    warmup_policy: crate::WarmupPolicy::FullWindow,
+                },
+            ),
+            ScopedIndicator::global(IndicatorSpec::DayOfWeek),
+        ]);
+
+        let compilation = compile::<f64>(&feature_set, 3, 2).unwrap();
+        let spans = compilation
+            .entries
+            .iter()
+            .map(|entry| entry.output_span)
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            spans,
+            [
+                OutputSpan { start: 0, count: 1 },
+                OutputSpan { start: 1, count: 2 },
+            ]
+        );
     }
 
     #[test]

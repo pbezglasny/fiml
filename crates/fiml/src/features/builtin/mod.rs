@@ -34,16 +34,21 @@ pub(crate) enum IndicatorFeaturesEnum<F: Float> {
 }
 
 impl<F: Float> IndicatorFeaturesEnum<F> {
-    pub(crate) fn update<O: FeatureVector<F = F>>(&mut self, event: &Event<F>, output: &mut O) {
+    pub(crate) fn update<O: FeatureVector<F = F>>(
+        &mut self,
+        event: &Event<F>,
+        output_span: OutputSpan,
+        output: &mut O,
+    ) {
         match self {
-            Self::Cvd(cvd) => cvd.update(event, output),
-            Self::Sma(sma) => sma.update(event, output),
-            Self::Ema(ema) => ema.update(event, output),
-            Self::SmaTimed(sma) => sma.update(event, output),
-            Self::ObvTimed(obv) => obv.update(event, output),
-            Self::TradeCountTimed(count) => count.update(event, output),
-            Self::DayOfWeek(day_of_week) => day_of_week.update_event(event, output),
-            Self::TimeSinceFirstEventOfDay(clock) => clock.update_event(event, output),
+            Self::Cvd(cvd) => cvd.update(event, output_span, output),
+            Self::Sma(sma) => sma.update(event, output_span, output),
+            Self::Ema(ema) => ema.update(event, output_span, output),
+            Self::SmaTimed(sma) => sma.update(event, output_span, output),
+            Self::ObvTimed(obv) => obv.update(event, output_span, output),
+            Self::TradeCountTimed(count) => count.update(event, output_span, output),
+            Self::DayOfWeek(day_of_week) => day_of_week.update(event, output_span, output),
+            Self::TimeSinceFirstEventOfDay(clock) => clock.update(event, output_span, output),
         }
     }
 }
