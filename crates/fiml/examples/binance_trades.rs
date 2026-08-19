@@ -1,6 +1,6 @@
 use fiml::{
-    ArrayFeatureVector, Event, FeatureSet, FeatureVector, IndicatorFeatureVector,
-    IndicatorFeatures, symbols,
+    ArrayFeatureVector, Event, EventField, FeatureDefinition, FeatureExtractor, FeatureKey,
+    FeatureSource, FeatureVector, WarmupPolicy, symbols,
 };
 use futures::StreamExt;
 use serde::Deserialize;
@@ -36,14 +36,21 @@ async fn main() -> anyhow::Result<()> {
     let symbol_name = stream_symbol.to_uppercase();
     let symbol = symbols::intern(&symbol_name);
 
-    let feature_set = FeatureSet::builder()
-        .ema(symbol, [12])
-        .sma(symbol, [12])
-        .build();
-    let mut indicators = IndicatorFeatureVector::<f64, _, 2>::from_feature_set(
-        ArrayFeatureVector::<f64, 2>::new(),
-        &feature_set,
-    )?;
+    let source = FeatureSource::Field(EventField::TradePrice);
+    let mut extractor = FeatureExtractor::builder(ArrayFeatureVector::<f64, 2>::new())
+        .add_feature(FeatureDefinition::with_default_id(FeatureKey::Ema {
+            symbol,
+            source,
+            window: 12,
+            warmup_policy: WarmupPolicy::FullWindow,
+        }))
+        .add_feature(FeatureDefinition::with_default_id(FeatureKey::Sma {
+            symbol,
+            source,
+            window: 12,
+            warmup_policy: WarmupPolicy::FullWindow,
+        }))
+        .build()?;
 
     let url = format!("{BINANCE_STREAM_URL}/{stream_symbol}@trade");
     let (mut ws_stream, _) = connect_async(&url).await?;
@@ -54,8 +61,14 @@ async fn main() -> anyhow::Result<()> {
         match msg? {
             Message::Text(text) => match serde_json::from_str::<BinanceTrade>(&text) {
                 Ok(trade) => {
-                    indicators.dispatch(&Event::price(symbol, trade.price, trade.trade_time))?;
-                    let values = indicators.feature_vector().values();
+                    extractor.handle_event(&Event::trade(
+                        symbol,
+                        trade.price,
+                        trade.quantity,
+                        trade.trade_time,
+                        None,
+                    ))?;
+                    let values = extractor.feature_vector().values();
 
                     println!(
                         "{},{},{},{:.8},{:.8},{:.8},{:.8}",

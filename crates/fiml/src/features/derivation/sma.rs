@@ -1,23 +1,23 @@
 use std::time::Duration;
 
 use crate::event::Event;
+use crate::features::MAX_OUTPUTS_PER_INDICATOR;
 use crate::features::compiler::OutputSpan;
-use crate::features::definition::{MAX_OUTPUTS_PER_INDICATOR, ValueSource};
 use crate::features::derivation::{FeatureDerivation, write_outputs};
 use crate::indicators::{SimpleMovingAverage, SimpleMovingAverageTimed};
 use crate::vectors::FeatureVector;
-use crate::{FimlError, Float, HeapRingBuffer, Result, Symbol, WarmupPolicy};
+use crate::{EventField, FimlError, Float, HeapRingBuffer, Result, Symbol, WarmupPolicy};
 
 pub(crate) struct SmaFeature<F: Float> {
     symbol: Symbol,
-    source: ValueSource,
+    source: EventField,
     sma: SimpleMovingAverage<HeapRingBuffer<F>, F, MAX_OUTPUTS_PER_INDICATOR>,
 }
 
 impl<F: Float> SmaFeature<F> {
     pub(crate) fn new(
         symbol: Symbol,
-        source: ValueSource,
+        source: EventField,
         sma: SimpleMovingAverage<HeapRingBuffer<F>, F, MAX_OUTPUTS_PER_INDICATOR>,
     ) -> Self {
         Self {
@@ -33,7 +33,9 @@ impl<F: Float> SmaFeature<F> {
         output_span: OutputSpan,
         output: &mut O,
     ) {
-        if let Some(value) = self.source.value(event, self.symbol) {
+        if event.symbol() == self.symbol
+            && let Some(value) = self.source.extract(event)
+        {
             self.sma.update(value);
             write_outputs(output_span, output, |index| self.sma.value_at(index));
         }
@@ -42,14 +44,14 @@ impl<F: Float> SmaFeature<F> {
 
 pub(crate) struct SmaTimedFeature<F: Float> {
     symbol: Symbol,
-    source: ValueSource,
+    source: EventField,
     sma: SimpleMovingAverageTimed<HeapRingBuffer<(i64, F)>, F, MAX_OUTPUTS_PER_INDICATOR>,
 }
 
 impl<F: Float> SmaTimedFeature<F> {
     pub(crate) fn new(
         symbol: Symbol,
-        source: ValueSource,
+        source: EventField,
         sma: SimpleMovingAverageTimed<HeapRingBuffer<(i64, F)>, F, MAX_OUTPUTS_PER_INDICATOR>,
     ) -> Self {
         Self {
@@ -65,7 +67,9 @@ impl<F: Float> SmaTimedFeature<F> {
         output_span: OutputSpan,
         output: &mut O,
     ) {
-        if let Some(value) = self.source.value(event, self.symbol) {
+        if event.symbol() == self.symbol
+            && let Some(value) = self.source.extract(event)
+        {
             self.sma.update(value, event.timestamp());
         } else if !self.sma.observe(event.timestamp()) {
             return;
@@ -77,7 +81,7 @@ impl<F: Float> SmaTimedFeature<F> {
 
 pub(crate) fn build<F: Float>(
     symbol: Symbol,
-    source: ValueSource,
+    source: EventField,
     windows: &[usize],
     warmup_policy: WarmupPolicy,
 ) -> Result<FeatureDerivation<F>> {
@@ -94,7 +98,7 @@ pub(crate) fn build<F: Float>(
 
 pub(crate) fn build_timed<F: Float>(
     symbol: Symbol,
-    source: ValueSource,
+    source: EventField,
     aggregation: Duration,
     periods: &[usize],
     max_period: usize,
@@ -128,17 +132,13 @@ mod tests {
     #[test]
     fn grouped_sma_writes_adjacent_outputs() {
         let symbol = symbols::intern("AAPL");
-        let mut feature = match build::<f64>(
-            symbol,
-            ValueSource::Price,
-            &[2, 3],
-            WarmupPolicy::FullWindow,
-        )
-        .unwrap()
-        {
-            FeatureDerivation::Sma(feature) => feature,
-            _ => unreachable!(),
-        };
+        let mut feature =
+            match build::<f64>(symbol, EventField::Price, &[2, 3], WarmupPolicy::FullWindow)
+                .unwrap()
+            {
+                FeatureDerivation::Sma(feature) => feature,
+                _ => unreachable!(),
+            };
         let mut output = ArrayFeatureVector::<f64, 2>::new();
         let output_span = OutputSpan { start: 0, count: 2 };
 
@@ -155,7 +155,7 @@ mod tests {
         let symbol = symbols::intern("AAPL");
         let mut feature = match build::<f64>(
             symbol,
-            ValueSource::TradeVolume,
+            EventField::TradeVolume,
             &[2],
             WarmupPolicy::FullWindow,
         )

@@ -1,6 +1,4 @@
-mod builder;
 pub(crate) mod compiler;
-mod definition;
 pub(crate) mod derivation;
 mod feature_extractor;
 mod feature_extractor_builder;
@@ -11,6 +9,9 @@ pub mod transformers;
 
 use crate::event::EventKind;
 
+/// Maximum number of adjacent outputs one runtime derivation may own.
+pub const MAX_OUTPUTS_PER_INDICATOR: usize = 16;
+
 /// Where a feature subscribes in the dispatch table.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum FeatureRoute {
@@ -18,10 +19,6 @@ pub(crate) enum FeatureRoute {
     Every,
 }
 
-pub use builder::FeatureSetBuilder;
-pub use definition::{
-    FeatureSet, IndicatorSpec, MAX_OUTPUTS_PER_INDICATOR, ScopedIndicator, TimeWindows, ValueSource,
-};
 pub use feature_extractor::{FeatureExtractor, UpdateResult};
 pub use feature_extractor_builder::FeatureExtractorBuilder;
 pub use feature_id::FeatureId;

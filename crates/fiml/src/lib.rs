@@ -17,8 +17,7 @@ pub use event::{
 };
 pub use features::{
     EventField, FeatureDefinition, FeatureExtractor, FeatureExtractorBuilder, FeatureId,
-    FeatureKey, FeatureSet, FeatureSetBuilder, FeatureSource, IndicatorSpec,
-    MAX_OUTPUTS_PER_INDICATOR, ScopedIndicator, TimeWindows, UpdateResult, ValueSource,
+    FeatureKey, FeatureSource, MAX_OUTPUTS_PER_INDICATOR, UpdateResult,
 };
 pub use indicators::{CumulativeVolumeDelta, ObvBucket, OnBalanceVolumeTimed};
 pub use ring_buffer::{
@@ -41,14 +40,6 @@ pub enum FimlError {
     InvalidIndicatorDefinition {
         index: usize,
         reason: String,
-    },
-    TooManyIndicators {
-        count: usize,
-        capacity: usize,
-    },
-    TooManyOutputs {
-        count: usize,
-        capacity: usize,
     },
     OutputCountMismatch {
         expected: usize,
@@ -75,15 +66,6 @@ impl Display for FimlError {
             ),
             FimlError::InvalidIndicatorDefinition { index, reason } => {
                 write!(f, "invalid indicator definition at index {index}: {reason}")
-            }
-            FimlError::TooManyIndicators { count, capacity } => {
-                write!(
-                    f,
-                    "indicator count {count} exceeds fixed capacity {capacity}"
-                )
-            }
-            FimlError::TooManyOutputs { count, capacity } => {
-                write!(f, "output count {count} exceeds fixed capacity {capacity}")
             }
             FimlError::OutputCountMismatch { expected, actual } => {
                 write!(

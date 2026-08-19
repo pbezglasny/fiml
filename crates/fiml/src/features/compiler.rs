@@ -1,10 +1,9 @@
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
-use crate::features::definition::{MAX_OUTPUTS_PER_INDICATOR, ValueSource};
 use crate::features::derivation::{self, FeatureDerivation};
 use crate::features::feature_extractor::EventRouter;
-use crate::features::{FeatureRoute, FeatureSource};
+use crate::features::{FeatureRoute, FeatureSource, MAX_OUTPUTS_PER_INDICATOR};
 use crate::{
     EventField, EventKind, FeatureDefinition, FeatureId, FeatureKey, FimlError, Float, Result,
     Symbol, WarmupPolicy,
@@ -443,7 +442,7 @@ fn build_group<F: Float>(group: &FeatureGroup) -> Result<FeatureDerivation<F>> {
                 warmup_policy,
             },
             GroupOutputs::SampleWindows(windows),
-        ) => derivation::sma::build(*symbol, value_source(*source), windows, *warmup_policy),
+        ) => derivation::sma::build(*symbol, *source, windows, *warmup_policy),
         (
             GroupKey::Ema {
                 symbol,
@@ -451,7 +450,7 @@ fn build_group<F: Float>(group: &FeatureGroup) -> Result<FeatureDerivation<F>> {
                 warmup_policy,
             },
             GroupOutputs::SampleWindows(windows),
-        ) => derivation::ema::build(*symbol, value_source(*source), windows, *warmup_policy),
+        ) => derivation::ema::build(*symbol, *source, windows, *warmup_policy),
         (
             GroupKey::Cvd {
                 symbol,
@@ -470,7 +469,7 @@ fn build_group<F: Float>(group: &FeatureGroup) -> Result<FeatureDerivation<F>> {
             GroupOutputs::TimedPeriods(periods),
         ) => derivation::sma::build_timed(
             *symbol,
-            value_source(*source),
+            *source,
             *aggregation,
             periods,
             periods.iter().copied().max().unwrap_or(0),
@@ -624,15 +623,6 @@ fn route_for_source(source: FeatureSource) -> FeatureRoute {
         FeatureSource::Field(field) => FeatureRoute::Kind(field.event_kind()),
         FeatureSource::Event(event_kind) => FeatureRoute::Kind(event_kind),
         FeatureSource::EveryEvent => FeatureRoute::Every,
-    }
-}
-
-fn value_source(source: EventField) -> ValueSource {
-    match source {
-        EventField::Price => ValueSource::Price,
-        EventField::Volume => ValueSource::Volume,
-        EventField::TradePrice => ValueSource::TradePrice,
-        EventField::TradeVolume => ValueSource::TradeVolume,
     }
 }
 
