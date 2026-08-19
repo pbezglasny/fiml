@@ -1,57 +1,50 @@
 # Project type and dependency schema
 
-This document maps the production traits, structs, and enums in the `fiml`
-workspace. Test-only helper types are excluded. Serialization-only helper types
-are excluded because the feature-set serialization module is currently not
-compiled. The remaining `serde` feature applies only to selected scalar/public
-types described below.
+This document maps the active production types in the `fiml` workspace.
+Test helpers and historical designs are excluded.
 
-Dependency notation used below:
+Dependency notation:
 
-- `A --> B`: A calls, constructs, converts to, or is generically bounded by B.
-- `A *-- B`: A owns B.
-- `A o-- B`: A contains or borrows B through a generic/variant relationship.
-- `Trait <|.. Type`: Type implements Trait.
-- **Public** means reachable by a downstream Rust crate. **Internal** means
-  `pub(crate)` or private.
+- `A --> B`: `A` calls, constructs, converts to, or is bounded by `B`.
+- `A *-- B`: `A` owns `B`.
+- `A o-- B`: `A` contains or borrows `B` through a generic or enum variant.
+- `Trait <|.. Type`: `Type` implements `Trait`.
 
 ## Workspace boundary
 
 ```mermaid
 flowchart LR
-    Python["Python user"] --> PyBindings["fiml-python<br/>PyO3 wrapper"]
-    PyBindings --> CoreCrate["fiml<br/>Rust core"]
-    RustUser["Rust user"] --> CoreCrate
+    RustUser["Rust user"] --> Core["fiml Rust core"]
+    PythonUser["Python user"] --> Binding["fiml-python PyO3 binding"]
+    Binding --> Core
 
-    subgraph CoreModules["fiml core modules"]
-        Definitions["Feature definitions"] --> Compiler["Compiler"]
-        Compiler --> Runtime["Extractor runtime"]
-        Events["Events"] --> Runtime
-        Indicators["Standalone indicators"] --> Runtime
-        Runtime --> Vectors["Feature vectors"]
-        Runtime --> Pipeline["Transformation pipeline"]
-        OrderBook["Order book"]
-    end
-    CoreCrate --> Definitions
-    CoreCrate --> Events
-    CoreCrate --> OrderBook
+    Definitions["FeatureDefinition / FeatureKey"] --> Compiler["Feature compiler"]
+    Compiler --> Extractor["FeatureExtractor"]
+    Events["Event stream"] --> Extractor
+    Indicators["Standalone indicators"] --> Compiler
+    Extractor --> Vectors["FeatureVector"]
+
+    Core --> Definitions
+    Core --> Events
+    Core --> Indicators
+    Core --> OrderBook["Order book"]
 ```
 
-The feature extractor and order-book subsystems share foundational numeric and
-error types, but the order book is not currently compiled into a feature
-adapter.
+The extractor and order book share numeric and error types. Order-book state is
+not yet exposed as a feature derivation.
 
-### Active Cargo features and targets
+### Cargo features and targets
 
 | Item | Current state |
 |---|---|
-| Core default features | Empty; the normal core build enables neither `serde` nor `tracing`. |
-| `serde` | Enables Serde only for `Symbol`, `WarmupPolicy`, and `EventKind`; it does not enable FeatureSet JSON. |
-| `tracing` | Enables the optional tracing dependency used for pipeline diagnostics. |
-| Rust examples | Automatic example discovery is disabled. `binance_trades` is the only explicitly registered example target. |
-| Python core dependency | `fiml-python` depends on `fiml` without optional core features. |
+| Core default features | Empty. |
+| `serde` | Enables Serde for `Symbol`, `WarmupPolicy`, and `EventKind`; feature definitions have no serialization module. |
+| `tracing` | Enables optional diagnostics in selected standalone indicators. |
+| Examples | Automatic discovery is disabled; `feature_extractor` and `binance_trades` are explicit targets. |
+| Benchmarks | Automatic discovery is disabled; `sma` and `ring_buffer` are explicit targets. |
+| Python dependency | `fiml-python` uses the core without optional features. |
 
-## Foundational traits
+## Foundational abstractions
 
 ```mermaid
 classDiagram
@@ -61,10 +54,7 @@ classDiagram
         ONE
         NAN
         from_usize()
-        abs()
     }
-    class f32
-    class f64
     Float <|.. f32
     Float <|.. f64
 
@@ -73,14 +63,10 @@ classDiagram
         type Item
         capacity()
         len()
-        is_empty()
         push_back()
         pop_front()
-        pop_back()
         peek_*()
     }
-    class StackRingBuffer
-    class HeapRingBuffer
     RingBuffer <|.. StackRingBuffer
     RingBuffer <|.. HeapRingBuffer
 
@@ -91,32 +77,12 @@ classDiagram
         value_at()
         capacity()
         len()
-        is_empty()
         set_value_at()
         try_set_value_at()
         set_values_range()
-        try_set_values_range()
     }
-    class ArrayFeatureVector
-    class VecFeatureVector
     FeatureVector <|.. ArrayFeatureVector
     FeatureVector <|.. VecFeatureVector
-    ArrayFeatureVector --> Float
-    VecFeatureVector --> Float
-
-    class IndicatorFeatures {
-        <<sealed trait>>
-        type F: Float
-        type FeatureVector
-        feature_vector()
-        dispatch()
-        validate_dispatch()
-        index_of()
-    }
-    class IndicatorFeatureVector
-    class FeatureExtractor
-    IndicatorFeatures <|.. IndicatorFeatureVector
-    IndicatorFeatures <|.. FeatureExtractor
 
     class Transformation {
         <<trait>>
@@ -124,201 +90,145 @@ classDiagram
         type OutputVector
         transform()
         output_values()
-        output_values_mut()
     }
-    class StandardScaler
-    class ParallelTransformer
     Transformation <|.. StandardScaler
-    Transformation <|.. ParallelTransformer
 ```
 
-| Trait | Visibility and implementations | Main dependency contract |
-|---|---|---|
-| `Float` | Public; implemented for `f32` and `f64` | Numeric type used by events, indicators, adapters, and feature vectors. |
-| `RingBuffer` | Public; implemented by `StackRingBuffer<N, T>` and `HeapRingBuffer<T>` | Supplies bounded history to rolling indicators through its associated `Item`. |
-| `FeatureVector` | Public; implemented by `ArrayFeatureVector<F, N>` and `VecFeatureVector<F>` | Stores output cells; its associated `F` must implement `Float`. Downstream implementations are allowed. |
-| `IndicatorFeatures` | Public but sealed; implemented only by `IndicatorFeatureVector` and `FeatureExtractor` | Common dispatch/output interface consumed by `Pipeline` and the Python wrapper. |
-| `Transformation` | Public; implemented by `StandardScaler` and `ParallelTransformer` | Consumes any `FeatureVector` with the same `F` and owns a concrete output vector. |
-
-`WarmupPolicy` is the shared public enum used by every windowed indicator.
-`FimlError` is the shared public error enum, and `Result<T>` aliases
-`std::result::Result<T, FimlError>`.
+| Type | Role |
+|---|---|
+| `Float` | Numeric contract used by events, indicators, derivations, and feature vectors. |
+| `RingBuffer` | Bounded history contract implemented by stack- and heap-backed buffers. |
+| `FeatureVector` | Mutable output storage. `ArrayFeatureVector<F, N>` avoids allocation; `VecFeatureVector<F>` chooses size at runtime. |
+| `Transformation` | Independent post-processing interface currently implemented by `StandardScaler`; it is not owned by the extractor. |
+| `WarmupPolicy` | Shared readiness policy for windowed calculations. |
+| `FimlError` | Shared public error type; `Result<T>` aliases `Result<T, FimlError>`. |
 
 ## Feature definition and compilation
 
+One `FeatureDefinition` describes exactly one scalar output cell. Multiple
+compatible definitions can still share one runtime derivation.
+
 ```mermaid
 flowchart LR
-    Builder["FeatureSetBuilder"] -->|build| Set["FeatureSet"]
-    Set *--|ordered Vec| Scoped["ScopedIndicator"]
-    Scoped o--|symbol: Option| Symbol["Symbol"]
-    Symbol --> Interner["global SymbolInterner"]
-    Scoped *-- Spec["IndicatorSpec"]
-    Spec o-- Source["ValueSource"]
-    Spec o-- Windows["TimeWindows"]
-    Spec o-- Warmup["WarmupPolicy"]
+    Definition["FeatureDefinition"] *-- Key["FeatureKey"]
+    Definition *-- Id["FeatureId"]
+    Key o-- Symbol
+    Key o-- Source["FeatureSource"]
+    Key o-- WarmupPolicy
+    Source --> Field["EventField"]
+    Source --> Kind["EventKind"]
 
-    Set -->|compile| Compiler["compiler::compile"]
-    Compiler --> Identity["IndicatorIdentity"]
-    Compiler --> Span["OutputSpan"]
-    Compiler --> Compilation["Compilation<F>"]
-    Compilation *--|Vec| Entry["CompiledFeature<F>"]
-    Compilation *--|Box slice| Names["canonical names"]
-    Entry *-- Route["FeatureRoute"]
-    Entry *-- Derivation["FeatureDerivation<F>"]
+    Builder["FeatureExtractorBuilder"] *--|Vec| Definition
+    Builder *-- Output["V: FeatureVector"]
+    Builder --> Compiler["compiler::compile"]
+    Compiler --> Groups["FeatureGroup"]
+    Groups --> Compilation["Compilation<F>"]
+    Compilation *-- Derivations["Box<[FeatureDerivation<F>]> "]
+    Compilation *-- Spans["Box<[OutputSpan]>"]
+    Compilation *-- Ids["Box<[FeatureId]>"]
+    Compilation *-- Router["EventRouter"]
 ```
 
-The definition graph is cold-path configuration:
-
-| Type | Visibility | Owns or depends on |
+| Type | Visibility | Meaning |
 |---|---|---|
-| `FeatureSetBuilder` | Public | Accumulates `Vec<ScopedIndicator>` and produces `FeatureSet`. |
-| `FeatureSet` | Public | Owns the canonically ordered `Vec<ScopedIndicator>`; it does not currently implement Serde traits. |
-| `ScopedIndicator` | Public | Owns an `Option<Symbol>` and one `IndicatorSpec`; global indicators use `None`. |
-| `IndicatorSpec` | Public closed enum | Owns window lists, `ValueSource`, `TimeWindows`, and `WarmupPolicy` according to its variant. |
-| `TimeWindows` | Public | Owns one aggregation `Duration` and ordered window `Duration` values. |
-| `ValueSource` | Public | Maps a moving-average input field to `FeatureRoute` and extracts it from `Event<F>`. |
-| `OutputSpan` | Internal | Start/count of adjacent output cells assigned to one compiled indicator. |
-| `IndicatorIdentity` | Internal | Hash key used by the compiler to reject duplicate runtime indicators. |
-| `ValidatedTimeWindows` | Internal | Compiler result containing validated aggregation/window periods. |
-| `CompiledFeature<F>` | Internal | Owns one `FeatureDerivation<F>` plus its `FeatureRoute`. |
-| `Compilation<F>` | Internal | Owns compiled entries and canonical output names before fixed-capacity placement. |
+| `FeatureDefinition` | Public | A structural `FeatureKey` paired with a stable user-facing `FeatureId`. |
+| `FeatureKey` | Public closed enum | Complete calculation identity for one scalar output, including symbol, source, window, and warm-up policy. |
+| `FeatureId` | Public | Output lookup/schema name; it may be explicit or deterministically generated from a key. |
+| `FeatureSource` | Public | `Field(EventField)`, `Event(EventKind)`, or `EveryEvent`. |
+| `EventField` | Public | Extractable scalar event fields: price, volume, trade price, and trade volume. |
+| `FeatureExtractorBuilder<F, V>` | Public | Collects scalar definitions and owns the caller-selected output vector until `build`. |
+| `FeatureGroup` / `GroupKey` | Internal | Cold-path grouping state for definitions that can share calculation history. |
+| `OutputSpan` | Internal | Start/count of adjacent output cells written by one derivation. |
+| `Compilation<F>` | Internal | Validated derivations, spans, IDs, and routing state handed to the extractor. |
 
-### Definition-to-runtime adapter mapping
+The compiler rejects duplicate keys and IDs, validates windows and sources,
+groups compatible definitions, assigns contiguous output spans, and constructs
+the router. Temporary maps are dropped before event processing.
 
-The compiler is the only construction path from `IndicatorSpec` to the closed
-`FeatureDerivation` enum.
+### Key-to-runtime mapping
 
-| `IndicatorSpec` variant | `FeatureDerivation` variant | Concrete internal derivation | Standalone calculation state | Route |
-|---|---|---|---|---|
-| `Sma` | `Sma` | `SmaFeature<F>` | `SimpleMovingAverage<HeapRingBuffer<F>, F, 16>` | Selected by `ValueSource` |
-| `Ema` | `Ema` | `EmaFeature<F>` | `ExponentialMovingAverage<F, 16>` | Selected by `ValueSource` |
-| `Cvd` | `Cvd` | `CvdFeature<F>` | `CumulativeVolumeDelta<HeapRingBuffer<F>, F, 16>` | `Trade` |
-| `SmaTimed` | `SmaTimed` | `SmaTimedFeature<F>` | `SimpleMovingAverageTimed<HeapRingBuffer<(i64, F)>, F, 16>` | Selected by `ValueSource`; also observes global time |
-| `ObvTimed` | `ObvTimed` | `ObvTimedFeature<F>` | `OnBalanceVolumeTimed<HeapRingBuffer<ObvBucket<F>>, F, 16>` | `Trade`; also observes global time |
-| `TradeCountTimed` | `TradeCountTimed` | `TradeCountTimedFeature<F>` | `TradeCountTimed<HeapRingBuffer<CountBucket>, F>` | `Trade`; also observes global time |
-| `DayOfWeek` | `DayOfWeek` | `DayOfWeek` | Adapter owns its clock state directly | Every event |
-| `TimeSinceFirstEventOfDay` | `TimeSinceFirstEventOfDay` | `TimeSinceFirstEventOfDay` | Adapter owns its clock state directly | Every event |
+| `FeatureKey` variant | Runtime derivation | Calculation state | Route |
+|---|---|---|---|
+| `Sma` | `SmaFeature<F>` | `SimpleMovingAverage<HeapRingBuffer<F>, F, 16>` | Event kind selected by `EventField` and the configured symbol. |
+| `Ema` | `EmaFeature<F>` | `ExponentialMovingAverage<F, 16>` | Event kind selected by `EventField` and the configured symbol. |
+| `Cvd` | `CvdFeature<F>` | `CumulativeVolumeDelta<HeapRingBuffer<F>, F, 16>` | Trade events for the configured symbol. |
+| `SmaTimed` | `SmaTimedFeature<F>` | `SimpleMovingAverageTimed<HeapRingBuffer<(i64, F)>, F, 16>` | Every event, so time advances even without a matching scalar sample. |
+| `ObvTimed` | `ObvTimedFeature<F>` | `OnBalanceVolumeTimed<HeapRingBuffer<ObvBucket<F>>, F, 16>` | Every event. |
+| `TradeCountTimed` | `TradeCountTimedFeature<F>` | `TradeCountTimed<HeapRingBuffer<CountBucket>, F>` | Every event. |
+| `DayOfWeek` | `DayOfWeek` | Clock state in the derivation. | Every event. |
+| `TimeSinceFirstEventOfDay` | `TimeSinceFirstEventOfDay` | Clock state in the derivation. | Every event. |
 
-The concrete derivation structs and `FeatureDerivation` are internal. Downstream
-customization happens at `FeatureSet` configuration, standalone indicator,
-feature-vector, or transformation boundaries—not by adding extractor adapters.
+`MAX_OUTPUTS_PER_INDICATOR` is currently 16. It bounds the adjacent scalar
+outputs that can share one runtime derivation.
 
 ## Events and routing
 
 ```mermaid
-flowchart TB
-    Event["Event<F>"] --> Price["PriceUpdate<F>"]
-    Event --> Volume["VolumeUpdate<F>"]
-    Event --> Trade["TradeUpdate<F>"]
-    Event --> BookEvent["event::OrderBookUpdate<F>"]
-    Event --> Time["TimeUpdate"]
+flowchart LR
+    Event["Event<F>"] --> Kind["EventKind"]
+    Event --> Symbol
+    Event --> Timestamp
 
-    Price --> Symbol["Symbol"]
-    Volume --> Symbol
-    Trade --> Symbol
-    BookEvent --> Symbol
-    Trade o-- Side["TradeSide"]
-
-    Event --> Kind["EventKind"]
-    Route["FeatureRoute"] --> Kind
-    Route --> Every["Every-event group"]
-    Route --> Groups["IndicatorFeatureVector dispatch groups"]
+    Router["EventRouter"] *-- SymbolMap["symbol_to_index"]
+    Router *-- SymbolRouters["symbol_routers"]
+    Router *-- Subscribers["subscribers"]
+    Router *-- Always["always_subscribers"]
+    SymbolMap --> SymbolRouters
+    SymbolRouters --> Subscribers
+    Kind --> SymbolRouters
+    Always --> Subscribers
+    Subscribers --> RuntimeIndex["FeatureDerivation index"]
 ```
 
-`EventKind` discriminants index the fixed dispatch-group table. The internal
-`FeatureRoute` selects one event-kind group or the every-event clock group.
-`Symbol` is a compact public handle produced by the private global
-`SymbolInterner`; symbol names are normalized and interned before hot-path
-dispatch. ASCII identity is case-insensitive. `Symbol::GLOBAL` is the reserved
-ID `0`, resolves to `"__global__"`, and is available where a concrete global
-handle is useful; `ScopedIndicator` continues to represent global scope as
-`None`.
+`EventKind` has six variants: price, volume, trade, order-book delta,
+order-book snapshot, and time. Its discriminants index fixed routing arrays.
+Each symbol/kind route is a contiguous range into the flattened subscriber
+array; each stored subscriber value is a runtime derivation index. The separate
+always-subscriber range contains timed and clock derivations.
 
-The feature event named `event::OrderBookUpdate<F>` is only a
-top-of-book `{bid, ask}` payload. It is distinct from the snapshot/delta
-`order_book::OrderBookUpdate` enum described below.
+`Symbol` is a compact interned handle. ASCII identity is case-insensitive.
+`Symbol::GLOBAL` is reserved index `0`, resolves as `"__global__"`, and is used
+by time events and global feature keys.
 
-## Extractor runtime and pipeline
+## Extractor runtime
 
 ```mermaid
 flowchart LR
-    Set["FeatureSet"] -->|from_feature_set| IFV["IndicatorFeatureVector<F,V,M>"]
-    Compilation["Compilation<F>"] --> IFV
-    IFV *--|M slots| Derivations["FeatureDerivation<F>"]
-    IFV *-- Output["V: FeatureVector<F=F>"]
-    IFV *-- DispatchGroups["event-kind ranges"]
-    IFV *-- Names["Box<[String]>"]
-
-    Dynamic["FeatureExtractor"] *--|one enum variant| Boxed["Box<IndicatorFeatureVector<f64, VecFeatureVector<f64>, M>>"]
-    Boxed --> IFV
-
-    IFV -.implements.-> Shared["IndicatorFeatures"]
-    Dynamic -.implements.-> Shared
-    Shared --> Pipeline["Pipeline<I,T,F,V,N>"]
-    Transform["T: Transformation"] --> Pipeline
-    Pipeline --> Final["final feature values"]
+    Builder["FeatureExtractor::builder(output)"] --> Compile["build / compile"]
+    Compile --> Extractor["FeatureExtractor<F, V>"]
+    Extractor *-- Vector["V: FeatureVector<F=F>"]
+    Extractor *-- Features["Box<[FeatureDerivation<F>]> "]
+    Extractor *-- Spans["Box<[OutputSpan]>"]
+    Extractor *-- Ids["Box<[FeatureId]>"]
+    Extractor *-- Router["EventRouter"]
+    Incoming["Event<F>"] -->|handle_event| Extractor
+    Router --> Features
+    Features -->|write assigned span| Vector
 ```
 
-| Runtime type | Visibility | Important dependencies |
+`FeatureExtractor<F, V>` is the single runtime owner. It uses static dispatch
+through the closed `FeatureDerivation<F>` enum; there are no boxed feature
+trait objects. `handle_event` performs no allocation: it validates the global
+timestamp watermark, runs symbol/kind subscribers, runs always-subscribers,
+and writes directly into `V`.
+
+Public lookup/read methods are `last_timestamp`, `feature_vector`,
+`feature_ids`, and `feature_index`.
+
+## Standalone indicators
+
+| Standalone type | History/state | Extractor derivation |
 |---|---|---|
-| `IndicatorFeatureVector<F, V, M>` | Public | Owns fixed-capacity `FeatureDerivation<F>` storage, caller-provided `V: FeatureVector`, route ranges, timed-derivation indexes, names, and timestamp watermark. |
-| `FeatureExtractor` | Public | Macro-generated enum with capacities 16 through 128; each variant boxes an `IndicatorFeatureVector<f64, VecFeatureVector<f64>, M>`. |
-| `DispatchSequenceError` | Public | Owns the failing event index and a `FimlError` for non-mutating batch validation. |
-| `Pipeline<I, T, F, V, N>` | Public | Owns `I: IndicatorFeatures` and up to `N` sequential `T: Transformation<OutputVector = V>` values. |
-| `StandardScaler<F, V, SIZE>` | Public | Implements `Transformation`; owns index mappings, scalar parameters, and output `V`. |
-| `ParallelTransformer<F, V, T, N>` | Public | Implements `Transformation`; owns `N` child transformations and combines their outputs into `V`. |
-
-`IndicatorFeatures` is sealed, so only the two library extractor forms can be
-used as `Pipeline` inputs. `FeatureVector` and `Transformation` remain open for
-downstream implementations.
-
-## Standalone indicator state
-
-```mermaid
-flowchart TB
-    Ring["R: RingBuffer"] --> SMA["SimpleMovingAverage<R,F,WINDOWS>"]
-    Ring --> TimedSMA["SimpleMovingAverageTimed<R,F,WINDOWS>"]
-    Ring --> CVD["CumulativeVolumeDelta<R,F,WINDOWS>"]
-    Ring --> OBV["OnBalanceVolumeTimed<R,F,WINDOWS>"]
-    Ring --> Count["TradeCountTimed<R,F>"]
-
-    Float["F: Float"] --> SMA
-    Float --> TimedSMA
-    Float --> EMA["ExponentialMovingAverage<F,WINDOWS>"]
-    Float --> CVD
-    Float --> OBV
-    Float --> Count
-
-    Warmup["WarmupPolicy"] --> SMA
-    Warmup --> TimedSMA
-    Warmup --> EMA
-    Warmup --> CVD
-    Warmup --> OBV
-    Warmup --> Count
-
-    SMA *-- SmaWindow["SmaWindow<F>"]
-    EMA *-- EmaWindow["EmaWindow<F>"]
-    OBV *-- ObvBucket["ObvBucket<F>"]
-    Count *-- CountBucket["CountBucket"]
-```
-
-| Standalone type | History item / child state | Used by extractor adapter |
-|---|---|---|
-| `SimpleMovingAverage<R, F, WINDOWS>` | `R::Item = F`; inline `SmaWindow<F>` array | `SmaFeature` |
-| `SimpleMovingAverageTimed<R, F, WINDOWS>` | `R::Item = (i64, F)`; private timed-window state | `SmaTimedFeature` |
-| `ExponentialMovingAverage<F, WINDOWS>` | Inline `EmaWindow<F>` array; no ring buffer | `EmaFeature` |
-| `CumulativeVolumeDelta<R, F, WINDOWS>` | `R::Item = F`; private CVD-window state | `CvdFeature` |
-| `OnBalanceVolumeTimed<R, F, WINDOWS>` | `R::Item = ObvBucket<F>`; private timed-window state | `ObvTimedFeature` |
+| `SimpleMovingAverage<R, F, WINDOWS>` | `R::Item = F`; inline window array | `SmaFeature` |
+| `SimpleMovingAverageTimed<R, F, WINDOWS>` | `R::Item = (i64, F)` | `SmaTimedFeature` |
+| `ExponentialMovingAverage<F, WINDOWS>` | Inline EMA window array | `EmaFeature` |
+| `CumulativeVolumeDelta<R, F, WINDOWS>` | `R::Item = F` | `CvdFeature` |
+| `OnBalanceVolumeTimed<R, F, WINDOWS>` | `R::Item = ObvBucket<F>` | `ObvTimedFeature` |
 | `TradeCountTimed<R, F>` | `R::Item = CountBucket` | `TradeCountTimedFeature` |
 
-Each ring-buffer-based indicator can select `StackRingBuffer` for compile-time
-capacity or `HeapRingBuffer` for runtime capacity. Extractor adapters currently
-construct the heap-backed forms during cold-path compilation.
-
-The window bookkeeping types `SmaWindow`, `SmaWindowTimed`, `EmaWindow`,
-`CvdWindow`, and `ObvWindowTimed` are internal implementation details. The
-bucket types `CountBucket` and `ObvBucket` are public because they occur in the
-generic ring-buffer item constraints of their standalone indicators.
+Standalone indicators can use stack-backed history when capacity is known at
+compile time. Compiled feature derivations use heap-backed history because
+configuration is a cold-path runtime input.
 
 ## Order-book subsystem
 
@@ -326,82 +236,42 @@ generic ring-buffer item constraints of their standalone indicators.
 flowchart LR
     Update["order_book::OrderBookUpdate"] --> Delta["OrderBookDelta"]
     Update --> Snapshot["OrderBookSnapshot"]
-    Delta *--|Vec| Change["OrderBookLevelUpdate"]
-    Change --> Side["Side"]
-    Snapshot *--|Vec bids/asks| Level["OrderBookLevel"]
-
-    Book["OrderBook"] *-- Bids["BookSide (bids)"]
-    Book *-- Asks["BookSide (asks)"]
-    Book *--|VecDeque| Delta
-    Book *-- State["SyncState"]
-    Book *-- Policy["UpdatePolicy"]
-    Bids *--|BTreeMap| Key["BookSideKey"]
-    Asks *--|BTreeMap| Key
-
-    Book -->|apply_update| Outcome["UpdateOutcome"]
-    Book -->|failure| Error["OrderBookUpdateError"]
-    Book -->|query| Depth["DepthUntilSizeResult"]
+    Delta *-- Changes["Vec<OrderBookLevelUpdate>"]
+    Snapshot *-- Levels["bid/ask Vec<OrderBookLevel>"]
+    Book["OrderBook"] *-- Sides["bid/ask BookSide"]
+    Book *-- History["VecDeque<OrderBookDelta>"]
+    Book --> Outcome["UpdateOutcome"]
 ```
 
-`OrderBookLevel`, `OrderBookLevelUpdate`, `OrderBookDelta`,
-`OrderBookSnapshot`, `order_book::OrderBookUpdate`, `OrderBook`, policies,
-outcomes, errors, sync state, and query results are public. `BookSide` and
-`BookSideKey` are internal ordered-map details. Price and size values use
-`rust_decimal::Decimal`, not the extractor's `Float` abstraction.
-`OrderBookUpdateId` is the public `u64` alias shared by update, snapshot,
-sequence-state, and error types.
+Order-book prices and sizes use `rust_decimal::Decimal`, independently of the
+extractor's `Float` abstraction. `BookSide` and its ordered-map key are internal;
+updates, snapshots, policies, outcomes, errors, and query results are public.
 
-## Serde boundary
+## Serialization boundary
 
-The optional core `serde` feature currently covers only three active types:
-
-```mermaid
-flowchart LR
-    Serde["serde feature"] --> Symbol["Symbol"]
-    Serde --> Warmup["WarmupPolicy"]
-    Serde --> Kind["EventKind"]
-    Symbol -->|string name| Interner["SymbolInterner"]
-```
-
-`Symbol` serializes to its normalized string and deserializes by interning the
-string. `WarmupPolicy` uses snake-case variant names, while `EventKind` uses its
-derived enum representation. `FeatureSet`, `ScopedIndicator`, and
-`IndicatorSpec` do not currently implement `Serialize` or `Deserialize`.
-
-The old private implementation remains under
-`crates/fiml/src/features/serialization/` as dormant source, but
-`features/mod.rs` does not declare that module. Its wire types, format version,
-and module tests are therefore not compiled or exposed. The JSON schema and old
-JSON examples remain as repository artifacts; `autoexamples = false` and the
-explicit Cargo example list keep those examples out of current build targets.
+The optional `serde` feature covers only `Symbol`, `WarmupPolicy`, and
+`EventKind`. `Symbol` serializes as its normalized name and deserializes by
+interning. Feature-definition serialization is intentionally absent; the old
+feature-set serialization module and its JSON examples have been removed.
 
 ## Python binding boundary
 
 ```mermaid
 flowchart LR
-    PyPolicy["PyWarmupPolicy"] -->|From| Policy["core WarmupPolicy"]
-    PySet["Python FeatureSet"] *-- CoreSet["core FeatureSet"]
-    PySet --> Spec["IndicatorSpec"]
-    PyExtractor["Python FeatureExtractor"] *-- CoreExtractor["core FeatureExtractor"]
-    PyExtractor *-- Symbols["Vec<Symbol>"]
-    PyExtractor *-- Dtype["OutputDtype"]
-    PyExtractor --> Event["Event<f64>"]
-    PyExtractor --> Buffer["OutputBuffer"]
-    Buffer --> Numpy["NumPy float32/float64 array"]
+    PySet["Python FeatureSet"] *-- Definitions["Vec<FeatureDefinition>"]
+    PySet --> Keys["FeatureKey"]
+    PyExtractor["Python FeatureExtractor"] *-- Core["FeatureExtractor<f64, VecFeatureVector<f64>>"]
+    PyExtractor *-- Handles["Vec<Symbol>"]
+    PyExtractor --> Events["Event<f64>"]
+    Core --> Numpy["NumPy float32/float64 snapshots"]
 ```
 
-| Binding type | Wraps or converts to | Purpose |
-|---|---|---|
-| `PyWarmupPolicy` (exported to Python as `WarmupPolicy`) | Core `WarmupPolicy` | Python enum conversion. |
-| Python `FeatureSet` | Core `FeatureSet` | Fluent in-process configuration. |
-| Python `FeatureExtractor` | Core `FeatureExtractor` | Scalar update, batch replay, symbol-handle table, and output-dtype policy. |
-| `OutputDtype` | `Float32` or `Float64` | Internal output selection; calculation state remains `f64`. |
-| `OutputBuffer` | `Vec<f32>` or `Vec<f64>` | Internal row-major batch buffer converted into a NumPy array. |
-
-The binding constructs core `Event<f64>` values and calls the same sealed
-`IndicatorFeatures::dispatch` implementation used by Rust callers. It depends
-on the core crate without enabling `serde`; there are currently no Python
-`to_json` or `from_json` entry points.
+The Python `FeatureSet` remains a fluent convenience API. Each grouped method
+expands windows into scalar core definitions; compilation groups compatible
+definitions again. The binding preserves its established column IDs and
+canonical ordering. It initializes Python output cells to `NaN`, validates a
+complete batch before mutation, then calls the same core `handle_event` method
+used by Rust callers.
 
 ## Source map
 
@@ -410,18 +280,14 @@ on the core crate without enabling `serde`; there are currently no Python
 | Numeric and warm-up types | [`crates/fiml/src/types.rs`](../crates/fiml/src/types.rs) |
 | Ring buffers | [`crates/fiml/src/ring_buffer.rs`](../crates/fiml/src/ring_buffer.rs) |
 | Feature vectors | [`crates/fiml/src/vectors.rs`](../crates/fiml/src/vectors.rs) |
-| Symbols and interner | [`crates/fiml/src/symbols.rs`](../crates/fiml/src/symbols.rs) |
-| Feature-set builder | [`crates/fiml/src/features/builder.rs`](../crates/fiml/src/features/builder.rs) |
-| Feature definitions | [`crates/fiml/src/features/definition.rs`](../crates/fiml/src/features/definition.rs) |
+| Symbols | [`crates/fiml/src/symbols.rs`](../crates/fiml/src/symbols.rs) |
 | Events | [`crates/fiml/src/event.rs`](../crates/fiml/src/event.rs) |
-| Feature routing | [`crates/fiml/src/features/mod.rs`](../crates/fiml/src/features/mod.rs) |
-| Compiler | [`crates/fiml/src/features/compiler.rs`](../crates/fiml/src/features/compiler.rs) |
-| Runtime storage and sealed interface | [`crates/fiml/src/features/indicator_vector.rs`](../crates/fiml/src/features/indicator_vector.rs) |
-| Dynamic extractor | [`crates/fiml/src/features/extractor.rs`](../crates/fiml/src/features/extractor.rs) |
-| Internal derivations | [`crates/fiml/src/features/derivation/`](../crates/fiml/src/features/derivation/) |
-| Transformations and pipeline | [`crates/fiml/src/features/transformers/`](../crates/fiml/src/features/transformers/), [`crates/fiml/src/features/pipeline/mod.rs`](../crates/fiml/src/features/pipeline/mod.rs) |
+| Feature definitions | [`crates/fiml/src/features/mod.rs`](../crates/fiml/src/features/mod.rs), [`feature_key.rs`](../crates/fiml/src/features/feature_key.rs), [`feature_source.rs`](../crates/fiml/src/features/feature_source.rs), [`feature_id.rs`](../crates/fiml/src/features/feature_id.rs) |
+| Builder/compiler | [`feature_extractor_builder.rs`](../crates/fiml/src/features/feature_extractor_builder.rs), [`compiler.rs`](../crates/fiml/src/features/compiler.rs) |
+| Extractor and router | [`feature_extractor.rs`](../crates/fiml/src/features/feature_extractor.rs) |
+| Runtime derivations | [`crates/fiml/src/features/derivation/`](../crates/fiml/src/features/derivation/) |
+| Transformations | [`crates/fiml/src/features/transformers/`](../crates/fiml/src/features/transformers/) |
 | Standalone indicators | [`crates/fiml/src/indicators/`](../crates/fiml/src/indicators/) |
-| Dormant feature-set serialization source | [`crates/fiml/src/features/serialization/`](../crates/fiml/src/features/serialization/) (not declared by `features/mod.rs`) |
 | Order book | [`crates/fiml/src/order_book/`](../crates/fiml/src/order_book/) |
 | Python bindings | [`crates/fiml-python/src/lib.rs`](../crates/fiml-python/src/lib.rs) |
 | Python facade | [`crates/fiml-python/python/fiml/__init__.py`](../crates/fiml-python/python/fiml/__init__.py) |

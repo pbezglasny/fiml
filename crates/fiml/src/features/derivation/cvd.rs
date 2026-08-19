@@ -1,6 +1,6 @@
 use crate::event::Event;
+use crate::features::MAX_OUTPUTS_PER_INDICATOR;
 use crate::features::compiler::OutputSpan;
-use crate::features::definition::MAX_OUTPUTS_PER_INDICATOR;
 use crate::features::derivation::{FeatureDerivation, write_outputs};
 use crate::indicators::CumulativeVolumeDelta;
 use crate::vectors::FeatureVector;

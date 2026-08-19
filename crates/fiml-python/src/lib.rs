@@ -9,9 +9,9 @@
 use std::time::Duration;
 
 use fiml::{
-    Event, FeatureExtractor as CoreFeatureExtractor, FeatureSet as CoreFeatureSet,
-    IndicatorFeatures, IndicatorSpec, ScopedIndicator, Symbol, TimeWindows, TradeSide, ValueSource,
-    WarmupPolicy as CoreWarmupPolicy, symbols,
+    Event, EventField, EventKind, FeatureDefinition, FeatureExtractor as GenericFeatureExtractor,
+    FeatureId, FeatureKey, FeatureSource, FeatureVector, FimlError, Symbol, TradeSide,
+    VecFeatureVector, WarmupPolicy as CoreWarmupPolicy, symbols,
 };
 use numpy::ndarray::Array2;
 use numpy::{Element, IntoPyArray, PyArray1, PyReadonlyArray1};
@@ -83,12 +83,12 @@ fn invalid_duration(field: &str, text: &str) -> PyErr {
     ))
 }
 
-fn parse_value_source(field: &str, value: &str) -> PyResult<ValueSource> {
+fn parse_value_source(field: &str, value: &str) -> PyResult<EventField> {
     match value {
-        "price" => Ok(ValueSource::Price),
-        "volume" => Ok(ValueSource::Volume),
-        "trade_price" => Ok(ValueSource::TradePrice),
-        "trade_volume" => Ok(ValueSource::TradeVolume),
+        "price" => Ok(EventField::Price),
+        "volume" => Ok(EventField::Volume),
+        "trade_price" => Ok(EventField::TradePrice),
+        "trade_volume" => Ok(EventField::TradeVolume),
         _ => Err(PyValueError::new_err(format!(
             "invalid `{field}` {value:?}; expected \"price\", \"volume\", \
              \"trade_price\", or \"trade_volume\""
@@ -142,17 +142,25 @@ fn parse_tz(tz: &str) -> PyResult<i64> {
 #[pyclass]
 #[derive(Default)]
 pub struct FeatureSet {
-    inner: CoreFeatureSet,
+    definitions: Vec<FeatureDefinition>,
+    indicator_count: usize,
 }
 
 impl FeatureSet {
-    fn push_symbol(&mut self, symbol: &str, indicator: IndicatorSpec) {
-        self.inner
-            .add_indicator(ScopedIndicator::symbol(symbol, indicator));
+    fn add_group<I>(&mut self, definitions: I)
+    where
+        I: IntoIterator<Item = FeatureDefinition>,
+    {
+        self.definitions.extend(definitions);
+        self.indicator_count += 1;
     }
 
-    fn push_global(&mut self, indicator: IndicatorSpec) {
-        self.inner.add_indicator(ScopedIndicator::global(indicator));
+    fn require_windows<T>(windows: &[T]) -> PyResult<()> {
+        if windows.is_empty() {
+            Err(PyValueError::new_err("windows must not be empty"))
+        } else {
+            Ok(())
+        }
     }
 }
 
@@ -163,14 +171,15 @@ impl FeatureSet {
         Self::default()
     }
 
-    /// Number of runtime indicator instances.
+    /// Number of grouped builder calls. Compatible calls may share one runtime
+    /// derivation after compilation.
     fn indicator_count(&self) -> usize {
-        self.inner.indicator_count()
+        self.indicator_count
     }
 
     /// Number of output cells produced after compilation.
     fn output_count(&self) -> usize {
-        self.inner.output_count()
+        self.definitions.len()
     }
 
     /// Grouped simple moving averages over ordered sample windows.
@@ -188,14 +197,21 @@ impl FeatureSet {
         source: &str,
         warmup: PyWarmupPolicy,
     ) -> PyResult<PyRefMut<'py, Self>> {
-        slf.push_symbol(
-            symbol,
-            IndicatorSpec::Sma {
-                source: parse_value_source("source", source)?,
-                windows,
-                warmup_policy: warmup.into(),
-            },
-        );
+        Self::require_windows(&windows)?;
+        let symbol = symbols::intern(symbol);
+        let field = parse_value_source("source", source)?;
+        let warmup_policy = warmup.into();
+        slf.add_group(windows.into_iter().map(|window| {
+            definition(
+                FeatureKey::Sma {
+                    symbol,
+                    source: FeatureSource::Field(field),
+                    window,
+                    warmup_policy,
+                },
+                format!("{}:{source}:sma:{window}", symbol.resolve_as_string()),
+            )
+        }));
         Ok(slf)
     }
 
@@ -214,14 +230,21 @@ impl FeatureSet {
         source: &str,
         warmup: PyWarmupPolicy,
     ) -> PyResult<PyRefMut<'py, Self>> {
-        slf.push_symbol(
-            symbol,
-            IndicatorSpec::Ema {
-                source: parse_value_source("source", source)?,
-                windows,
-                warmup_policy: warmup.into(),
-            },
-        );
+        Self::require_windows(&windows)?;
+        let symbol = symbols::intern(symbol);
+        let field = parse_value_source("source", source)?;
+        let warmup_policy = warmup.into();
+        slf.add_group(windows.into_iter().map(|window| {
+            definition(
+                FeatureKey::Ema {
+                    symbol,
+                    source: FeatureSource::Field(field),
+                    window,
+                    warmup_policy,
+                },
+                format!("{}:{source}:ema:{window}", symbol.resolve_as_string()),
+            )
+        }));
         Ok(slf)
     }
 
@@ -238,13 +261,20 @@ impl FeatureSet {
         windows: Vec<usize>,
         warmup: PyWarmupPolicy,
     ) -> PyResult<PyRefMut<'py, Self>> {
-        slf.push_symbol(
-            symbol,
-            IndicatorSpec::Cvd {
-                windows,
-                warmup_policy: warmup.into(),
-            },
-        );
+        Self::require_windows(&windows)?;
+        let symbol = symbols::intern(symbol);
+        let warmup_policy = warmup.into();
+        slf.add_group(windows.into_iter().map(|window| {
+            definition(
+                FeatureKey::Cvd {
+                    symbol,
+                    source: FeatureSource::Event(EventKind::Trade),
+                    window,
+                    warmup_policy,
+                },
+                format!("{}:trade:cvd:{window}", symbol.resolve_as_string()),
+            )
+        }));
         Ok(slf)
     }
 
@@ -265,17 +295,29 @@ impl FeatureSet {
         source: &str,
         warmup: PyWarmupPolicy,
     ) -> PyResult<PyRefMut<'py, Self>> {
-        slf.push_symbol(
-            symbol,
-            IndicatorSpec::SmaTimed {
-                source: parse_value_source("source", source)?,
-                time_windows: TimeWindows::new(
-                    parse_duration("aggregation", aggregation)?,
-                    parse_durations("windows", windows)?,
+        Self::require_windows(&windows)?;
+        let symbol = symbols::intern(symbol);
+        let field = parse_value_source("source", source)?;
+        let aggregation = parse_duration("aggregation", aggregation)?;
+        let windows = parse_durations("windows", windows)?;
+        let warmup_policy = warmup.into();
+        slf.add_group(windows.into_iter().map(|window| {
+            definition(
+                FeatureKey::SmaTimed {
+                    symbol,
+                    source: FeatureSource::Field(field),
+                    aggregation,
+                    window,
+                    warmup_policy,
+                },
+                format!(
+                    "{}:{source}:sma_timed:{}ms:{}ms",
+                    symbol.resolve_as_string(),
+                    aggregation.as_millis(),
+                    window.as_millis()
                 ),
-                warmup_policy: warmup.into(),
-            },
-        );
+            )
+        }));
         Ok(slf)
     }
 
@@ -294,16 +336,28 @@ impl FeatureSet {
         windows: Vec<String>,
         warmup: PyWarmupPolicy,
     ) -> PyResult<PyRefMut<'py, Self>> {
-        slf.push_symbol(
-            symbol,
-            IndicatorSpec::ObvTimed {
-                time_windows: TimeWindows::new(
-                    parse_duration("aggregation", aggregation)?,
-                    parse_durations("windows", windows)?,
+        Self::require_windows(&windows)?;
+        let symbol = symbols::intern(symbol);
+        let aggregation = parse_duration("aggregation", aggregation)?;
+        let windows = parse_durations("windows", windows)?;
+        let warmup_policy = warmup.into();
+        slf.add_group(windows.into_iter().map(|window| {
+            definition(
+                FeatureKey::ObvTimed {
+                    symbol,
+                    source: FeatureSource::Event(EventKind::Trade),
+                    aggregation,
+                    window,
+                    warmup_policy,
+                },
+                format!(
+                    "{}:trade:obv_timed:{}ms:{}ms",
+                    symbol.resolve_as_string(),
+                    aggregation.as_millis(),
+                    window.as_millis()
                 ),
-                warmup_policy: warmup.into(),
-            },
-        );
+            )
+        }));
         Ok(slf)
     }
 
@@ -323,14 +377,24 @@ impl FeatureSet {
         window: &str,
         warmup: PyWarmupPolicy,
     ) -> PyResult<PyRefMut<'py, Self>> {
-        slf.push_symbol(
-            symbol,
-            IndicatorSpec::TradeCountTimed {
-                aggregation: parse_duration("aggregation", aggregation)?,
-                window: parse_duration("window", window)?,
+        let symbol = symbols::intern(symbol);
+        let aggregation = parse_duration("aggregation", aggregation)?;
+        let window = parse_duration("window", window)?;
+        slf.add_group([definition(
+            FeatureKey::TradeCountTimed {
+                symbol,
+                source: FeatureSource::Event(EventKind::Trade),
+                aggregation,
+                window,
                 warmup_policy: warmup.into(),
             },
-        );
+            format!(
+                "{}:trade:count_timed:{}ms:{}ms",
+                symbol.resolve_as_string(),
+                aggregation.as_millis(),
+                window.as_millis()
+            ),
+        )]);
         Ok(slf)
     }
 
@@ -338,7 +402,13 @@ impl FeatureSet {
     /// from every event's timestamp, so it has a value on every row.
     fn day_of_week(slf: PyRefMut<'_, Self>) -> PyRefMut<'_, Self> {
         let mut slf = slf;
-        slf.push_global(IndicatorSpec::DayOfWeek);
+        slf.add_group([definition(
+            FeatureKey::DayOfWeek {
+                symbol: Symbol::GLOBAL,
+                source: FeatureSource::EveryEvent,
+            },
+            "clock:day_of_week".to_string(),
+        )]);
         slf
     }
 
@@ -348,12 +418,21 @@ impl FeatureSet {
         mut slf: PyRefMut<'py, Self>,
         tz: &str,
     ) -> PyResult<PyRefMut<'py, Self>> {
-        let spec = IndicatorSpec::TimeSinceFirstEventOfDay {
-            utc_offset_millis: parse_tz(tz)?,
-        };
-        slf.push_global(spec);
+        let utc_offset_millis = parse_tz(tz)?;
+        slf.add_group([definition(
+            FeatureKey::TimeSinceFirstEventOfDay {
+                symbol: Symbol::GLOBAL,
+                source: FeatureSource::EveryEvent,
+                utc_offset_millis,
+            },
+            format!("clock:time_since_first_event_of_day:{utc_offset_millis}ms"),
+        )]);
         Ok(slf)
     }
+}
+
+fn definition(key: FeatureKey, id: String) -> FeatureDefinition {
+    FeatureDefinition::new(key, FeatureId::new(id))
 }
 
 #[derive(Clone, Copy)]
@@ -422,9 +501,77 @@ impl OutputBuffer {
     }
 }
 
-fn build_core(feature_set: &CoreFeatureSet) -> PyResult<CoreFeatureExtractor> {
-    CoreFeatureExtractor::from_feature_set(feature_set)
+type CoreFeatureExtractor = GenericFeatureExtractor<f64, VecFeatureVector<f64>>;
+
+fn build_core(feature_set: &FeatureSet) -> PyResult<CoreFeatureExtractor> {
+    let mut definitions = feature_set.definitions.clone();
+    definitions.sort_by_cached_key(|definition| feature_sort_key(&definition.key));
+
+    let mut output_vector = VecFeatureVector::new(definitions.len());
+    for index in 0..definitions.len() {
+        output_vector.set_value_at(index, f64::NAN);
+    }
+    let mut builder = GenericFeatureExtractor::builder(output_vector);
+    for definition in definitions {
+        builder = builder.add_feature(definition);
+    }
+    builder
+        .build()
         .map_err(|error| PyValueError::new_err(error.to_string()))
+}
+
+fn feature_sort_key(key: &FeatureKey) -> (Option<String>, u8, u8, u128, i64) {
+    let symbol = match key {
+        FeatureKey::Sma { symbol, .. }
+        | FeatureKey::Ema { symbol, .. }
+        | FeatureKey::Cvd { symbol, .. }
+        | FeatureKey::SmaTimed { symbol, .. }
+        | FeatureKey::ObvTimed { symbol, .. }
+        | FeatureKey::TradeCountTimed { symbol, .. }
+        | FeatureKey::DayOfWeek { symbol, .. }
+        | FeatureKey::TimeSinceFirstEventOfDay { symbol, .. } => *symbol,
+    };
+    let symbol = (symbol != Symbol::GLOBAL).then(|| symbol.resolve_as_string());
+    let kind = match key {
+        FeatureKey::Cvd { .. } => 0,
+        FeatureKey::DayOfWeek { .. } => 1,
+        FeatureKey::Ema { .. } => 2,
+        FeatureKey::ObvTimed { .. } => 3,
+        FeatureKey::Sma { .. } => 4,
+        FeatureKey::SmaTimed { .. } => 5,
+        FeatureKey::TimeSinceFirstEventOfDay { .. } => 6,
+        FeatureKey::TradeCountTimed { .. } => 7,
+    };
+    let source = match key {
+        FeatureKey::Sma { source, .. }
+        | FeatureKey::Ema { source, .. }
+        | FeatureKey::SmaTimed { source, .. } => source_rank(*source),
+        _ => 0,
+    };
+    let aggregation_nanos = match key {
+        FeatureKey::SmaTimed { aggregation, .. }
+        | FeatureKey::ObvTimed { aggregation, .. }
+        | FeatureKey::TradeCountTimed { aggregation, .. } => aggregation.as_nanos(),
+        _ => 0,
+    };
+    let utc_offset_millis = match key {
+        FeatureKey::TimeSinceFirstEventOfDay {
+            utc_offset_millis, ..
+        } => *utc_offset_millis,
+        _ => 0,
+    };
+    (symbol, kind, source, aggregation_nanos, utc_offset_millis)
+}
+
+const fn source_rank(source: FeatureSource) -> u8 {
+    match source {
+        FeatureSource::Field(EventField::Price) => 0,
+        FeatureSource::Field(EventField::TradePrice) => 1,
+        FeatureSource::Field(EventField::TradeVolume) => 2,
+        FeatureSource::Field(EventField::Volume) => 3,
+        FeatureSource::Event(kind) => 4 + kind as u8,
+        FeatureSource::EveryEvent => u8::MAX,
+    }
 }
 
 /// A configured, runnable feature extractor.
@@ -440,7 +587,7 @@ pub struct FeatureExtractor {
 
 impl FeatureExtractor {
     fn from_core(inner: CoreFeatureExtractor, output_dtype: OutputDtype) -> Self {
-        let n_features = inner.feature_names().len();
+        let n_features = inner.feature_ids().len();
         Self {
             inner,
             symbols: Vec::new(),
@@ -558,7 +705,7 @@ impl FeatureExtractor {
     #[pyo3(signature = (feature_set, output_dtype="float64"))]
     fn new(feature_set: PyRef<'_, FeatureSet>, output_dtype: &str) -> PyResult<Self> {
         Ok(Self::from_core(
-            build_core(&feature_set.inner)?,
+            build_core(&feature_set)?,
             OutputDtype::parse(output_dtype)?,
         ))
     }
@@ -572,7 +719,7 @@ impl FeatureExtractor {
     /// Change the output dtype before the first event is processed.
     #[setter]
     fn set_output_dtype(&mut self, value: &str) -> PyResult<()> {
-        if self.inner.has_dispatched() {
+        if self.inner.last_timestamp().is_some() {
             return Err(PyValueError::new_err(
                 "output_dtype cannot be changed after the extractor has processed an event",
             ));
@@ -594,7 +741,11 @@ impl FeatureExtractor {
 
     /// Feature (column) names in output order.
     fn feature_names(&self) -> Vec<String> {
-        self.inner.feature_names().to_vec()
+        self.inner
+            .feature_ids()
+            .iter()
+            .map(|id| id.as_str().to_owned())
+            .collect()
     }
 
     /// Number of feature columns.
@@ -609,13 +760,14 @@ impl FeatureExtractor {
             OutputDtype::Float32 => {
                 let values: Vec<f32> = self
                     .inner
+                    .feature_vector()
                     .values()
                     .iter()
                     .map(|&value| value as f32)
                     .collect();
                 PyArray1::from_vec(py, values).into_any().unbind()
             }
-            OutputDtype::Float64 => PyArray1::from_slice(py, self.inner.values())
+            OutputDtype::Float64 => PyArray1::from_slice(py, self.inner.feature_vector().values())
                 .into_any()
                 .unbind(),
         }
@@ -653,7 +805,7 @@ impl FeatureExtractor {
     ) -> PyResult<()> {
         let event = self.build_event(kind, symbol, timestamp, price, volume, side, bid, ask)?;
         self.inner
-            .dispatch(&event)
+            .handle_event(&event)
             .map_err(|error| PyValueError::new_err(error.to_string()))?;
         Ok(())
     }
@@ -740,19 +892,29 @@ impl FeatureExtractor {
                 .map_err(|err| PyValueError::new_err(format!("row {row}: {}", err.value(py))))?;
             events.push(event);
         }
-        self.inner
-            .validate_dispatch_sequence(&events)
-            .map_err(|error| {
-                PyValueError::new_err(format!("row {}: {}", error.index, error.error))
-            })?;
+        let mut previous_timestamp = self.inner.last_timestamp();
+        for (row, event) in events.iter().enumerate() {
+            if let Some(previous_timestamp) = previous_timestamp
+                && previous_timestamp > event.timestamp()
+            {
+                let error = FimlError::TimestampOutOfOrder {
+                    symbol: event.symbol(),
+                    event_kind: event.kind(),
+                    timestamp: event.timestamp(),
+                    previous_timestamp,
+                };
+                return Err(PyValueError::new_err(format!("row {row}: {error}")));
+            }
+            previous_timestamp = Some(event.timestamp());
+        }
 
         let n_features = self.n_features;
         let mut output = OutputBuffer::new(self.output_dtype, n_rows * n_features);
         for (row, event) in events.iter().enumerate() {
             self.inner
-                .dispatch(event)
+                .handle_event(event)
                 .map_err(|err| PyValueError::new_err(format!("row {row}: {err}")))?;
-            output.write_row(row, n_features, self.inner.values());
+            output.write_row(row, n_features, self.inner.feature_vector().values());
         }
         output.into_pyarray(py, n_rows, n_features)
     }

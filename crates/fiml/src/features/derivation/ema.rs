@@ -1,21 +1,21 @@
 use crate::event::Event;
+use crate::features::MAX_OUTPUTS_PER_INDICATOR;
 use crate::features::compiler::OutputSpan;
-use crate::features::definition::{MAX_OUTPUTS_PER_INDICATOR, ValueSource};
 use crate::features::derivation::{FeatureDerivation, write_outputs};
 use crate::indicators::ExponentialMovingAverage;
 use crate::vectors::FeatureVector;
-use crate::{Float, Result, Symbol, WarmupPolicy};
+use crate::{EventField, Float, Result, Symbol, WarmupPolicy};
 
 pub(crate) struct EmaFeature<F: Float> {
     symbol: Symbol,
-    source: ValueSource,
+    source: EventField,
     ema: ExponentialMovingAverage<F, MAX_OUTPUTS_PER_INDICATOR>,
 }
 
 impl<F: Float> EmaFeature<F> {
     pub(crate) fn new(
         symbol: Symbol,
-        source: ValueSource,
+        source: EventField,
         ema: ExponentialMovingAverage<F, MAX_OUTPUTS_PER_INDICATOR>,
     ) -> Self {
         Self {
@@ -31,7 +31,9 @@ impl<F: Float> EmaFeature<F> {
         output_span: OutputSpan,
         output: &mut O,
     ) {
-        if let Some(value) = self.source.value(event, self.symbol) {
+        if event.symbol() == self.symbol
+            && let Some(value) = self.source.extract(event)
+        {
             self.ema.update(value);
             write_outputs(output_span, output, |index| self.ema.value_at(index));
         }
@@ -40,7 +42,7 @@ impl<F: Float> EmaFeature<F> {
 
 pub(crate) fn build<F: Float>(
     symbol: Symbol,
-    source: ValueSource,
+    source: EventField,
     windows: &[usize],
     warmup_policy: WarmupPolicy,
 ) -> Result<FeatureDerivation<F>> {
@@ -69,7 +71,7 @@ mod tests {
             ExponentialMovingAverage::new(WarmupPolicy::FirstValue);
         ema.add_window(3).unwrap();
 
-        let mut feat = EmaFeature::new(aapl, ValueSource::Price, ema);
+        let mut feat = EmaFeature::new(aapl, EventField::Price, ema);
         let output_span = OutputSpan { start: 0, count: 1 };
         for v in [10.0, 20.0, 30.0] {
             feat.update(&Event::price(aapl, v, 0), output_span, &mut fv);
@@ -90,7 +92,7 @@ mod tests {
             ExponentialMovingAverage::new(WarmupPolicy::FirstValue);
         ema.add_window(3).unwrap();
 
-        let mut feat = EmaFeature::new(aapl, ValueSource::Volume, ema);
+        let mut feat = EmaFeature::new(aapl, EventField::Volume, ema);
         let output_span = OutputSpan { start: 0, count: 1 };
         feat.update(&Event::price(aapl, 1_000.0, 0), output_span, &mut fv);
         for v in [100.0, 200.0, 300.0] {
@@ -111,7 +113,7 @@ mod tests {
             ExponentialMovingAverage::new(WarmupPolicy::FirstValue);
         ema.add_window(3).unwrap();
 
-        let mut feat = EmaFeature::new(aapl, ValueSource::TradePrice, ema);
+        let mut feat = EmaFeature::new(aapl, EventField::TradePrice, ema);
         let output_span = OutputSpan { start: 0, count: 1 };
         feat.update(&Event::price(aapl, 1_000.0, 0), output_span, &mut fv);
         feat.update(&Event::volume(aapl, 1_000.0, 0), output_span, &mut fv);

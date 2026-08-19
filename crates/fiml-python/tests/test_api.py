@@ -95,6 +95,23 @@ def test_grouped_sma_and_ema_can_consume_trade_price_and_volume():
     assert not result["btcusdt:trade_volume:ema:2"].isna().any()
 
 
+def test_feature_names_keep_canonical_source_order():
+    extractor = fiml.FeatureExtractor(
+        fiml.FeatureSet()
+        .sma("BTCUSDT", [2], source="volume")
+        .sma("BTCUSDT", [2], source="trade_volume")
+        .sma("BTCUSDT", [2], source="trade_price")
+        .sma("BTCUSDT", [2], source="price")
+    )
+
+    assert extractor.feature_names() == [
+        "btcusdt:price:sma:2",
+        "btcusdt:trade_price:sma:2",
+        "btcusdt:trade_volume:sma:2",
+        "btcusdt:volume:sma:2",
+    ]
+
+
 def test_cvd_uses_aggressor_side_codes():
     feature_set = fiml.FeatureSet().cvd(
         "BTCUSDT", [1, 2], warmup=fiml.WarmupPolicy.FIRST_VALUE
@@ -174,17 +191,20 @@ def test_moving_average_source_is_validated():
         fiml.FeatureSet().sma("BTCUSDT", [2], source="orderbook")
 
 
-def test_compilation_rejects_duplicate_identity_and_invalid_windows():
-    duplicate = (
+def test_compatible_feature_calls_are_grouped_and_empty_windows_are_rejected():
+    compatible = (
         fiml.FeatureSet()
         .sma("BTCUSDT", [2], source="trade_price")
         .sma("BTCUSDT", [3], source="trade_price")
     )
-    with pytest.raises(ValueError, match="duplicates an earlier indicator identity"):
-        fiml.FeatureExtractor(duplicate)
+    extractor = fiml.FeatureExtractor(compatible)
+    assert extractor.feature_names() == [
+        "btcusdt:trade_price:sma:2",
+        "btcusdt:trade_price:sma:3",
+    ]
 
     with pytest.raises(ValueError, match="windows must not be empty"):
-        fiml.FeatureExtractor(fiml.FeatureSet().ema("BTCUSDT", []))
+        fiml.FeatureSet().ema("BTCUSDT", [])
 
 
 def test_global_clock_features_have_no_symbol():

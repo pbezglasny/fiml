@@ -1,54 +1,41 @@
-//! Live/serving side of the Python <-> Rust parity story.
-//!
-//! Builds a feature extractor from the same `FeatureSet` JSON that Python
-//! training uses (see `crates/fiml-python/examples/quickstart.py`) and
-//! dispatches the same price series. The printed feature values match what
-//! `FeatureExtractor.transform` produces in Python, because both run this
-//! exact extractor.
-//!
-//! Run with: `cargo run --example feature_extractor --features serde`
+//! Build an extractor from scalar feature definitions and process price ticks.
 
-use fiml::{Event, FeatureExtractor, FeatureSet, IndicatorFeatures, symbols};
-
-const FEATURE_SET_JSON: &str = r#"{
-    "version": "1.0.0",
-    "features": [
-        {
-            "symbol": "btcusdt",
-            "indicators": [
-                {
-                    "name": "ema",
-                    "options": {
-                        "source": "price",
-                        "windows": [3],
-                        "warmup_policy": "full_window"
-                    }
-                },
-                {
-                    "name": "sma",
-                    "options": {
-                        "source": "price",
-                        "windows": [3],
-                        "warmup_policy": "full_window"
-                    }
-                }
-            ]
-        }
-    ],
-    "options": {}
-}"#;
+use fiml::{
+    ArrayFeatureVector, Event, EventField, FeatureDefinition, FeatureExtractor, FeatureKey,
+    FeatureSource, FeatureVector, WarmupPolicy, symbols,
+};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let feature_set: FeatureSet = serde_json::from_str(FEATURE_SET_JSON)?;
-    let mut extractor = FeatureExtractor::from_feature_set(&feature_set)?;
-
     let btc = symbols::intern("BTCUSDT");
+    let source = FeatureSource::Field(EventField::Price);
+    let mut extractor = FeatureExtractor::builder(ArrayFeatureVector::<f64, 2>::new())
+        .add_feature(FeatureDefinition::with_default_id(FeatureKey::Ema {
+            symbol: btc,
+            source,
+            window: 3,
+            warmup_policy: WarmupPolicy::FullWindow,
+        }))
+        .add_feature(FeatureDefinition::with_default_id(FeatureKey::Sma {
+            symbol: btc,
+            source,
+            window: 3,
+            warmup_policy: WarmupPolicy::FullWindow,
+        }))
+        .build()?;
     let prices = [10.0, 11.0, 9.0, 12.0, 13.0, 12.5];
 
-    println!("columns: {:?}", extractor.feature_names());
+    let columns: Vec<_> = extractor
+        .feature_ids()
+        .iter()
+        .map(|id| id.as_str())
+        .collect();
+    println!("columns: {columns:?}");
     for (timestamp, price) in prices.iter().enumerate() {
-        extractor.dispatch(&Event::price(btc, *price, timestamp as i64))?;
-        println!("t={timestamp} price={price} -> {:?}", extractor.values());
+        extractor.handle_event(&Event::price(btc, *price, timestamp as i64))?;
+        println!(
+            "t={timestamp} price={price} -> {:?}",
+            extractor.feature_vector().values()
+        );
     }
 
     Ok(())

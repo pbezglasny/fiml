@@ -36,3 +36,9 @@ harness = false
 [[bench]]
 name = "ring_buffer"
 harness = false
+
+[[example]]
+name = "feature_extractor"
+
+[[example]]
+name = "binance_trades"
