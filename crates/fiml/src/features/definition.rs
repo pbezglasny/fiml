@@ -1,14 +1,12 @@
 use std::cmp::Ordering;
 use std::time::Duration;
 
-use crate::event::{Event, EventKind};
-use crate::features::FeatureRoute;
+use crate::event::Event;
 use crate::{Float, Symbol, WarmupPolicy};
 
 /// Maximum number of adjacent outputs one runtime indicator may own.
 pub const MAX_OUTPUTS_PER_INDICATOR: usize = 16;
 
-// TODO: in feature vector create array of indicies that subscribed on event
 /// Numeric event field consumed by a moving average.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum ValueSource {
@@ -20,14 +18,6 @@ pub enum ValueSource {
 }
 
 impl ValueSource {
-    pub(crate) fn route(self) -> FeatureRoute {
-        FeatureRoute::Kind(match self {
-            Self::Price => EventKind::Price,
-            Self::Volume => EventKind::Volume,
-            Self::TradePrice | Self::TradeVolume => EventKind::Trade,
-        })
-    }
-
     pub(crate) fn canonical_name(self) -> &'static str {
         match self {
             Self::Price => "price",
@@ -120,31 +110,6 @@ impl IndicatorSpec {
         }
     }
 
-    pub(crate) fn route(&self) -> FeatureRoute {
-        match self {
-            Self::Sma { source, .. } | Self::Ema { source, .. } => source.route(),
-            Self::Cvd { .. } => FeatureRoute::Kind(EventKind::Trade),
-            Self::SmaTimed { .. }
-            | Self::ObvTimed { .. }
-            | Self::TradeCountTimed { .. }
-            | Self::DayOfWeek
-            | Self::TimeSinceFirstEventOfDay { .. } => FeatureRoute::Every,
-        }
-    }
-
-    pub(crate) fn name(&self) -> &'static str {
-        match self {
-            Self::Sma { .. } => "SMA",
-            Self::Ema { .. } => "EMA",
-            Self::Cvd { .. } => "CVD",
-            Self::SmaTimed { .. } => "timed SMA",
-            Self::ObvTimed { .. } => "timed OBV",
-            Self::TradeCountTimed { .. } => "timed trade count",
-            Self::DayOfWeek => "day of week",
-            Self::TimeSinceFirstEventOfDay { .. } => "time since first event of day",
-        }
-    }
-
     pub(crate) fn canonical_name(&self) -> &'static str {
         match self {
             Self::Sma { .. } => "sma",
@@ -206,13 +171,6 @@ impl IndicatorSpec {
             ) => left.cmp(right),
             _ => Ordering::Equal,
         }
-    }
-
-    pub(crate) fn is_global(&self) -> bool {
-        matches!(
-            self,
-            Self::DayOfWeek | Self::TimeSinceFirstEventOfDay { .. }
-        )
     }
 }
 

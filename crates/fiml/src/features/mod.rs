@@ -3,19 +3,13 @@ pub(crate) mod compiler;
 mod definition;
 pub(crate) mod derivation;
 mod feature_extractor;
+mod feature_extractor_builder;
 mod feature_id;
 mod feature_key;
 mod feature_source;
 pub mod transformers;
 
-use crate::event::{EVENT_KIND_COUNT, EventKind};
-
-/// Number of dispatch groups: one per [`EventKind`] plus the group that runs
-/// on every event.
-pub(crate) const FEATURE_GROUP_COUNT: usize = EVENT_KIND_COUNT + 1;
-
-/// Index of the every-event group in the feature dispatch table.
-pub(crate) const EVERY_EVENT_GROUP: usize = EVENT_KIND_COUNT;
+use crate::event::EventKind;
 
 /// Where a feature subscribes in the dispatch table.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -24,20 +18,12 @@ pub(crate) enum FeatureRoute {
     Every,
 }
 
-impl FeatureRoute {
-    pub(crate) fn group_index(self) -> usize {
-        match self {
-            Self::Kind(kind) => kind as usize,
-            Self::Every => EVERY_EVENT_GROUP,
-        }
-    }
-}
-
 pub use builder::FeatureSetBuilder;
 pub use definition::{
     FeatureSet, IndicatorSpec, MAX_OUTPUTS_PER_INDICATOR, ScopedIndicator, TimeWindows, ValueSource,
 };
 pub use feature_extractor::{FeatureExtractor, UpdateResult};
+pub use feature_extractor_builder::FeatureExtractorBuilder;
 pub use feature_id::FeatureId;
 pub use feature_key::FeatureKey;
 pub use feature_source::{EventField, FeatureSource};
