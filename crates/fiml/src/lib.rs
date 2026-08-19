@@ -16,9 +16,9 @@ pub use event::{
     TradeUpdate, VolumeUpdate,
 };
 pub use features::{
-    EventField, FeatureDefinition, FeatureExtractor, FeatureId, FeatureKey, FeatureSet,
-    FeatureSetBuilder, FeatureSource, IndicatorSpec, MAX_OUTPUTS_PER_INDICATOR, ScopedIndicator,
-    TimeWindows, UpdateResult, ValueSource,
+    EventField, FeatureDefinition, FeatureExtractor, FeatureExtractorBuilder, FeatureId,
+    FeatureKey, FeatureSet, FeatureSetBuilder, FeatureSource, IndicatorSpec,
+    MAX_OUTPUTS_PER_INDICATOR, ScopedIndicator, TimeWindows, UpdateResult, ValueSource,
 };
 pub use indicators::{CumulativeVolumeDelta, ObvBucket, OnBalanceVolumeTimed};
 pub use ring_buffer::{

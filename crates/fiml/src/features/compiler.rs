@@ -1,645 +1,784 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
-use crate::features::FeatureRoute;
-use crate::features::definition::{
-    FeatureSet, IndicatorSpec, MAX_OUTPUTS_PER_INDICATOR, ScopedIndicator, TimeWindows, ValueSource,
-};
+use crate::features::definition::{MAX_OUTPUTS_PER_INDICATOR, ValueSource};
 use crate::features::derivation::{self, FeatureDerivation};
-use crate::{FimlError, Float, Result, Symbol};
+use crate::features::feature_extractor::EventRouter;
+use crate::features::{FeatureRoute, FeatureSource};
+use crate::{
+    EventField, EventKind, FeatureDefinition, FeatureId, FeatureKey, FimlError, Float, Result,
+    Symbol, WarmupPolicy,
+};
 
-/// Contiguous output cells owned by one compiled indicator.
+/// Contiguous section of the output feature vector written by one derivation.
+///
+/// Grouped derivations, such as an SMA with several windows, write one value
+/// per cell. `start` is the first output-vector index and `count` is the number
+/// of grouped scalar outputs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct OutputSpan {
+    /// Index of the first output cell assigned to the derivation.
     pub(crate) start: usize,
+    /// Number of consecutive output cells assigned to the derivation.
     pub(crate) count: usize,
 }
 
-pub(crate) struct CompiledFeature<F: Float> {
-    pub(crate) feature: FeatureDerivation<F>,
-    pub(crate) route: FeatureRoute,
-    pub(crate) output_span: OutputSpan,
-}
-
+/// Validated runtime state produced from a collection of [`FeatureDefinition`]s.
+///
+/// This is the handoff between cold-path compilation and
+/// [`FeatureExtractor`](crate::FeatureExtractor). All temporary grouping maps
+/// have already been discarded. Entries in `features` and `output_spans`
+/// correspond one-to-one, while `feature_ids` follows output-vector order.
 pub(crate) struct Compilation<F: Float> {
-    pub(crate) entries: Vec<CompiledFeature<F>>,
-    pub(crate) names: Box<[String]>,
+    /// Stateful derivations indexed by the event router.
+    pub(crate) features: Box<[FeatureDerivation<F>]>,
+    /// Output-vector span belonging to each derivation at the same index.
+    pub(crate) output_spans: Box<[OutputSpan]>,
+    /// Stable feature IDs ordered by their final output-vector indices.
+    pub(crate) feature_ids: Box<[FeatureId]>,
+    /// Precomputed symbol and event-kind routes into `features`.
+    pub(crate) event_router: EventRouter,
 }
 
+/// Identity of one runtime derivation after removing its groupable output.
+///
+/// For example, SMA definitions that differ only by `window` have the same
+/// `GroupKey` and can share one runtime SMA. Fields that alter calculation
+/// state or event subscription remain part of the key.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-enum IndicatorIdentity {
-    Sma(Symbol, ValueSource),
-    Ema(Symbol, ValueSource),
-    Cvd(Symbol),
-    SmaTimed(Symbol, ValueSource, i64),
-    ObvTimed(Symbol, i64),
-    TradeCountTimed(Symbol, i64),
-    DayOfWeek,
-    TimeSinceFirstEventOfDay(i64),
+enum GroupKey {
+    Sma {
+        symbol: Symbol,
+        source: EventField,
+        warmup_policy: WarmupPolicy,
+    },
+    Ema {
+        symbol: Symbol,
+        source: EventField,
+        warmup_policy: WarmupPolicy,
+    },
+    Cvd {
+        symbol: Symbol,
+        source: FeatureSource,
+        warmup_policy: WarmupPolicy,
+    },
+    SmaTimed {
+        symbol: Symbol,
+        source: EventField,
+        aggregation: Duration,
+        warmup_policy: WarmupPolicy,
+    },
+    ObvTimed {
+        symbol: Symbol,
+        source: FeatureSource,
+        aggregation: Duration,
+        warmup_policy: WarmupPolicy,
+    },
+    TradeCountTimed {
+        symbol: Symbol,
+        source: FeatureSource,
+        aggregation: Duration,
+        window: Duration,
+        warmup_policy: WarmupPolicy,
+    },
+    DayOfWeek {
+        symbol: Symbol,
+        source: FeatureSource,
+    },
+    TimeSinceFirstEventOfDay {
+        symbol: Symbol,
+        source: FeatureSource,
+        utc_offset_millis: i64,
+    },
 }
 
-pub(crate) fn compile<F: Float>(
-    feature_set: &FeatureSet,
-    cell_count: usize,
-    indicator_capacity: usize,
-) -> Result<Compilation<F>> {
-    let indicator_count = feature_set.indicator_count();
-    if indicator_count > indicator_capacity {
-        return Err(FimlError::TooManyIndicators {
-            count: indicator_count,
-            capacity: indicator_capacity,
-        });
+impl GroupKey {
+    fn symbol(&self) -> Symbol {
+        match self {
+            Self::Sma { symbol, .. }
+            | Self::Ema { symbol, .. }
+            | Self::Cvd { symbol, .. }
+            | Self::SmaTimed { symbol, .. }
+            | Self::ObvTimed { symbol, .. }
+            | Self::TradeCountTimed { symbol, .. }
+            | Self::DayOfWeek { symbol, .. }
+            | Self::TimeSinceFirstEventOfDay { symbol, .. } => *symbol,
+        }
     }
 
-    let output_count = feature_set.output_count();
-    if output_count != cell_count {
-        return Err(FimlError::OutputCountMismatch {
-            expected: output_count,
-            actual: cell_count,
-        });
+    fn route(&self) -> FeatureRoute {
+        match self {
+            Self::Sma { source, .. } | Self::Ema { source, .. } => {
+                FeatureRoute::Kind(source.event_kind())
+            }
+            Self::Cvd { source, .. }
+            | Self::DayOfWeek { source, .. }
+            | Self::TimeSinceFirstEventOfDay { source, .. } => route_for_source(*source),
+            Self::SmaTimed { .. } | Self::ObvTimed { .. } | Self::TradeCountTimed { .. } => {
+                FeatureRoute::Every
+            }
+        }
     }
+}
 
-    let mut entries = Vec::with_capacity(indicator_count);
-    let mut names = Vec::with_capacity(output_count);
-    let mut identities = HashSet::with_capacity(indicator_count);
-    let mut generated_names = HashSet::with_capacity(output_count);
+/// Ordered output parameters accumulated for one runtime derivation.
+///
+/// The number and order of entries in a window or period collection must match
+/// the corresponding [`FeatureGroup::feature_ids`]. Scalar derivations own
+/// exactly one feature ID and need no output parameter collection.
+enum GroupOutputs {
+    SampleWindows(Vec<usize>),
+    TimedPeriods(Vec<usize>),
+    Scalar,
+}
 
-    for (index, definition) in feature_set.indicators.iter().enumerate() {
-        let symbol = validate_symbol_scope(index, definition)?;
-        let span = OutputSpan {
-            start: names.len(),
-            count: definition.indicator.output_count(),
+/// Normalized output parameter contributed by one scalar feature definition.
+///
+/// This temporary value is appended to [`GroupOutputs`] when the definition is
+/// assigned to its compatible [`FeatureGroup`].
+enum GroupOutput {
+    SampleWindow(usize),
+    TimedPeriod(usize),
+    Scalar,
+}
+
+/// Definitions that can be executed by one shared runtime derivation.
+///
+/// A group preserves definition order for its windows and feature IDs. During
+/// final compilation it becomes one [`FeatureDerivation`], one [`OutputSpan`],
+/// and one event-router entry.
+struct FeatureGroup {
+    /// Calculation and subscription identity shared by every grouped output.
+    key: GroupKey,
+    /// Ordered window or period parameters used to construct the derivation.
+    outputs: GroupOutputs,
+    /// IDs corresponding one-to-one with the ordered grouped outputs.
+    feature_ids: Vec<FeatureId>,
+    /// Original definition index used to report derivation-construction errors.
+    first_definition_index: usize,
+}
+
+impl FeatureGroup {
+    fn new(
+        key: GroupKey,
+        output: GroupOutput,
+        feature_id: FeatureId,
+        definition_index: usize,
+    ) -> Self {
+        let outputs = match output {
+            GroupOutput::SampleWindow(window) => GroupOutputs::SampleWindows(vec![window]),
+            GroupOutput::TimedPeriod(period) => GroupOutputs::TimedPeriods(vec![period]),
+            GroupOutput::Scalar => GroupOutputs::Scalar,
         };
-        let (feature, identity, definition_names) =
-            compile_definition::<F>(index, definition, symbol)?;
+        Self {
+            key,
+            outputs,
+            feature_ids: vec![feature_id],
+            first_definition_index: definition_index,
+        }
+    }
 
-        if !identities.insert(identity) {
+    fn add_output(
+        &mut self,
+        output: GroupOutput,
+        feature_id: FeatureId,
+        definition_index: usize,
+        feature_key: &FeatureKey,
+    ) -> Result<()> {
+        if self.feature_ids.len() == MAX_OUTPUTS_PER_INDICATOR {
             return invalid_definition(
-                index,
-                definition,
-                "duplicates an earlier indicator identity; combine its windows into one definition",
+                definition_index,
+                feature_key,
+                format!("compatible feature group exceeds {MAX_OUTPUTS_PER_INDICATOR} outputs"),
             );
         }
-        for name in definition_names {
-            if !generated_names.insert(name.clone()) {
+
+        match (&mut self.outputs, output) {
+            (GroupOutputs::SampleWindows(windows), GroupOutput::SampleWindow(window)) => {
+                windows.push(window);
+            }
+            (GroupOutputs::TimedPeriods(periods), GroupOutput::TimedPeriod(period)) => {
+                periods.push(period);
+            }
+            (GroupOutputs::Scalar, GroupOutput::Scalar) => {
                 return invalid_definition(
-                    index,
-                    definition,
-                    format!("generated canonical name {name:?} is not globally unique"),
+                    definition_index,
+                    feature_key,
+                    "duplicates a scalar runtime derivation",
                 );
             }
-            names.push(name);
+            _ => unreachable!("group key and output shape must agree"),
         }
-        entries.push(CompiledFeature {
-            feature,
-            route: definition.indicator.route(),
-            output_span: span,
+        self.feature_ids.push(feature_id);
+        Ok(())
+    }
+}
+
+/// Compile scalar definitions into grouped runtime derivations and routing state.
+pub(crate) fn compile<F: Float>(
+    definitions: Vec<FeatureDefinition>,
+    output_count: usize,
+) -> Result<Compilation<F>> {
+    if definitions.len() != output_count {
+        return Err(FimlError::OutputCountMismatch {
+            expected: definitions.len(),
+            actual: output_count,
         });
     }
 
+    let mut groups = Vec::<FeatureGroup>::new();
+    let mut group_indices = HashMap::<GroupKey, usize>::new();
+    let mut feature_keys = HashSet::with_capacity(definitions.len());
+    let mut feature_ids = HashSet::with_capacity(definitions.len());
+
+    for (definition_index, definition) in definitions.into_iter().enumerate() {
+        if !feature_keys.insert(definition.key) {
+            return invalid_definition(
+                definition_index,
+                &definition.key,
+                "duplicates an earlier feature key",
+            );
+        }
+        if !feature_ids.insert(definition.id.clone()) {
+            return invalid_definition(
+                definition_index,
+                &definition.key,
+                format!("duplicates feature ID {:?}", definition.id.as_str()),
+            );
+        }
+
+        let (group_key, output) = group_key(definition_index, &definition.key)?;
+        if let Some(&group_index) = group_indices.get(&group_key) {
+            groups[group_index].add_output(
+                output,
+                definition.id,
+                definition_index,
+                &definition.key,
+            )?;
+        } else {
+            let group_index = groups.len();
+            group_indices.insert(group_key.clone(), group_index);
+            groups.push(FeatureGroup::new(
+                group_key,
+                output,
+                definition.id,
+                definition_index,
+            ));
+        }
+    }
+
+    if groups.len() > usize::from(u16::MAX) {
+        return Err(FimlError::InvalidArgument(format!(
+            "runtime feature count {} exceeds router limit of {}",
+            groups.len(),
+            u16::MAX
+        )));
+    }
+
+    let mut features = Vec::with_capacity(groups.len());
+    let mut output_spans = Vec::with_capacity(groups.len());
+    let mut compiled_ids = Vec::with_capacity(output_count);
+    let mut routes = Vec::with_capacity(groups.len());
+
+    for group in groups {
+        let output_span = OutputSpan {
+            start: compiled_ids.len(),
+            count: group.feature_ids.len(),
+        };
+        let feature = build_group::<F>(&group).map_err(|error| {
+            invalid_definition_error(
+                group.first_definition_index,
+                group_kind(&group.key),
+                error.to_string(),
+            )
+        })?;
+        routes.push((group.key.symbol(), group.key.route()));
+        compiled_ids.extend(group.feature_ids);
+        features.push(feature);
+        output_spans.push(output_span);
+    }
+
+    debug_assert_eq!(compiled_ids.len(), output_count);
+    let event_router = EventRouter::from_routes(&routes)?;
+
     Ok(Compilation {
-        entries,
-        names: names.into_boxed_slice(),
+        features: features.into_boxed_slice(),
+        output_spans: output_spans.into_boxed_slice(),
+        feature_ids: compiled_ids.into_boxed_slice(),
+        event_router,
     })
 }
 
-fn validate_symbol_scope(index: usize, definition: &ScopedIndicator) -> Result<Option<Symbol>> {
-    match (&definition.symbol, definition.indicator.is_global()) {
-        (None, true) => Ok(None),
-        (Some(_), true) => {
-            invalid_definition(index, definition, "is global and must not define a symbol")
-        }
-        (None, false) => {
-            invalid_definition(index, definition, "is symbol-scoped and requires a symbol")
-        }
-        (Some(symbol), false) => Ok(Some(*symbol)),
-    }
-}
-
-fn compile_definition<F: Float>(
-    index: usize,
-    definition: &ScopedIndicator,
-    symbol: Option<Symbol>,
-) -> Result<(FeatureDerivation<F>, IndicatorIdentity, Vec<String>)> {
-    match &definition.indicator {
-        IndicatorSpec::Sma {
+fn group_key(index: usize, key: &FeatureKey) -> Result<(GroupKey, GroupOutput)> {
+    match *key {
+        FeatureKey::Sma {
+            symbol,
             source,
-            windows,
+            window,
             warmup_policy,
         } => {
-            validate_sample_windows(index, definition, windows, true)?;
-            let symbol = symbol.expect("validated symbol-scoped definition");
-            let feature = derivation::sma::build(symbol, *source, windows, *warmup_policy)
-                .map_err(|error| contextualize(index, definition, error))?;
-            let names = windows
-                .iter()
-                .map(|window| {
-                    market_name(symbol, source.canonical_name(), "sma", &window.to_string())
-                })
-                .collect();
-            Ok((feature, IndicatorIdentity::Sma(symbol, *source), names))
-        }
-        IndicatorSpec::Ema {
-            source,
-            windows,
-            warmup_policy,
-        } => {
-            validate_sample_windows(index, definition, windows, false)?;
-            let symbol = symbol.expect("validated symbol-scoped definition");
-            let feature = derivation::ema::build(symbol, *source, windows, *warmup_policy)
-                .map_err(|error| contextualize(index, definition, error))?;
-            let names = windows
-                .iter()
-                .map(|window| {
-                    market_name(symbol, source.canonical_name(), "ema", &window.to_string())
-                })
-                .collect();
-            Ok((feature, IndicatorIdentity::Ema(symbol, *source), names))
-        }
-        IndicatorSpec::Cvd {
-            windows,
-            warmup_policy,
-        } => {
-            validate_sample_windows(index, definition, windows, true)?;
-            let symbol = symbol.expect("validated symbol-scoped definition");
-            let feature = derivation::cvd::build(symbol, windows, *warmup_policy)
-                .map_err(|error| contextualize(index, definition, error))?;
-            let names = windows
-                .iter()
-                .map(|window| market_name(symbol, "trade", "cvd", &window.to_string()))
-                .collect();
-            Ok((feature, IndicatorIdentity::Cvd(symbol), names))
-        }
-        IndicatorSpec::SmaTimed {
-            source,
-            time_windows,
-            warmup_policy,
-        } => {
-            let validated = validate_time_windows(index, definition, time_windows)?;
-            let symbol = symbol.expect("validated symbol-scoped definition");
-            let feature = derivation::sma::build_timed(
-                symbol,
-                *source,
-                time_windows.aggregation,
-                &validated.periods,
-                validated.max_period,
-                *warmup_policy,
-            )
-            .map_err(|error| contextualize(index, definition, error))?;
-            let names = validated
-                .window_millis
-                .iter()
-                .map(|window| {
-                    market_name(
-                        symbol,
-                        source.canonical_name(),
-                        "sma_timed",
-                        &format!("{}ms:{window}ms", validated.aggregation_millis),
-                    )
-                })
-                .collect();
+            validate_sample_window(index, key, window, true)?;
             Ok((
-                feature,
-                IndicatorIdentity::SmaTimed(symbol, *source, validated.aggregation_millis),
-                names,
+                GroupKey::Sma {
+                    symbol,
+                    source: scalar_source(index, key, source)?,
+                    warmup_policy,
+                },
+                GroupOutput::SampleWindow(window),
             ))
         }
-        IndicatorSpec::ObvTimed {
-            time_windows,
+        FeatureKey::Ema {
+            symbol,
+            source,
+            window,
             warmup_policy,
         } => {
-            let validated = validate_time_windows(index, definition, time_windows)?;
-            let symbol = symbol.expect("validated symbol-scoped definition");
-            let feature = derivation::obv::build_timed(
-                symbol,
-                time_windows.aggregation,
-                &validated.periods,
-                validated.max_period,
-                *warmup_policy,
-            )
-            .map_err(|error| contextualize(index, definition, error))?;
-            let names = validated
-                .window_millis
-                .iter()
-                .map(|window| {
-                    market_name(
-                        symbol,
-                        "trade",
-                        "obv_timed",
-                        &format!("{}ms:{window}ms", validated.aggregation_millis),
-                    )
-                })
-                .collect();
+            validate_sample_window(index, key, window, false)?;
             Ok((
-                feature,
-                IndicatorIdentity::ObvTimed(symbol, validated.aggregation_millis),
-                names,
+                GroupKey::Ema {
+                    symbol,
+                    source: scalar_source(index, key, source)?,
+                    warmup_policy,
+                },
+                GroupOutput::SampleWindow(window),
             ))
         }
-        IndicatorSpec::TradeCountTimed {
+        FeatureKey::Cvd {
+            symbol,
+            source,
+            window,
+            warmup_policy,
+        } => {
+            validate_trade_source(index, key, source)?;
+            validate_sample_window(index, key, window, true)?;
+            Ok((
+                GroupKey::Cvd {
+                    symbol,
+                    source,
+                    warmup_policy,
+                },
+                GroupOutput::SampleWindow(window),
+            ))
+        }
+        FeatureKey::SmaTimed {
+            symbol,
+            source,
+            aggregation,
+            window,
+            warmup_policy,
+        } => Ok((
+            GroupKey::SmaTimed {
+                symbol,
+                source: scalar_source(index, key, source)?,
+                aggregation,
+                warmup_policy,
+            },
+            GroupOutput::TimedPeriod(validate_timed_window(index, key, aggregation, window)?),
+        )),
+        FeatureKey::ObvTimed {
+            symbol,
+            source,
             aggregation,
             window,
             warmup_policy,
         } => {
-            let time_windows = TimeWindows::new(*aggregation, vec![*window]);
-            let validated = validate_time_windows(index, definition, &time_windows)?;
-            let symbol = symbol.expect("validated symbol-scoped definition");
-            let feature =
-                derivation::trade_count::build(symbol, *aggregation, *window, *warmup_policy)
-                    .map_err(|error| contextualize(index, definition, error))?;
-            let name = market_name(
-                symbol,
-                "trade",
-                "count_timed",
-                &format!(
-                    "{}ms:{}ms",
-                    validated.aggregation_millis, validated.window_millis[0]
-                ),
-            );
+            validate_trade_source(index, key, source)?;
             Ok((
-                feature,
-                IndicatorIdentity::TradeCountTimed(symbol, validated.aggregation_millis),
-                vec![name],
+                GroupKey::ObvTimed {
+                    symbol,
+                    source,
+                    aggregation,
+                    warmup_policy,
+                },
+                GroupOutput::TimedPeriod(validate_timed_window(index, key, aggregation, window)?),
             ))
         }
-        IndicatorSpec::DayOfWeek => Ok((
-            derivation::day_of_week::build(),
-            IndicatorIdentity::DayOfWeek,
-            vec!["clock:day_of_week".to_string()],
-        )),
-        IndicatorSpec::TimeSinceFirstEventOfDay { utc_offset_millis } => {
-            validate_utc_offset(index, definition, *utc_offset_millis)?;
+        FeatureKey::TradeCountTimed {
+            symbol,
+            source,
+            aggregation,
+            window,
+            warmup_policy,
+        } => {
+            validate_trade_source(index, key, source)?;
+            validate_timed_window(index, key, aggregation, window)?;
             Ok((
-                derivation::time_since_first_event_of_day::build(*utc_offset_millis),
-                IndicatorIdentity::TimeSinceFirstEventOfDay(*utc_offset_millis),
-                vec![format!(
-                    "clock:time_since_first_event_of_day:{utc_offset_millis}ms"
-                )],
+                GroupKey::TradeCountTimed {
+                    symbol,
+                    source,
+                    aggregation,
+                    window,
+                    warmup_policy,
+                },
+                GroupOutput::Scalar,
+            ))
+        }
+        FeatureKey::DayOfWeek { symbol, source } => {
+            Ok((GroupKey::DayOfWeek { symbol, source }, GroupOutput::Scalar))
+        }
+        FeatureKey::TimeSinceFirstEventOfDay {
+            symbol,
+            source,
+            utc_offset_millis,
+        } => {
+            validate_utc_offset(index, key, utc_offset_millis)?;
+            Ok((
+                GroupKey::TimeSinceFirstEventOfDay {
+                    symbol,
+                    source,
+                    utc_offset_millis,
+                },
+                GroupOutput::Scalar,
             ))
         }
     }
 }
 
-fn validate_sample_windows(
+fn build_group<F: Float>(group: &FeatureGroup) -> Result<FeatureDerivation<F>> {
+    match (&group.key, &group.outputs) {
+        (
+            GroupKey::Sma {
+                symbol,
+                source,
+                warmup_policy,
+            },
+            GroupOutputs::SampleWindows(windows),
+        ) => derivation::sma::build(*symbol, value_source(*source), windows, *warmup_policy),
+        (
+            GroupKey::Ema {
+                symbol,
+                source,
+                warmup_policy,
+            },
+            GroupOutputs::SampleWindows(windows),
+        ) => derivation::ema::build(*symbol, value_source(*source), windows, *warmup_policy),
+        (
+            GroupKey::Cvd {
+                symbol,
+                warmup_policy,
+                ..
+            },
+            GroupOutputs::SampleWindows(windows),
+        ) => derivation::cvd::build(*symbol, windows, *warmup_policy),
+        (
+            GroupKey::SmaTimed {
+                symbol,
+                source,
+                aggregation,
+                warmup_policy,
+            },
+            GroupOutputs::TimedPeriods(periods),
+        ) => derivation::sma::build_timed(
+            *symbol,
+            value_source(*source),
+            *aggregation,
+            periods,
+            periods.iter().copied().max().unwrap_or(0),
+            *warmup_policy,
+        ),
+        (
+            GroupKey::ObvTimed {
+                symbol,
+                aggregation,
+                warmup_policy,
+                ..
+            },
+            GroupOutputs::TimedPeriods(periods),
+        ) => derivation::obv::build_timed(
+            *symbol,
+            *aggregation,
+            periods,
+            periods.iter().copied().max().unwrap_or(0),
+            *warmup_policy,
+        ),
+        (
+            GroupKey::TradeCountTimed {
+                symbol,
+                aggregation,
+                window,
+                warmup_policy,
+                ..
+            },
+            GroupOutputs::Scalar,
+        ) => derivation::trade_count::build(*symbol, *aggregation, *window, *warmup_policy),
+        (GroupKey::DayOfWeek { .. }, GroupOutputs::Scalar) => Ok(derivation::day_of_week::build()),
+        (
+            GroupKey::TimeSinceFirstEventOfDay {
+                utc_offset_millis, ..
+            },
+            GroupOutputs::Scalar,
+        ) => Ok(derivation::time_since_first_event_of_day::build(
+            *utc_offset_millis,
+        )),
+        _ => unreachable!("group key and output shape must agree"),
+    }
+}
+
+fn scalar_source(index: usize, key: &FeatureKey, source: FeatureSource) -> Result<EventField> {
+    match source {
+        FeatureSource::Field(field) => Ok(field),
+        _ => invalid_definition(index, key, "requires a scalar event-field source"),
+    }
+}
+
+fn validate_trade_source(index: usize, key: &FeatureKey, source: FeatureSource) -> Result<()> {
+    if source == FeatureSource::Event(EventKind::Trade) {
+        Ok(())
+    } else {
+        invalid_definition(index, key, "requires Event(Trade) as its source")
+    }
+}
+
+fn validate_sample_window(
     index: usize,
-    definition: &ScopedIndicator,
-    windows: &[usize],
-    is_sma: bool,
+    key: &FeatureKey,
+    window: usize,
+    allows_max: bool,
 ) -> Result<()> {
-    validate_output_windows(index, definition, windows)?;
-    for &window in windows {
-        if window == 0 {
-            return invalid_definition(
-                index,
-                definition,
-                format!("window must be at least 1, got {window}"),
-            );
-        }
-        if !is_sma && window == usize::MAX {
-            return invalid_definition(
-                index,
-                definition,
-                format!("window is too large, got {window}"),
-            );
-        }
+    if window == 0 {
+        return invalid_definition(index, key, "window must be at least 1");
+    }
+    if !allows_max && window == usize::MAX {
+        return invalid_definition(index, key, "window is too large");
     }
     Ok(())
 }
 
-fn validate_output_windows<T>(
+fn validate_timed_window(
     index: usize,
-    definition: &ScopedIndicator,
-    windows: &[T],
-) -> Result<()>
-where
-    T: Eq + std::hash::Hash + std::fmt::Debug,
-{
-    if windows.is_empty() {
-        return invalid_definition(index, definition, "windows must not be empty");
+    key: &FeatureKey,
+    aggregation: Duration,
+    window: Duration,
+) -> Result<usize> {
+    let aggregation_millis = duration_millis(index, key, "aggregation", aggregation)?;
+    if aggregation_millis == 0 {
+        return invalid_definition(index, key, "aggregation must be at least 1 millisecond");
     }
-    if windows.len() > MAX_OUTPUTS_PER_INDICATOR {
+    let window_millis = duration_millis(index, key, "window", window)?;
+    if window_millis < aggregation_millis {
         return invalid_definition(
             index,
-            definition,
+            key,
             format!(
-                "windows has {} outputs, maximum is {MAX_OUTPUTS_PER_INDICATOR}",
-                windows.len()
+                "window must be at least aggregation {aggregation_millis}ms, got {window_millis}ms"
             ),
         );
     }
-    let mut unique = HashSet::with_capacity(windows.len());
-    for window in windows {
-        if !unique.insert(window) {
-            return invalid_definition(
-                index,
-                definition,
-                format!("windows contains duplicate value {window:?}"),
-            );
-        }
-    }
-    Ok(())
-}
-
-struct ValidatedTimeWindows {
-    aggregation_millis: i64,
-    window_millis: Vec<i64>,
-    periods: Vec<usize>,
-    max_period: usize,
-}
-
-fn validate_time_windows(
-    index: usize,
-    definition: &ScopedIndicator,
-    time_windows: &TimeWindows,
-) -> Result<ValidatedTimeWindows> {
-    validate_output_windows(index, definition, &time_windows.windows)?;
-    let aggregation_millis =
-        duration_millis(index, definition, "aggregation", time_windows.aggregation)?;
-    if aggregation_millis == 0 {
+    if window_millis % aggregation_millis != 0 {
         return invalid_definition(
             index,
-            definition,
-            "aggregation must be at least 1 millisecond, got 0ms",
+            key,
+            format!(
+                "window must be an exact multiple of aggregation {aggregation_millis}ms, got {window_millis}ms"
+            ),
         );
     }
-
-    let mut window_millis = Vec::with_capacity(time_windows.windows.len());
-    let mut periods = Vec::with_capacity(time_windows.windows.len());
-    let mut max_period = 0;
-    for &window in &time_windows.windows {
-        let millis = duration_millis(index, definition, "window", window)?;
-        if millis < aggregation_millis {
-            return invalid_definition(
-                index,
-                definition,
-                format!(
-                    "window must be at least aggregation {aggregation_millis}ms, got {millis}ms"
-                ),
-            );
-        }
-        if millis % aggregation_millis != 0 {
-            return invalid_definition(
-                index,
-                definition,
-                format!(
-                    "window must be an exact multiple of aggregation {aggregation_millis}ms, got {millis}ms"
-                ),
-            );
-        }
-        let period_i64 = millis / aggregation_millis;
-        let period = usize::try_from(period_i64).map_err(|_| {
-            invalid_definition_error(
-                index,
-                definition,
-                format!("derived bucket period does not fit usize, got {period_i64}"),
-            )
-        })?;
-        max_period = max_period.max(period);
-        window_millis.push(millis);
-        periods.push(period);
-    }
-
-    Ok(ValidatedTimeWindows {
-        aggregation_millis,
-        window_millis,
-        periods,
-        max_period,
+    usize::try_from(window_millis / aggregation_millis).map_err(|_| {
+        invalid_definition_error(
+            index,
+            group_kind_from_feature_key(key),
+            "derived bucket period does not fit usize",
+        )
     })
 }
 
-fn duration_millis(
-    index: usize,
-    definition: &ScopedIndicator,
-    field: &str,
-    duration: Duration,
-) -> Result<i64> {
+fn duration_millis(index: usize, key: &FeatureKey, field: &str, duration: Duration) -> Result<i64> {
     if !duration.subsec_nanos().is_multiple_of(1_000_000) {
         return invalid_definition(
             index,
-            definition,
+            key,
             format!("{field} must use whole-millisecond precision, got {duration:?}"),
         );
     }
     i64::try_from(duration.as_millis()).map_err(|_| {
         invalid_definition_error(
             index,
-            definition,
+            group_kind_from_feature_key(key),
             format!("{field} must fit signed 64-bit milliseconds, got {duration:?}"),
         )
     })
 }
 
-fn validate_utc_offset(
-    index: usize,
-    definition: &ScopedIndicator,
-    utc_offset_millis: i64,
-) -> Result<()> {
+fn validate_utc_offset(index: usize, key: &FeatureKey, utc_offset_millis: i64) -> Result<()> {
     const MINUTE_MILLIS: i64 = 60_000;
     const MAX_OFFSET_MILLIS: i64 = 14 * 60 * MINUTE_MILLIS;
     if !(-MAX_OFFSET_MILLIS..=MAX_OFFSET_MILLIS).contains(&utc_offset_millis) {
         return invalid_definition(
             index,
-            definition,
-            format!("utc_offset_millis must be within -14h..=+14h, got {utc_offset_millis}"),
+            key,
+            format!("UTC offset must be within -14h..=+14h, got {utc_offset_millis}ms"),
         );
     }
     if utc_offset_millis % MINUTE_MILLIS != 0 {
         return invalid_definition(
             index,
-            definition,
-            format!("utc_offset_millis must use whole-minute precision, got {utc_offset_millis}"),
+            key,
+            format!("UTC offset must use whole-minute precision, got {utc_offset_millis}ms"),
         );
     }
     Ok(())
 }
 
-fn market_name(symbol: Symbol, source: &str, indicator: &str, output: &str) -> String {
-    let symbol = symbol.resolve_as_string();
-    let escaped_symbol = symbol.replace('%', "%25").replace(':', "%3A");
-    format!("{escaped_symbol}:{source}:{indicator}:{output}")
+fn route_for_source(source: FeatureSource) -> FeatureRoute {
+    match source {
+        FeatureSource::Field(field) => FeatureRoute::Kind(field.event_kind()),
+        FeatureSource::Event(event_kind) => FeatureRoute::Kind(event_kind),
+        FeatureSource::EveryEvent => FeatureRoute::Every,
+    }
 }
 
-fn contextualize(index: usize, definition: &ScopedIndicator, error: FimlError) -> FimlError {
-    invalid_definition_error(index, definition, error.to_string())
+fn value_source(source: EventField) -> ValueSource {
+    match source {
+        EventField::Price => ValueSource::Price,
+        EventField::Volume => ValueSource::Volume,
+        EventField::TradePrice => ValueSource::TradePrice,
+        EventField::TradeVolume => ValueSource::TradeVolume,
+    }
 }
 
-fn invalid_definition<T>(
-    index: usize,
-    definition: &ScopedIndicator,
-    reason: impl Into<String>,
-) -> Result<T> {
-    Err(invalid_definition_error(index, definition, reason))
+fn group_kind(key: &GroupKey) -> &'static str {
+    match key {
+        GroupKey::Sma { .. } => "SMA",
+        GroupKey::Ema { .. } => "EMA",
+        GroupKey::Cvd { .. } => "CVD",
+        GroupKey::SmaTimed { .. } => "timed SMA",
+        GroupKey::ObvTimed { .. } => "timed OBV",
+        GroupKey::TradeCountTimed { .. } => "timed trade count",
+        GroupKey::DayOfWeek { .. } => "day of week",
+        GroupKey::TimeSinceFirstEventOfDay { .. } => "time since first event of day",
+    }
 }
 
-fn invalid_definition_error(
-    index: usize,
-    definition: &ScopedIndicator,
-    reason: impl Into<String>,
-) -> FimlError {
-    let symbol = definition
-        .symbol
-        .map(|symbol| format!(" for symbol {symbol:?}"))
-        .unwrap_or_default();
+fn group_kind_from_feature_key(key: &FeatureKey) -> &'static str {
+    match key {
+        FeatureKey::Sma { .. } => "SMA",
+        FeatureKey::Ema { .. } => "EMA",
+        FeatureKey::Cvd { .. } => "CVD",
+        FeatureKey::SmaTimed { .. } => "timed SMA",
+        FeatureKey::ObvTimed { .. } => "timed OBV",
+        FeatureKey::TradeCountTimed { .. } => "timed trade count",
+        FeatureKey::DayOfWeek { .. } => "day of week",
+        FeatureKey::TimeSinceFirstEventOfDay { .. } => "time since first event of day",
+    }
+}
+
+fn invalid_definition<T>(index: usize, key: &FeatureKey, reason: impl Into<String>) -> Result<T> {
+    Err(invalid_definition_error(
+        index,
+        group_kind_from_feature_key(key),
+        reason,
+    ))
+}
+
+fn invalid_definition_error(index: usize, kind: &str, reason: impl Into<String>) -> FimlError {
     FimlError::InvalidIndicatorDefinition {
         index,
-        reason: format!("{}{symbol}: {}", definition.indicator.name(), reason.into()),
+        reason: format!("{kind}: {}", reason.into()),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::features::{IndicatorSpec, ScopedIndicator};
 
-    fn compile_names(feature_set: &FeatureSet) -> Result<Vec<String>> {
-        Ok(compile::<f64>(
-            feature_set,
-            feature_set.output_count(),
-            feature_set.indicator_count(),
-        )?
-        .names
-        .into_vec())
+    fn definition(key: FeatureKey) -> FeatureDefinition {
+        FeatureDefinition::with_default_id(key)
     }
 
     #[test]
-    fn canonical_names_escape_reserved_symbol_characters() {
-        let feature_set = FeatureSet::new(vec![ScopedIndicator::symbol(
-            "A%B:C",
-            IndicatorSpec::Sma {
-                source: ValueSource::Price,
-                windows: vec![2],
-                warmup_policy: crate::WarmupPolicy::FullWindow,
-            },
-        )]);
+    fn groups_compatible_non_adjacent_definitions() {
+        let symbol = Symbol::new("compiler-grouped");
+        let sma_one = FeatureKey::Sma {
+            symbol,
+            source: FeatureSource::Field(EventField::Price),
+            window: 1,
+            warmup_policy: WarmupPolicy::FullWindow,
+        };
+        let ema_two = FeatureKey::Ema {
+            symbol,
+            source: FeatureSource::Field(EventField::Price),
+            window: 2,
+            warmup_policy: WarmupPolicy::FullWindow,
+        };
+        let sma_two = FeatureKey::Sma {
+            symbol,
+            source: FeatureSource::Field(EventField::Price),
+            window: 2,
+            warmup_policy: WarmupPolicy::FullWindow,
+        };
 
+        let compilation = compile::<f64>(
+            vec![
+                definition(sma_one),
+                definition(ema_two),
+                definition(sma_two),
+            ],
+            3,
+        )
+        .unwrap();
+
+        assert_eq!(compilation.features.len(), 2);
         assert_eq!(
-            compile_names(&feature_set).unwrap(),
-            ["a%25b%3Ac:price:sma:2"]
-        );
-    }
-
-    #[test]
-    fn cvd_builder_generates_grouped_names_and_identity() {
-        let feature_set = FeatureSet::builder().cvd("BTCUSDT", [2, 5]).build();
-
-        assert_eq!(
-            compile_names(&feature_set).unwrap(),
-            ["btcusdt:trade:cvd:2", "btcusdt:trade:cvd:5"]
-        );
-
-        let duplicate = FeatureSet::builder()
-            .cvd("BTCUSDT", [2])
-            .cvd("BTCUSDT", [5])
-            .build();
-        let error = compile_names(&duplicate).unwrap_err();
-        assert!(error.to_string().contains("combine its windows"));
-
-        for invalid_windows in [vec![], vec![0]] {
-            let invalid = FeatureSet::builder()
-                .cvd("BTCUSDT", invalid_windows)
-                .build();
-            assert!(compile_names(&invalid).is_err());
-        }
-    }
-
-    #[test]
-    fn assigns_one_output_span_per_compiled_feature() {
-        let feature_set = FeatureSet::new(vec![
-            ScopedIndicator::symbol(
-                "AAPL",
-                IndicatorSpec::Sma {
-                    source: ValueSource::Price,
-                    windows: vec![2, 5],
-                    warmup_policy: crate::WarmupPolicy::FullWindow,
-                },
-            ),
-            ScopedIndicator::global(IndicatorSpec::DayOfWeek),
-        ]);
-
-        let compilation = compile::<f64>(&feature_set, 3, 2).unwrap();
-        let spans = compilation
-            .entries
-            .iter()
-            .map(|entry| entry.output_span)
-            .collect::<Vec<_>>();
-
-        assert_eq!(
-            spans,
+            compilation.output_spans.as_ref(),
             [
-                OutputSpan { start: 0, count: 1 },
-                OutputSpan { start: 1, count: 2 },
+                OutputSpan { start: 0, count: 2 },
+                OutputSpan { start: 2, count: 1 },
             ]
         );
+        assert_eq!(compilation.feature_ids[0], FeatureId::from(&sma_one));
+        assert_eq!(compilation.feature_ids[1], FeatureId::from(&sma_two));
+        assert_eq!(compilation.feature_ids[2], FeatureId::from(&ema_two));
     }
 
     #[test]
-    fn duplicate_identity_requires_grouped_windows() {
-        let feature_set = FeatureSet::new(vec![
-            ScopedIndicator::symbol(
-                "AAPL",
-                IndicatorSpec::Sma {
-                    source: ValueSource::Price,
-                    windows: vec![2],
-                    warmup_policy: crate::WarmupPolicy::FullWindow,
+    fn rejects_duplicate_keys_and_ids() {
+        let key = FeatureKey::DayOfWeek {
+            symbol: Symbol::GLOBAL,
+            source: FeatureSource::EveryEvent,
+        };
+        let duplicate_key = vec![
+            FeatureDefinition::new(key, FeatureId::new("one")),
+            FeatureDefinition::new(key, FeatureId::new("two")),
+        ];
+        assert!(compile::<f64>(duplicate_key, 2).is_err());
+
+        let duplicate_id = vec![
+            FeatureDefinition::new(key, FeatureId::new("same")),
+            FeatureDefinition::new(
+                FeatureKey::TimeSinceFirstEventOfDay {
+                    symbol: Symbol::GLOBAL,
+                    source: FeatureSource::EveryEvent,
+                    utc_offset_millis: 0,
                 },
+                FeatureId::new("same"),
             ),
-            ScopedIndicator::symbol(
-                "AAPL",
-                IndicatorSpec::Sma {
-                    source: ValueSource::Price,
-                    windows: vec![5],
-                    warmup_policy: crate::WarmupPolicy::FirstValue,
-                },
-            ),
-        ]);
-
-        let error = compile_names(&feature_set).unwrap_err();
-
-        assert!(matches!(
-            error,
-            FimlError::InvalidIndicatorDefinition { index: 1, .. }
-        ));
-        assert!(error.to_string().contains("combine its windows"));
+        ];
+        assert!(compile::<f64>(duplicate_id, 2).is_err());
     }
 
     #[test]
-    fn timed_windows_require_exact_multiples_and_millisecond_precision() {
-        let non_multiple = FeatureSet::new(vec![ScopedIndicator::symbol(
-            "AAPL",
-            IndicatorSpec::SmaTimed {
-                source: ValueSource::Price,
-                time_windows: TimeWindows::new(
-                    Duration::from_secs(1),
-                    vec![Duration::from_millis(1_500)],
-                ),
-                warmup_policy: crate::WarmupPolicy::FullWindow,
-            },
-        )]);
-        let sub_millisecond = FeatureSet::new(vec![ScopedIndicator::symbol(
-            "AAPL",
-            IndicatorSpec::SmaTimed {
-                source: ValueSource::Price,
-                time_windows: TimeWindows::new(
-                    Duration::from_micros(1_500),
-                    vec![Duration::from_millis(3)],
-                ),
-                warmup_policy: crate::WarmupPolicy::FullWindow,
-            },
-        )]);
+    fn rejects_non_scalar_moving_average_source() {
+        let definition = definition(FeatureKey::Sma {
+            symbol: Symbol::new("compiler-source"),
+            source: FeatureSource::Event(EventKind::Trade),
+            window: 2,
+            warmup_policy: WarmupPolicy::FullWindow,
+        });
 
-        assert!(compile_names(&non_multiple).is_err());
-        assert!(compile_names(&sub_millisecond).is_err());
+        assert!(compile::<f64>(vec![definition], 1).is_err());
     }
 
     #[test]
-    fn clock_offset_is_bounded_and_uses_whole_minutes() {
-        for offset in [14 * 60 * 60_000 + 60_000, 1] {
-            let feature_set = FeatureSet::new(vec![ScopedIndicator::global(
-                IndicatorSpec::TimeSinceFirstEventOfDay {
-                    utc_offset_millis: offset,
-                },
-            )]);
-            assert!(compile_names(&feature_set).is_err());
-        }
+    fn validates_output_count_and_timed_windows() {
+        let key = FeatureKey::SmaTimed {
+            symbol: Symbol::new("compiler-timed"),
+            source: FeatureSource::Field(EventField::Price),
+            aggregation: Duration::from_secs(1),
+            window: Duration::from_millis(1_500),
+            warmup_policy: WarmupPolicy::FullWindow,
+        };
+
+        assert!(compile::<f64>(vec![definition(key)], 1).is_err());
+        assert!(compile::<f64>(Vec::new(), 1).is_err());
     }
 }

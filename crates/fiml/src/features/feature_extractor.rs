@@ -1,12 +1,13 @@
-use crate::features::compiler::OutputSpan;
+use crate::features::FeatureRoute;
+use crate::features::compiler::{Compilation, OutputSpan};
 use crate::features::derivation::FeatureDerivation;
-use crate::{EVENT_KIND_COUNT, Event, EventKind, FeatureVector, FimlError, Float, Symbol};
-
-use std::marker::PhantomData;
-use std::mem::MaybeUninit;
+use crate::features::feature_extractor_builder::FeatureExtractorBuilder;
+use crate::{
+    EVENT_KIND_COUNT, Event, EventKind, FeatureId, FeatureVector, FimlError, Float, Result, Symbol,
+};
 
 #[derive(Clone, Copy, Default)]
-struct SubscriberRange {
+pub(crate) struct SubscriberRange {
     /// Index of the first entry in [`EventRouter::subscribers`].
     start: u16,
     /// Number of consecutive entries in [`EventRouter::subscribers`].
@@ -21,7 +22,7 @@ impl SubscriberRange {
     }
 }
 
-struct SymbolRouter {
+pub(crate) struct SymbolRouter {
     /// Subscriber ranges for this symbol.
     ///
     /// Each array index is an [`EventKind`] converted to `usize`. Its value is
@@ -31,7 +32,7 @@ struct SymbolRouter {
 }
 
 /// Maps an event's symbol and kind to the runtime features that consume it.
-struct EventRouter {
+pub(crate) struct EventRouter {
     /// Maps interned symbols to their symbol-specific routers.
     ///
     /// Each array index is [`Symbol::index`]. Its value is either the index of
@@ -57,18 +58,86 @@ struct EventRouter {
 }
 
 impl EventRouter {
-    pub(crate) fn new(
-        symbol_to_index: Box<[Option<u16>]>,
-        symbol_routers: Box<[SymbolRouter]>,
-        subscribers: Box<[u16]>,
-        always_subscribers: SubscriberRange,
-    ) -> Self {
-        Self {
-            symbol_to_index,
-            symbol_routers,
-            subscribers,
-            always_subscribers,
+    pub(crate) fn from_routes(routes: &[(Symbol, FeatureRoute)]) -> Result<Self> {
+        let max_symbol_index = routes
+            .iter()
+            .filter_map(|(symbol, route)| match route {
+                FeatureRoute::Kind(_) => Some(symbol.index()),
+                FeatureRoute::Every => None,
+            })
+            .max();
+        let mut symbol_to_index = vec![None; max_symbol_index.map_or(0, |index| index + 1)];
+        let mut grouped_subscribers: Vec<[Vec<u16>; EVENT_KIND_COUNT]> = Vec::new();
+        let mut always_subscribers = Vec::new();
+
+        for (feature_index, &(symbol, route)) in routes.iter().enumerate() {
+            let feature_index = u16::try_from(feature_index).map_err(|_| {
+                FimlError::InvalidArgument(format!(
+                    "runtime feature count exceeds router limit of {}",
+                    u16::MAX
+                ))
+            })?;
+
+            match route {
+                FeatureRoute::Every => always_subscribers.push(feature_index),
+                FeatureRoute::Kind(event_kind) => {
+                    let symbol_index = symbol.index();
+                    let router_index = match symbol_to_index[symbol_index] {
+                        Some(router_index) => usize::from(router_index),
+                        None => {
+                            let router_index =
+                                u16::try_from(grouped_subscribers.len()).map_err(|_| {
+                                    FimlError::InvalidArgument(format!(
+                                        "symbol router count exceeds limit of {}",
+                                        u16::MAX
+                                    ))
+                                })?;
+                            symbol_to_index[symbol_index] = Some(router_index);
+                            grouped_subscribers.push(std::array::from_fn(|_| Vec::<u16>::new()));
+                            usize::from(router_index)
+                        }
+                    };
+                    grouped_subscribers[router_index][event_kind as usize].push(feature_index);
+                }
+            }
         }
+
+        let mut subscribers = Vec::with_capacity(routes.len());
+        let mut symbol_routers = Vec::with_capacity(grouped_subscribers.len());
+        for event_subscriber_groups in grouped_subscribers {
+            let mut event_subscribers = [SubscriberRange::default(); EVENT_KIND_COUNT];
+            for (event_kind_index, group) in event_subscriber_groups.into_iter().enumerate() {
+                event_subscribers[event_kind_index] =
+                    Self::append_subscribers(&mut subscribers, group)?;
+            }
+            symbol_routers.push(SymbolRouter { event_subscribers });
+        }
+
+        let always_subscribers = Self::append_subscribers(&mut subscribers, always_subscribers)?;
+
+        Ok(Self {
+            symbol_to_index: symbol_to_index.into_boxed_slice(),
+            symbol_routers: symbol_routers.into_boxed_slice(),
+            subscribers: subscribers.into_boxed_slice(),
+            always_subscribers,
+        })
+    }
+
+    fn append_subscribers(subscribers: &mut Vec<u16>, group: Vec<u16>) -> Result<SubscriberRange> {
+        let start = u16::try_from(subscribers.len()).map_err(|_| {
+            FimlError::InvalidArgument(format!(
+                "subscriber count exceeds router limit of {}",
+                u16::MAX
+            ))
+        })?;
+        let len = u16::try_from(group.len()).map_err(|_| {
+            FimlError::InvalidArgument(format!(
+                "subscriber group exceeds router limit of {}",
+                u16::MAX
+            ))
+        })?;
+        subscribers.extend(group);
+        Ok(SubscriberRange { start, len })
     }
 
     /// Returns runtime feature indices subscribed to this symbol and event kind.
@@ -90,30 +159,30 @@ impl EventRouter {
     }
 }
 
-/// Stateful, fixed-capacity extractor that routes events to subscribed features.
+/// Stateful extractor that routes events to subscribed features.
 ///
 /// The extractor owns the runtime feature state and the output feature vector.
 /// Handling an event updates the subscribed features directly in that vector
 /// without allocating on the event-processing path.
-pub struct FeatureExtractor<F, V, const M: usize>
+pub struct FeatureExtractor<F, V>
 where
     F: Float,
     V: FeatureVector<F = F>,
 {
     feature_vector: V,
-    /// Runtime features stored in the initialized `[..feature_count]` prefix.
-    features: [MaybeUninit<FeatureDerivation<F>>; M],
+    /// Runtime features indexed by the event router.
+    features: Box<[FeatureDerivation<F>]>,
     /// Output spans corresponding one-to-one with [`Self::features`].
     ///
-    /// Each initialized array index is a runtime feature index. Its value is
-    /// the contiguous range of feature-vector cells written by the feature at
-    /// the same index in [`Self::features`].
-    output_spans: [MaybeUninit<OutputSpan>; M],
-    feature_count: usize,
+    /// Each slice index is a runtime feature index. Its value is the contiguous
+    /// range of feature-vector cells written by the feature at the same index
+    /// in [`Self::features`].
+    output_spans: Box<[OutputSpan]>,
+    /// User-facing IDs in feature-vector index order.
+    feature_ids: Box<[FeatureId]>,
     event_router: EventRouter,
 
     last_timestamp: Option<i64>,
-    _marker: PhantomData<F>,
 }
 
 pub struct UpdateResult {
@@ -121,16 +190,29 @@ pub struct UpdateResult {
     pub features_updated: usize,
 }
 
-impl<F, V, const M: usize> FeatureExtractor<F, V, M>
+impl<F, V> FeatureExtractor<F, V>
 where
     F: Float,
     V: FeatureVector<F = F>,
 {
-    pub(crate) fn new() -> Self {
-        todo!()
+    pub(crate) fn new(feature_vector: V, compilation: Compilation<F>) -> Self {
+        debug_assert_eq!(compilation.features.len(), compilation.output_spans.len());
+
+        Self {
+            feature_vector,
+            features: compilation.features,
+            output_spans: compilation.output_spans,
+            feature_ids: compilation.feature_ids,
+            event_router: compilation.event_router,
+            last_timestamp: None,
+        }
     }
 
-    pub fn handle_event(&mut self, event: &Event<F>) -> Result<UpdateResult, FimlError> {
+    pub fn builder(output_vector: V) -> FeatureExtractorBuilder<F, V> {
+        FeatureExtractorBuilder::new(output_vector)
+    }
+
+    pub fn handle_event(&mut self, event: &Event<F>) -> Result<UpdateResult> {
         if let Some(previous_timestamp) = self.last_timestamp
             && previous_timestamp > event.timestamp()
         {
@@ -176,9 +258,19 @@ where
         &self.feature_vector
     }
 
+    /// Return feature IDs in output-vector index order.
+    pub fn feature_ids(&self) -> &[FeatureId] {
+        &self.feature_ids
+    }
+
+    /// Resolve a feature ID to its output-vector index.
+    pub fn feature_index(&self, feature_id: &FeatureId) -> Option<usize> {
+        self.feature_ids.iter().position(|id| id == feature_id)
+    }
+
     fn update_subscribers(
-        features: &mut [MaybeUninit<FeatureDerivation<F>>; M],
-        output_spans: &[MaybeUninit<OutputSpan>; M],
+        features: &mut [FeatureDerivation<F>],
+        output_spans: &[OutputSpan],
         feature_vector: &mut V,
         subscribers: &[u16],
         event: &Event<F>,
@@ -186,25 +278,7 @@ where
         for &feature_index in subscribers {
             let feature_index = usize::from(feature_index);
 
-            // SAFETY: construction initializes matching entries in `features`
-            // and `output_spans` before registering the index with the router.
-            let feature = unsafe { features[feature_index].assume_init_mut() };
-            let output_span = unsafe { *output_spans[feature_index].assume_init_ref() };
-            feature.update(event, output_span, feature_vector);
-        }
-    }
-}
-
-impl<F, V, const M: usize> Drop for FeatureExtractor<F, V, M>
-where
-    F: Float,
-    V: FeatureVector<F = F>,
-{
-    fn drop(&mut self) {
-        // SAFETY: construction initializes exactly the
-        // `features[..feature_count]` prefix.
-        for feature in &mut self.features[..self.feature_count] {
-            unsafe { feature.assume_init_drop() };
+            features[feature_index].update(event, output_spans[feature_index], feature_vector);
         }
     }
 }
@@ -212,7 +286,75 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{ArrayFeatureVector, FeatureVector};
+    use crate::{
+        ArrayFeatureVector, EventField, FeatureDefinition, FeatureKey, FeatureSource,
+        FeatureVector, WarmupPolicy,
+    };
+
+    #[test]
+    fn builder_infers_types_from_output_vector() {
+        let _builder = FeatureExtractor::builder(ArrayFeatureVector::<f64, 2>::new());
+    }
+
+    #[test]
+    fn builder_compiles_definitions_and_routes_events() {
+        let symbol = Symbol::new("extractor-builder");
+        let first_key = FeatureKey::Sma {
+            symbol,
+            source: FeatureSource::Field(EventField::Price),
+            window: 1,
+            warmup_policy: WarmupPolicy::FullWindow,
+        };
+        let second_key = FeatureKey::Sma {
+            symbol,
+            source: FeatureSource::Field(EventField::Price),
+            window: 2,
+            warmup_policy: WarmupPolicy::FullWindow,
+        };
+        let first_id = FeatureId::from(&first_key);
+        let second_id = FeatureId::from(&second_key);
+        let mut extractor = FeatureExtractor::builder(ArrayFeatureVector::<f64, 2>::new())
+            .add_feature(FeatureDefinition::with_default_id(first_key))
+            .add_feature(FeatureDefinition::with_default_id(second_key))
+            .build()
+            .unwrap();
+
+        assert_eq!(extractor.feature_ids(), [first_id.clone(), second_id]);
+        assert_eq!(extractor.feature_index(&first_id), Some(0));
+        assert_eq!(
+            extractor
+                .handle_event(&Event::volume(symbol, 100.0, 0))
+                .unwrap()
+                .features_updated,
+            0
+        );
+        assert_eq!(
+            extractor
+                .handle_event(&Event::price(symbol, 10.0, 1))
+                .unwrap()
+                .features_updated,
+            1
+        );
+        extractor
+            .handle_event(&Event::price(symbol, 20.0, 2))
+            .unwrap();
+
+        assert_eq!(extractor.feature_vector().values(), [20.0, 15.0]);
+    }
+
+    #[test]
+    fn builder_validates_output_vector_length() {
+        let key = FeatureKey::DayOfWeek {
+            symbol: Symbol::GLOBAL,
+            source: FeatureSource::EveryEvent,
+        };
+
+        let result = FeatureExtractor::builder(ArrayFeatureVector::<f64, 2>::new())
+            .add_feature(FeatureDefinition::with_default_id(key))
+            .build();
+
+        assert!(matches!(result, Err(FimlError::OutputCountMismatch { .. })));
+    }
 
     #[test]
     fn routes_runtime_feature_indices_by_symbol_and_event_kind() {
@@ -276,17 +418,14 @@ mod tests {
 
     #[test]
     fn passes_the_matching_output_span_to_the_feature() {
-        let mut features = [const { MaybeUninit::uninit() }; 1];
-        features[0].write(crate::features::derivation::day_of_week::build());
+        let features = vec![crate::features::derivation::day_of_week::build()].into_boxed_slice();
+        let output_spans = vec![OutputSpan { start: 1, count: 1 }].into_boxed_slice();
 
-        let mut output_spans = [const { MaybeUninit::uninit() }; 1];
-        output_spans[0].write(OutputSpan { start: 1, count: 1 });
-
-        let mut vector = FeatureExtractor::<f64, ArrayFeatureVector<f64, 2>, 1> {
+        let mut vector = FeatureExtractor::<f64, ArrayFeatureVector<f64, 2>> {
             feature_vector: ArrayFeatureVector::new(),
             features,
             output_spans,
-            feature_count: 1,
+            feature_ids: vec![FeatureId::new("day")].into_boxed_slice(),
             event_router: EventRouter {
                 symbol_to_index: Box::new([]),
                 symbol_routers: Box::new([]),
@@ -294,7 +433,6 @@ mod tests {
                 always_subscribers: SubscriberRange { start: 0, len: 1 },
             },
             last_timestamp: None,
-            _marker: PhantomData,
         };
 
         let result = vector
