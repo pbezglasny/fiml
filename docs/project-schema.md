@@ -92,6 +92,7 @@ classDiagram
         output_values()
     }
     Transformation <|.. StandardScaler
+    Transformation <|.. ParallelTransformer
 ```
 
 | Type | Role |
@@ -99,7 +100,7 @@ classDiagram
 | `Float` | Numeric contract used by events, indicators, derivations, and feature vectors. |
 | `RingBuffer` | Bounded history contract implemented by stack- and heap-backed buffers. |
 | `FeatureVector` | Mutable output storage. `ArrayFeatureVector<F, N>` avoids allocation; `VecFeatureVector<F>` chooses size at runtime. |
-| `Transformation` | Independent post-processing interface currently implemented by `StandardScaler`; it is not owned by the extractor. |
+| `Transformation` | Independent post-processing interface currently implemented by `StandardScaler` and `ParallelTransformer`; it is not owned by the extractor. |
 | `WarmupPolicy` | Shared readiness policy for windowed calculations. |
 | `FimlError` | Shared public error type; `Result<T>` aliases `Result<T, FimlError>`. |
 

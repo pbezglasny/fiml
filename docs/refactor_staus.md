@@ -44,9 +44,10 @@ subscriber lists, and derivations write directly into the output vector.
   retaining the established Python column names and canonical ordering.
 - Preserved Python batch validation and `NaN` initialization for unavailable
   output cells.
-- Removed the old pipeline, feature-set serialization implementation, legacy
-  extractor, obsolete examples, stale benchmark, and unused
-  `ParallelTransformer` prototype.
+- Retained the pipeline and transformation modules for a future migration to
+  the new extractor API.
+- Removed the feature-set serialization implementation, legacy extractor,
+  obsolete examples, and stale benchmark.
 - Updated the maintained Rust examples to use `FeatureExtractor` and registered
   them as explicit Cargo example targets.
 - Updated `docs/project-schema.md` for the current architecture.
@@ -80,11 +81,14 @@ The current refactor passes:
 - `cargo fmt` and `git diff --check`.
 
 The project remains in pre-release development, so breaking API changes are
-still expected. The current refactor changes are not yet committed.
+still expected. The refactor is committed; the pipeline restoration is currently uncommitted.
 
 ## Known gaps
 
 - Feature definitions do not currently have a serialization format.
+- The retained pipeline still targets the legacy `IndicatorFeatures` API and
+  is not declared by `features/mod.rs`; it must be adapted before use with the
+  current `FeatureExtractor`.
 - The library does not provide an exchange-specific historical-data loader.
 - Label generation and model training are outside the current core API.
 - Events from multiple live sources must be merged into globally

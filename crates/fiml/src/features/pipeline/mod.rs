@@ -1,0 +1,164 @@
+use std::marker::PhantomData;
+use std::mem::MaybeUninit;
+
+use crate::features::IndicatorFeatures;
+use crate::features::transformers::Transformation;
+use crate::{Event, FeatureVector, FimlError, Float, Result};
+
+pub struct Pipeline<I, T, F, V, const TRANSFORMER_SIZE: usize>
+where
+    F: Float,
+    V: FeatureVector<F = F>,
+    I: IndicatorFeatures<F = F>,
+    T: Transformation<F = F, OutputVector = V>,
+{
+    indicators: I,
+    transformers: [MaybeUninit<T>; TRANSFORMER_SIZE],
+    num_transformers: usize,
+    _phantom: PhantomData<V>,
+}
+
+impl<I, T, F, V, const NUM_TRANSFORMERS_SIZE: usize> Pipeline<I, T, F, V, NUM_TRANSFORMERS_SIZE>
+where
+    F: Float,
+    V: FeatureVector<F = F>,
+    I: IndicatorFeatures<F = F>,
+    T: Transformation<F = F, OutputVector = V>,
+{
+    pub fn new(indicators: I) -> Self {
+        Self {
+            indicators,
+            transformers: [const { MaybeUninit::uninit() }; NUM_TRANSFORMERS_SIZE],
+            num_transformers: 0,
+            _phantom: PhantomData::<V>,
+        }
+    }
+
+    pub fn add_transformer(&mut self, transformer: T) -> Result<()> {
+        if self.num_transformers < NUM_TRANSFORMERS_SIZE {
+            self.transformers[self.num_transformers].write(transformer);
+            self.num_transformers += 1;
+            #[cfg(feature = "tracing")]
+            tracing::debug!(
+                transformer_index = self.num_transformers - 1,
+                transformer_count = self.num_transformers,
+                transformer_capacity = NUM_TRANSFORMERS_SIZE,
+                transformer_type = std::any::type_name::<T>(),
+                "added pipeline transformer"
+            );
+            Ok(())
+        } else {
+            Err(FimlError::InvalidArgument(format!(
+                "cannot add more than {} transformers",
+                self.num_transformers
+            )))
+        }
+    }
+
+    pub fn dispatch(&mut self, event: &Event<I::F>) -> Result<()> {
+        self.indicators.dispatch(event)?;
+        if self.num_transformers == 0 {
+            return Ok(());
+        }
+
+        let first = unsafe { self.transformers[0].assume_init_mut() };
+        first.transform(self.indicators.feature_vector());
+
+        for i in 1..self.num_transformers {
+            let (previous, current) = self.transformers.split_at_mut(i);
+            let prev_transformation = unsafe { previous[i - 1].assume_init_ref() };
+            let current_transformation = unsafe { current[0].assume_init_mut() };
+            current_transformation.transform(prev_transformation.output_values());
+        }
+        Ok(())
+    }
+
+    pub fn values(&self) -> &[F] {
+        if self.num_transformers == 0 {
+            self.indicators.feature_vector().values()
+        } else {
+            let last = unsafe { self.transformers[self.num_transformers - 1].assume_init_ref() };
+            last.output_values().values()
+        }
+    }
+}
+
+impl<I, T, F, V, const NUM_TRANSFORMERS_SIZE: usize> Drop
+    for Pipeline<I, T, F, V, NUM_TRANSFORMERS_SIZE>
+where
+    F: Float,
+    V: FeatureVector<F = F>,
+    I: IndicatorFeatures<F = F>,
+    T: Transformation<F = F, OutputVector = V>,
+{
+    fn drop(&mut self) {
+        // SAFETY: the first `num_transformers` entries are initialized by
+        // `add_transformer`.
+        for slot in &mut self.transformers[..self.num_transformers] {
+            unsafe { slot.assume_init_drop() };
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::features::transformers::StandardScaler;
+    use crate::{ArrayFeatureVector, FeatureSet, IndicatorFeatureVector};
+
+    fn test_indicators() -> IndicatorFeatureVector<f64, ArrayFeatureVector<f64, 1>, 1> {
+        let feature_set = FeatureSet::builder().day_of_week().build();
+        IndicatorFeatureVector::from_feature_set(ArrayFeatureVector::new(), &feature_set).unwrap()
+    }
+
+    fn approx_eq(a: f64, b: f64) -> bool {
+        (a - b).abs() < 1e-9
+    }
+
+    #[test]
+    fn values_returns_indicator_output_without_transformers() {
+        let mut pipeline: Pipeline<
+            _,
+            StandardScaler<f64, ArrayFeatureVector<f64, 1>, 1>,
+            f64,
+            ArrayFeatureVector<f64, 1>,
+            0,
+        > = Pipeline::new(test_indicators());
+        pipeline.dispatch(&Event::time(0)).unwrap();
+
+        assert!(approx_eq(pipeline.values()[0], 4.0));
+    }
+
+    #[test]
+    fn dispatch_chains_transformers_and_exposes_last_output() {
+        let mut pipeline: Pipeline<
+            _,
+            StandardScaler<f64, ArrayFeatureVector<f64, 1>, 1>,
+            f64,
+            ArrayFeatureVector<f64, 1>,
+            2,
+        > = Pipeline::new(test_indicators());
+        pipeline
+            .add_transformer(StandardScaler::new(
+                [0],
+                [0],
+                0.0,
+                1.0,
+                ArrayFeatureVector::<f64, 1>::new(),
+            ))
+            .unwrap();
+        pipeline
+            .add_transformer(StandardScaler::new(
+                [0],
+                [0],
+                1.0,
+                2.0,
+                ArrayFeatureVector::<f64, 1>::new(),
+            ))
+            .unwrap();
+
+        pipeline.dispatch(&Event::time(0)).unwrap();
+
+        assert!(approx_eq(pipeline.values()[0], 1.5));
+    }
+}
