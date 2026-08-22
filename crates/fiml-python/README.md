@@ -147,9 +147,27 @@ the first event is processed and is then locked.
 
 ## Feature sets
 
-Feature sets are currently authored with the fluent `FeatureSet` builder and
-passed directly to `FeatureExtractor`. Feature-set JSON serialization is
-disabled while its format is being revised.
+`FeatureSet` is the versioned parity artifact shared by Python training and
+Rust serving. Author it fluently, serialize it once, and load that same JSON in
+either language:
+
+```python
+fs = fiml.FeatureSet(capacity=128, checksum="model-v7").sma(
+    "BTCUSDT", [12, 24], source="trade_price"
+)
+json_text = fs.to_json()
+
+restored = fiml.FeatureSet.from_json(json_text)
+extractor = fiml.FeatureExtractor.from_json(json_text, output_dtype="float64")
+```
+
+Omitting `capacity` keeps it equal to the active output count. An explicit
+larger capacity reserves trailing model-input cells. Those cells are exposed as
+`__reserved_<index>` columns and remain `NaN`; adding outputs beyond the fixed
+capacity raises `ValueError`. `n_features()` and `feature_names()` cover the
+complete model width, while `active_feature_count()` excludes reserved cells.
+The optional `checksum` is opaque metadata and is round-tripped without being
+calculated or verified.
 
 Builder methods: `sma`, `ema`, `cvd`, `sma_timed`, `obv_timed`,
 `trade_count_timed`, `day_of_week`, and `time_since_first_event_of_day`
@@ -162,7 +180,8 @@ is `fiml.WarmupPolicy.FULL_WINDOW`.
 Moving averages accept a keyword-only `source` of `"price"`, `"volume"`,
 `"trade_price"`, or `"trade_volume"` (default `"price"`). Use a trade source
 with `compute_features`. Output names are generated canonically at compilation,
-for example `btcusdt:trade_price:sma:12`; arbitrary aliases are not supported.
+from each structural feature key; arbitrary aliases are accepted only when
+loading JSON with an explicit output `id`.
 ASCII symbol identity is case-insensitive throughout the library and canonical
 names use lowercase symbols.
 

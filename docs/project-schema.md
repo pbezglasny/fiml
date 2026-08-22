@@ -250,29 +250,27 @@ updates, snapshots, policies, outcomes, errors, and query results are public.
 
 ## Serialization boundary
 
-The optional `serde` feature covers only `Symbol`, `WarmupPolicy`, and
-`EventKind`. `Symbol` serializes as its normalized name and deserializes by
-interning. Feature-definition serialization is intentionally absent; the old
-feature-set serialization module and its JSON examples have been removed.
+Under the optional `serde` feature, public `FeatureSet` is the serialization
+boundary. A private adapter converts its flat, canonically ordered scalar
+definitions to and from the strict grouped JSON contract. Wire-only structs
+remain private, and core does not depend on `serde_json` at runtime.
 
 ## Python binding boundary
 
 ```mermaid
 flowchart LR
-    PySet["Python FeatureSet"] *-- Definitions["Vec<FeatureDefinition>"]
-    PySet --> Keys["FeatureKey"]
+    PySet["Python FeatureSet"] *-- RustSet["Rust FeatureSet"]
+    RustSet *-- Definitions["Vec<FeatureDefinition>"]
     PyExtractor["Python FeatureExtractor"] *-- Core["FeatureExtractor<f64, VecFeatureVector<f64>>"]
     PyExtractor *-- Handles["Vec<Symbol>"]
     PyExtractor --> Events["Event<f64>"]
     Core --> Numpy["NumPy float32/float64 snapshots"]
 ```
 
-The Python `FeatureSet` remains a fluent convenience API. Each grouped method
-expands windows into scalar core definitions; compilation groups compatible
-definitions again. The binding preserves its established column IDs and
-canonical ordering. It initializes Python output cells to `NaN`, validates a
-complete batch before mutation, then calls the same core `handle_event` method
-used by Rust callers.
+The Python `FeatureSet` is a fluent convenience wrapper around the Rust set.
+Rust owns canonical ordering, deterministic default IDs, JSON conversion, and
+capacity validation. Reserved trailing model cells receive deterministic
+`__reserved_<index>` Python column names and remain `NaN`.
 
 ## Source map
 

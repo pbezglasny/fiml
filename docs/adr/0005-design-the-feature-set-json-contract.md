@@ -16,30 +16,30 @@ columns.
 
 ## Decision
 
-Version `1.0.0` is redefined during pre-release development. Compatibility with
-the old derived shape is intentionally not preserved. Writers emit `1.0.0`;
-readers also accept `1.0` and compatible `1.0.x` patch versions, but reject
-future minor versions until support is explicit.
+Compatibility with the old derived shape is intentionally not preserved.
+Writers emit exact version `1.0`, and readers accept only that version.
 
 The top-level shape is:
 
 ```json
 {
-  "version": "1.0.0",
-  "features": [],
-  "options": {}
+  "version": "1.0",
+  "feature_vector_capacity": 128,
+  "feature_vector_length": 100,
+  "checksum": "optional opaque metadata",
+  "features": []
 }
 ```
 
-`features` contains feature groups. A symbol-scoped group has a lowercase
-`symbol`; a global group omits `symbol`. Each group has a nonempty `indicators`
-array. There may be at most one global group and one group per normalized
-symbol. Duplicate groups are errors rather than merge candidates.
+`features` contains feature groups. Every group has a required normalized
+`symbol`; global features use `__global__`. Each group has a nonempty
+`indicators` array. Duplicate normalized symbol groups are errors.
 
-Each indicator has a snake_case `name` and a required, strict `options` object.
-Options mirror public builder arguments, are explicit even when they equal
-defaults, and reject unknown fields. Parameterless indicators use
-`"options": {}`. Output size is derived from the options and is not serialized.
+Each indicator uses a common strict envelope with `kind`, `source`, applicable
+`warmup_policy`, optional shared `options`, and optional `outputs`. Empty
+options are omitted. Scalar default outputs serialize without `outputs`; an
+output `id` is written only when it differs from the deterministic default.
+Empty output arrays are invalid.
 
 Durations are integer strings with `ms`, `s`, `m`, or `h` units. Writers use
 the largest exact unit. Fixed UTC offsets accept the Python builder's existing
@@ -55,26 +55,17 @@ Canonical order is:
 Input need not be sorted; deserialization produces a canonically ordered
 runtime `FeatureSet`.
 
-The top-level `options` object is required, empty, and strict until a real
-feature-vector option exists. An empty feature set is valid; an empty feature
-group is not.
+The expanded output count must equal `feature_vector_length`, and
+`feature_vector_capacity` must be at least that length. Trailing capacity is
+reserved model width rather than active features. `checksum` is stored and
+round-tripped but is not calculated or verified. An empty feature set is valid;
+an empty feature group is not.
 
 ## Module seam
 
 Runtime definitions remain a flat, canonically ordered collection optimized for
-compilation. A private `features/serialization` module owns the hierarchical
-wire model:
-
-```text
-serialization/
-├── mod.rs
-├── feature_set.rs
-├── feature.rs
-├── indicator/
-│   ├── mod.rs
-│   └── options.rs
-└── scalar.rs
-```
+compilation. A private `features/serialization.rs` adapter owns the
+hierarchical wire model.
 
 Its interface is the existing `Serialize` and `Deserialize` implementation on
 `FeatureSet`. Python delegates to that same implementation. Grouping, sorting,

@@ -1,6 +1,9 @@
 use std::fmt;
 
-use crate::{Float, Symbol};
+use crate::{
+    Float, Symbol,
+    order_book::{OrderBookDelta, OrderBookSnapshot},
+};
 
 /// Number of [`EventKind`] variants.
 pub const EVENT_KIND_COUNT: usize = 6;
@@ -67,23 +70,36 @@ pub struct TradeUpdate<F: Float> {
     pub side: Option<TradeSide>,
 }
 
-/// An order-book change.
-pub struct OrderBookDeltaUpdate<F: Float> {
-    pub symbol: Symbol,
-    pub bid: F,
-    pub ask: F,
-    pub timestamp: i64,
-}
-
-pub struct OrderBookSnapshot<F: Float> {
-    pub symbol: Symbol,
-    pub bids: F,
-    pub timestamp: i64,
-}
-
 /// A wall-clock tick carrying no market data.
 pub struct TimeUpdate {
     pub timestamp: i64,
+}
+
+pub struct OrderBookDeltaEvent {
+    timestamp: i64,
+    symbol: Symbol,
+    delta: OrderBookDelta,
+}
+
+impl OrderBookDeltaEvent {
+    /// Returns the order-book mutation carried by this event.
+    pub fn delta(&self) -> &OrderBookDelta {
+        &self.delta
+    }
+}
+
+/// A complete order-book image associated with a symbol and timestamp.
+pub struct OrderBookSnapshotEvent {
+    timestamp: i64,
+    symbol: Symbol,
+    snapshot: OrderBookSnapshot,
+}
+
+impl OrderBookSnapshotEvent {
+    /// Returns the complete order-book image carried by this event.
+    pub fn snapshot(&self) -> &OrderBookSnapshot {
+        &self.snapshot
+    }
 }
 
 /// An incoming change. Each variant carries only the payload its kind needs.
@@ -91,8 +107,8 @@ pub enum Event<F: Float> {
     Price(PriceUpdate<F>),
     Volume(VolumeUpdate<F>),
     Trade(TradeUpdate<F>),
-    OrderBookDelta(OrderBookDeltaUpdate<F>),
-    OrderBookSnapshot(OrderBookSnapshot<F>),
+    OrderBookDelta(OrderBookDeltaEvent),
+    OrderBookSnapshot(OrderBookSnapshotEvent),
     Time(TimeUpdate),
 }
 
@@ -165,17 +181,24 @@ impl<F: Float> Event<F> {
         })
     }
 
-    pub fn order_book_delta(symbol: Symbol, bid: F, ask: F, timestamp: i64) -> Self {
-        Event::OrderBookDelta(OrderBookDeltaUpdate {
+    pub fn order_book_delta(symbol: Symbol, timestamp: i64, delta: OrderBookDelta) -> Self {
+        Event::OrderBookDelta(OrderBookDeltaEvent {
             symbol,
-            bid,
-            ask,
             timestamp,
+            delta,
         })
     }
 
-    pub fn order_book_snapshot(_symbol: Symbol) -> Self {
-        todo!()
+    pub fn order_book_snapshot(
+        symbol: Symbol,
+        timestamp: i64,
+        snapshot: OrderBookSnapshot,
+    ) -> Self {
+        Event::OrderBookSnapshot(OrderBookSnapshotEvent {
+            symbol,
+            timestamp,
+            snapshot,
+        })
     }
 
     pub fn time(timestamp: i64) -> Self {

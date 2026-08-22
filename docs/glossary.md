@@ -276,8 +276,8 @@ is a separate concept from a serialized feature group.
 ### Feature-set format version
 
 The version of the serialized feature-set contract. It is independent of the
-Rust crate or Python package version. Writers emit full semantic versions, such
-as `1.0.0`; readers accept only explicitly compatible format versions.
+Rust crate or Python package version. Writers emit exact version `1.0`; readers
+accept only `1.0` until another version is explicitly supported.
 
 ### Parity artifact
 

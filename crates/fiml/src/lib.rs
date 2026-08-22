@@ -12,12 +12,12 @@ use std::{error::Error, fmt::Display};
 use rust_decimal::Decimal;
 
 pub use event::{
-    EVENT_KIND_COUNT, Event, EventKind, OrderBookDeltaUpdate, PriceUpdate, TimeUpdate, TradeSide,
-    TradeUpdate, VolumeUpdate,
+    EVENT_KIND_COUNT, Event, EventKind, OrderBookDeltaEvent, OrderBookSnapshotEvent, PriceUpdate,
+    TimeUpdate, TradeSide, TradeUpdate, VolumeUpdate,
 };
 pub use features::{
     EventField, FeatureDefinition, FeatureExtractor, FeatureExtractorBuilder, FeatureId,
-    FeatureKey, FeatureSource, MAX_OUTPUTS_PER_INDICATOR, UpdateResult,
+    FeatureKey, FeatureSet, FeatureSource, MAX_OUTPUTS_PER_INDICATOR, UpdateResult,
 };
 pub use indicators::{CumulativeVolumeDelta, ObvBucket, OnBalanceVolumeTimed};
 pub use ring_buffer::{
@@ -42,6 +42,10 @@ pub enum FimlError {
         reason: String,
     },
     OutputCountMismatch {
+        expected: usize,
+        actual: usize,
+    },
+    FeatureVectorCapacityMismatch {
         expected: usize,
         actual: usize,
     },
@@ -73,6 +77,10 @@ impl Display for FimlError {
                     "output storage has {actual} cells, but compilation requires exactly {expected}"
                 )
             }
+            FimlError::FeatureVectorCapacityMismatch { expected, actual } => write!(
+                f,
+                "output storage has capacity {actual}, but the feature set requires capacity {expected}"
+            ),
             FimlError::TimestampOutOfOrder {
                 symbol,
                 event_kind,
