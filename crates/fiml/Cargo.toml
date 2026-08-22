@@ -42,3 +42,7 @@ name = "feature_extractor"
 
 [[example]]
 name = "binance_trades"
+
+[[example]]
+name = "feature_set_from_json"
+required-features = ["serde"]

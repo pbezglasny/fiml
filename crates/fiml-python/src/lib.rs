@@ -8,10 +8,11 @@
 
 use std::time::Duration;
 
+use fiml::order_book::OrderBookDelta;
 use fiml::{
     Event, EventField, EventKind, FeatureDefinition, FeatureExtractor as GenericFeatureExtractor,
-    FeatureId, FeatureKey, FeatureSource, FeatureVector, FimlError, Symbol, TradeSide,
-    VecFeatureVector, WarmupPolicy as CoreWarmupPolicy, symbols,
+    FeatureKey, FeatureSet as CoreFeatureSet, FeatureSource, FeatureVector, FimlError, Symbol,
+    TradeSide, VecFeatureVector, WarmupPolicy as CoreWarmupPolicy, symbols,
 };
 use numpy::ndarray::Array2;
 use numpy::{Element, IntoPyArray, PyArray1, PyReadonlyArray1};
@@ -140,19 +141,30 @@ fn parse_tz(tz: &str) -> PyResult<i64> {
 /// with the fluent builder methods, then construct a [`FeatureExtractor`] from
 /// it.
 #[pyclass]
-#[derive(Default)]
 pub struct FeatureSet {
-    definitions: Vec<FeatureDefinition>,
-    indicator_count: usize,
+    core: CoreFeatureSet,
+    explicit_capacity: bool,
 }
 
 impl FeatureSet {
-    fn add_group<I>(&mut self, definitions: I)
+    fn add_group<I>(&mut self, definitions: I) -> PyResult<()>
     where
         I: IntoIterator<Item = FeatureDefinition>,
     {
-        self.definitions.extend(definitions);
-        self.indicator_count += 1;
+        let mut all_definitions = self.core.definitions().to_vec();
+        all_definitions.extend(definitions);
+        let capacity = if self.explicit_capacity {
+            self.core.feature_vector_capacity()
+        } else {
+            all_definitions.len()
+        };
+        self.core = CoreFeatureSet::with_metadata(
+            all_definitions,
+            capacity,
+            self.core.checksum().map(str::to_owned),
+        )
+        .map_err(|error| PyValueError::new_err(error.to_string()))?;
+        Ok(())
     }
 
     fn require_windows<T>(windows: &[T]) -> PyResult<()> {
@@ -167,19 +179,61 @@ impl FeatureSet {
 #[pymethods]
 impl FeatureSet {
     #[new]
-    fn new() -> Self {
-        Self::default()
+    #[pyo3(signature = (*, capacity=None, checksum=None))]
+    fn new(capacity: Option<usize>, checksum: Option<String>) -> PyResult<Self> {
+        let explicit_capacity = capacity.is_some();
+        let core = CoreFeatureSet::with_metadata([], capacity.unwrap_or(0), checksum)
+            .map_err(|error| PyValueError::new_err(error.to_string()))?;
+        Ok(Self {
+            core,
+            explicit_capacity,
+        })
+    }
+
+    /// Loads the strict versioned JSON parity artifact.
+    #[staticmethod]
+    fn from_json(json: &str) -> PyResult<Self> {
+        let core =
+            serde_json::from_str(json).map_err(|error| PyValueError::new_err(error.to_string()))?;
+        Ok(Self {
+            core,
+            explicit_capacity: true,
+        })
+    }
+
+    /// Serializes this set using the canonical Rust JSON adapter.
+    fn to_json(&self) -> PyResult<String> {
+        serde_json::to_string_pretty(&self.core)
+            .map_err(|error| PyValueError::new_err(error.to_string()))
     }
 
     /// Number of grouped builder calls. Compatible calls may share one runtime
     /// derivation after compilation.
     fn indicator_count(&self) -> usize {
-        self.indicator_count
+        self.core.indicator_count()
     }
 
     /// Number of output cells produced after compilation.
     fn output_count(&self) -> usize {
-        self.definitions.len()
+        self.core.feature_vector_length()
+    }
+
+    /// Complete configured model width, including trailing reserved cells.
+    #[getter]
+    fn capacity(&self) -> usize {
+        self.core.feature_vector_capacity()
+    }
+
+    /// Number of configured scalar outputs, excluding reserved cells.
+    #[getter]
+    fn active_feature_count(&self) -> usize {
+        self.core.feature_vector_length()
+    }
+
+    /// Opaque checksum metadata from the parity artifact.
+    #[getter]
+    fn checksum(&self) -> Option<&str> {
+        self.core.checksum()
     }
 
     /// Grouped simple moving averages over ordered sample windows.
@@ -202,16 +256,13 @@ impl FeatureSet {
         let field = parse_value_source("source", source)?;
         let warmup_policy = warmup.into();
         slf.add_group(windows.into_iter().map(|window| {
-            definition(
-                FeatureKey::Sma {
-                    symbol,
-                    source: FeatureSource::Field(field),
-                    window,
-                    warmup_policy,
-                },
-                format!("{}:{source}:sma:{window}", symbol.resolve_as_string()),
-            )
-        }));
+            definition(FeatureKey::Sma {
+                symbol,
+                source: FeatureSource::Field(field),
+                window,
+                warmup_policy,
+            })
+        }))?;
         Ok(slf)
     }
 
@@ -235,16 +286,13 @@ impl FeatureSet {
         let field = parse_value_source("source", source)?;
         let warmup_policy = warmup.into();
         slf.add_group(windows.into_iter().map(|window| {
-            definition(
-                FeatureKey::Ema {
-                    symbol,
-                    source: FeatureSource::Field(field),
-                    window,
-                    warmup_policy,
-                },
-                format!("{}:{source}:ema:{window}", symbol.resolve_as_string()),
-            )
-        }));
+            definition(FeatureKey::Ema {
+                symbol,
+                source: FeatureSource::Field(field),
+                window,
+                warmup_policy,
+            })
+        }))?;
         Ok(slf)
     }
 
@@ -265,16 +313,13 @@ impl FeatureSet {
         let symbol = symbols::intern(symbol);
         let warmup_policy = warmup.into();
         slf.add_group(windows.into_iter().map(|window| {
-            definition(
-                FeatureKey::Cvd {
-                    symbol,
-                    source: FeatureSource::Event(EventKind::Trade),
-                    window,
-                    warmup_policy,
-                },
-                format!("{}:trade:cvd:{window}", symbol.resolve_as_string()),
-            )
-        }));
+            definition(FeatureKey::Cvd {
+                symbol,
+                source: FeatureSource::Event(EventKind::Trade),
+                window,
+                warmup_policy,
+            })
+        }))?;
         Ok(slf)
     }
 
@@ -302,22 +347,14 @@ impl FeatureSet {
         let windows = parse_durations("windows", windows)?;
         let warmup_policy = warmup.into();
         slf.add_group(windows.into_iter().map(|window| {
-            definition(
-                FeatureKey::SmaTimed {
-                    symbol,
-                    source: FeatureSource::Field(field),
-                    aggregation,
-                    window,
-                    warmup_policy,
-                },
-                format!(
-                    "{}:{source}:sma_timed:{}ms:{}ms",
-                    symbol.resolve_as_string(),
-                    aggregation.as_millis(),
-                    window.as_millis()
-                ),
-            )
-        }));
+            definition(FeatureKey::SmaTimed {
+                symbol,
+                source: FeatureSource::Field(field),
+                aggregation,
+                window,
+                warmup_policy,
+            })
+        }))?;
         Ok(slf)
     }
 
@@ -342,22 +379,14 @@ impl FeatureSet {
         let windows = parse_durations("windows", windows)?;
         let warmup_policy = warmup.into();
         slf.add_group(windows.into_iter().map(|window| {
-            definition(
-                FeatureKey::ObvTimed {
-                    symbol,
-                    source: FeatureSource::Event(EventKind::Trade),
-                    aggregation,
-                    window,
-                    warmup_policy,
-                },
-                format!(
-                    "{}:trade:obv_timed:{}ms:{}ms",
-                    symbol.resolve_as_string(),
-                    aggregation.as_millis(),
-                    window.as_millis()
-                ),
-            )
-        }));
+            definition(FeatureKey::ObvTimed {
+                symbol,
+                source: FeatureSource::Event(EventKind::Trade),
+                aggregation,
+                window,
+                warmup_policy,
+            })
+        }))?;
         Ok(slf)
     }
 
@@ -380,36 +409,24 @@ impl FeatureSet {
         let symbol = symbols::intern(symbol);
         let aggregation = parse_duration("aggregation", aggregation)?;
         let window = parse_duration("window", window)?;
-        slf.add_group([definition(
-            FeatureKey::TradeCountTimed {
-                symbol,
-                source: FeatureSource::Event(EventKind::Trade),
-                aggregation,
-                window,
-                warmup_policy: warmup.into(),
-            },
-            format!(
-                "{}:trade:count_timed:{}ms:{}ms",
-                symbol.resolve_as_string(),
-                aggregation.as_millis(),
-                window.as_millis()
-            ),
-        )]);
+        slf.add_group([definition(FeatureKey::TradeCountTimed {
+            symbol,
+            source: FeatureSource::Event(EventKind::Trade),
+            aggregation,
+            window,
+            warmup_policy: warmup.into(),
+        })])?;
         Ok(slf)
     }
 
     /// Day-of-week clock feature (`0 = Sunday ..= 6 = Saturday`). Refreshes
     /// from every event's timestamp, so it has a value on every row.
-    fn day_of_week(slf: PyRefMut<'_, Self>) -> PyRefMut<'_, Self> {
-        let mut slf = slf;
-        slf.add_group([definition(
-            FeatureKey::DayOfWeek {
-                symbol: Symbol::GLOBAL,
-                source: FeatureSource::EveryEvent,
-            },
-            "clock:day_of_week".to_string(),
-        )]);
-        slf
+    fn day_of_week(mut slf: PyRefMut<'_, Self>) -> PyResult<PyRefMut<'_, Self>> {
+        slf.add_group([definition(FeatureKey::DayOfWeek {
+            symbol: Symbol::GLOBAL,
+            source: FeatureSource::EveryEvent,
+        })])?;
+        Ok(slf)
     }
 
     /// Milliseconds since the first observed event after a local day boundary.
@@ -419,20 +436,17 @@ impl FeatureSet {
         tz: &str,
     ) -> PyResult<PyRefMut<'py, Self>> {
         let utc_offset_millis = parse_tz(tz)?;
-        slf.add_group([definition(
-            FeatureKey::TimeSinceFirstEventOfDay {
-                symbol: Symbol::GLOBAL,
-                source: FeatureSource::EveryEvent,
-                utc_offset_millis,
-            },
-            format!("clock:time_since_first_event_of_day:{utc_offset_millis}ms"),
-        )]);
+        slf.add_group([definition(FeatureKey::TimeSinceFirstEventOfDay {
+            symbol: Symbol::GLOBAL,
+            source: FeatureSource::EveryEvent,
+            utc_offset_millis,
+        })])?;
         Ok(slf)
     }
 }
 
-fn definition(key: FeatureKey, id: String) -> FeatureDefinition {
-    FeatureDefinition::new(key, FeatureId::new(id))
+fn definition(key: FeatureKey) -> FeatureDefinition {
+    FeatureDefinition::with_default_id(key)
 }
 
 #[derive(Clone, Copy)]
@@ -504,74 +518,14 @@ impl OutputBuffer {
 type CoreFeatureExtractor = GenericFeatureExtractor<f64, VecFeatureVector<f64>>;
 
 fn build_core(feature_set: &FeatureSet) -> PyResult<CoreFeatureExtractor> {
-    let mut definitions = feature_set.definitions.clone();
-    definitions.sort_by_cached_key(|definition| feature_sort_key(&definition.key));
-
-    let mut output_vector = VecFeatureVector::new(definitions.len());
-    for index in 0..definitions.len() {
-        output_vector.set_value_at(index, f64::NAN);
-    }
-    let mut builder = GenericFeatureExtractor::builder(output_vector);
-    for definition in definitions {
-        builder = builder.add_feature(definition);
-    }
-    builder
-        .build()
+    let output_vector = VecFeatureVector::new_of_length(
+        feature_set.core.feature_vector_capacity(),
+        feature_set.core.feature_vector_length(),
+    );
+    feature_set
+        .core
+        .build(output_vector)
         .map_err(|error| PyValueError::new_err(error.to_string()))
-}
-
-fn feature_sort_key(key: &FeatureKey) -> (Option<String>, u8, u8, u128, i64) {
-    let symbol = match key {
-        FeatureKey::Sma { symbol, .. }
-        | FeatureKey::Ema { symbol, .. }
-        | FeatureKey::Cvd { symbol, .. }
-        | FeatureKey::SmaTimed { symbol, .. }
-        | FeatureKey::ObvTimed { symbol, .. }
-        | FeatureKey::TradeCountTimed { symbol, .. }
-        | FeatureKey::DayOfWeek { symbol, .. }
-        | FeatureKey::TimeSinceFirstEventOfDay { symbol, .. } => *symbol,
-    };
-    let symbol = (symbol != Symbol::GLOBAL).then(|| symbol.resolve_as_string());
-    let kind = match key {
-        FeatureKey::Cvd { .. } => 0,
-        FeatureKey::DayOfWeek { .. } => 1,
-        FeatureKey::Ema { .. } => 2,
-        FeatureKey::ObvTimed { .. } => 3,
-        FeatureKey::Sma { .. } => 4,
-        FeatureKey::SmaTimed { .. } => 5,
-        FeatureKey::TimeSinceFirstEventOfDay { .. } => 6,
-        FeatureKey::TradeCountTimed { .. } => 7,
-    };
-    let source = match key {
-        FeatureKey::Sma { source, .. }
-        | FeatureKey::Ema { source, .. }
-        | FeatureKey::SmaTimed { source, .. } => source_rank(*source),
-        _ => 0,
-    };
-    let aggregation_nanos = match key {
-        FeatureKey::SmaTimed { aggregation, .. }
-        | FeatureKey::ObvTimed { aggregation, .. }
-        | FeatureKey::TradeCountTimed { aggregation, .. } => aggregation.as_nanos(),
-        _ => 0,
-    };
-    let utc_offset_millis = match key {
-        FeatureKey::TimeSinceFirstEventOfDay {
-            utc_offset_millis, ..
-        } => *utc_offset_millis,
-        _ => 0,
-    };
-    (symbol, kind, source, aggregation_nanos, utc_offset_millis)
-}
-
-const fn source_rank(source: FeatureSource) -> u8 {
-    match source {
-        FeatureSource::Field(EventField::Price) => 0,
-        FeatureSource::Field(EventField::TradePrice) => 1,
-        FeatureSource::Field(EventField::TradeVolume) => 2,
-        FeatureSource::Field(EventField::Volume) => 3,
-        FeatureSource::Event(kind) => 4 + kind as u8,
-        FeatureSource::EveryEvent => u8::MAX,
-    }
 }
 
 /// A configured, runnable feature extractor.
@@ -581,17 +535,29 @@ pub struct FeatureExtractor {
     /// Handle (index) -> interned symbol, so Python can pass cheap integer ids
     /// in array columns instead of strings per row.
     symbols: Vec<Symbol>,
+    feature_names: Vec<String>,
     n_features: usize,
+    active_feature_count: usize,
     output_dtype: OutputDtype,
 }
 
 impl FeatureExtractor {
     fn from_core(inner: CoreFeatureExtractor, output_dtype: OutputDtype) -> Self {
-        let n_features = inner.feature_ids().len();
+        let active_feature_count = inner.feature_ids().len();
+        let n_features = inner.feature_vector().capacity();
+        let mut feature_names = inner
+            .feature_ids()
+            .iter()
+            .map(|id| id.as_str().to_owned())
+            .collect::<Vec<_>>();
+        feature_names
+            .extend((active_feature_count..n_features).map(|index| format!("__reserved_{index}")));
         Self {
             inner,
             symbols: Vec::new(),
+            feature_names,
             n_features,
+            active_feature_count,
             output_dtype,
         }
     }
@@ -642,12 +608,15 @@ impl FeatureExtractor {
                 timestamp,
                 side.map(parse_trade_side).transpose()?,
             ),
-            KIND_ORDERBOOK => Event::order_book_delta(
-                self.symbol_at(symbol)?,
-                require("bid", bid)?,
-                require("ask", ask)?,
-                timestamp,
-            ),
+            KIND_ORDERBOOK => {
+                let _ = require("bid", bid)?;
+                let _ = require("ask", ask)?;
+                Event::order_book_delta(
+                    self.symbol_at(symbol)?,
+                    timestamp,
+                    OrderBookDelta::new(0, Vec::new()),
+                )
+            }
             KIND_TIME => Event::time(timestamp),
             other => {
                 return Err(PyValueError::new_err(format!(
@@ -710,6 +679,17 @@ impl FeatureExtractor {
         ))
     }
 
+    /// Build an extractor directly from versioned FeatureSet JSON.
+    #[staticmethod]
+    #[pyo3(signature = (json, output_dtype="float64"))]
+    fn from_json(json: &str, output_dtype: &str) -> PyResult<Self> {
+        let feature_set = FeatureSet::from_json(json)?;
+        Ok(Self::from_core(
+            build_core(&feature_set)?,
+            OutputDtype::parse(output_dtype)?,
+        ))
+    }
+
     /// Numeric dtype used by arrays returned to Python.
     #[getter]
     fn output_dtype(&self) -> &'static str {
@@ -741,16 +721,17 @@ impl FeatureExtractor {
 
     /// Feature (column) names in output order.
     fn feature_names(&self) -> Vec<String> {
-        self.inner
-            .feature_ids()
-            .iter()
-            .map(|id| id.as_str().to_owned())
-            .collect()
+        self.feature_names.clone()
     }
 
     /// Number of feature columns.
     fn n_features(&self) -> usize {
         self.n_features
+    }
+
+    /// Number of configured outputs, excluding trailing reserved cells.
+    fn active_feature_count(&self) -> usize {
+        self.active_feature_count
     }
 
     /// Current feature values in output order. A window cell is NaN until its

@@ -167,7 +167,7 @@ impl<F: Float> FeatureVector for VecFeatureVector<F> {
     }
 
     fn capacity(&self) -> usize {
-        self.data.capacity()
+        self.data.len()
     }
 
     fn len(&self) -> usize {
@@ -244,5 +244,14 @@ mod tests {
         let result = values.try_set_value_at(2, 4.0);
 
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn vec_feature_vector_capacity_is_model_width_not_allocator_capacity() {
+        let mut data = Vec::with_capacity(16);
+        data.resize(2, 0.0);
+        let values = VecFeatureVector { data, length: 2 };
+
+        assert_eq!(values.capacity(), 2);
     }
 }
