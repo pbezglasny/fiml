@@ -52,9 +52,10 @@ Both go through the identical dispatch path, so they preserve parity.
 
 ## 3. Authoring the feature set
 
-Feature-set JSON serialization is currently disabled while its format is being
-revised. Author feature sets with the fluent Python builder and pass them
-directly to the extractor.
+Feature-set JSON is the shared training/serving artifact. Author sets with the
+fluent Python builder, then use `FeatureSet.to_json()`,
+`FeatureSet.from_json(...)`, or `FeatureExtractor.from_json(...)`. Python
+delegates canonical ordering and conversion to the Rust `FeatureSet`.
 
 ```python
 fs = (fiml.FeatureSet()

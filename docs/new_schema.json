@@ -1,16 +1,16 @@
 {
   "version": "1.0",
-  "feature_vector_capacity": 128,
-  "feature_vector_length": 100,
-  "check_hash_sum": "123",
+  "feature_vector_capacity": 4,
+  "feature_vector_length": 2,
+  "checksum": "opaque model metadata",
   "features": [
     {
       "symbol": "__global__",
       "indicators": [
         {
-          "kind": "hour_of_day",
-          "options": {
-            "utc_offset": "0h"
+          "kind": "day_of_week",
+          "source": {
+            "type": "every_event"
           }
         }
       ]
@@ -20,36 +20,18 @@
       "indicators": [
         {
           "kind": "sma",
-          "source": "price",
+          "source": {
+            "type": "field",
+            "event": "trade",
+            "field": "price"
+          },
           "warmup_policy": "full_window",
-          "options": {
-            "windows": [
-              5,
-              10
-            ]
-          }
-        },
-        {
-          "kind": "sma",
-          "source": "volume",
-          "warmup_policy": "full_window",
-          "options": {
-            "windows": [
-              5,
-              10
-            ]
-          }
-        },
-        {
-          "kind": "cvd_timed",
-          "warmup_policy": "full_window",
-          "options": {
-            "aggregation": "100ms",
-            "windows": [
-              "5s",
-              "30s"
-            ]
-          }
+          "outputs": [
+            {
+              "window": 5,
+              "id": "btc_trade_sma_5"
+            }
+          ]
         }
       ]
     }

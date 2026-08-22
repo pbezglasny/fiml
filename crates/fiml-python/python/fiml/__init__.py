@@ -78,6 +78,11 @@ class FeatureExtractor(_FeatureExtractor):
             cls, feature_set, _normalize_output_dtype(output_dtype)
         )
 
+    @classmethod
+    def from_json(cls, json, output_dtype="float64"):
+        """Construct directly from a versioned FeatureSet JSON artifact."""
+        return cls(FeatureSet.from_json(json), output_dtype=output_dtype)
+
     @property
     def output_dtype(self):
         return _FeatureExtractor.output_dtype.__get__(self, type(self))

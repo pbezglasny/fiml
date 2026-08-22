@@ -1,11 +1,16 @@
 {
-  "version": "1.0.0",
+  "version": "1.0",
+  "feature_vector_capacity": 9,
+  "feature_vector_length": 9,
   "features": [
     {
+      "symbol": "__global__",
       "indicators": [
         {
-          "name": "day_of_week",
-          "options": {}
+          "kind": "day_of_week",
+          "source": {
+            "type": "every_event"
+          }
         }
       ]
     },
@@ -13,33 +18,51 @@
       "symbol": "btcusdt",
       "indicators": [
         {
-          "name": "ema",
-          "options": {
-            "source": "trade_price",
-            "windows": [
-              2
-            ],
-            "warmup_policy": "full_window"
-          }
+          "kind": "ema",
+          "source": {
+            "type": "field",
+            "event": "trade",
+            "field": "price"
+          },
+          "warmup_policy": "full_window",
+          "outputs": [
+            {
+              "window": 2
+            }
+          ]
         },
         {
-          "name": "sma",
-          "options": {
-            "source": "trade_price",
-            "windows": [
-              2,
-              4
-            ],
-            "warmup_policy": "full_window"
-          }
+          "kind": "sma",
+          "source": {
+            "type": "field",
+            "event": "trade",
+            "field": "price"
+          },
+          "warmup_policy": "full_window",
+          "outputs": [
+            {
+              "window": 2
+            },
+            {
+              "window": 4
+            }
+          ]
         },
         {
-          "name": "trade_count_timed",
+          "kind": "trade_count_timed",
+          "source": {
+            "type": "event",
+            "event": "trade"
+          },
+          "warmup_policy": "full_window",
           "options": {
-            "aggregation": "1ms",
-            "window": "1m",
-            "warmup_policy": "full_window"
-          }
+            "aggregation": "1ms"
+          },
+          "outputs": [
+            {
+              "window": "1m"
+            }
+          ]
         }
       ]
     },
@@ -47,36 +70,53 @@
       "symbol": "ethusdt",
       "indicators": [
         {
-          "name": "ema",
-          "options": {
-            "source": "trade_price",
-            "windows": [
-              2
-            ],
-            "warmup_policy": "full_window"
-          }
+          "kind": "ema",
+          "source": {
+            "type": "field",
+            "event": "trade",
+            "field": "price"
+          },
+          "warmup_policy": "full_window",
+          "outputs": [
+            {
+              "window": 2
+            }
+          ]
         },
         {
-          "name": "sma",
-          "options": {
-            "source": "trade_price",
-            "windows": [
-              2,
-              4
-            ],
-            "warmup_policy": "full_window"
-          }
+          "kind": "sma",
+          "source": {
+            "type": "field",
+            "event": "trade",
+            "field": "price"
+          },
+          "warmup_policy": "full_window",
+          "outputs": [
+            {
+              "window": 2
+            },
+            {
+              "window": 4
+            }
+          ]
         },
         {
-          "name": "trade_count_timed",
+          "kind": "trade_count_timed",
+          "source": {
+            "type": "event",
+            "event": "trade"
+          },
+          "warmup_policy": "full_window",
           "options": {
-            "aggregation": "1ms",
-            "window": "1m",
-            "warmup_policy": "full_window"
-          }
+            "aggregation": "1ms"
+          },
+          "outputs": [
+            {
+              "window": "1m"
+            }
+          ]
         }
       ]
     }
-  ],
-  "options": {}
+  ]
 }

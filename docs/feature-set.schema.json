@@ -1,427 +1,76 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "fiml FeatureSet",
-  "description": "The versioned feature-vector parity artifact shared by Python training and Rust serving.",
+  "title": "fiml FeatureSet 1.0",
   "type": "object",
   "additionalProperties": false,
-  "required": [
-    "version",
-    "features",
-    "options"
-  ],
+  "required": ["version", "feature_vector_capacity", "feature_vector_length", "features"],
   "properties": {
-    "version": {
-      "description": "The feature-set format version. Writers emit 1.0.0; readers accept stable 1.0.x patch versions and the short 1.0 form.",
-      "type": "string",
-      "pattern": "^1\\.0(?:\\.(?:0|[1-9][0-9]*))?(?:\\+[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?$",
-      "examples": [
-        "1.0.0"
-      ]
-    },
-    "features": {
-      "description": "Feature groups. Canonical writers place the global group first, then lowercase symbol groups in lexical order.",
-      "type": "array",
-      "items": {
-        "$ref": "#/$defs/featureGroup"
-      }
-    },
-    "options": {
-      "$ref": "#/$defs/featureSetOptions"
-    }
+    "version": { "const": "1.0" },
+    "feature_vector_capacity": { "type": "integer", "minimum": 0 },
+    "feature_vector_length": { "type": "integer", "minimum": 0 },
+    "checksum": { "type": "string" },
+    "features": { "type": "array", "items": { "$ref": "#/$defs/group" } }
   },
   "$defs": {
-    "featureSetOptions": {
-      "description": "Reserved for future feature-vector options.",
-      "type": "object",
-      "additionalProperties": false
+    "group": {
+      "type": "object", "additionalProperties": false,
+      "required": ["symbol", "indicators"],
+      "properties": {
+        "symbol": { "type": "string", "minLength": 1 },
+        "indicators": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/indicator" } }
+      }
     },
-    "featureGroup": {
-      "description": "One global or symbol-scoped indicator group. Scope uniqueness and canonical order are validated by the loader.",
+    "indicator": {
+      "type": "object", "additionalProperties": false,
+      "required": ["kind", "source"],
+      "properties": {
+        "kind": { "enum": ["sma", "ema", "cvd", "sma_timed", "obv_timed", "trade_count_timed", "day_of_week", "time_since_first_event_of_day"] },
+        "source": { "$ref": "#/$defs/source" },
+        "warmup_policy": { "enum": ["first_value", "full_window"] },
+        "options": { "$ref": "#/$defs/options" },
+        "outputs": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/output" } }
+      }
+    },
+    "source": {
       "oneOf": [
         {
-          "$ref": "#/$defs/globalFeatureGroup"
-        },
-        {
-          "$ref": "#/$defs/symbolFeatureGroup"
-        }
-      ]
-    },
-    "globalFeatureGroup": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "indicators"
-      ],
-      "properties": {
-        "indicators": {
-          "type": "array",
-          "minItems": 1,
-          "items": {
-            "$ref": "#/$defs/globalIndicatorDefinition"
+          "type": "object", "additionalProperties": false,
+          "required": ["type", "event", "field"],
+          "properties": {
+            "type": { "const": "field" },
+            "event": { "enum": ["price", "volume", "trade"] },
+            "field": { "enum": ["value", "price", "volume"] }
           }
-        }
-      }
-    },
-    "symbolFeatureGroup": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "symbol",
-        "indicators"
-      ],
-      "properties": {
-        "symbol": {
-          "description": "A nonempty market symbol. Writers normalize ASCII letters to lowercase.",
-          "type": "string",
-          "minLength": 1
         },
-        "indicators": {
-          "type": "array",
-          "minItems": 1,
-          "items": {
-            "$ref": "#/$defs/marketIndicatorDefinition"
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["type", "event"],
+          "properties": {
+            "type": { "const": "event" },
+            "event": { "enum": ["price", "volume", "trade", "order_book_delta", "order_book_snapshot", "time"] }
           }
-        }
-      }
-    },
-    "marketIndicatorDefinition": {
-      "oneOf": [
-        {
-          "$ref": "#/$defs/smaDefinition"
         },
         {
-          "$ref": "#/$defs/emaDefinition"
-        },
-        {
-          "$ref": "#/$defs/cvdDefinition"
-        },
-        {
-          "$ref": "#/$defs/smaTimedDefinition"
-        },
-        {
-          "$ref": "#/$defs/obvTimedDefinition"
-        },
-        {
-          "$ref": "#/$defs/tradeCountTimedDefinition"
+          "type": "object", "additionalProperties": false,
+          "required": ["type"],
+          "properties": { "type": { "const": "every_event" } }
         }
       ]
     },
-    "globalIndicatorDefinition": {
-      "oneOf": [
-        {
-          "$ref": "#/$defs/dayOfWeekDefinition"
-        },
-        {
-          "$ref": "#/$defs/timeSinceFirstEventOfDayDefinition"
-        }
-      ]
-    },
-    "valueSource": {
-      "description": "The numeric event field consumed by a moving average.",
-      "type": "string",
-      "enum": [
-        "price",
-        "volume",
-        "trade_price",
-        "trade_volume"
-      ]
-    },
-    "warmupPolicy": {
-      "description": "When a window indicator starts exposing values.",
-      "type": "string",
-      "enum": [
-        "first_value",
-        "full_window"
-      ]
-    },
-    "sampleWindows": {
-      "description": "Ordered, unique sample counts. Authored order determines adjacent output-cell order.",
-      "type": "array",
-      "minItems": 1,
-      "maxItems": 16,
-      "uniqueItems": true,
-      "items": {
-        "type": "integer",
-        "minimum": 1
-      }
-    },
-    "duration": {
-      "description": "A positive whole-number duration using milliseconds, seconds, minutes, or hours. Writers use the largest exact unit.",
-      "type": "string",
-      "pattern": "^0*[1-9][0-9]*(?:ms|s|m|h)$",
-      "examples": [
-        "500ms",
-        "1s",
-        "5m",
-        "1h"
-      ]
-    },
-    "durationWindows": {
-      "description": "Ordered, unique time windows. Authored order determines adjacent output-cell order.",
-      "type": "array",
-      "minItems": 1,
-      "maxItems": 16,
-      "uniqueItems": true,
-      "items": {
-        "$ref": "#/$defs/duration"
-      }
-    },
-    "utcOffset": {
-      "description": "A fixed UTC offset from -14:00 through +14:00. Readers accept UTC, UTC+3, UTC-05:30, +02:00, and -7; writers emit signed HH:MM.",
-      "type": "string",
-      "pattern": "^(?:UTC|(?:UTC)?[+-][0-9]+(?::[0-9]+)?)$",
-      "examples": [
-        "+00:00",
-        "+03:00",
-        "-05:30"
-      ]
-    },
-    "sampleMovingAverageOptions": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "source",
-        "windows",
-        "warmup_policy"
-      ],
+    "options": {
+      "type": "object", "additionalProperties": false,
       "properties": {
-        "source": {
-          "$ref": "#/$defs/valueSource"
-        },
-        "windows": {
-          "$ref": "#/$defs/sampleWindows"
-        },
-        "warmup_policy": {
-          "$ref": "#/$defs/warmupPolicy"
-        }
+        "aggregation": { "$ref": "#/$defs/duration" },
+        "utc_offset": { "type": "string", "pattern": "^[+-][0-9]{2}:[0-9]{2}$" }
       }
     },
-    "cvdOptions": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "windows",
-        "warmup_policy"
-      ],
+    "output": {
+      "type": "object", "additionalProperties": false,
       "properties": {
-        "windows": {
-          "$ref": "#/$defs/sampleWindows"
-        },
-        "warmup_policy": {
-          "$ref": "#/$defs/warmupPolicy"
-        }
+        "window": { "oneOf": [{ "type": "integer", "minimum": 1 }, { "$ref": "#/$defs/duration" }] },
+        "id": { "type": "string", "not": { "pattern": "^__reserved_" } }
       }
     },
-    "timedMovingAverageOptions": {
-      "description": "Every window must be at least, and an exact multiple of, aggregation; compilation validates that relationship.",
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "source",
-        "aggregation",
-        "windows",
-        "warmup_policy"
-      ],
-      "properties": {
-        "source": {
-          "$ref": "#/$defs/valueSource"
-        },
-        "aggregation": {
-          "$ref": "#/$defs/duration"
-        },
-        "windows": {
-          "$ref": "#/$defs/durationWindows"
-        },
-        "warmup_policy": {
-          "$ref": "#/$defs/warmupPolicy"
-        }
-      }
-    },
-    "obvTimedOptions": {
-      "description": "Every window must be at least, and an exact multiple of, aggregation; compilation validates that relationship.",
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "aggregation",
-        "windows",
-        "warmup_policy"
-      ],
-      "properties": {
-        "aggregation": {
-          "$ref": "#/$defs/duration"
-        },
-        "windows": {
-          "$ref": "#/$defs/durationWindows"
-        },
-        "warmup_policy": {
-          "$ref": "#/$defs/warmupPolicy"
-        }
-      }
-    },
-    "tradeCountTimedOptions": {
-      "description": "Window must be at least, and an exact multiple of, aggregation; compilation validates that relationship.",
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "aggregation",
-        "window",
-        "warmup_policy"
-      ],
-      "properties": {
-        "aggregation": {
-          "$ref": "#/$defs/duration"
-        },
-        "window": {
-          "$ref": "#/$defs/duration"
-        },
-        "warmup_policy": {
-          "$ref": "#/$defs/warmupPolicy"
-        }
-      }
-    },
-    "emptyOptions": {
-      "type": "object",
-      "additionalProperties": false
-    },
-    "timeSinceFirstEventOfDayOptions": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "utc_offset"
-      ],
-      "properties": {
-        "utc_offset": {
-          "$ref": "#/$defs/utcOffset"
-        }
-      }
-    },
-    "smaDefinition": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "name",
-        "options"
-      ],
-      "properties": {
-        "name": {
-          "const": "sma"
-        },
-        "options": {
-          "$ref": "#/$defs/sampleMovingAverageOptions"
-        }
-      }
-    },
-    "emaDefinition": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "name",
-        "options"
-      ],
-      "properties": {
-        "name": {
-          "const": "ema"
-        },
-        "options": {
-          "$ref": "#/$defs/sampleMovingAverageOptions"
-        }
-      }
-    },
-    "cvdDefinition": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "name",
-        "options"
-      ],
-      "properties": {
-        "name": {
-          "const": "cvd"
-        },
-        "options": {
-          "$ref": "#/$defs/cvdOptions"
-        }
-      }
-    },
-    "smaTimedDefinition": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "name",
-        "options"
-      ],
-      "properties": {
-        "name": {
-          "const": "sma_timed"
-        },
-        "options": {
-          "$ref": "#/$defs/timedMovingAverageOptions"
-        }
-      }
-    },
-    "obvTimedDefinition": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "name",
-        "options"
-      ],
-      "properties": {
-        "name": {
-          "const": "obv_timed"
-        },
-        "options": {
-          "$ref": "#/$defs/obvTimedOptions"
-        }
-      }
-    },
-    "tradeCountTimedDefinition": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "name",
-        "options"
-      ],
-      "properties": {
-        "name": {
-          "const": "trade_count_timed"
-        },
-        "options": {
-          "$ref": "#/$defs/tradeCountTimedOptions"
-        }
-      }
-    },
-    "dayOfWeekDefinition": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "name",
-        "options"
-      ],
-      "properties": {
-        "name": {
-          "const": "day_of_week"
-        },
-        "options": {
-          "$ref": "#/$defs/emptyOptions"
-        }
-      }
-    },
-    "timeSinceFirstEventOfDayDefinition": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "name",
-        "options"
-      ],
-      "properties": {
-        "name": {
-          "const": "time_since_first_event_of_day"
-        },
-        "options": {
-          "$ref": "#/$defs/timeSinceFirstEventOfDayOptions"
-        }
-      }
-    }
+    "duration": { "type": "string", "pattern": "^[1-9][0-9]*(ms|s|m|h)$" }
   }
 }

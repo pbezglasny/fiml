@@ -5,8 +5,27 @@ import pytest
 import fiml
 
 
+def sample_name(kind, symbol, source, window, warmup="full_window"):
+    source_name = {
+        "price": "field.price",
+        "volume": "field.volume",
+        "trade_price": "field.trade_price",
+        "trade_volume": "field.trade_volume",
+        "trade": "event.trade",
+    }[source]
+    normalized = symbol.lower()
+    return (
+        f"{kind}:symbol={len(normalized)}:{normalized}:source={source_name}:"
+        f"window={window}:warmup={warmup}"
+    )
+
+
 def count_name(symbol):
-    return f"{symbol.lower()}:trade:count_timed:1ms:10000ms"
+    normalized = symbol.lower()
+    return (
+        f"trade_count_timed:symbol={len(normalized)}:{normalized}:source=event.trade:"
+        "aggregation_ns=1000000:window_ns=10000000000:warmup=first_value"
+    )
 
 
 def trade_counts(*symbols):
@@ -85,14 +104,17 @@ def test_grouped_sma_and_ema_can_consume_trade_price_and_volume():
     result = extractor.compute_features(source)
 
     assert extractor.feature_names() == [
-        "btcusdt:trade_volume:ema:2",
-        "btcusdt:trade_price:sma:2",
-        "btcusdt:trade_price:sma:3",
+        sample_name("ema", "BTCUSDT", "trade_volume", 2, "first_value"),
+        sample_name("sma", "BTCUSDT", "trade_price", 2, "first_value"),
+        sample_name("sma", "BTCUSDT", "trade_price", 3, "first_value"),
     ]
     np.testing.assert_allclose(
-        result["btcusdt:trade_price:sma:2"], [1.0, 1.05, 1.15, 1.1]
+        result[sample_name("sma", "BTCUSDT", "trade_price", 2, "first_value")],
+        [1.0, 1.05, 1.15, 1.1],
     )
-    assert not result["btcusdt:trade_volume:ema:2"].isna().any()
+    assert not result[
+        sample_name("ema", "BTCUSDT", "trade_volume", 2, "first_value")
+    ].isna().any()
 
 
 def test_feature_names_keep_canonical_source_order():
@@ -105,10 +127,10 @@ def test_feature_names_keep_canonical_source_order():
     )
 
     assert extractor.feature_names() == [
-        "btcusdt:price:sma:2",
-        "btcusdt:trade_price:sma:2",
-        "btcusdt:trade_volume:sma:2",
-        "btcusdt:volume:sma:2",
+        sample_name("sma", "BTCUSDT", "price", 2),
+        sample_name("sma", "BTCUSDT", "trade_price", 2),
+        sample_name("sma", "BTCUSDT", "trade_volume", 2),
+        sample_name("sma", "BTCUSDT", "volume", 2),
     ]
 
 
@@ -131,8 +153,8 @@ def test_cvd_uses_aggressor_side_codes():
     result = extractor.compute_features(source, side="side")
 
     assert extractor.feature_names() == [
-        "btcusdt:trade:cvd:1",
-        "btcusdt:trade:cvd:2",
+        sample_name("cvd", "BTCUSDT", "trade", 1, "first_value"),
+        sample_name("cvd", "BTCUSDT", "trade", 2, "first_value"),
     ]
     np.testing.assert_equal(
         result[extractor.feature_names()].to_numpy(),
@@ -199,8 +221,8 @@ def test_compatible_feature_calls_are_grouped_and_empty_windows_are_rejected():
     )
     extractor = fiml.FeatureExtractor(compatible)
     assert extractor.feature_names() == [
-        "btcusdt:trade_price:sma:2",
-        "btcusdt:trade_price:sma:3",
+        sample_name("sma", "BTCUSDT", "trade_price", 2),
+        sample_name("sma", "BTCUSDT", "trade_price", 3),
     ]
 
     with pytest.raises(ValueError, match="windows must not be empty"):
@@ -213,8 +235,8 @@ def test_global_clock_features_have_no_symbol():
     )
 
     assert extractor.feature_names() == [
-        "clock:day_of_week",
-        "clock:time_since_first_event_of_day:7200000ms",
+        "day_of_week:symbol=10:__global__:source=every_event",
+        "time_since_first_event_of_day:symbol=10:__global__:source=every_event:utc_offset_ms=7200000",
     ]
 
 
