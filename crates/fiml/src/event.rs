@@ -75,6 +75,7 @@ pub struct TimeUpdate {
     pub timestamp: i64,
 }
 
+/// Order book delta event
 pub struct OrderBookDeltaEvent {
     timestamp: i64,
     symbol: Symbol,

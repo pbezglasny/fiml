@@ -7,7 +7,7 @@ Date: 2026-07-16
 
 Built-in features currently have two parallel construction models:
 
-- `FeatureSet` describes one output cell per `FeatureDef`.
+- `FeatureVectorSpec` describes one output cell per `FeatureDef`.
 - `IndicatorFeatureVectorBuilder` describes grouped indicators that may write
   several output cells.
 
@@ -34,7 +34,7 @@ construction interface.
 The construction flow is:
 
 ```text
-FeatureSet or fluent builder
+FeatureVectorSpec or fluent builder
         |
         v
 ordered ScopedIndicator values
@@ -50,18 +50,18 @@ The compiler is an implementation detail. The low-level public compilation
 interface is:
 
 ```rust
-IndicatorFeatureVector::<F, V, M>::from_feature_set(cells, &feature_set)
+IndicatorFeatureVector::<F, V, M>::from_feature_vector_spec(cells, &feature_vector_spec)
 ```
 
 The runtime-sized `FeatureExtractor` selects a fixed capacity and delegates to
-the same interface. The fluent builder produces a reusable `FeatureSet`; it
+the same interface. The fluent builder produces a reusable `FeatureVectorSpec`; it
 does not own output storage or maintain a separate pending-feature hierarchy.
 
 No compatibility shims will be retained for the old builders or JSON schema.
 
 ## Definition model
 
-`FeatureSet` is an ordered collection of `ScopedIndicator` values.
+`FeatureVectorSpec` is an ordered collection of `ScopedIndicator` values.
 
 A `ScopedIndicator` contains:
 
@@ -180,7 +180,7 @@ fn index_of(&self, canonical_name: &str) -> Option<usize>;
 ```
 
 The core stores generated names once and exposes them by borrowed slice rather
-than cloning them on every call. Uncompiled `FeatureSet` values do not expose
+than cloning them on every call. Uncompiled `FeatureVectorSpec` values do not expose
 feature names. They expose explicit `indicator_count()` and `output_count()`
 metadata instead of an ambiguous `len()`.
 
@@ -205,7 +205,7 @@ a separate indicator with explicit filtering and calendar semantics.
 
 ## Validation and errors
 
-The compiler is the single semantic validation path for `FeatureSet`
+The compiler is the single semantic validation path for `FeatureVectorSpec`
 construction. Fluent builders collect definitions and delegate validation to
 compilation.
 
@@ -268,7 +268,7 @@ allocation.
 
 The feature layer is organized by responsibility:
 
-- `features/definition.rs` owns `FeatureSet`, `ScopedIndicator`, `IndicatorSpec`,
+- `features/definition.rs` owns `FeatureVectorSpec`, `ScopedIndicator`, `IndicatorSpec`,
   `ValueSource`, `TimeWindows`, and canonical-name definitions.
 - `features/builder.rs` owns fluent construction of definitions.
 - `features/compiler.rs` owns validation, output spans, routing metadata,
@@ -296,7 +296,7 @@ behavior and current warm-up documentation need a separate decision.
 4. Introduce the single compiler using temporary initialized storage.
 5. Migrate SMA and EMA, then timed SMA and OBV, then single-window trade count
    and global clock features.
-6. Replace the parallel fluent builder implementation with a `FeatureSet`
+6. Replace the parallel fluent builder implementation with a `FeatureVectorSpec`
    builder.
 7. Move global ordering into the core and remove Python ordering duplication.
 8. Update Rust examples, Python bindings/tests, notebooks, JSON fixtures, and

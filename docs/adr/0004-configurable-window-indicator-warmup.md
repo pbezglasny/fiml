@@ -69,11 +69,11 @@ represent the missing-value contract.
 canonical feature names.
 
 Rust standalone indicator constructors require the policy explicitly. Rust
-feature-set builder methods default to `FullWindow` and provide explicit
+feature-vector spec builder methods default to `FullWindow` and provide explicit
 warm-up variants. Python exposes matching `WarmupPolicy.FIRST_VALUE` and
 `WarmupPolicy.FULL_WINDOW` enum values and accepts them in builder methods.
 
-The serialized feature-set version remains `1.0.0`. Compatibility with earlier
+The serialized feature-vector spec version remains `1.0.0`. Compatibility with earlier
 development artifacts is intentionally not preserved.
 
 Non-window features do not accept a warm-up policy and become ready when they
@@ -88,5 +88,5 @@ deferred.
 - Timed values and readiness reflect the extractor's global event-time
   watermark, including quiet periods and events for other symbols.
 - Readiness can later be aggregated without scanning output values for NaN.
-- Existing Rust constructors, serialized feature sets, and Decimal builds break
+- Existing Rust constructors, serialized feature-vector specs, and Decimal builds break
   during the pre-release development phase.

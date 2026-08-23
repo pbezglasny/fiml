@@ -98,14 +98,14 @@ A minimal notebook session:
 import pandas as pd
 import fiml
 
-fs = (fiml.FeatureSet()
+spec = (fiml.FeatureVectorSpec()
       .sma("BTCUSDT", [12, 24], source="trade_price")
       .ema("BTCUSDT", [12], source="trade_price")
       .obv_timed("BTCUSDT", aggregation="1ms", windows=["30s", "60s"])
       .trade_count_timed("BTCUSDT", aggregation="1ms", window="60s")
       .day_of_week())
 
-extractor = fiml.FeatureExtractor(fs, output_dtype="float32")
+extractor = fiml.FeatureExtractor(spec, output_dtype="float32")
 
 trades = pd.read_csv("trades.csv")     # symbol, ts, price, volume columns
 feats = extractor.compute_features(trades)
@@ -145,19 +145,19 @@ aggressors. The complete frame is validated before the extractor changes.
 columns. Calculation state remains `float64`. The property can be changed until
 the first event is processed and is then locked.
 
-## Feature sets
+## Feature-vector specs
 
-`FeatureSet` is the versioned parity artifact shared by Python training and
+`FeatureVectorSpec` is the versioned parity artifact shared by Python training and
 Rust serving. Author it fluently, serialize it once, and load that same JSON in
 either language:
 
 ```python
-fs = fiml.FeatureSet(capacity=128, checksum="model-v7").sma(
+spec = fiml.FeatureVectorSpec(capacity=128, checksum="model-v7").sma(
     "BTCUSDT", [12, 24], source="trade_price"
 )
-json_text = fs.to_json()
+json_text = spec.to_json()
 
-restored = fiml.FeatureSet.from_json(json_text)
+restored = fiml.FeatureVectorSpec.from_json(json_text)
 extractor = fiml.FeatureExtractor.from_json(json_text, output_dtype="float64")
 ```
 
@@ -229,7 +229,7 @@ To guarantee identical output between Python (batch) and Rust (live):
 
 1. **f64 calculation state on both sides.** The extractor calculates in `f64`;
    choose `output_dtype="float64"` when comparing exact Python/Rust output.
-2. **Same `FeatureSet` configuration** — same periods, aggregation/window durations,
+2. **Same `FeatureVectorSpec` configuration** — same periods, aggregation/window durations,
    warm-up policies, symbol names, and feature order.
 3. **Replay the full event stream in the same order with the same millisecond
    timestamps.** Do not downsample or skip rows: timed indicators (`SmaTimed`,
@@ -243,7 +243,7 @@ To guarantee identical output between Python (batch) and Rust (live):
 
 - `transform(...)` over the whole stream equals stepping the same events one at
   a time with `update(...)` then reading `values()` — same code path.
-- End-to-end: run a recorded dataset + one feature set through the live Rust
+- End-to-end: run a recorded dataset + one feature-vector spec through the live Rust
   extractor and through `transform`; the two `float64` matrices must be
   **exactly** equal (not just approximately; NaN warmup cells compare with
   `equal_nan=True`).

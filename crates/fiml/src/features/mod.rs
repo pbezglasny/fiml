@@ -4,8 +4,8 @@ mod feature_extractor;
 mod feature_extractor_builder;
 mod feature_id;
 mod feature_key;
-mod feature_set;
 mod feature_source;
+mod feature_vector_spec;
 #[cfg(feature = "serde")]
 mod serialization;
 pub mod transformers;
@@ -26,8 +26,8 @@ pub use feature_extractor::{FeatureExtractor, UpdateResult};
 pub use feature_extractor_builder::FeatureExtractorBuilder;
 pub use feature_id::FeatureId;
 pub use feature_key::FeatureKey;
-pub use feature_set::FeatureSet;
 pub use feature_source::{EventField, FeatureSource};
+pub use feature_vector_spec::FeatureVectorSpec;
 
 /// Declaration of one scalar output in a feature vector.
 ///

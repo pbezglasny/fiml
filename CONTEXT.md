@@ -14,7 +14,7 @@ is dispatched. `compute_features` emits one snapshot per trade.
 ## Event kind
 
 The market input stream a routed feature consumes: price, volume, or trade.
-SMA and EMA record their event kind in the feature-set parity artifact; a
+SMA and EMA record their event kind in the feature-vector spec parity artifact; a
 feature updates only when an event of that kind is dispatched.
 
 ## Metadata columns
@@ -81,18 +81,18 @@ only feature names until a concrete need for aliases appears.
 
 ## Output count
 
-The number of feature-vector cells produced by a feature set. This differs from
+The number of feature-vector cells produced by a feature-vector spec. This differs from
 the indicator count because one grouped indicator may own several adjacent
 outputs.
 
 ## Indicator count
 
 The number of indicator definitions, and therefore runtime indicator instances,
-in a compiled feature set.
+in a compiled feature-vector spec.
 
 ## Compilation
 
-The cold-path process that validates an ordered `FeatureSet`, generates
+The cold-path process that validates an ordered `FeatureVectorSpec`, generates
 canonical names and output spans, constructs runtime indicator adapters, and
 moves them into fixed-capacity storage. Compilation may allocate temporary
 metadata; event dispatch may not.

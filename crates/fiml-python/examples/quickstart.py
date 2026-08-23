@@ -4,7 +4,7 @@ Run after ``maturin develop``:
 
     python examples/quickstart.py
 
-It authors a ``FeatureSet`` with the fluent builder, computes features on a
+It authors a ``FeatureVectorSpec`` with the fluent builder, computes features on a
 small trade frame with ``compute_features`` (the DataFrame path), verifies the
 low-level batch ``transform`` exactly equals stepping the same events one at a
 time with ``update`` (the streaming path), and shows the keyword payload
@@ -20,9 +20,9 @@ import fiml
 T0 = 1_609_459_200_000
 
 
-def build_feature_set() -> fiml.FeatureSet:
+def build_feature_vector_spec() -> fiml.FeatureVectorSpec:
     return (
-        fiml.FeatureSet()
+        fiml.FeatureVectorSpec()
         .sma("BTCUSDT", [3])
         .ema("BTCUSDT", [3])
         .day_of_week()
@@ -30,8 +30,8 @@ def build_feature_set() -> fiml.FeatureSet:
 
 
 def main() -> None:
-    fs = build_feature_set()
-    extractor = fiml.FeatureExtractor(fs)
+    spec = build_feature_vector_spec()
+    extractor = fiml.FeatureExtractor(spec)
     btc = extractor.symbol("BTCUSDT")
 
     prices = np.array([10.0, 11.0, 9.0, 12.0, 13.0, 12.5], dtype=np.float64)
@@ -44,7 +44,7 @@ def main() -> None:
     batch = extractor.transform(kind, symbol, timestamp, price=prices)
 
     # Streaming path: a fresh extractor stepped one event at a time.
-    streaming_extractor = fiml.FeatureExtractor(build_feature_set())
+    streaming_extractor = fiml.FeatureExtractor(build_feature_vector_spec())
     streaming_extractor.symbol("BTCUSDT")
     streaming = np.empty_like(batch)
     for i in range(n):
@@ -56,7 +56,7 @@ def main() -> None:
     print("columns:", extractor.feature_names())
     print(batch)
 
-    # Exact equality, not approximate: identical feature set + identical code
+    # Exact equality, not approximate: identical feature-vector spec + identical code
     # path. equal_nan covers cells that are still warming up or unavailable.
     assert np.array_equal(batch, streaming, equal_nan=True), (
         "batch and streaming outputs diverged"
@@ -84,15 +84,15 @@ def check_compute_features() -> None:
         }
     )
 
-    feature_set = (
-        fiml.FeatureSet()
+    feature_vector_spec = (
+        fiml.FeatureVectorSpec()
         .sma("BTCUSDT", [3], source="trade_price")
         .ema("BTCUSDT", [3], source="trade_price")
         .obv_timed("BTCUSDT", aggregation="1s", windows=["60s"])
         .trade_count_timed("BTCUSDT", aggregation="1s", window="60s")
         .day_of_week()
     )
-    extractor = fiml.FeatureExtractor(feature_set, output_dtype=np.float32)
+    extractor = fiml.FeatureExtractor(feature_vector_spec, output_dtype=np.float32)
     feats = extractor.compute_features(df)
     assert feats.shape == (len(df), extractor.n_features() + 2)
     assert list(feats.columns) == ["symbol", "ts", *extractor.feature_names()]
@@ -111,7 +111,7 @@ def check_event_kinds() -> None:
     mutating extractor state (rows are validated before any dispatch).
     """
     extractor = fiml.FeatureExtractor(
-        fiml.FeatureSet().trade_count_timed(
+        fiml.FeatureVectorSpec().trade_count_timed(
             "BTCUSDT",
             aggregation="1s",
             window="60s",

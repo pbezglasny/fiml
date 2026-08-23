@@ -49,6 +49,10 @@ impl OrderBookDelta {
     }
 }
 
+/// Whole order book update.
+/// Order book supposed to set all vales from event
+/// and apply deltas from buffer that id greater that
+/// this snapshot
 pub struct OrderBookSnapshot {
     pub last_update_id: OrderBookUpdateId,
     pub bids: Vec<OrderBookLevel>,

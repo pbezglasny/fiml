@@ -1,7 +1,7 @@
 # Glossary
 
 This glossary defines the terminology used by the Rust library, the Python
-bindings, and the feature-set JSON format. Code identifiers are shown in
+bindings, and the feature-vector spec JSON format. Code identifiers are shown in
 `snake_case` or `UpperCamelCase` where their exact spelling matters.
 
 ## Core concepts
@@ -15,7 +15,7 @@ input, indicator, and output parameters, for example
 
 ### Canonical order
 
-The deterministic order in which a feature set is compiled and serialized:
+The deterministic order in which a feature-vector spec is compiled and serialized:
 global scope first, then normalized symbol, indicator name, indicator identity,
 and finally authored window order. This order, rather than builder-call or input
 JSON order, determines the positions of feature cells in the feature vector.
@@ -32,7 +32,7 @@ The code also uses *output* and *output cell* for this concept.
 ### Feature extractor
 
 A compiled, stateful engine that consumes an ordered event stream and maintains
-the current feature vector. A `FeatureExtractor` is built from a feature set.
+the current feature vector. A `FeatureExtractor` is built from a feature-vector spec.
 
 ### Feature row
 
@@ -40,9 +40,9 @@ A copy of the complete feature vector after one input event is processed. The
 Python batch APIs return one feature row per input event or trade. *Snapshot*
 and *feature-vector snapshot* are synonyms.
 
-### Feature set
+### Feature-vector spec
 
-The complete, versioned definition used to build an extractor. A `FeatureSet`
+The complete, versioned definition used to build an extractor. A `FeatureVectorSpec`
 contains canonically ordered indicator definitions and is the parity artifact
 shared by Python training and Rust serving.
 
@@ -185,7 +185,7 @@ have no samples in its current window.
 
 A rolling horizon measured in matching input samples. Its positive integer
 length is also called its *period* in standalone indicator APIs and internal
-implementations. In public feature-set configuration, *window* is the canonical
+implementations. In public feature-vector spec configuration, *window* is the canonical
 term.
 
 ### Time window
@@ -265,7 +265,7 @@ generated feature names use the shorter `count_timed` segment.
 
 ### Feature group
 
-In feature-set JSON, a group of indicator definitions sharing one scope. A
+In feature-vector spec JSON, a group of indicator definitions sharing one scope. A
 group is either global or belongs to one normalized symbol. Runtime definitions
 remain flat, and only one serialized group may exist for each scope.
 
@@ -273,16 +273,16 @@ Rust dispatch internals also use *feature group* or *dispatch group* for the
 collection of runtime features routed to one event kind (or every event). That
 is a separate concept from a serialized feature group.
 
-### Feature-set format version
+### Feature-vector spec format version
 
-The version of the serialized feature-set contract. It is independent of the
+The version of the serialized feature-vector spec contract. It is independent of the
 Rust crate or Python package version. Writers emit exact version `1.0`; readers
 accept only `1.0` until another version is explicitly supported.
 
 ### Parity artifact
 
-The serialized feature set saved with a trained model and loaded by both Python
-training and Rust serving. Identical feature sets and identical ordered event
+The serialized feature-vector spec saved with a trained model and loaded by both Python
+training and Rust serving. Identical feature-vector specs and identical ordered event
 streams are required for train/serve parity.
 
 ### Semantic validation
@@ -294,7 +294,7 @@ uniqueness.
 ### Serialization module
 
 The private Rust module that converts between the hierarchical JSON contract
-and flat runtime indicator definitions. Its public interface is `FeatureSet`
+and flat runtime indicator definitions. Its public interface is `FeatureVectorSpec`
 serialization and deserialization.
 
 ### Structural validation

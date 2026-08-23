@@ -4,15 +4,15 @@ use std::time::Duration;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::{
-    EventField, EventKind, FeatureDefinition, FeatureId, FeatureKey, FeatureSet, FeatureSource,
-    Symbol, WarmupPolicy,
+    EventField, EventKind, FeatureDefinition, FeatureId, FeatureKey, FeatureSource,
+    FeatureVectorSpec, Symbol, WarmupPolicy,
 };
 
 const FORMAT_VERSION: &str = "1.0";
 
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct FeatureSetWire {
+struct FeatureVectorSpecWire {
     version: String,
     feature_vector_capacity: usize,
     feature_vector_length: usize,
@@ -154,35 +154,35 @@ struct IndicatorAccumulator {
     wire: IndicatorWire,
 }
 
-impl Serialize for FeatureSet {
+impl Serialize for FeatureVectorSpec {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
-        let wire = FeatureSetWire::try_from(self).map_err(serde::ser::Error::custom)?;
+        let wire = FeatureVectorSpecWire::try_from(self).map_err(serde::ser::Error::custom)?;
         wire.serialize(serializer)
     }
 }
 
-impl<'de> Deserialize<'de> for FeatureSet {
+impl<'de> Deserialize<'de> for FeatureVectorSpec {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
     {
-        let wire = FeatureSetWire::deserialize(deserializer)?;
-        FeatureSet::try_from(wire).map_err(serde::de::Error::custom)
+        let wire = FeatureVectorSpecWire::deserialize(deserializer)?;
+        FeatureVectorSpec::try_from(wire).map_err(serde::de::Error::custom)
     }
 }
 
-impl TryFrom<&FeatureSet> for FeatureSetWire {
+impl TryFrom<&FeatureVectorSpec> for FeatureVectorSpecWire {
     type Error = String;
 
-    fn try_from(feature_set: &FeatureSet) -> Result<Self, Self::Error> {
+    fn try_from(feature_vector_spec: &FeatureVectorSpec) -> Result<Self, Self::Error> {
         let mut groups = Vec::<FeatureGroupWire>::new();
         let mut current_symbol = None::<Symbol>;
         let mut indicators = Vec::<IndicatorAccumulator>::new();
 
-        for definition in feature_set.definitions() {
+        for definition in feature_vector_spec.definitions() {
             let symbol = symbol_of(&definition.key);
             if current_symbol != Some(symbol) {
                 if let Some(previous_symbol) = current_symbol {
@@ -229,9 +229,9 @@ impl TryFrom<&FeatureSet> for FeatureSetWire {
 
         Ok(Self {
             version: FORMAT_VERSION.to_owned(),
-            feature_vector_capacity: feature_set.feature_vector_capacity(),
-            feature_vector_length: feature_set.feature_vector_length(),
-            checksum: feature_set.checksum().map(str::to_owned),
+            feature_vector_capacity: feature_vector_spec.feature_vector_capacity(),
+            feature_vector_length: feature_vector_spec.feature_vector_length(),
+            checksum: feature_vector_spec.checksum().map(str::to_owned),
             features: groups,
         })
     }
@@ -391,13 +391,13 @@ fn serialize_definition(
     ))
 }
 
-impl TryFrom<FeatureSetWire> for FeatureSet {
+impl TryFrom<FeatureVectorSpecWire> for FeatureVectorSpec {
     type Error = String;
 
-    fn try_from(wire: FeatureSetWire) -> Result<Self, Self::Error> {
+    fn try_from(wire: FeatureVectorSpecWire) -> Result<Self, Self::Error> {
         if wire.version != FORMAT_VERSION {
             return Err(format!(
-                "unsupported feature-set version {:?}; expected {FORMAT_VERSION:?}",
+                "unsupported feature-vector spec version {:?}; expected {FORMAT_VERSION:?}",
                 wire.version
             ));
         }
@@ -437,7 +437,7 @@ impl TryFrom<FeatureSetWire> for FeatureSet {
                 wire.feature_vector_capacity, wire.feature_vector_length
             ));
         }
-        FeatureSet::with_metadata(definitions, wire.feature_vector_capacity, wire.checksum)
+        FeatureVectorSpec::with_metadata(definitions, wire.feature_vector_capacity, wire.checksum)
             .map_err(|error| error.to_string())
     }
 }
@@ -861,9 +861,9 @@ mod tests {
         FeatureDefinition::with_default_id(key)
     }
 
-    fn complete_set() -> FeatureSet {
+    fn complete_spec() -> FeatureVectorSpec {
         let btc = Symbol::new("BTCUSDT");
-        FeatureSet::with_metadata(
+        FeatureVectorSpec::with_metadata(
             [
                 default(FeatureKey::TradeCountTimed {
                     symbol: btc,
@@ -931,8 +931,8 @@ mod tests {
 
     #[test]
     fn round_trip_covers_all_keys_and_writes_the_canonical_contract() {
-        let set = complete_set();
-        let text = serde_json::to_string_pretty(&set).unwrap();
+        let spec = complete_spec();
+        let text = serde_json::to_string_pretty(&spec).unwrap();
         let value: Value = serde_json::from_str(&text).unwrap();
 
         assert_eq!(value["version"], "1.0");
@@ -995,14 +995,14 @@ mod tests {
         assert_eq!(timed["options"]["aggregation"], "1s");
         assert_eq!(timed["outputs"][0]["window"], "1m");
 
-        let restored: FeatureSet = serde_json::from_str(&text).unwrap();
-        assert_eq!(restored, set);
+        let restored: FeatureVectorSpec = serde_json::from_str(&text).unwrap();
+        assert_eq!(restored, spec);
     }
 
     #[test]
     fn standalone_price_and_volume_use_the_value_field_literal() {
         let symbol = Symbol::new("x");
-        let set = FeatureSet::new([
+        let spec = FeatureVectorSpec::new([
             default(FeatureKey::Sma {
                 symbol,
                 source: FeatureSource::Field(EventField::Price),
@@ -1023,7 +1023,7 @@ mod tests {
             }),
         ])
         .unwrap();
-        let value = serde_json::to_value(set).unwrap();
+        let value = serde_json::to_value(spec).unwrap();
         let sources = value["features"][0]["indicators"]
             .as_array()
             .unwrap()
@@ -1056,7 +1056,7 @@ mod tests {
     }
 
     fn error(value: Value) -> String {
-        serde_json::from_value::<FeatureSet>(value)
+        serde_json::from_value::<FeatureVectorSpec>(value)
             .unwrap_err()
             .to_string()
     }
@@ -1077,8 +1077,8 @@ mod tests {
                 }]}
             ]
         });
-        let set: FeatureSet = serde_json::from_value(value).unwrap();
-        let canonical = serde_json::to_value(set).unwrap();
+        let spec: FeatureVectorSpec = serde_json::from_value(value).unwrap();
+        let canonical = serde_json::to_value(spec).unwrap();
         assert_eq!(canonical["features"][0]["symbol"], "__global__");
         assert!(
             canonical["features"][0]["indicators"][0]
@@ -1099,7 +1099,7 @@ mod tests {
     fn rejects_version_unknown_fields_and_dimension_mismatches() {
         let mut value = valid_day_set();
         value["version"] = json!("1.0.0");
-        assert!(error(value).contains("unsupported feature-set version"));
+        assert!(error(value).contains("unsupported feature-vector spec version"));
 
         let mut value = valid_day_set();
         value["extra"] = json!(true);

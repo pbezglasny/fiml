@@ -15,7 +15,7 @@ The broader feature warm-up contract remains unsettled. In particular, whether
 all rolling indicators should withhold output until a complete window is ready
 is tracked separately from correcting the sample-SMA calculation.
 
-The library is still in development, and its feature-set JSON version currently
+The library is still in development, and its feature-vector spec JSON version currently
 identifies the schema rather than every numerical-behavior revision.
 
 ## Decision
