@@ -19,7 +19,9 @@ test-python: python-venv
 	$(PYTHON) -m pytest crates/fiml-python/tests
 
 test-notebook:
-	cd notebooks && uv run jupyter execute test.ipynb --timeout=120
+	cd notebooks && uv sync
+	uv pip install --python notebooks/.venv/bin/python --reinstall-package fiml ./crates/fiml-python
+	cd notebooks && uv run --no-sync jupyter execute test.ipynb --timeout=120
 
 build-python: python-venv
 	cd crates/fiml-python && ../../$(MATURIN) build --release --out dist

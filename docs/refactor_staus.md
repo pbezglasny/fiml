@@ -30,7 +30,7 @@ subscriber lists, and derivations write directly into the output vector.
 
 ## Completed work
 
-- Replaced the legacy `FeatureSet`, `IndicatorSpec`, `ScopedIndicator`,
+- Replaced the legacy `FeatureVectorSpec`, `IndicatorSpec`, `ScopedIndicator`,
   `TimeWindows`, and `ValueSource` core model with scalar `FeatureDefinition`,
   `FeatureKey`, `FeatureSource`, and `EventField` values.
 - Made the feature compiler the only path from definitions to runtime
@@ -40,13 +40,13 @@ subscriber lists, and derivations write directly into the output vector.
 - Added runtime-sized `VecFeatureVector` support alongside
   `ArrayFeatureVector`.
 - Migrated the Python binding to the new compiler and extractor. Its fluent
-  Python `FeatureSet` expands grouped calls into scalar core definitions while
+  Python `FeatureVectorSpec` expands grouped calls into scalar core definitions while
   retaining the established Python column names and canonical ordering.
 - Preserved Python batch validation and `NaN` initialization for unavailable
   output cells.
 - Retained the pipeline and transformation modules for a future migration to
   the new extractor API.
-- Removed the feature-set serialization implementation, legacy extractor,
+- Removed the feature-vector spec serialization implementation, legacy extractor,
   obsolete examples, and stale benchmark.
 - Updated the maintained Rust examples to use `FeatureExtractor` and registered
   them as explicit Cargo example targets.

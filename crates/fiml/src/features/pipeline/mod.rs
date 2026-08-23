@@ -104,11 +104,11 @@ where
 mod tests {
     use super::*;
     use crate::features::transformers::StandardScaler;
-    use crate::{ArrayFeatureVector, FeatureSet, IndicatorFeatureVector};
+    use crate::{ArrayFeatureVector, FeatureVectorSpec, IndicatorFeatureVector};
 
     fn test_indicators() -> IndicatorFeatureVector<f64, ArrayFeatureVector<f64, 1>, 1> {
-        let feature_set = FeatureSet::builder().day_of_week().build();
-        IndicatorFeatureVector::from_feature_set(ArrayFeatureVector::new(), &feature_set).unwrap()
+        let feature_vector_spec = FeatureVectorSpec::builder().day_of_week().build();
+        IndicatorFeatureVector::from_feature_vector_spec(ArrayFeatureVector::new(), &feature_vector_spec).unwrap()
     }
 
     fn approx_eq(a: f64, b: f64) -> bool {

@@ -250,7 +250,7 @@ updates, snapshots, policies, outcomes, errors, and query results are public.
 
 ## Serialization boundary
 
-Under the optional `serde` feature, public `FeatureSet` is the serialization
+Under the optional `serde` feature, public `FeatureVectorSpec` is the serialization
 boundary. A private adapter converts its flat, canonically ordered scalar
 definitions to and from the strict grouped JSON contract. Wire-only structs
 remain private, and core does not depend on `serde_json` at runtime.
@@ -259,15 +259,15 @@ remain private, and core does not depend on `serde_json` at runtime.
 
 ```mermaid
 flowchart LR
-    PySet["Python FeatureSet"] *-- RustSet["Rust FeatureSet"]
-    RustSet *-- Definitions["Vec<FeatureDefinition>"]
+    PySpec["Python FeatureVectorSpec"] *-- RustSpec["Rust FeatureVectorSpec"]
+    RustSpec *-- Definitions["Vec<FeatureDefinition>"]
     PyExtractor["Python FeatureExtractor"] *-- Core["FeatureExtractor<f64, VecFeatureVector<f64>>"]
     PyExtractor *-- Handles["Vec<Symbol>"]
     PyExtractor --> Events["Event<f64>"]
     Core --> Numpy["NumPy float32/float64 snapshots"]
 ```
 
-The Python `FeatureSet` is a fluent convenience wrapper around the Rust set.
+The Python `FeatureVectorSpec` is a fluent convenience wrapper around the Rust spec.
 Rust owns canonical ordering, deterministic default IDs, JSON conversion, and
 capacity validation. Reserved trailing model cells receive deterministic
 `__reserved_<index>` Python column names and remain `NaN`.

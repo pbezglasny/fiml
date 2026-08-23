@@ -50,13 +50,13 @@ trait-object extension mechanism is retained.
 ## Consequences
 
 - The public API describes the customization that the extractor actually
-  supports: configuring library indicators through `FeatureSet` and
+  supports: configuring library indicators through `FeatureVectorSpec` and
   `IndicatorSpec`.
 - Runtime dispatch remains static and allocation-free per event.
 - Fixed-capacity and runtime-sized library extractors continue to work with
   `Pipeline`.
 - Users can compose standalone calculations in their own applications but
-  cannot inject them into `FeatureSet`, compilation, or library pipelines as a
+  cannot inject them into `FeatureVectorSpec`, compilation, or library pipelines as a
   custom extractor implementation.
 - Downstream code importing `Feature`, `BuiltinFeature`, or concrete adapter
   types breaks at compile time and must move to the supported configuration or

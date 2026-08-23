@@ -29,15 +29,15 @@ def count_name(symbol):
 
 
 def trade_counts(*symbols):
-    feature_set = fiml.FeatureSet()
+    feature_vector_spec = fiml.FeatureVectorSpec()
     for symbol in symbols:
-        feature_set.trade_count_timed(
+        feature_vector_spec.trade_count_timed(
             symbol,
             aggregation="1ms",
             window="10s",
             warmup=fiml.WarmupPolicy.FIRST_VALUE,
         )
-    return feature_set
+    return feature_vector_spec
 
 
 def trades(**overrides):
@@ -74,8 +74,8 @@ def test_compute_features_returns_one_multi_symbol_snapshot_per_trade():
 
 
 def test_grouped_sma_and_ema_can_consume_trade_price_and_volume():
-    feature_set = (
-        fiml.FeatureSet()
+    feature_vector_spec = (
+        fiml.FeatureVectorSpec()
         .sma(
             "BTCUSDT",
             [2, 3],
@@ -89,9 +89,9 @@ def test_grouped_sma_and_ema_can_consume_trade_price_and_volume():
             warmup=fiml.WarmupPolicy.FIRST_VALUE,
         )
     )
-    assert feature_set.indicator_count() == 2
-    assert feature_set.output_count() == 3
-    extractor = fiml.FeatureExtractor(feature_set)
+    assert feature_vector_spec.indicator_count() == 2
+    assert feature_vector_spec.output_count() == 3
+    extractor = fiml.FeatureExtractor(feature_vector_spec)
     source = pd.DataFrame(
         {
             "symbol": ["BTCUSDT"] * 4,
@@ -119,7 +119,7 @@ def test_grouped_sma_and_ema_can_consume_trade_price_and_volume():
 
 def test_feature_names_keep_canonical_source_order():
     extractor = fiml.FeatureExtractor(
-        fiml.FeatureSet()
+        fiml.FeatureVectorSpec()
         .sma("BTCUSDT", [2], source="volume")
         .sma("BTCUSDT", [2], source="trade_volume")
         .sma("BTCUSDT", [2], source="trade_price")
@@ -135,10 +135,10 @@ def test_feature_names_keep_canonical_source_order():
 
 
 def test_cvd_uses_aggressor_side_codes():
-    feature_set = fiml.FeatureSet().cvd(
+    feature_vector_spec = fiml.FeatureVectorSpec().cvd(
         "BTCUSDT", [1, 2], warmup=fiml.WarmupPolicy.FIRST_VALUE
     )
-    extractor = fiml.FeatureExtractor(feature_set)
+    extractor = fiml.FeatureExtractor(feature_vector_spec)
     source = trades(
         side=np.array(
             [
@@ -163,7 +163,7 @@ def test_cvd_uses_aggressor_side_codes():
 
 
 def test_invalid_trade_side_is_rejected_before_dispatch():
-    extractor = fiml.FeatureExtractor(fiml.FeatureSet().cvd("BTCUSDT", [1]))
+    extractor = fiml.FeatureExtractor(fiml.FeatureVectorSpec().cvd("BTCUSDT", [1]))
     btc = extractor.symbol("BTCUSDT")
 
     with pytest.raises(ValueError, match=r"invalid `side` 9"):
@@ -183,10 +183,10 @@ def test_python_warmup_enum_matches_default_and_first_value_policies():
     assert fiml.WarmupPolicy.FIRST_VALUE != fiml.WarmupPolicy.FULL_WINDOW
 
     default_extractor = fiml.FeatureExtractor(
-        fiml.FeatureSet().sma("BTCUSDT", [2], source="trade_price")
+        fiml.FeatureVectorSpec().sma("BTCUSDT", [2], source="trade_price")
     )
     partial_extractor = fiml.FeatureExtractor(
-        fiml.FeatureSet().sma(
+        fiml.FeatureVectorSpec().sma(
             "BTCUSDT",
             [2],
             source="trade_price",
@@ -210,12 +210,12 @@ def test_moving_average_source_is_validated():
         ValueError,
         match='expected "price", "volume", "trade_price", or "trade_volume"',
     ):
-        fiml.FeatureSet().sma("BTCUSDT", [2], source="orderbook")
+        fiml.FeatureVectorSpec().sma("BTCUSDT", [2], source="orderbook")
 
 
 def test_compatible_feature_calls_are_grouped_and_empty_windows_are_rejected():
     compatible = (
-        fiml.FeatureSet()
+        fiml.FeatureVectorSpec()
         .sma("BTCUSDT", [2], source="trade_price")
         .sma("BTCUSDT", [3], source="trade_price")
     )
@@ -226,12 +226,12 @@ def test_compatible_feature_calls_are_grouped_and_empty_windows_are_rejected():
     ]
 
     with pytest.raises(ValueError, match="windows must not be empty"):
-        fiml.FeatureSet().ema("BTCUSDT", [])
+        fiml.FeatureVectorSpec().ema("BTCUSDT", [])
 
 
 def test_global_clock_features_have_no_symbol():
     extractor = fiml.FeatureExtractor(
-        fiml.FeatureSet().day_of_week().time_since_first_event_of_day("UTC+02:00")
+        fiml.FeatureVectorSpec().day_of_week().time_since_first_event_of_day("UTC+02:00")
     )
 
     assert extractor.feature_names() == [
@@ -243,7 +243,7 @@ def test_global_clock_features_have_no_symbol():
 @pytest.mark.parametrize("tz", ["é", "UTC+14:30", "+-1"])
 def test_fixed_utc_offset_rejects_invalid_text_without_panicking(tz):
     with pytest.raises(ValueError, match="invalid `tz`"):
-        fiml.FeatureSet().time_since_first_event_of_day(tz)
+        fiml.FeatureVectorSpec().time_since_first_event_of_day(tz)
 
 
 def test_custom_column_names_are_preserved():

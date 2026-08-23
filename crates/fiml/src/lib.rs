@@ -17,7 +17,7 @@ pub use event::{
 };
 pub use features::{
     EventField, FeatureDefinition, FeatureExtractor, FeatureExtractorBuilder, FeatureId,
-    FeatureKey, FeatureSet, FeatureSource, MAX_OUTPUTS_PER_INDICATOR, UpdateResult,
+    FeatureKey, FeatureSource, FeatureVectorSpec, MAX_OUTPUTS_PER_INDICATOR, UpdateResult,
 };
 pub use indicators::{CumulativeVolumeDelta, ObvBucket, OnBalanceVolumeTimed};
 pub use ring_buffer::{
@@ -79,7 +79,7 @@ impl Display for FimlError {
             }
             FimlError::FeatureVectorCapacityMismatch { expected, actual } => write!(
                 f,
-                "output storage has capacity {actual}, but the feature set requires capacity {expected}"
+                "output storage has capacity {actual}, but the feature-vector spec requires capacity {expected}"
             ),
             FimlError::TimestampOutOfOrder {
                 symbol,

@@ -20,7 +20,7 @@ Symbol identity is ASCII case-insensitive throughout the library.
 characters to lowercase before lookup or insertion. Resolved and serialized
 symbols use that lowercase canonical spelling.
 
-Rust builders and `FeatureSet::new` normalize stored symbol strings as well.
+Rust builders and `FeatureVectorSpec::new` normalize stored symbol strings as well.
 JSON duplicate-group validation runs after normalization, so groups named
 `BTCUSDT` and `btcusdt` are an error. Indicator identity checks consequently
 treat them as the same symbol.

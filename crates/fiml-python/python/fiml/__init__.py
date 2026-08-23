@@ -2,14 +2,14 @@
 
 Features are computed by the exact Rust extractor (the same code the live Rust
 environment runs), so batch (training) and live (serving) outputs match given
-the same feature set and the same event stream. See the package README for the
+the same feature-vector spec and the same event stream. See the package README for the
 determinism rules.
 """
 
 import numpy as np
 
 from ._fiml import (
-    FeatureSet,
+    FeatureVectorSpec,
     KIND_PRICE,
     KIND_VOLUME,
     KIND_TRADE,
@@ -23,7 +23,7 @@ from ._fiml import FeatureExtractor as _FeatureExtractor
 
 __all__ = [
     "FeatureExtractor",
-    "FeatureSet",
+    "FeatureVectorSpec",
     "WarmupPolicy",
     "KIND_PRICE",
     "KIND_VOLUME",
@@ -68,20 +68,20 @@ def _first_invalid(mask):
 class FeatureExtractor(_FeatureExtractor):
     """A configured, runnable feature extractor.
 
-    Construct from a :class:`FeatureSet` (``FeatureExtractor(fs)``). Use
+    Construct from a :class:`FeatureVectorSpec` (``FeatureExtractor(spec)``). Use
     :meth:`compute_features` for DataFrame input, or the low-level ``transform``
     / ``update`` for raw event arrays.
     """
 
-    def __new__(cls, feature_set, output_dtype="float64"):
+    def __new__(cls, feature_vector_spec, output_dtype="float64"):
         return _FeatureExtractor.__new__(
-            cls, feature_set, _normalize_output_dtype(output_dtype)
+            cls, feature_vector_spec, _normalize_output_dtype(output_dtype)
         )
 
     @classmethod
     def from_json(cls, json, output_dtype="float64"):
-        """Construct directly from a versioned FeatureSet JSON artifact."""
-        return cls(FeatureSet.from_json(json), output_dtype=output_dtype)
+        """Construct directly from a versioned FeatureVectorSpec JSON artifact."""
+        return cls(FeatureVectorSpec.from_json(json), output_dtype=output_dtype)
 
     @property
     def output_dtype(self):

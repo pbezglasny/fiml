@@ -7,8 +7,8 @@ import pytest
 import fiml
 
 
-def configured_set(capacity=4):
-    return fiml.FeatureSet(capacity=capacity, checksum="opaque").sma(
+def configured_spec(capacity=4):
+    return fiml.FeatureVectorSpec(capacity=capacity, checksum="opaque").sma(
         "BTCUSDT",
         [2, 3],
         source="trade_price",
@@ -16,15 +16,15 @@ def configured_set(capacity=4):
     )
 
 
-def test_fluent_set_uses_core_json_and_round_trips_metadata():
-    feature_set = configured_set()
+def test_fluent_spec_uses_core_json_and_round_trips_metadata():
+    feature_vector_spec = configured_spec()
 
-    assert feature_set.capacity == 4
-    assert feature_set.active_feature_count == 2
-    assert feature_set.output_count() == 2
-    assert feature_set.checksum == "opaque"
+    assert feature_vector_spec.capacity == 4
+    assert feature_vector_spec.active_feature_count == 2
+    assert feature_vector_spec.output_count() == 2
+    assert feature_vector_spec.checksum == "opaque"
 
-    document = json.loads(feature_set.to_json())
+    document = json.loads(feature_vector_spec.to_json())
     assert document["version"] == "1.0"
     assert document["feature_vector_capacity"] == 4
     assert document["feature_vector_length"] == 2
@@ -32,22 +32,22 @@ def test_fluent_set_uses_core_json_and_round_trips_metadata():
     assert [output["window"] for output in document["features"][0]["indicators"][0]["outputs"]] == [2, 3]
     assert all("id" not in output for output in document["features"][0]["indicators"][0]["outputs"])
 
-    restored = fiml.FeatureSet.from_json(feature_set.to_json())
+    restored = fiml.FeatureVectorSpec.from_json(feature_vector_spec.to_json())
     assert json.loads(restored.to_json()) == document
 
 
 def test_omitted_capacity_tracks_outputs_and_explicit_capacity_is_fixed():
-    dynamic = fiml.FeatureSet().sma("BTCUSDT", [2]).ema("BTCUSDT", [3, 4])
+    dynamic = fiml.FeatureVectorSpec().sma("BTCUSDT", [2]).ema("BTCUSDT", [3, 4])
     assert dynamic.capacity == 3
     assert dynamic.active_feature_count == 3
 
-    fixed = fiml.FeatureSet(capacity=1).day_of_week()
+    fixed = fiml.FeatureVectorSpec(capacity=1).day_of_week()
     with pytest.raises(ValueError, match="capacity 1 is smaller"):
         fixed.time_since_first_event_of_day()
 
 
 def test_reserved_cells_are_named_and_remain_nan_in_arrays_and_dataframes():
-    extractor = fiml.FeatureExtractor(configured_set())
+    extractor = fiml.FeatureExtractor(configured_spec())
     names = extractor.feature_names()
     assert extractor.n_features() == 4
     assert extractor.active_feature_count() == 2
@@ -65,7 +65,7 @@ def test_reserved_cells_are_named_and_remain_nan_in_arrays_and_dataframes():
     assert matrix.shape == (1, 4)
     assert np.isnan(matrix[:, 2:]).all()
 
-    frame_extractor = fiml.FeatureExtractor(configured_set())
+    frame_extractor = fiml.FeatureExtractor(configured_spec())
     frame = frame_extractor.compute_features(
         pd.DataFrame({"symbol": ["BTCUSDT"], "ts": [1], "price": [10.0], "volume": [1.0]})
     )
@@ -74,7 +74,7 @@ def test_reserved_cells_are_named_and_remain_nan_in_arrays_and_dataframes():
 
 
 def test_custom_ids_and_direct_extractor_loading():
-    document = json.loads(configured_set(capacity=2).to_json())
+    document = json.loads(configured_spec(capacity=2).to_json())
     document["features"][0]["indicators"][0]["outputs"][0]["id"] = "model_price"
     text = json.dumps(document)
 
@@ -84,16 +84,16 @@ def test_custom_ids_and_direct_extractor_loading():
 
 
 def test_reserved_id_namespace_is_rejected_from_json():
-    document = json.loads(configured_set(capacity=2).to_json())
+    document = json.loads(configured_spec(capacity=2).to_json())
     document["features"][0]["indicators"][0]["outputs"][0]["id"] = "__reserved_0"
     with pytest.raises(ValueError, match="reserved namespace"):
-        fiml.FeatureSet.from_json(json.dumps(document))
+        fiml.FeatureVectorSpec.from_json(json.dumps(document))
 
 
 def test_json_and_fluent_extractors_have_identical_names_and_values():
-    feature_set = configured_set(capacity=2)
-    fluent = fiml.FeatureExtractor(feature_set)
-    restored = fiml.FeatureExtractor.from_json(feature_set.to_json())
+    feature_vector_spec = configured_spec(capacity=2)
+    fluent = fiml.FeatureExtractor(feature_vector_spec)
+    restored = fiml.FeatureExtractor.from_json(feature_vector_spec.to_json())
     assert restored.feature_names() == fluent.feature_names()
 
     for extractor in (fluent, restored):

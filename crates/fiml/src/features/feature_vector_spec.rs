@@ -6,18 +6,18 @@ const RESERVED_ID_PREFIX: &str = "__reserved_";
 
 /// Versioned configuration for one complete model-input feature vector.
 ///
-/// The set owns canonically ordered scalar definitions plus the model width.
+/// The spec owns canonically ordered scalar definitions plus the model width.
 /// Definitions describe active outputs; any remaining capacity is reserved and
-/// is initialized to `NaN` when the set is compiled.
+/// is initialized to `NaN` when the spec is compiled.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FeatureSet {
+pub struct FeatureVectorSpec {
     definitions: Vec<FeatureDefinition>,
     feature_vector_capacity: usize,
     checksum: Option<String>,
 }
 
-impl FeatureSet {
-    /// Creates a set whose model width exactly matches its active output count.
+impl FeatureVectorSpec {
+    /// Creates a spec whose model width exactly matches its active output count.
     pub fn new(
         definitions: impl IntoIterator<Item = FeatureDefinition>,
     ) -> Result<Self, FimlError> {
@@ -26,7 +26,7 @@ impl FeatureSet {
         Self::with_metadata(definitions, capacity, None)
     }
 
-    /// Creates a set with an explicit model width, reserving trailing cells.
+    /// Creates a spec with an explicit model width, reserving trailing cells.
     pub fn with_capacity(
         definitions: impl IntoIterator<Item = FeatureDefinition>,
         feature_vector_capacity: usize,
@@ -34,7 +34,7 @@ impl FeatureSet {
         Self::with_metadata(definitions, feature_vector_capacity, None)
     }
 
-    /// Creates a set with an explicit model width and opaque checksum metadata.
+    /// Creates a spec with an explicit model width and opaque checksum metadata.
     pub fn with_metadata(
         definitions: impl IntoIterator<Item = FeatureDefinition>,
         feature_vector_capacity: usize,
@@ -249,13 +249,13 @@ mod tests {
 
     #[test]
     fn build_initializes_active_and_reserved_cells_to_nan() {
-        let set = FeatureSet::with_capacity([day_of_week("day")], 3).unwrap();
+        let spec = FeatureVectorSpec::with_capacity([day_of_week("day")], 3).unwrap();
         let mut output = ArrayFeatureVector::<f64, 3>::new_of_length(1);
         output.set_value_at(0, 1.0);
         output.set_value_at(1, 2.0);
         output.set_value_at(2, 3.0);
 
-        let mut extractor = set.build(output).unwrap();
+        let mut extractor = spec.build(output).unwrap();
         assert!(
             extractor
                 .feature_vector()
@@ -276,9 +276,9 @@ mod tests {
 
     #[test]
     fn build_rejects_capacity_and_active_length_mismatches() {
-        let set = FeatureSet::with_capacity([day_of_week("day")], 3).unwrap();
+        let spec = FeatureVectorSpec::with_capacity([day_of_week("day")], 3).unwrap();
         let capacity_error =
-            match set.build::<f64, _>(ArrayFeatureVector::<f64, 2>::new_of_length(1)) {
+            match spec.build::<f64, _>(ArrayFeatureVector::<f64, 2>::new_of_length(1)) {
                 Err(error) => error,
                 Ok(_) => panic!("capacity mismatch should fail"),
             };
@@ -290,11 +290,11 @@ mod tests {
             }
         ));
 
-        let length_error = match set.build::<f64, _>(ArrayFeatureVector::<f64, 3>::new_of_length(2))
-        {
-            Err(error) => error,
-            Ok(_) => panic!("active length mismatch should fail"),
-        };
+        let length_error =
+            match spec.build::<f64, _>(ArrayFeatureVector::<f64, 3>::new_of_length(2)) {
+                Err(error) => error,
+                Ok(_) => panic!("active length mismatch should fail"),
+            };
         assert!(matches!(
             length_error,
             FimlError::OutputCountMismatch {
@@ -306,7 +306,7 @@ mod tests {
 
     #[test]
     fn reserved_feature_id_namespace_is_rejected() {
-        let error = FeatureSet::new([day_of_week("__reserved_0")]).unwrap_err();
+        let error = FeatureVectorSpec::new([day_of_week("__reserved_0")]).unwrap_err();
         assert!(error.to_string().contains("reserved namespace"));
     }
 }

@@ -3,7 +3,7 @@
 //! The bindings deliberately run the *exact* Rust extractor: features are
 //! computed by replaying events through [`fiml::FeatureExtractor`]'s dispatch,
 //! the same code the live Rust environment uses. Feed both sides the same
-//! feature set and events in the same order to get identical output. Indicator
+//! feature-vector spec and events in the same order to get identical output. Indicator
 //! state is always `f64`; Python arrays can be returned as `float32` or `float64`.
 
 use std::time::Duration;
@@ -11,8 +11,8 @@ use std::time::Duration;
 use fiml::order_book::OrderBookDelta;
 use fiml::{
     Event, EventField, EventKind, FeatureDefinition, FeatureExtractor as GenericFeatureExtractor,
-    FeatureKey, FeatureSet as CoreFeatureSet, FeatureSource, FeatureVector, FimlError, Symbol,
-    TradeSide, VecFeatureVector, WarmupPolicy as CoreWarmupPolicy, symbols,
+    FeatureKey, FeatureSource, FeatureVector, FeatureVectorSpec as CoreFeatureVectorSpec,
+    FimlError, Symbol, TradeSide, VecFeatureVector, WarmupPolicy as CoreWarmupPolicy, symbols,
 };
 use numpy::ndarray::Array2;
 use numpy::{Element, IntoPyArray, PyArray1, PyReadonlyArray1};
@@ -136,17 +136,17 @@ fn parse_tz(tz: &str) -> PyResult<i64> {
     Ok(sign * (hours * 3_600_000 + minutes * 60_000))
 }
 
-/// Declarative feature set: the ordered list of features an extractor produces
+/// Declarative feature-vector spec: the ordered list of features an extractor produces
 /// and the parity contract between Python (batch) and Rust (live). Author it
 /// with the fluent builder methods, then construct a [`FeatureExtractor`] from
 /// it.
 #[pyclass]
-pub struct FeatureSet {
-    core: CoreFeatureSet,
+pub struct FeatureVectorSpec {
+    core: CoreFeatureVectorSpec,
     explicit_capacity: bool,
 }
 
-impl FeatureSet {
+impl FeatureVectorSpec {
     fn add_group<I>(&mut self, definitions: I) -> PyResult<()>
     where
         I: IntoIterator<Item = FeatureDefinition>,
@@ -158,7 +158,7 @@ impl FeatureSet {
         } else {
             all_definitions.len()
         };
-        self.core = CoreFeatureSet::with_metadata(
+        self.core = CoreFeatureVectorSpec::with_metadata(
             all_definitions,
             capacity,
             self.core.checksum().map(str::to_owned),
@@ -177,12 +177,12 @@ impl FeatureSet {
 }
 
 #[pymethods]
-impl FeatureSet {
+impl FeatureVectorSpec {
     #[new]
     #[pyo3(signature = (*, capacity=None, checksum=None))]
     fn new(capacity: Option<usize>, checksum: Option<String>) -> PyResult<Self> {
         let explicit_capacity = capacity.is_some();
-        let core = CoreFeatureSet::with_metadata([], capacity.unwrap_or(0), checksum)
+        let core = CoreFeatureVectorSpec::with_metadata([], capacity.unwrap_or(0), checksum)
             .map_err(|error| PyValueError::new_err(error.to_string()))?;
         Ok(Self {
             core,
@@ -201,7 +201,7 @@ impl FeatureSet {
         })
     }
 
-    /// Serializes this set using the canonical Rust JSON adapter.
+    /// Serializes this spec using the canonical Rust JSON adapter.
     fn to_json(&self) -> PyResult<String> {
         serde_json::to_string_pretty(&self.core)
             .map_err(|error| PyValueError::new_err(error.to_string()))
@@ -517,12 +517,12 @@ impl OutputBuffer {
 
 type CoreFeatureExtractor = GenericFeatureExtractor<f64, VecFeatureVector<f64>>;
 
-fn build_core(feature_set: &FeatureSet) -> PyResult<CoreFeatureExtractor> {
+fn build_core(feature_vector_spec: &FeatureVectorSpec) -> PyResult<CoreFeatureExtractor> {
     let output_vector = VecFeatureVector::new_of_length(
-        feature_set.core.feature_vector_capacity(),
-        feature_set.core.feature_vector_length(),
+        feature_vector_spec.core.feature_vector_capacity(),
+        feature_vector_spec.core.feature_vector_length(),
     );
-    feature_set
+    feature_vector_spec
         .core
         .build(output_vector)
         .map_err(|error| PyValueError::new_err(error.to_string()))
@@ -669,23 +669,26 @@ fn column<'a, T: Element>(
 
 #[pymethods]
 impl FeatureExtractor {
-    /// Build an extractor directly from a [`FeatureSet`].
+    /// Build an extractor directly from a [`FeatureVectorSpec`].
     #[new]
-    #[pyo3(signature = (feature_set, output_dtype="float64"))]
-    fn new(feature_set: PyRef<'_, FeatureSet>, output_dtype: &str) -> PyResult<Self> {
+    #[pyo3(signature = (feature_vector_spec, output_dtype="float64"))]
+    fn new(
+        feature_vector_spec: PyRef<'_, FeatureVectorSpec>,
+        output_dtype: &str,
+    ) -> PyResult<Self> {
         Ok(Self::from_core(
-            build_core(&feature_set)?,
+            build_core(&feature_vector_spec)?,
             OutputDtype::parse(output_dtype)?,
         ))
     }
 
-    /// Build an extractor directly from versioned FeatureSet JSON.
+    /// Build an extractor directly from versioned FeatureVectorSpec JSON.
     #[staticmethod]
     #[pyo3(signature = (json, output_dtype="float64"))]
     fn from_json(json: &str, output_dtype: &str) -> PyResult<Self> {
-        let feature_set = FeatureSet::from_json(json)?;
+        let feature_vector_spec = FeatureVectorSpec::from_json(json)?;
         Ok(Self::from_core(
-            build_core(&feature_set)?,
+            build_core(&feature_vector_spec)?,
             OutputDtype::parse(output_dtype)?,
         ))
     }
@@ -904,7 +907,7 @@ impl FeatureExtractor {
 #[pymodule]
 fn _fiml(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyWarmupPolicy>()?;
-    m.add_class::<FeatureSet>()?;
+    m.add_class::<FeatureVectorSpec>()?;
     m.add_class::<FeatureExtractor>()?;
     m.add("KIND_PRICE", KIND_PRICE)?;
     m.add("KIND_VOLUME", KIND_VOLUME)?;

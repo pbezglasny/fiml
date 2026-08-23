@@ -160,15 +160,15 @@ the incremental value still equals a recomputed reference within a tight bound.
 ### 2.1 `compute_features` dispatches every row as a trade, so price-source features are silently empty
 
 `compute_features` hardcodes the kind column to `KIND_TRADE`
-(`crates/fiml-python/python/fiml/__init__.py:252-259`). A feature set built with the
-builder's default source — `FeatureSet().sma("BTCUSDT", [12])`, where `source="price"`
+(`crates/fiml-python/python/fiml/__init__.py:252-259`). A feature-vector spec built with the
+builder's default source — `FeatureVectorSpec().sma("BTCUSDT", [12])`, where `source="price"`
 (`crates/fiml-python/src/lib.rs:170`) — routes to `EventKind::Price` and therefore never
 updates. The column comes back all-NaN with no warning.
 
 This is not hypothetical: the repository's own live example dispatches trades as
-`Event::price` (`crates/fiml/examples/binance_trades.rs:57`) against a feature set built
+`Event::price` (`crates/fiml/examples/binance_trades.rs:57`) against a feature-vector spec built
 with `.ema(sym, [12]).sma(sym, [12])` — the price-source default. Load that same
-`FeatureSet` JSON in Python, call `compute_features`, and you get NaNs where Rust produced
+`FeatureVectorSpec` JSON in Python, call `compute_features`, and you get NaNs where Rust produced
 values. The one failure mode the library is built to prevent is reachable by following the
 repo's own examples.
 
@@ -182,7 +182,7 @@ already available via `IndicatorSpec::route`. Optionally let `compute_features` 
 
 `StandardScaler` / `ParallelTransformer` / `Pipeline` exist in Rust
 (`crates/fiml/src/features/transformers/`, `crates/fiml/src/features/pipeline/`), but they
-are not part of `FeatureSet`, not serialized into the parity artifact, and not exposed to
+are not part of `FeatureVectorSpec`, not serialized into the parity artifact, and not exposed to
 Python at all. A user who scales in Python with sklearn and serves in Rust is back to
 maintaining two implementations — the exact problem the README calls out.
 
@@ -199,7 +199,7 @@ until there is a concrete need. Half-built public API is worse than none.
 
 ### 2.3 The JSON artifact leaks serde defaults into a cross-language contract
 
-`notebooks/feature_set.json` shows what the parity file actually looks like:
+`notebooks/feature_vector_spec.json` shows what the parity file actually looks like:
 
 ```json
 { "symbol": "BTCUSDT",
@@ -265,7 +265,7 @@ touches all N indicators of that kind to find the one that can fire.
  64 symbols (1 SMA each):   120.9 ns/event
 ```
 
-13× more work for identical useful work. A crypto feature set covering 50–200 symbols is
+13× more work for identical useful work. A crypto feature-vector spec covering 50–200 symbols is
 routine, and this is the hot loop the whole design is organised around.
 
 Recommendation: key the dispatch table by `(kind, symbol)` instead of `kind` alone — the
@@ -313,7 +313,7 @@ several-fold.
 enum (see the module docs)" (`crates/fiml/src/features/builtin/mod.rs:23-27`), and the
 `Feature<F>` trait is public. But `IndicatorFeatureVector` stores
 `[MaybeUninit<BuiltinFeature<F>>; M]` concretely, `compile` is `pub(crate)`, and
-`from_feature_set` is the only constructor. There is no way for a downstream crate to add
+`from_feature_vector_spec` is the only constructor. There is no way for a downstream crate to add
 an indicator without forking.
 
 Recommendation: either make the storage generic over `Feature<F>` and expose a compiled-
@@ -444,7 +444,7 @@ missing is the class of test that would have caught sections 1 and 2:
    largest effect on model quality, and it makes the documentation true.
 2. **1.4** — reject non-finite input at the dispatch boundary. Cheap, prevents a silent
    production failure.
-3. **2.1** — raise when a feature set's indicators are unreachable from the events being
+3. **2.1** — raise when a feature-vector spec's indicators are unreachable from the events being
    fed. Prevents the silent all-NaN failure the repo's own examples can produce.
 4. **2.4** — the `parse_tz` panic. Two-line fix.
 5. **3.2** — drop the capacity ladder for an exactly-sized boxed slice. Unblocks 3.1 and
