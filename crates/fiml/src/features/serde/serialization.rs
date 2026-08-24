@@ -1,11 +1,12 @@
 use std::collections::HashSet;
 use std::time::Duration;
 
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use ::serde::{Deserialize, Deserializer, Serialize, Serializer};
 
+use super::FeatureVectorSpec;
 use crate::{
-    EventField, EventKind, FeatureDefinition, FeatureId, FeatureKey, FeatureSource,
-    FeatureVectorSpec, Symbol, WarmupPolicy,
+    EventField, EventKind, FeatureDefinition, FeatureId, FeatureKey, FeatureSource, Symbol,
+    WarmupPolicy,
 };
 
 const FORMAT_VERSION: &str = "1.0";
@@ -176,7 +177,7 @@ impl Serialize for FeatureVectorSpec {
     where
         S: Serializer,
     {
-        let wire = FeatureVectorSpecWire::try_from(self).map_err(serde::ser::Error::custom)?;
+        let wire = FeatureVectorSpecWire::try_from(self).map_err(::serde::ser::Error::custom)?;
         wire.serialize(serializer)
     }
 }
@@ -187,7 +188,7 @@ impl<'de> Deserialize<'de> for FeatureVectorSpec {
         D: Deserializer<'de>,
     {
         let wire = FeatureVectorSpecWire::deserialize(deserializer)?;
-        FeatureVectorSpec::try_from(wire).map_err(serde::de::Error::custom)
+        FeatureVectorSpec::try_from(wire).map_err(::serde::de::Error::custom)
     }
 }
 
