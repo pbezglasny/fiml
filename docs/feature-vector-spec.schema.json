@@ -38,8 +38,35 @@
           "required": ["type", "event", "field"],
           "properties": {
             "type": { "const": "field" },
-            "event": { "enum": ["price", "volume", "trade"] },
-            "field": { "enum": ["value", "price", "volume"] }
+            "event": { "const": "price" },
+            "field": { "const": "value" }
+          }
+        },
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["type", "event", "field"],
+          "properties": {
+            "type": { "const": "field" },
+            "event": { "const": "volume" },
+            "field": { "const": "value" }
+          }
+        },
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["type", "event", "field"],
+          "properties": {
+            "type": { "const": "field" },
+            "event": { "const": "trade" },
+            "field": { "const": "price" }
+          }
+        },
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["type", "event", "field"],
+          "properties": {
+            "type": { "const": "field" },
+            "event": { "const": "trade" },
+            "field": { "const": "volume" }
           }
         },
         {

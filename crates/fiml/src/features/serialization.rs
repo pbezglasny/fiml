@@ -25,6 +25,23 @@ struct FeatureVectorSpecWire {
     features: Vec<FeatureGroupWire>,
 }
 
+impl FeatureVectorSpecWire {
+    fn scalar_output_count(&self) -> usize {
+        let mut result = 0;
+
+        for feature_group in &self.features {
+            for indicator in &feature_group.indicators {
+                if let Some(outputs) = &indicator.outputs {
+                    result += outputs.len();
+                } else {
+                    result += 1;
+                }
+            }
+        }
+        result
+    }
+}
+
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct FeatureGroupWire {
@@ -402,7 +419,7 @@ impl TryFrom<FeatureVectorSpecWire> for FeatureVectorSpec {
             ));
         }
         let mut scopes = HashSet::with_capacity(wire.features.len());
-        let mut definitions = Vec::with_capacity(wire.feature_vector_length);
+        let mut definitions = Vec::with_capacity(wire.scalar_output_count());
         for group in wire.features {
             if group.symbol.is_empty() {
                 return Err("feature group symbol must not be empty".to_owned());
@@ -1111,6 +1128,10 @@ mod tests {
 
         let mut value = valid_day_set();
         value["feature_vector_length"] = json!(2);
+        assert!(error(value).contains("does not match expanded definition count"));
+
+        let mut value = valid_day_set();
+        value["feature_vector_length"] = json!(usize::MAX);
         assert!(error(value).contains("does not match expanded definition count"));
 
         let mut value = valid_day_set();
