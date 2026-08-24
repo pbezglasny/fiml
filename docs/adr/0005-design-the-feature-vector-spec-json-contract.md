@@ -64,7 +64,7 @@ an empty feature group is not.
 ## Module seam
 
 Runtime definitions remain a flat, canonically ordered collection optimized for
-compilation. A private `features/serialization.rs` adapter owns the
+compilation. A private `features/serde/serialization.rs` adapter owns the
 hierarchical wire model.
 
 Its interface is the existing `Serialize` and `Deserialize` implementation on

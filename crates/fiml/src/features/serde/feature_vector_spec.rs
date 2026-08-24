@@ -1,6 +1,6 @@
 use crate::{FeatureDefinition, FeatureExtractor, FeatureSource, FeatureVector, FimlError, Float};
 
-use super::FeatureKey;
+use crate::features::FeatureKey;
 
 const RESERVED_ID_PREFIX: &str = "__reserved_";
 
@@ -125,7 +125,8 @@ impl FeatureVectorSpec {
             output_vector.set_value_at(index, F::NAN);
         }
 
-        let compilation = super::compiler::compile(self.definitions.clone(), output_vector.len())?;
+        let compilation =
+            crate::features::compiler::compile(self.definitions.clone(), output_vector.len())?;
         Ok(FeatureExtractor::new(output_vector, compilation))
     }
 }
