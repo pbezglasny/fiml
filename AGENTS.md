@@ -17,6 +17,7 @@ This is a financial library for machine learning prediction. It is intended for 
 - Do not produce duplicate code; refactor common logic into functions or modules as needed.
 - In case of refactoring, ask details first to avoid unnecessary work and ensure alignment with project goals.
 - Add documentation comment for new structs and traits. Describe intentitions why they were added and what are they supposed to do
+- for folder modules add description what module do in mod.rs file
 
 ## Agent Behavior
 

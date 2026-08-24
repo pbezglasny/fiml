@@ -1,3 +1,11 @@
+//! Defines feature configuration, compilation, routing, and extraction.
+//!
+//! The module's intent is to provide one construction path from scalar feature
+//! definitions to an allocation-free event-processing runtime. Public types
+//! describe feature identity and output storage, while the compiler,
+//! derivations, and router remain implementation details behind
+//! [`FeatureExtractor`].
+
 pub(crate) mod compiler;
 pub(crate) mod derivation;
 mod feature_extractor;
