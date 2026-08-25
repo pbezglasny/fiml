@@ -1,5 +1,5 @@
 mod ema;
 mod sma;
 
-pub use ema::ExponentialMovingAverage;
-pub use sma::{SimpleMovingAverage, SimpleMovingAverageTimed};
+pub use ema::{ExponentialMovingAverage, ema};
+pub use sma::{SimpleMovingAverage, SimpleMovingAverageTimed, sma, sma_timed};
