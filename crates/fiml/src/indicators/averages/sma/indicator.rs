@@ -166,11 +166,11 @@ where
         }
     }
 
-    pub fn value_at(&self, index: usize) -> Option<F> {
-        if !self.is_ready_at(index) {
+    pub fn value_at(&self, window_id: usize) -> Option<F> {
+        if !self.is_ready_at(window_id) {
             return None;
         }
-        let window = unsafe { self.windows[index].assume_init_ref() };
+        let window = unsafe { self.windows[window_id].assume_init_ref() };
         Some(window.moving_avg)
     }
 
@@ -214,16 +214,16 @@ struct SmaWindowTimed<T: Float> {
 ///Window cannot be less than the aggregation duration, and all windows must be multiples of the
 ///aggregation duration.
 ///Aggeregation can not be less than one millisecond.
-pub struct SimpleMovingAverageTimed<R, T, const WINDOWS: usize>
+pub struct SimpleMovingAverageTimed<R, F, const WINDOWS: usize>
 where
-    R: RingBuffer<Item = (i64, T)>,
-    T: Float,
+    R: RingBuffer<Item = (i64, F)>,
+    F: Float,
 {
     data: R,
     millis_aggregation: i64,
-    last_sum: Option<T>,
+    last_sum: Option<F>,
     last_cnt: usize,
-    windows: [MaybeUninit<SmaWindowTimed<T>>; WINDOWS],
+    windows: [MaybeUninit<SmaWindowTimed<F>>; WINDOWS],
     window_count: usize,
     warmup_policy: WarmupPolicy,
     first_timestamp: Option<i64>,
