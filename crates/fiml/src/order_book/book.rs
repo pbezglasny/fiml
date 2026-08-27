@@ -6,7 +6,8 @@ use rust_decimal::Decimal;
 use crate::{
     FimlError,
     order_book::{
-        OrderBookDelta, OrderBookLevel, OrderBookSnapshot, OrderBookUpdate, OrderBookUpdateId, Side,
+        OrderBookDelta, OrderBookLevel, OrderBookSnapshot, OrderBookUpdate, OrderBookUpdateId,
+        OrderBookUpdateRef, Side,
     },
 };
 
@@ -185,6 +186,44 @@ pub struct OrderBook {
     last_snapshot_update_id: Option<OrderBookUpdateId>,
 }
 
+/// Allocation-free plan for applying an update after all fallible checks finish.
+pub(crate) struct PreparedOrderBookUpdate {
+    action: PreparedUpdateAction,
+}
+
+enum PreparedUpdateAction {
+    IgnoreStaleDelta,
+    BufferDelta,
+    ApplyDelta,
+    ApplySnapshot {
+        resynchronized: bool,
+    },
+    Reject {
+        error: OrderBookUpdateError,
+        action: RejectedUpdateAction,
+    },
+}
+
+enum RejectedUpdateAction {
+    None,
+    RequireResync,
+    BufferDelta { require_resync: bool },
+}
+
+impl PreparedOrderBookUpdate {
+    fn new(action: PreparedUpdateAction) -> Self {
+        Self { action }
+    }
+
+    fn reject(error: OrderBookUpdateError, action: RejectedUpdateAction) -> Self {
+        Self::new(PreparedUpdateAction::Reject { error, action })
+    }
+
+    pub(crate) fn is_rejected(&self) -> bool {
+        matches!(self.action, PreparedUpdateAction::Reject { .. })
+    }
+}
+
 impl OrderBook {
     /// Create new order book instance
     /// Arguments:
@@ -204,35 +243,13 @@ impl OrderBook {
         }
     }
 
-    /// Check if update buffer if full.
-    /// Return Ok if it has empty capacity
-    /// Otherwise set sync_state to RequireResync and return Err
-    fn validate_history_buffer_capacity_or_change_sync_state(
-        &mut self,
-    ) -> Result<(), OrderBookUpdateError> {
-        if self.update_buffer.len() == self.buffer_size {
-            self.sync_state = SyncState::RequireResync;
-            return Err(OrderBookUpdateError::BufferCapacityExceeded {
+    fn reject_full_history_buffer(&self) -> PreparedOrderBookUpdate {
+        PreparedOrderBookUpdate::reject(
+            OrderBookUpdateError::BufferCapacityExceeded {
                 capacity: self.buffer_size,
-            });
-        }
-        Ok(())
-    }
-
-    fn handle_contiguous_gap(
-        &mut self,
-        previous_update_id: OrderBookUpdateId,
-        delta: OrderBookDelta,
-    ) -> Result<OrderBookUpdateOutcome, OrderBookUpdateError> {
-        if matches!(self.sync_state, SyncState::Live) {
-            self.sync_state = SyncState::RequireResync;
-        }
-        let delta_update_id = delta.update_id;
-        self.update_buffer.push_back(delta);
-        Err(OrderBookUpdateError::SequenceGap {
-            expected: previous_update_id + 1,
-            received: delta_update_id,
-        })
+            },
+            RejectedUpdateAction::RequireResync,
+        )
     }
 
     fn validate_history_after_snapshot_contiguous(
@@ -276,80 +293,180 @@ impl OrderBook {
         }
     }
 
-    fn apply_snapshot(
-        &mut self,
-        snapshot: OrderBookSnapshot,
-    ) -> Result<OrderBookUpdateOutcome, OrderBookUpdateError> {
-        self.validate_history_after_snapshot_contiguous(snapshot.last_update_id)?;
-        let was_resync = matches!(self.sync_state, SyncState::RequireResync);
+    fn apply_snapshot(&mut self, snapshot: OrderBookSnapshot, resynchronized: bool) {
+        debug_assert_eq!(
+            resynchronized,
+            matches!(self.sync_state, SyncState::RequireResync),
+            "prepared snapshot outcome must be committed without intervening book updates"
+        );
         self.bids.apply_snapshot(snapshot.bids);
         self.asks.apply_snapshot(snapshot.asks);
         self.last_update_id = Some(snapshot.last_update_id);
         self.last_snapshot_update_id = Some(snapshot.last_update_id);
         self.replay_history_after_snapshot(snapshot.last_update_id);
         self.sync_state = SyncState::Live;
-        if was_resync {
-            Ok(OrderBookUpdateOutcome::Resynchronized)
-        } else {
-            Ok(OrderBookUpdateOutcome::Applied)
+    }
+
+    /// Determines an update's exact mutation without changing the book.
+    pub(crate) fn prepare_update(&self, update: OrderBookUpdateRef<'_>) -> PreparedOrderBookUpdate {
+        match update {
+            OrderBookUpdateRef::Delta(delta) => self.prepare_delta_update(delta),
+            OrderBookUpdateRef::Snapshot(snapshot) => self.prepare_snapshot_update(snapshot),
         }
     }
 
-    /// Update order book by passing delta or entire snapshot of order book
+    fn prepare_delta_update(&self, delta: &OrderBookDelta) -> PreparedOrderBookUpdate {
+        if let Err(error) = validate_level_update_deltas(delta) {
+            return PreparedOrderBookUpdate::reject(error, RejectedUpdateAction::None);
+        }
+
+        if let Some(previous_update_id) = self.update_buffer.back().map(|delta| delta.update_id) {
+            if delta.update_id <= previous_update_id {
+                return PreparedOrderBookUpdate::new(PreparedUpdateAction::IgnoreStaleDelta);
+            }
+            if has_contiguous_gap(self.policy, Some(previous_update_id), delta.update_id) {
+                if self.update_buffer.len() == self.buffer_size {
+                    return self.reject_full_history_buffer();
+                }
+                return PreparedOrderBookUpdate::reject(
+                    OrderBookUpdateError::SequenceGap {
+                        expected: previous_update_id + 1,
+                        received: delta.update_id,
+                    },
+                    RejectedUpdateAction::BufferDelta {
+                        require_resync: matches!(self.sync_state, SyncState::Live),
+                    },
+                );
+            }
+        }
+
+        match self.sync_state {
+            SyncState::AwaitingSnapshot | SyncState::RequireResync => {
+                if self.update_buffer.len() == self.buffer_size {
+                    self.reject_full_history_buffer()
+                } else {
+                    PreparedOrderBookUpdate::new(PreparedUpdateAction::BufferDelta)
+                }
+            }
+            SyncState::Live => {
+                if delta.update_id <= self.last_update_id.unwrap_or(0) {
+                    return PreparedOrderBookUpdate::new(PreparedUpdateAction::IgnoreStaleDelta);
+                }
+                if self.update_buffer.len() == self.buffer_size {
+                    return self.reject_full_history_buffer();
+                }
+                if has_contiguous_gap(self.policy, self.last_update_id, delta.update_id) {
+                    return PreparedOrderBookUpdate::reject(
+                        OrderBookUpdateError::SequenceGap {
+                            expected: self.last_update_id.unwrap_or(0) + 1,
+                            received: delta.update_id,
+                        },
+                        RejectedUpdateAction::BufferDelta {
+                            require_resync: true,
+                        },
+                    );
+                }
+                PreparedOrderBookUpdate::new(PreparedUpdateAction::ApplyDelta)
+            }
+        }
+    }
+
+    fn prepare_snapshot_update(&self, snapshot: &OrderBookSnapshot) -> PreparedOrderBookUpdate {
+        if let Err(error) = validate_snapshot_update(snapshot) {
+            return PreparedOrderBookUpdate::reject(error, RejectedUpdateAction::None);
+        }
+        if let Some(previous_snapshot_id) = self.last_snapshot_update_id
+            && snapshot.last_update_id <= previous_snapshot_id
+        {
+            return PreparedOrderBookUpdate::reject(
+                OrderBookUpdateError::StaleSnapshot {
+                    current_snapshot_update_id: previous_snapshot_id,
+                    received_snapshot_update_id: snapshot.last_update_id,
+                },
+                RejectedUpdateAction::None,
+            );
+        }
+        if let Err(error) = self.validate_history_after_snapshot_contiguous(snapshot.last_update_id)
+        {
+            return PreparedOrderBookUpdate::reject(error, RejectedUpdateAction::None);
+        }
+        PreparedOrderBookUpdate::new(PreparedUpdateAction::ApplySnapshot {
+            resynchronized: matches!(self.sync_state, SyncState::RequireResync),
+        })
+    }
+
+    /// Applies a previously prepared update without repeating fallible checks.
+    pub(crate) fn commit_update(
+        &mut self,
+        prepared: PreparedOrderBookUpdate,
+        update: OrderBookUpdate,
+    ) -> Result<OrderBookUpdateOutcome, OrderBookUpdateError> {
+        match (prepared.action, update) {
+            (PreparedUpdateAction::IgnoreStaleDelta, OrderBookUpdate::Delta(_)) => {
+                Ok(OrderBookUpdateOutcome::IgnoredStale)
+            }
+            (PreparedUpdateAction::BufferDelta, OrderBookUpdate::Delta(delta)) => {
+                self.update_buffer.push_back(delta);
+                Ok(OrderBookUpdateOutcome::Buffered)
+            }
+            (PreparedUpdateAction::ApplyDelta, OrderBookUpdate::Delta(delta)) => {
+                apply_delta_update(&mut self.bids, &mut self.asks, &delta);
+                self.last_update_id = Some(delta.update_id);
+                self.update_buffer.push_back(delta);
+                Ok(OrderBookUpdateOutcome::Applied)
+            }
+            (
+                PreparedUpdateAction::ApplySnapshot { resynchronized },
+                OrderBookUpdate::Snapshot(snapshot),
+            ) => {
+                self.apply_snapshot(snapshot, resynchronized);
+                if resynchronized {
+                    Ok(OrderBookUpdateOutcome::Resynchronized)
+                } else {
+                    Ok(OrderBookUpdateOutcome::Applied)
+                }
+            }
+            (
+                PreparedUpdateAction::Reject {
+                    error,
+                    action: RejectedUpdateAction::None,
+                },
+                _,
+            ) => Err(error),
+            (
+                PreparedUpdateAction::Reject {
+                    error,
+                    action: RejectedUpdateAction::RequireResync,
+                },
+                _,
+            ) => {
+                self.sync_state = SyncState::RequireResync;
+                Err(error)
+            }
+            (
+                PreparedUpdateAction::Reject {
+                    error,
+                    action: RejectedUpdateAction::BufferDelta { require_resync },
+                },
+                OrderBookUpdate::Delta(delta),
+            ) => {
+                if require_resync {
+                    self.sync_state = SyncState::RequireResync;
+                }
+                self.update_buffer.push_back(delta);
+                Err(error)
+            }
+            _ => unreachable!("prepared update must be committed with the update it describes"),
+        }
+    }
+
+    /// Update order book by passing delta or entire snapshot of order book.
     pub fn apply_update(
         &mut self,
         update: OrderBookUpdate,
     ) -> Result<OrderBookUpdateOutcome, OrderBookUpdateError> {
-        match update {
-            OrderBookUpdate::Delta(delta) => {
-                validate_level_update_deltas(&delta)?;
-                if let Some(previous_update_id) =
-                    self.update_buffer.back().map(|delta| delta.update_id)
-                {
-                    if delta.update_id <= previous_update_id {
-                        return Ok(OrderBookUpdateOutcome::IgnoredStale);
-                    }
-                    if has_contiguous_gap(self.policy, Some(previous_update_id), delta.update_id) {
-                        self.validate_history_buffer_capacity_or_change_sync_state()?;
-                        return self.handle_contiguous_gap(previous_update_id, delta);
-                    }
-                }
-                match self.sync_state {
-                    SyncState::AwaitingSnapshot | SyncState::RequireResync => {
-                        self.validate_history_buffer_capacity_or_change_sync_state()?;
-                        self.update_buffer.push_back(delta);
-                        Ok(OrderBookUpdateOutcome::Buffered)
-                    }
-                    SyncState::Live => {
-                        if delta.update_id <= self.last_update_id.unwrap_or(0) {
-                            return Ok(OrderBookUpdateOutcome::IgnoredStale);
-                        }
-                        self.validate_history_buffer_capacity_or_change_sync_state()?;
-                        if has_contiguous_gap(self.policy, self.last_update_id, delta.update_id) {
-                            return self
-                                .handle_contiguous_gap(self.last_update_id.unwrap_or(0), delta);
-                        }
-                        let Self { bids, asks, .. } = self;
-                        apply_delta_update(bids, asks, &delta);
-                        self.last_update_id = Some(delta.update_id);
-                        self.update_buffer.push_back(delta);
-                        Ok(OrderBookUpdateOutcome::Applied)
-                    }
-                }
-            }
-            OrderBookUpdate::Snapshot(snapshot) => {
-                validate_snapshot_update(&snapshot)?;
-                if let Some(previous_snapshot_id) = self.last_snapshot_update_id
-                    && snapshot.last_update_id <= previous_snapshot_id
-                {
-                    return Err(OrderBookUpdateError::StaleSnapshot {
-                        current_snapshot_update_id: previous_snapshot_id,
-                        received_snapshot_update_id: snapshot.last_update_id,
-                    });
-                }
-                self.apply_snapshot(snapshot)
-            }
-        }
+        let prepared = self.prepare_update(update.as_ref());
+        self.commit_update(prepared, update)
     }
 
     pub fn last_update_id(&self) -> Option<OrderBookUpdateId> {

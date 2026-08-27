@@ -2,7 +2,7 @@ use std::fmt;
 
 use crate::{
     Float, Symbol,
-    order_book::{OrderBookDelta, OrderBookSnapshot},
+    order_book::{OrderBookDelta, OrderBookSnapshot, OrderBookUpdate, OrderBookUpdateRef},
 };
 
 /// Number of [`EventKind`] variants.
@@ -155,6 +155,24 @@ impl<F: Float> Event<F> {
             Event::OrderBookDelta(o) => o.symbol,
             Event::OrderBookSnapshot(s) => s.symbol,
             Event::Time(_) => Symbol::GLOBAL,
+        }
+    }
+
+    pub(crate) fn order_book_update(&self) -> Option<OrderBookUpdateRef<'_>> {
+        match self {
+            Self::OrderBookDelta(event) => Some(OrderBookUpdateRef::Delta(event.delta())),
+            Self::OrderBookSnapshot(event) => Some(OrderBookUpdateRef::Snapshot(event.snapshot())),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn into_order_book_update(self) -> Option<OrderBookUpdate> {
+        match self {
+            Self::OrderBookDelta(event) => Some(OrderBookUpdate::Delta(event.into_delta())),
+            Self::OrderBookSnapshot(event) => {
+                Some(OrderBookUpdate::Snapshot(event.into_snapshot()))
+            }
+            _ => None,
         }
     }
 

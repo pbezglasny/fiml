@@ -2,7 +2,9 @@ use crate::features::FeatureRoute;
 use crate::features::compiler::{Compilation, OutputSpan};
 use crate::features::derivation::FeatureDerivation;
 use crate::features::feature_extractor_builder::FeatureExtractorBuilder;
-use crate::order_book::{OrderBook, OrderBookUpdate, OrderBookUpdateOutcome};
+use crate::order_book::{
+    OrderBook, OrderBookUpdate, OrderBookUpdateOutcome, OrderBookUpdateRef, PreparedOrderBookUpdate,
+};
 use crate::{
     EVENT_KIND_COUNT, Event, EventKind, FeatureId, FeatureVector, FimlError, Float, Result, Symbol,
 };
@@ -239,15 +241,29 @@ impl OrderBookStorage {
         self.index(symbol).and_then(|index| self.books.get(index))
     }
 
-    fn apply_update(
+    fn prepare_update(
+        &self,
+        symbol: Symbol,
+        update: OrderBookUpdateRef<'_>,
+    ) -> Result<PreparedOrderBookUpdate> {
+        let index = self
+            .index(symbol)
+            .ok_or(FimlError::OrderBookNotConfigured { symbol })?;
+        Ok(self.books[index].prepare_update(update))
+    }
+
+    fn commit_update(
         &mut self,
         symbol: Symbol,
+        prepared: PreparedOrderBookUpdate,
         update: OrderBookUpdate,
     ) -> Result<OrderBookUpdateOutcome> {
         let index = self
             .index(symbol)
             .ok_or(FimlError::OrderBookNotConfigured { symbol })?;
-        self.books[index].apply_update(update).map_err(Into::into)
+        self.books[index]
+            .commit_update(prepared, update)
+            .map_err(Into::into)
     }
 
     fn index(&self, symbol: Symbol) -> Option<usize> {
@@ -328,23 +344,31 @@ where
         FeatureExtractorBuilder::new(output_vector)
     }
 
-    fn handle_orderbook_event(
-        &mut self,
+    fn prepare_order_book_event(
+        &self,
         symbol: Symbol,
-        timestamp: i64,
-        update: OrderBookUpdate,
-    ) -> Result<UpdateResult> {
+        update: OrderBookUpdateRef<'_>,
+    ) -> Result<Option<PreparedOrderBookUpdate>> {
         let subscribers = self.event_router.order_book(symbol);
         if self.order_books.get(symbol).is_none() {
             if subscribers.is_empty() {
-                return Ok(UpdateResult {
-                    features_updated: 0,
-                });
+                return Ok(None);
             }
             return Err(FimlError::OrderBookNotConfigured { symbol });
         }
 
-        let outcome = self.order_books.apply_update(symbol, update)?;
+        self.order_books.prepare_update(symbol, update).map(Some)
+    }
+
+    fn commit_order_book_event(
+        &mut self,
+        symbol: Symbol,
+        timestamp: i64,
+        prepared: PreparedOrderBookUpdate,
+        update: OrderBookUpdate,
+    ) -> Result<UpdateResult> {
+        let subscribers = self.event_router.order_book(symbol);
+        let outcome = self.order_books.commit_update(symbol, prepared, update)?;
 
         if !matches!(
             outcome,
@@ -415,24 +439,43 @@ where
 
         let symbol = event.symbol();
         let timestamp = event.timestamp();
+        let prepared_order_book_update = event
+            .order_book_update()
+            .map(|update| self.prepare_order_book_event(symbol, update))
+            .transpose()?
+            .flatten();
+
+        if prepared_order_book_update
+            .as_ref()
+            .is_some_and(PreparedOrderBookUpdate::is_rejected)
+        {
+            let update = event
+                .into_order_book_update()
+                .expect("a prepared order-book update must come from an order-book event");
+            let prepared = prepared_order_book_update
+                .expect("the rejected order-book update was prepared above");
+            let result = self.order_books.commit_update(symbol, prepared, update);
+            return match result {
+                Err(error) => Err(error),
+                Ok(_) => unreachable!("a rejected order-book update cannot commit successfully"),
+            };
+        }
+
         let any_features_result = self.update_any_features(&event);
         let event_features_result = self.update_event_features(&event);
 
-        let order_book_features_result = match event {
-            Event::OrderBookDelta(book_event) => self.handle_orderbook_event(
-                symbol,
-                timestamp,
-                OrderBookUpdate::Delta(book_event.into_delta()),
-            )?,
-            Event::OrderBookSnapshot(book_event) => self.handle_orderbook_event(
-                symbol,
-                timestamp,
-                OrderBookUpdate::Snapshot(book_event.into_snapshot()),
-            )?,
-            _ => UpdateResult {
-                features_updated: 0,
-            },
-        };
+        let order_book_features_result =
+            match (prepared_order_book_update, event.into_order_book_update()) {
+                (Some(prepared), Some(update)) => {
+                    self.commit_order_book_event(symbol, timestamp, prepared, update)?
+                }
+                (None, _) => UpdateResult {
+                    features_updated: 0,
+                },
+                (Some(_), None) => {
+                    unreachable!("a prepared order-book update must come from an order-book event")
+                }
+            };
         self.last_timestamp = Some(timestamp);
         let total_updated = any_features_result
             .combine_with(event_features_result)
@@ -509,7 +552,10 @@ mod tests {
     use crate::{
         ArrayFeatureVector, EventField, FeatureDefinition, FeatureKey, FeatureSource,
         FeatureVector, WarmupPolicy,
-        order_book::{OrderBookDelta, OrderBookLevel, OrderBookSnapshot, UpdatePolicy},
+        order_book::{
+            OrderBookDelta, OrderBookLevel, OrderBookLevelUpdate, OrderBookSnapshot,
+            OrderBookUpdateError, Side, UpdatePolicy,
+        },
     };
     use rust_decimal::dec;
 
@@ -661,6 +707,114 @@ mod tests {
             Some(dec!(101))
         );
         assert_eq!(extractor.last_timestamp(), Some(10));
+    }
+
+    #[test]
+    fn rejected_order_book_event_does_not_advance_features_or_timestamp() {
+        let symbol = Symbol::new("rejected-extractor-order-book");
+        let any_event = FeatureKey::DayOfWeek {
+            symbol: Symbol::GLOBAL,
+            source: FeatureSource::EveryEvent,
+        };
+        let raw_delta = FeatureKey::DayOfWeek {
+            symbol,
+            source: FeatureSource::Event(EventKind::OrderBookDelta),
+        };
+        let mut extractor = FeatureExtractor::builder(ArrayFeatureVector::<f64, 2>::new())
+            .add_feature(FeatureDefinition::with_default_id(any_event))
+            .add_feature(FeatureDefinition::with_default_id(raw_delta))
+            .add_order_book(symbol, OrderBook::new(UpdatePolicy::Contiguous, 4))
+            .build()
+            .unwrap();
+
+        extractor
+            .handle_event(Event::order_book_snapshot(
+                symbol,
+                0,
+                OrderBookSnapshot::new(0, Vec::new(), Vec::new()),
+            ))
+            .unwrap();
+        extractor
+            .handle_event(Event::order_book_delta(
+                symbol,
+                1,
+                OrderBookDelta::new(1, Vec::new()),
+            ))
+            .unwrap();
+        assert_eq!(extractor.feature_vector().values(), [4.0, 4.0]);
+
+        let result = extractor.handle_event(Event::order_book_delta(
+            symbol,
+            86_400_000,
+            OrderBookDelta::new(
+                2,
+                vec![OrderBookLevelUpdate::new(Side::Bid, dec!(100), dec!(-1))],
+            ),
+        ));
+
+        assert!(matches!(
+            result,
+            Err(FimlError::OrderBookUpdateError {
+                reason: OrderBookUpdateError::InvalidUpdate { .. }
+            })
+        ));
+        assert_eq!(extractor.feature_vector().values(), [4.0, 4.0]);
+        assert_eq!(extractor.last_timestamp(), Some(1));
+        assert!(extractor.handle_event(Event::time(2)).is_ok());
+    }
+
+    #[test]
+    fn rejected_sequence_gap_is_buffered_without_advancing_features() {
+        let symbol = Symbol::new("sequence-gap-extractor-order-book");
+        let any_event = FeatureKey::DayOfWeek {
+            symbol: Symbol::GLOBAL,
+            source: FeatureSource::EveryEvent,
+        };
+        let mut extractor = FeatureExtractor::builder(ArrayFeatureVector::<f64, 1>::new())
+            .add_feature(FeatureDefinition::with_default_id(any_event))
+            .add_order_book(symbol, OrderBook::new(UpdatePolicy::Contiguous, 4))
+            .build()
+            .unwrap();
+
+        extractor
+            .handle_event(Event::order_book_snapshot(
+                symbol,
+                0,
+                OrderBookSnapshot::new(100, Vec::new(), Vec::new()),
+            ))
+            .unwrap();
+        let result = extractor.handle_event(Event::order_book_delta(
+            symbol,
+            86_400_000,
+            OrderBookDelta::new(102, Vec::new()),
+        ));
+
+        assert!(matches!(
+            result,
+            Err(FimlError::OrderBookUpdateError {
+                reason: OrderBookUpdateError::SequenceGap {
+                    expected: 101,
+                    received: 102,
+                }
+            })
+        ));
+        assert_eq!(extractor.feature_vector().values(), [4.0]);
+        assert_eq!(extractor.last_timestamp(), Some(0));
+
+        extractor
+            .handle_event(Event::order_book_snapshot(
+                symbol,
+                1,
+                OrderBookSnapshot::new(101, Vec::new(), Vec::new()),
+            ))
+            .unwrap();
+        assert_eq!(
+            extractor
+                .order_book_of_symbol(symbol)
+                .unwrap()
+                .last_update_id(),
+            Some(102)
+        );
     }
 
     #[test]
