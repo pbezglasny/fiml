@@ -2,6 +2,7 @@ use crate::features::FeatureRoute;
 use crate::features::compiler::{Compilation, OutputSpan};
 use crate::features::derivation::FeatureDerivation;
 use crate::features::feature_extractor_builder::FeatureExtractorBuilder;
+use crate::order_book::{OrderBook, OrderBookUpdate, OrderBookUpdateOutcome};
 use crate::{
     EVENT_KIND_COUNT, Event, EventKind, FeatureId, FeatureVector, FimlError, Float, Result, Symbol,
 };
@@ -29,6 +30,22 @@ pub(crate) struct SymbolRouter {
     /// the range in [`EventRouter::subscribers`] containing the runtime feature
     /// indices subscribed to that symbol and event kind.
     event_subscribers: [SubscriberRange; EVENT_KIND_COUNT],
+    /// Features that consume the visible order-book state after it changes.
+    order_book_subscribers: SubscriberRange,
+}
+
+struct PendingSymbolSubscribers {
+    event_subscribers: [Vec<u16>; EVENT_KIND_COUNT],
+    order_book_subscribers: Vec<u16>,
+}
+
+impl PendingSymbolSubscribers {
+    fn new() -> Self {
+        Self {
+            event_subscribers: std::array::from_fn(|_| Vec::new()),
+            order_book_subscribers: Vec::new(),
+        }
+    }
 }
 
 /// Maps an event's symbol and kind to the runtime features that consume it.
@@ -62,12 +79,12 @@ impl EventRouter {
         let max_symbol_index = routes
             .iter()
             .filter_map(|(symbol, route)| match route {
-                FeatureRoute::Kind(_) => Some(symbol.index()),
+                FeatureRoute::Kind(_) | FeatureRoute::OrderBook => Some(symbol.index()),
                 FeatureRoute::Every => None,
             })
             .max();
         let mut symbol_to_index = vec![None; max_symbol_index.map_or(0, |index| index + 1)];
-        let mut grouped_subscribers: Vec<[Vec<u16>; EVENT_KIND_COUNT]> = Vec::new();
+        let mut grouped_subscribers = Vec::<PendingSymbolSubscribers>::new();
         let mut always_subscribers = Vec::new();
 
         for (feature_index, &(symbol, route)) in routes.iter().enumerate() {
@@ -80,7 +97,7 @@ impl EventRouter {
 
             match route {
                 FeatureRoute::Every => always_subscribers.push(feature_index),
-                FeatureRoute::Kind(event_kind) => {
+                route @ (FeatureRoute::Kind(_) | FeatureRoute::OrderBook) => {
                     let symbol_index = symbol.index();
                     let router_index = match symbol_to_index[symbol_index] {
                         Some(router_index) => usize::from(router_index),
@@ -93,24 +110,37 @@ impl EventRouter {
                                     ))
                                 })?;
                             symbol_to_index[symbol_index] = Some(router_index);
-                            grouped_subscribers.push(std::array::from_fn(|_| Vec::<u16>::new()));
+                            grouped_subscribers.push(PendingSymbolSubscribers::new());
                             usize::from(router_index)
                         }
                     };
-                    grouped_subscribers[router_index][event_kind as usize].push(feature_index);
+                    match route {
+                        FeatureRoute::Kind(event_kind) => grouped_subscribers[router_index]
+                            .event_subscribers[event_kind as usize]
+                            .push(feature_index),
+                        FeatureRoute::OrderBook => grouped_subscribers[router_index]
+                            .order_book_subscribers
+                            .push(feature_index),
+                        FeatureRoute::Every => unreachable!("handled before symbol routing"),
+                    }
                 }
             }
         }
 
         let mut subscribers = Vec::with_capacity(routes.len());
         let mut symbol_routers = Vec::with_capacity(grouped_subscribers.len());
-        for event_subscriber_groups in grouped_subscribers {
+        for grouped in grouped_subscribers {
             let mut event_subscribers = [SubscriberRange::default(); EVENT_KIND_COUNT];
-            for (event_kind_index, group) in event_subscriber_groups.into_iter().enumerate() {
+            for (event_kind_index, group) in grouped.event_subscribers.into_iter().enumerate() {
                 event_subscribers[event_kind_index] =
                     Self::append_subscribers(&mut subscribers, group)?;
             }
-            symbol_routers.push(SymbolRouter { event_subscribers });
+            let order_book_subscribers =
+                Self::append_subscribers(&mut subscribers, grouped.order_book_subscribers)?;
+            symbol_routers.push(SymbolRouter {
+                event_subscribers,
+                order_book_subscribers,
+            });
         }
 
         let always_subscribers = Self::append_subscribers(&mut subscribers, always_subscribers)?;
@@ -157,6 +187,76 @@ impl EventRouter {
     fn always(&self) -> &[u16] {
         self.always_subscribers.as_slice(&self.subscribers)
     }
+
+    /// Returns runtime feature indices subscribed to this symbol's order book.
+    #[inline]
+    fn order_book(&self, symbol: Symbol) -> &[u16] {
+        let Some(symbol_router_index) = self.symbol_to_index.get(symbol.index()).copied().flatten()
+        else {
+            return &[];
+        };
+
+        let symbol_router = &self.symbol_routers[usize::from(symbol_router_index)];
+        symbol_router
+            .order_book_subscribers
+            .as_slice(&self.subscribers)
+    }
+}
+
+/// Dense symbol-indexed storage for caller-configured order books.
+struct OrderBookStorage {
+    symbol_to_index: Box<[Option<u16>]>,
+    books: Box<[OrderBook]>,
+}
+
+impl OrderBookStorage {
+    fn new(configured: Vec<(Symbol, OrderBook)>) -> Result<Self> {
+        let max_symbol_index = configured.iter().map(|(symbol, _)| symbol.index()).max();
+        let mut symbol_to_index = vec![None; max_symbol_index.map_or(0, |index| index + 1)];
+        let mut books = Vec::with_capacity(configured.len());
+
+        for (symbol, book) in configured {
+            if symbol_to_index[symbol.index()].is_some() {
+                return Err(FimlError::DuplicateOrderBook { symbol });
+            }
+            let book_index = u16::try_from(books.len()).map_err(|_| {
+                FimlError::InvalidArgument(format!(
+                    "order-book count exceeds limit of {}",
+                    u16::MAX
+                ))
+            })?;
+            symbol_to_index[symbol.index()] = Some(book_index);
+            books.push(book);
+        }
+
+        Ok(Self {
+            symbol_to_index: symbol_to_index.into_boxed_slice(),
+            books: books.into_boxed_slice(),
+        })
+    }
+
+    fn get(&self, symbol: Symbol) -> Option<&OrderBook> {
+        self.index(symbol).and_then(|index| self.books.get(index))
+    }
+
+    fn apply_update(
+        &mut self,
+        symbol: Symbol,
+        update: OrderBookUpdate,
+    ) -> Result<OrderBookUpdateOutcome> {
+        let index = self
+            .index(symbol)
+            .ok_or(FimlError::OrderBookNotConfigured { symbol })?;
+        self.books[index].apply_update(update).map_err(Into::into)
+    }
+
+    fn index(&self, symbol: Symbol) -> Option<usize> {
+        self.symbol_to_index
+            .get(symbol.index())
+            .copied()
+            .flatten()
+            .map(usize::from)
+    }
 }
 
 /// Stateful extractor that routes events to subscribed features.
@@ -181,13 +281,22 @@ where
     /// User-facing IDs in feature-vector index order.
     feature_ids: Box<[FeatureId]>,
     event_router: EventRouter,
-
+    order_books: OrderBookStorage,
     last_timestamp: Option<i64>,
 }
 
+#[derive(Clone, Copy)]
 pub struct UpdateResult {
     /// Number of runtime feature handlers invoked for the accepted event.
     pub features_updated: usize,
+}
+
+impl UpdateResult {
+    pub fn combine_with(self, other: UpdateResult) -> Self {
+        Self {
+            features_updated: self.features_updated + other.features_updated,
+        }
+    }
 }
 
 impl<F, V> FeatureExtractor<F, V>
@@ -195,24 +304,104 @@ where
     F: Float,
     V: FeatureVector<F = F>,
 {
-    pub(crate) fn new(feature_vector: V, compilation: Compilation<F>) -> Self {
+    pub(crate) fn new(
+        feature_vector: V,
+        compilation: Compilation<F>,
+        configured_order_books: Vec<(Symbol, OrderBook)>,
+    ) -> Result<Self> {
         debug_assert_eq!(compilation.features.len(), compilation.output_spans.len());
 
-        Self {
+        let order_books = OrderBookStorage::new(configured_order_books)?;
+
+        Ok(Self {
             feature_vector,
             features: compilation.features,
             output_spans: compilation.output_spans,
             feature_ids: compilation.feature_ids,
             event_router: compilation.event_router,
+            order_books,
             last_timestamp: None,
-        }
+        })
     }
 
     pub fn builder(output_vector: V) -> FeatureExtractorBuilder<F, V> {
         FeatureExtractorBuilder::new(output_vector)
     }
 
-    pub fn handle_event(&mut self, event: &Event<F>) -> Result<UpdateResult> {
+    fn handle_orderbook_event(
+        &mut self,
+        symbol: Symbol,
+        timestamp: i64,
+        update: OrderBookUpdate,
+    ) -> Result<UpdateResult> {
+        let subscribers = self.event_router.order_book(symbol);
+        if self.order_books.get(symbol).is_none() {
+            if subscribers.is_empty() {
+                return Ok(UpdateResult {
+                    features_updated: 0,
+                });
+            }
+            return Err(FimlError::OrderBookNotConfigured { symbol });
+        }
+
+        let outcome = self.order_books.apply_update(symbol, update)?;
+
+        if !matches!(
+            outcome,
+            OrderBookUpdateOutcome::Applied | OrderBookUpdateOutcome::Resynchronized
+        ) {
+            return Ok(UpdateResult {
+                features_updated: 0,
+            });
+        }
+
+        let order_book = self
+            .order_books
+            .get(symbol)
+            .expect("the order book accepted an update and must still be configured");
+        let features_updated = Self::update_order_book_subscribers(
+            &mut self.features,
+            &self.output_spans,
+            &mut self.feature_vector,
+            subscribers,
+            order_book,
+            timestamp,
+        );
+
+        Ok(UpdateResult { features_updated })
+    }
+
+    fn update_always_features(&mut self, event: &Event<F>) -> UpdateResult {
+        let always_features = self.event_router.always();
+        Self::update_subscribers(
+            &mut self.features,
+            &self.output_spans,
+            &mut self.feature_vector,
+            always_features,
+            event,
+        );
+        UpdateResult {
+            features_updated: always_features.len(),
+        }
+    }
+
+    fn update_event_features(&mut self, event: &Event<F>) -> UpdateResult {
+        let subscribed_features = self.event_router.route(event.symbol(), event.kind());
+        Self::update_subscribers(
+            &mut self.features,
+            &self.output_spans,
+            &mut self.feature_vector,
+            subscribed_features,
+            event,
+        );
+
+        UpdateResult {
+            features_updated: subscribed_features.len(),
+        }
+    }
+
+    pub fn handle_event(&mut self, event: Event<F>) -> Result<UpdateResult> {
+        // TODO: use separate counters for each symbol
         if let Some(previous_timestamp) = self.last_timestamp
             && previous_timestamp > event.timestamp()
         {
@@ -224,28 +413,31 @@ where
             });
         }
 
-        let subscribed_features = self.event_router.route(event.symbol(), event.kind());
-        Self::update_subscribers(
-            &mut self.features,
-            &self.output_spans,
-            &mut self.feature_vector,
-            subscribed_features,
-            event,
-        );
+        let symbol = event.symbol();
+        let timestamp = event.timestamp();
+        let always_features_result = self.update_always_features(&event);
+        let event_features_result = self.update_event_features(&event);
 
-        let always_features = self.event_router.always();
-        Self::update_subscribers(
-            &mut self.features,
-            &self.output_spans,
-            &mut self.feature_vector,
-            always_features,
-            event,
-        );
-
-        self.last_timestamp = Some(event.timestamp());
-        Ok(UpdateResult {
-            features_updated: subscribed_features.len() + always_features.len(),
-        })
+        let order_book_features_result = match event {
+            Event::OrderBookDelta(book_event) => self.handle_orderbook_event(
+                symbol,
+                timestamp,
+                OrderBookUpdate::Delta(book_event.into_delta()),
+            )?,
+            Event::OrderBookSnapshot(book_event) => self.handle_orderbook_event(
+                symbol,
+                timestamp,
+                OrderBookUpdate::Snapshot(book_event.into_snapshot()),
+            )?,
+            _ => UpdateResult {
+                features_updated: 0,
+            },
+        };
+        self.last_timestamp = Some(timestamp);
+        let total_updated = always_features_result
+            .combine_with(event_features_result)
+            .combine_with(order_book_features_result);
+        Ok(total_updated)
     }
 
     /// Return timestamp of last seen event
@@ -268,6 +460,11 @@ where
         self.feature_ids.iter().position(|id| id == feature_id)
     }
 
+    /// Return order book of given symbol
+    pub fn order_book_of_symbol(&self, symbol: Symbol) -> Option<&OrderBook> {
+        self.order_books.get(symbol)
+    }
+
     fn update_subscribers(
         features: &mut [FeatureDerivation<F>],
         output_spans: &[OutputSpan],
@@ -281,6 +478,29 @@ where
             features[feature_index].update(event, output_spans[feature_index], feature_vector);
         }
     }
+
+    fn update_order_book_subscribers(
+        features: &mut [FeatureDerivation<F>],
+        output_spans: &[OutputSpan],
+        feature_vector: &mut V,
+        subscribers: &[u16],
+        order_book: &OrderBook,
+        timestamp: i64,
+    ) -> usize {
+        subscribers
+            .iter()
+            .copied()
+            .filter(|&feature_index| {
+                let feature_index = usize::from(feature_index);
+                features[feature_index].update_order_book(
+                    order_book,
+                    timestamp,
+                    output_spans[feature_index],
+                    feature_vector,
+                )
+            })
+            .count()
+    }
 }
 
 #[cfg(test)]
@@ -289,7 +509,9 @@ mod tests {
     use crate::{
         ArrayFeatureVector, EventField, FeatureDefinition, FeatureKey, FeatureSource,
         FeatureVector, WarmupPolicy,
+        order_book::{OrderBookDelta, OrderBookLevel, OrderBookSnapshot, UpdatePolicy},
     };
+    use rust_decimal::dec;
 
     #[test]
     fn builder_infers_types_from_output_vector() {
@@ -323,20 +545,20 @@ mod tests {
         assert_eq!(extractor.feature_index(&first_id), Some(0));
         assert_eq!(
             extractor
-                .handle_event(&Event::volume(symbol, 100.0, 0))
+                .handle_event(Event::volume(symbol, 100.0, 0))
                 .unwrap()
                 .features_updated,
             0
         );
         assert_eq!(
             extractor
-                .handle_event(&Event::price(symbol, 10.0, 1))
+                .handle_event(Event::price(symbol, 10.0, 1))
                 .unwrap()
                 .features_updated,
             1
         );
         extractor
-            .handle_event(&Event::price(symbol, 20.0, 2))
+            .handle_event(Event::price(symbol, 20.0, 2))
             .unwrap();
 
         assert_eq!(extractor.feature_vector().values(), [20.0, 15.0]);
@@ -377,9 +599,11 @@ mod tests {
             symbol_routers: vec![
                 SymbolRouter {
                     event_subscribers: btc_subscribers,
+                    order_book_subscribers: SubscriberRange::default(),
                 },
                 SymbolRouter {
                     event_subscribers: eth_subscribers,
+                    order_book_subscribers: SubscriberRange::default(),
                 },
             ]
             .into_boxed_slice(),
@@ -394,6 +618,88 @@ mod tests {
     }
 
     #[test]
+    fn routes_order_book_features_by_symbol() {
+        let btc = Symbol::new("router-book-btc");
+        let eth = Symbol::new("router-book-eth");
+        let router = EventRouter::from_routes(&[
+            (btc, FeatureRoute::OrderBook),
+            (eth, FeatureRoute::Kind(EventKind::Trade)),
+            (btc, FeatureRoute::OrderBook),
+            (Symbol::GLOBAL, FeatureRoute::Every),
+        ])
+        .unwrap();
+
+        assert_eq!(router.order_book(btc), [0, 2]);
+        assert!(router.order_book(eth).is_empty());
+        assert_eq!(router.route(eth, EventKind::Trade), [1]);
+        assert_eq!(router.always(), [3]);
+    }
+
+    #[test]
+    fn builder_configures_and_updates_order_book_by_symbol() {
+        let symbol = Symbol::new("extractor-order-book");
+        let mut extractor = FeatureExtractor::builder(ArrayFeatureVector::<f64, 0>::new())
+            .add_order_book(symbol, OrderBook::new(UpdatePolicy::Contiguous, 4))
+            .build()
+            .unwrap();
+
+        let result = extractor
+            .handle_event(Event::order_book_snapshot(
+                symbol,
+                10,
+                OrderBookSnapshot::new(
+                    7,
+                    vec![OrderBookLevel::new(dec!(100), dec!(2))],
+                    vec![OrderBookLevel::new(dec!(102), dec!(3))],
+                ),
+            ))
+            .unwrap();
+
+        assert_eq!(result.features_updated, 0);
+        assert_eq!(
+            extractor.order_book_of_symbol(symbol).unwrap().mid_price(),
+            Some(dec!(101))
+        );
+        assert_eq!(extractor.last_timestamp(), Some(10));
+    }
+
+    #[test]
+    fn raw_order_book_event_features_do_not_require_book_state() {
+        let symbol = Symbol::new("raw-order-book-event");
+        let key = FeatureKey::DayOfWeek {
+            symbol,
+            source: FeatureSource::Event(EventKind::OrderBookDelta),
+        };
+        let mut extractor = FeatureExtractor::builder(ArrayFeatureVector::<f64, 1>::new())
+            .add_feature(FeatureDefinition::with_default_id(key))
+            .build()
+            .unwrap();
+
+        let result = extractor
+            .handle_event(Event::order_book_delta(
+                symbol,
+                0,
+                OrderBookDelta::new(1, Vec::new()),
+            ))
+            .unwrap();
+
+        assert_eq!(result.features_updated, 1);
+        assert!(!extractor.feature_vector().values()[0].is_nan());
+        assert!(extractor.order_book_of_symbol(symbol).is_none());
+    }
+
+    #[test]
+    fn builder_rejects_duplicate_order_books() {
+        let symbol = Symbol::new("duplicate-extractor-order-book");
+        let result = FeatureExtractor::builder(ArrayFeatureVector::<f64, 0>::new())
+            .add_order_book(symbol, OrderBook::new(UpdatePolicy::Monotonic, 1))
+            .add_order_book(symbol, OrderBook::new(UpdatePolicy::Contiguous, 2))
+            .build();
+
+        assert!(matches!(result, Err(FimlError::DuplicateOrderBook { .. })));
+    }
+
+    #[test]
     fn returns_empty_slice_for_unmapped_symbol() {
         let configured = Symbol::new("router-configured");
         let mut symbol_to_index = vec![None; configured.index() + 1];
@@ -403,6 +709,7 @@ mod tests {
             symbol_to_index: symbol_to_index.into_boxed_slice(),
             symbol_routers: vec![SymbolRouter {
                 event_subscribers: [SubscriberRange::default(); EVENT_KIND_COUNT],
+                order_book_subscribers: SubscriberRange::default(),
             }]
             .into_boxed_slice(),
             subscribers: Box::new([]),
@@ -432,12 +739,11 @@ mod tests {
                 subscribers: vec![0].into_boxed_slice(),
                 always_subscribers: SubscriberRange { start: 0, len: 1 },
             },
+            order_books: OrderBookStorage::new(Vec::new()).unwrap(),
             last_timestamp: None,
         };
 
-        let result = vector
-            .handle_event(&Event::time(1_609_459_200_000))
-            .unwrap();
+        let result = vector.handle_event(Event::time(1_609_459_200_000)).unwrap();
 
         assert_eq!(result.features_updated, 1);
         assert_eq!(vector.feature_vector().values(), [0.0, 5.0]);

@@ -61,7 +61,7 @@ async fn main() -> anyhow::Result<()> {
         match msg? {
             Message::Text(text) => match serde_json::from_str::<BinanceTrade>(&text) {
                 Ok(trade) => {
-                    extractor.handle_event(&Event::trade(
+                    extractor.handle_event(Event::trade(
                         symbol,
                         trade.price,
                         trade.quantity,

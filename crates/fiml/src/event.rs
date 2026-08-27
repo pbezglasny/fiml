@@ -79,7 +79,7 @@ pub struct TimeUpdate {
 pub struct OrderBookDeltaEvent {
     timestamp: i64,
     symbol: Symbol,
-    delta: OrderBookDelta,
+    pub(crate) delta: OrderBookDelta,
 }
 
 impl OrderBookDeltaEvent {
@@ -87,19 +87,27 @@ impl OrderBookDeltaEvent {
     pub fn delta(&self) -> &OrderBookDelta {
         &self.delta
     }
+
+    pub(crate) fn into_delta(self) -> OrderBookDelta {
+        self.delta
+    }
 }
 
 /// A complete order-book image associated with a symbol and timestamp.
 pub struct OrderBookSnapshotEvent {
     timestamp: i64,
     symbol: Symbol,
-    snapshot: OrderBookSnapshot,
+    pub(crate) snapshot: OrderBookSnapshot,
 }
 
 impl OrderBookSnapshotEvent {
     /// Returns the complete order-book image carried by this event.
     pub fn snapshot(&self) -> &OrderBookSnapshot {
         &self.snapshot
+    }
+
+    pub(crate) fn into_snapshot(self) -> OrderBookSnapshot {
+        self.snapshot
     }
 }
 

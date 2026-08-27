@@ -127,7 +127,7 @@ impl FeatureVectorSpec {
 
         let compilation =
             crate::features::compiler::compile(self.definitions.clone(), output_vector.len())?;
-        Ok(FeatureExtractor::new(output_vector, compilation))
+        FeatureExtractor::new(output_vector, compilation, Vec::new())
     }
 }
 
@@ -265,7 +265,7 @@ mod tests {
                 .all(|value| value.is_nan())
         );
 
-        extractor.handle_event(&Event::time(0)).unwrap();
+        extractor.handle_event(Event::time(0)).unwrap();
         assert!(!extractor.feature_vector().values()[0].is_nan());
         assert!(
             extractor.feature_vector().values()[1..]

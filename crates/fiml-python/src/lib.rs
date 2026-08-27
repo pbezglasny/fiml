@@ -789,7 +789,7 @@ impl FeatureExtractor {
     ) -> PyResult<()> {
         let event = self.build_event(kind, symbol, timestamp, price, volume, side, bid, ask)?;
         self.inner
-            .handle_event(&event)
+            .handle_event(event)
             .map_err(|error| PyValueError::new_err(error.to_string()))?;
         Ok(())
     }
@@ -894,7 +894,7 @@ impl FeatureExtractor {
 
         let n_features = self.n_features;
         let mut output = OutputBuffer::new(self.output_dtype, n_rows * n_features);
-        for (row, event) in events.iter().enumerate() {
+        for (row, event) in events.into_iter().enumerate() {
             self.inner
                 .handle_event(event)
                 .map_err(|err| PyValueError::new_err(format!("row {row}: {err}")))?;
