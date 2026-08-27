@@ -173,11 +173,11 @@ flowchart LR
     Router["EventRouter"] *-- SymbolMap["symbol_to_index"]
     Router *-- SymbolRouters["symbol_routers"]
     Router *-- Subscribers["subscribers"]
-    Router *-- Always["always_subscribers"]
+    Router *-- Any["any_subscribers"]
     SymbolMap --> SymbolRouters
     SymbolRouters --> Subscribers
     Kind --> SymbolRouters
-    Always --> Subscribers
+    Any --> Subscribers
     Subscribers --> RuntimeIndex["FeatureDerivation index"]
 ```
 

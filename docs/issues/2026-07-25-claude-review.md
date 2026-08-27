@@ -101,7 +101,7 @@ after 3 BTC trades   = [3.0, 4.0]
 "Trades in the last 2 seconds" still reads 3 an hour after the last trade. Live, a quiet
 market keeps reporting the last burst forever; in batch, every row whose event belongs to
 another symbol carries a stale as-of timestamp. Clock features refresh on every event
-(`FeatureRoute::Every`), so a snapshot mixes a live clock with frozen windows — the two
+(`FeatureRoute::Any`), so a snapshot mixes a live clock with frozen windows — the two
 disagree about what "now" is.
 
 Recommendation: add a refresh hook (`fn observe(&mut self, now: i64, output: &mut O)`) that

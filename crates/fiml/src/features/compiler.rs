@@ -114,7 +114,7 @@ impl GroupKey {
             | Self::DayOfWeek { source, .. }
             | Self::TimeSinceFirstEventOfDay { source, .. } => route_for_source(*source),
             Self::SmaTimed { .. } | Self::ObvTimed { .. } | Self::TradeCountTimed { .. } => {
-                FeatureRoute::Every
+                FeatureRoute::Any
             }
         }
     }
@@ -622,7 +622,7 @@ fn route_for_source(source: FeatureSource) -> FeatureRoute {
     match source {
         FeatureSource::Field(field) => FeatureRoute::Kind(field.event_kind()),
         FeatureSource::Event(event_kind) => FeatureRoute::Kind(event_kind),
-        FeatureSource::EveryEvent => FeatureRoute::Every,
+        FeatureSource::EveryEvent => FeatureRoute::Any,
     }
 }
 
