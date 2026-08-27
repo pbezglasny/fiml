@@ -33,7 +33,7 @@ pub(crate) enum FeatureRoute {
         )
     )]
     OrderBook,
-    Every,
+    Any,
 }
 
 pub use feature_extractor::{FeatureExtractor, UpdateResult};

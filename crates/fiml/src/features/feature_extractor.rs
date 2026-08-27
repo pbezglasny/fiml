@@ -70,8 +70,8 @@ pub(crate) struct EventRouter {
     /// stored contiguously.
     subscribers: Box<[u16]>,
     /// Range in [`Self::subscribers`] containing the runtime feature indices
-    /// invoked for every accepted event, including timed features.
-    always_subscribers: SubscriberRange,
+    /// invoked for any accepted event, including timed features.
+    any_subscribers: SubscriberRange,
 }
 
 impl EventRouter {
@@ -80,12 +80,12 @@ impl EventRouter {
             .iter()
             .filter_map(|(symbol, route)| match route {
                 FeatureRoute::Kind(_) | FeatureRoute::OrderBook => Some(symbol.index()),
-                FeatureRoute::Every => None,
+                FeatureRoute::Any => None,
             })
             .max();
         let mut symbol_to_index = vec![None; max_symbol_index.map_or(0, |index| index + 1)];
         let mut grouped_subscribers = Vec::<PendingSymbolSubscribers>::new();
-        let mut always_subscribers = Vec::new();
+        let mut any_subscribers = Vec::new();
 
         for (feature_index, &(symbol, route)) in routes.iter().enumerate() {
             let feature_index = u16::try_from(feature_index).map_err(|_| {
@@ -96,7 +96,7 @@ impl EventRouter {
             })?;
 
             match route {
-                FeatureRoute::Every => always_subscribers.push(feature_index),
+                FeatureRoute::Any => any_subscribers.push(feature_index),
                 route @ (FeatureRoute::Kind(_) | FeatureRoute::OrderBook) => {
                     let symbol_index = symbol.index();
                     let router_index = match symbol_to_index[symbol_index] {
@@ -121,7 +121,7 @@ impl EventRouter {
                         FeatureRoute::OrderBook => grouped_subscribers[router_index]
                             .order_book_subscribers
                             .push(feature_index),
-                        FeatureRoute::Every => unreachable!("handled before symbol routing"),
+                        FeatureRoute::Any => unreachable!("handled before symbol routing"),
                     }
                 }
             }
@@ -143,13 +143,13 @@ impl EventRouter {
             });
         }
 
-        let always_subscribers = Self::append_subscribers(&mut subscribers, always_subscribers)?;
+        let any_subscribers = Self::append_subscribers(&mut subscribers, any_subscribers)?;
 
         Ok(Self {
             symbol_to_index: symbol_to_index.into_boxed_slice(),
             symbol_routers: symbol_routers.into_boxed_slice(),
             subscribers: subscribers.into_boxed_slice(),
-            always_subscribers,
+            any_subscribers,
         })
     }
 
@@ -182,10 +182,10 @@ impl EventRouter {
         symbol_router.event_subscribers[event_kind as usize].as_slice(&self.subscribers)
     }
 
-    /// Returns runtime feature indices invoked for every accepted event.
+    /// Returns runtime feature indices invoked for any accepted event.
     #[inline]
-    fn always(&self) -> &[u16] {
-        self.always_subscribers.as_slice(&self.subscribers)
+    fn any(&self) -> &[u16] {
+        self.any_subscribers.as_slice(&self.subscribers)
     }
 
     /// Returns runtime feature indices subscribed to this symbol's order book.
@@ -371,17 +371,17 @@ where
         Ok(UpdateResult { features_updated })
     }
 
-    fn update_always_features(&mut self, event: &Event<F>) -> UpdateResult {
-        let always_features = self.event_router.always();
+    fn update_any_features(&mut self, event: &Event<F>) -> UpdateResult {
+        let any_features = self.event_router.any();
         Self::update_subscribers(
             &mut self.features,
             &self.output_spans,
             &mut self.feature_vector,
-            always_features,
+            any_features,
             event,
         );
         UpdateResult {
-            features_updated: always_features.len(),
+            features_updated: any_features.len(),
         }
     }
 
@@ -415,7 +415,7 @@ where
 
         let symbol = event.symbol();
         let timestamp = event.timestamp();
-        let always_features_result = self.update_always_features(&event);
+        let any_features_result = self.update_any_features(&event);
         let event_features_result = self.update_event_features(&event);
 
         let order_book_features_result = match event {
@@ -434,7 +434,7 @@ where
             },
         };
         self.last_timestamp = Some(timestamp);
-        let total_updated = always_features_result
+        let total_updated = any_features_result
             .combine_with(event_features_result)
             .combine_with(order_book_features_result);
         Ok(total_updated)
@@ -608,13 +608,13 @@ mod tests {
             ]
             .into_boxed_slice(),
             subscribers: vec![3, 7, 4, 8, 9].into_boxed_slice(),
-            always_subscribers: SubscriberRange { start: 3, len: 2 },
+            any_subscribers: SubscriberRange { start: 3, len: 2 },
         };
 
         assert_eq!(router.route(btc, EventKind::Trade), [3, 7]);
         assert_eq!(router.route(eth, EventKind::Price), [4]);
         assert!(router.route(btc, EventKind::Price).is_empty());
-        assert_eq!(router.always(), [8, 9]);
+        assert_eq!(router.any(), [8, 9]);
     }
 
     #[test]
@@ -625,14 +625,14 @@ mod tests {
             (btc, FeatureRoute::OrderBook),
             (eth, FeatureRoute::Kind(EventKind::Trade)),
             (btc, FeatureRoute::OrderBook),
-            (Symbol::GLOBAL, FeatureRoute::Every),
+            (Symbol::GLOBAL, FeatureRoute::Any),
         ])
         .unwrap();
 
         assert_eq!(router.order_book(btc), [0, 2]);
         assert!(router.order_book(eth).is_empty());
         assert_eq!(router.route(eth, EventKind::Trade), [1]);
-        assert_eq!(router.always(), [3]);
+        assert_eq!(router.any(), [3]);
     }
 
     #[test]
@@ -713,7 +713,7 @@ mod tests {
             }]
             .into_boxed_slice(),
             subscribers: Box::new([]),
-            always_subscribers: SubscriberRange::default(),
+            any_subscribers: SubscriberRange::default(),
         };
 
         assert!(
@@ -737,7 +737,7 @@ mod tests {
                 symbol_to_index: Box::new([]),
                 symbol_routers: Box::new([]),
                 subscribers: vec![0].into_boxed_slice(),
-                always_subscribers: SubscriberRange { start: 0, len: 1 },
+                any_subscribers: SubscriberRange { start: 0, len: 1 },
             },
             order_books: OrderBookStorage::new(Vec::new()).unwrap(),
             last_timestamp: None,
