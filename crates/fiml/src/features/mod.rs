@@ -25,6 +25,14 @@ pub const MAX_OUTPUTS_PER_INDICATOR: usize = 16;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum FeatureRoute {
     Kind(EventKind),
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "constructed when the first built-in order-book derivation is compiled"
+        )
+    )]
+    OrderBook,
     Every,
 }
 

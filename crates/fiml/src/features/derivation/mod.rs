@@ -1,6 +1,7 @@
 use crate::Float;
 use crate::event::Event;
 use crate::features::compiler::OutputSpan;
+use crate::order_book::OrderBook;
 use crate::vectors::FeatureVector;
 
 pub(crate) mod cvd;
@@ -52,6 +53,31 @@ impl<F: Float> FeatureDerivation<F> {
             Self::TradeCountTimed(count) => count.update(event, output_span, output),
             Self::DayOfWeek(day_of_week) => day_of_week.update(event, output_span, output),
             Self::TimeSinceFirstEventOfDay(clock) => clock.update(event, output_span, output),
+        }
+    }
+
+    /// Updates a derivation from the visible state of one order book.
+    ///
+    /// Event-based derivations return `false`. Concrete order-book variants
+    /// add their direct-dispatch arm here and return `true` after writing their
+    /// output span.
+    pub(crate) fn update_order_book<O: FeatureVector<F = F>>(
+        &mut self,
+        order_book: &OrderBook,
+        timestamp: i64,
+        output_span: OutputSpan,
+        output: &mut O,
+    ) -> bool {
+        let _ = (order_book, timestamp, output_span, output);
+        match self {
+            Self::Cvd(_)
+            | Self::Sma(_)
+            | Self::Ema(_)
+            | Self::SmaTimed(_)
+            | Self::ObvTimed(_)
+            | Self::TradeCountTimed(_)
+            | Self::DayOfWeek(_)
+            | Self::TimeSinceFirstEventOfDay(_) => false,
         }
     }
 }

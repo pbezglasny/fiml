@@ -13,6 +13,7 @@ pub enum Side {
 }
 
 /// Describe aggregated order book level with price and size.
+#[derive(Clone)]
 pub struct OrderBookLevel {
     pub price: Decimal,
     pub size: Decimal,
@@ -53,6 +54,7 @@ impl OrderBookDelta {
 /// Order book supposed to set all vales from event
 /// and apply deltas from buffer that id greater that
 /// this snapshot
+#[derive(Clone)]
 pub struct OrderBookSnapshot {
     pub last_update_id: OrderBookUpdateId,
     pub bids: Vec<OrderBookLevel>,
@@ -73,6 +75,7 @@ impl OrderBookSnapshot {
     }
 }
 
+#[derive(Clone)]
 pub enum OrderBookUpdate {
     Delta(OrderBookDelta),
     Snapshot(OrderBookSnapshot),

@@ -27,6 +27,8 @@ pub use symbols::Symbol;
 pub use types::{Float, WarmupPolicy};
 pub use vectors::{ArrayFeatureVector, FeatureVector, VecFeatureVector};
 
+use crate::order_book::OrderBookUpdateError;
+
 pub type Result<T> = std::result::Result<T, FimlError>;
 
 #[derive(Debug)]
@@ -54,6 +56,15 @@ pub enum FimlError {
         event_kind: EventKind,
         timestamp: i64,
         previous_timestamp: i64,
+    },
+    OrderBookUpdateError {
+        reason: OrderBookUpdateError,
+    },
+    OrderBookNotConfigured {
+        symbol: Symbol,
+    },
+    DuplicateOrderBook {
+        symbol: Symbol,
     },
 }
 
@@ -92,6 +103,18 @@ impl Display for FimlError {
                 write!(
                     f,
                     " is earlier than previous timestamp {previous_timestamp}"
+                )
+            }
+            FimlError::OrderBookUpdateError { reason } => {
+                write!(f, "order-book update failed: {reason}")
+            }
+            FimlError::OrderBookNotConfigured { symbol } => {
+                write!(f, "no order book is configured for symbol {symbol}")
+            }
+            FimlError::DuplicateOrderBook { symbol } => {
+                write!(
+                    f,
+                    "more than one order book is configured for symbol {symbol}"
                 )
             }
         }
