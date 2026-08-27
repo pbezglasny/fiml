@@ -81,6 +81,12 @@ pub enum OrderBookUpdate {
     Snapshot(OrderBookSnapshot),
 }
 
+/// Borrowed form of an order-book update used for allocation-free preparation.
+pub(crate) enum OrderBookUpdateRef<'a> {
+    Delta(&'a OrderBookDelta),
+    Snapshot(&'a OrderBookSnapshot),
+}
+
 impl OrderBookUpdate {
     pub fn new_delta(update_id: OrderBookUpdateId, changes: Vec<OrderBookLevelUpdate>) -> Self {
         OrderBookUpdate::Delta(OrderBookDelta::new(update_id, changes))
@@ -96,5 +102,12 @@ impl OrderBookUpdate {
             bids,
             asks,
         })
+    }
+
+    pub(crate) fn as_ref(&self) -> OrderBookUpdateRef<'_> {
+        match self {
+            Self::Delta(delta) => OrderBookUpdateRef::Delta(delta),
+            Self::Snapshot(snapshot) => OrderBookUpdateRef::Snapshot(snapshot),
+        }
     }
 }
