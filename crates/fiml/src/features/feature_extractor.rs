@@ -73,7 +73,7 @@ pub(crate) struct EventRouter {
     subscribers: Box<[u16]>,
     /// Range in [`Self::subscribers`] containing the runtime feature indices
     /// invoked for any accepted event, including timed features.
-    any_subscribers: SubscriberRange,
+    any_event_subscribers: SubscriberRange,
 }
 
 impl EventRouter {
@@ -87,7 +87,7 @@ impl EventRouter {
             .max();
         let mut symbol_to_index = vec![None; max_symbol_index.map_or(0, |index| index + 1)];
         let mut grouped_subscribers = Vec::<PendingSymbolSubscribers>::new();
-        let mut any_subscribers = Vec::new();
+        let mut any_event_subscribers = Vec::new();
 
         for (feature_index, &(symbol, route)) in routes.iter().enumerate() {
             let feature_index = u16::try_from(feature_index).map_err(|_| {
@@ -98,7 +98,7 @@ impl EventRouter {
             })?;
 
             match route {
-                FeatureRoute::Any => any_subscribers.push(feature_index),
+                FeatureRoute::Any => any_event_subscribers.push(feature_index),
                 route @ (FeatureRoute::Kind(_) | FeatureRoute::OrderBook) => {
                     let symbol_index = symbol.index();
                     let router_index = match symbol_to_index[symbol_index] {
@@ -145,13 +145,14 @@ impl EventRouter {
             });
         }
 
-        let any_subscribers = Self::append_subscribers(&mut subscribers, any_subscribers)?;
+        let any_event_subscribers =
+            Self::append_subscribers(&mut subscribers, any_event_subscribers)?;
 
         Ok(Self {
             symbol_to_index: symbol_to_index.into_boxed_slice(),
             symbol_routers: symbol_routers.into_boxed_slice(),
             subscribers: subscribers.into_boxed_slice(),
-            any_subscribers,
+            any_event_subscribers,
         })
     }
 
@@ -187,7 +188,7 @@ impl EventRouter {
     /// Returns runtime feature indices invoked for any accepted event.
     #[inline]
     fn any(&self) -> &[u16] {
-        self.any_subscribers.as_slice(&self.subscribers)
+        self.any_event_subscribers.as_slice(&self.subscribers)
     }
 
     /// Returns runtime feature indices subscribed to this symbol's order book.
@@ -654,7 +655,7 @@ mod tests {
             ]
             .into_boxed_slice(),
             subscribers: vec![3, 7, 4, 8, 9].into_boxed_slice(),
-            any_subscribers: SubscriberRange { start: 3, len: 2 },
+            any_event_subscribers: SubscriberRange { start: 3, len: 2 },
         };
 
         assert_eq!(router.route(btc, EventKind::Trade), [3, 7]);
@@ -867,7 +868,7 @@ mod tests {
             }]
             .into_boxed_slice(),
             subscribers: Box::new([]),
-            any_subscribers: SubscriberRange::default(),
+            any_event_subscribers: SubscriberRange::default(),
         };
 
         assert!(
@@ -891,7 +892,7 @@ mod tests {
                 symbol_to_index: Box::new([]),
                 symbol_routers: Box::new([]),
                 subscribers: vec![0].into_boxed_slice(),
-                any_subscribers: SubscriberRange { start: 0, len: 1 },
+                any_event_subscribers: SubscriberRange { start: 0, len: 1 },
             },
             order_books: OrderBookStorage::new(Vec::new()).unwrap(),
             last_timestamp: None,
