@@ -6,7 +6,9 @@ pub use indicator::{ObvBucket, OnBalanceVolumeTimed};
 
 use std::time::Duration;
 
-use crate::{FimlError, Float, HeapRingBuffer, Result, WarmupPolicy};
+use crate::{
+    FimlError, Float, HeapRingBuffer, IndicatorKind, InvalidArgumentError, Result, WarmupPolicy,
+};
 
 /// Calculates the final time-bucketed on-balance volume over a rolling window.
 ///
@@ -35,7 +37,11 @@ pub fn obv_timed<F: Float>(
 ) -> Result<Option<F>> {
     let capacity = window_periods
         .checked_add(1)
-        .ok_or_else(|| FimlError::InvalidArgument("OBV timed period is too large".to_string()))?;
+        .ok_or(FimlError::InvalidArgument(
+            InvalidArgumentError::TimedPeriodTooLarge {
+                indicator: IndicatorKind::ObvTimed,
+            },
+        ))?;
     let mut calculator: OnBalanceVolumeTimed<HeapRingBuffer<ObvBucket<F>>, F, 1> =
         OnBalanceVolumeTimed::new_heap(aggregation, capacity, warmup_policy)?;
     calculator.add_window_with_periods(window_periods)?;

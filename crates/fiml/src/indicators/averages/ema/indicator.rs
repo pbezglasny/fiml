@@ -1,7 +1,7 @@
 use std::fmt::Display;
 use std::mem::MaybeUninit;
 
-use crate::{FimlError, Float, Result, WarmupPolicy};
+use crate::{FimlError, Float, IntegerTarget, InvalidArgumentError, Result, WarmupPolicy};
 
 /// Represents a single Exponential Moving Average (EMA) window.
 pub struct EmaWindow<F: Float> {
@@ -74,23 +74,25 @@ where
     pub fn add_window(&mut self, period: usize) -> Result<()> {
         if self.window_count >= WINDOWS {
             return Err(FimlError::InvalidArgument(
-                "Maximum number of windows reached".to_string(),
+                InvalidArgumentError::WindowLimitReached { limit: WINDOWS },
             ));
         }
         if self.update_count > 0 {
             return Err(FimlError::InvalidArgument(
-                "Cannot add window after data has been added".to_string(),
+                InvalidArgumentError::WindowAddedAfterData,
             ));
         }
         if period == 0 {
             return Err(FimlError::InvalidArgument(
-                "Window period must be greater than 0".to_string(),
+                InvalidArgumentError::WindowPeriodZero,
             ));
         }
 
-        let divisor = period
-            .checked_add(1)
-            .ok_or_else(|| FimlError::InvalidArgument("Window period is too large".to_string()))?;
+        let divisor = period.checked_add(1).ok_or(FimlError::InvalidArgument(
+            InvalidArgumentError::WindowPeriodOutOfRange {
+                target: IntegerTarget::Usize,
+            },
+        ))?;
         let multiplier = T::from_usize(2).div(T::from_usize(divisor));
         self.windows[self.window_count].write(EmaWindow {
             period,

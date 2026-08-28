@@ -6,7 +6,7 @@ use std::time::Duration;
 
 pub use indicator::{SimpleMovingAverage, SimpleMovingAverageTimed};
 
-use crate::{FimlError, Float, HeapRingBuffer, Result, WarmupPolicy};
+use crate::{FimlError, Float, HeapRingBuffer, InvalidArgumentError, Result, WarmupPolicy};
 
 /// Calculates the final simple moving average after processing a slice of values.
 ///
@@ -30,7 +30,7 @@ pub fn sma<F: Float>(
 ) -> Result<Option<F>> {
     if window_length == 0 {
         return Err(FimlError::InvalidArgument(
-            "Window period must be greater than 0".to_string(),
+            InvalidArgumentError::WindowPeriodZero,
         ));
     }
     let mut calculator: SimpleMovingAverage<HeapRingBuffer<F>, F, 1> =

@@ -6,7 +6,10 @@ use crate::features::compiler::OutputSpan;
 use crate::features::derivation::{FeatureDerivation, write_outputs};
 use crate::indicators::{SimpleMovingAverage, SimpleMovingAverageTimed};
 use crate::vectors::FeatureVector;
-use crate::{EventField, FimlError, Float, HeapRingBuffer, Result, Symbol, WarmupPolicy};
+use crate::{
+    EventField, FimlError, Float, HeapRingBuffer, IndicatorKind, InvalidArgumentError, Result,
+    Symbol, WarmupPolicy,
+};
 
 pub(crate) struct SmaFeature<F: Float> {
     symbol: Symbol,
@@ -104,9 +107,11 @@ pub(crate) fn build_timed<F: Float>(
     max_period: usize,
     warmup_policy: WarmupPolicy,
 ) -> Result<FeatureDerivation<F>> {
-    let capacity = max_period
-        .checked_add(1)
-        .ok_or_else(|| FimlError::InvalidArgument("SMA timed period is too large".to_string()))?;
+    let capacity = max_period.checked_add(1).ok_or(FimlError::InvalidArgument(
+        InvalidArgumentError::TimedPeriodTooLarge {
+            indicator: IndicatorKind::SmaTimed,
+        },
+    ))?;
     let mut sma = SimpleMovingAverageTimed::<
         HeapRingBuffer<(i64, F)>,
         F,

@@ -6,7 +6,8 @@ use crate::order_book::{
     OrderBook, OrderBookUpdate, OrderBookUpdateOutcome, OrderBookUpdateRef, PreparedOrderBookUpdate,
 };
 use crate::{
-    EVENT_KIND_COUNT, Event, EventKind, FeatureId, FeatureVector, FimlError, Float, Result, Symbol,
+    EVENT_KIND_COUNT, Event, EventKind, FeatureId, FeatureVector, FimlError, Float,
+    InvalidArgumentError, LimitTarget, Result, Symbol,
 };
 
 #[derive(Clone, Copy, Default)]
@@ -91,10 +92,11 @@ impl EventRouter {
 
         for (feature_index, &(symbol, route)) in routes.iter().enumerate() {
             let feature_index = u16::try_from(feature_index).map_err(|_| {
-                FimlError::InvalidArgument(format!(
-                    "runtime feature count exceeds router limit of {}",
-                    u16::MAX
-                ))
+                FimlError::InvalidArgument(InvalidArgumentError::LimitExceeded {
+                    target: LimitTarget::RuntimeFeatures,
+                    count: routes.len(),
+                    limit: usize::from(u16::MAX),
+                })
             })?;
 
             match route {
@@ -106,10 +108,13 @@ impl EventRouter {
                         None => {
                             let router_index =
                                 u16::try_from(grouped_subscribers.len()).map_err(|_| {
-                                    FimlError::InvalidArgument(format!(
-                                        "symbol router count exceeds limit of {}",
-                                        u16::MAX
-                                    ))
+                                    FimlError::InvalidArgument(
+                                        InvalidArgumentError::LimitExceeded {
+                                            target: LimitTarget::SymbolRouters,
+                                            count: grouped_subscribers.len() + 1,
+                                            limit: usize::from(u16::MAX),
+                                        },
+                                    )
                                 })?;
                             symbol_to_index[symbol_index] = Some(router_index);
                             grouped_subscribers.push(PendingSymbolSubscribers::new());
@@ -158,16 +163,18 @@ impl EventRouter {
 
     fn append_subscribers(subscribers: &mut Vec<u16>, group: Vec<u16>) -> Result<SubscriberRange> {
         let start = u16::try_from(subscribers.len()).map_err(|_| {
-            FimlError::InvalidArgument(format!(
-                "subscriber count exceeds router limit of {}",
-                u16::MAX
-            ))
+            FimlError::InvalidArgument(InvalidArgumentError::LimitExceeded {
+                target: LimitTarget::Subscribers,
+                count: subscribers.len(),
+                limit: usize::from(u16::MAX),
+            })
         })?;
         let len = u16::try_from(group.len()).map_err(|_| {
-            FimlError::InvalidArgument(format!(
-                "subscriber group exceeds router limit of {}",
-                u16::MAX
-            ))
+            FimlError::InvalidArgument(InvalidArgumentError::LimitExceeded {
+                target: LimitTarget::SubscriberGroup,
+                count: group.len(),
+                limit: usize::from(u16::MAX),
+            })
         })?;
         subscribers.extend(group);
         Ok(SubscriberRange { start, len })
@@ -223,10 +230,11 @@ impl OrderBookStorage {
                 return Err(FimlError::DuplicateOrderBook { symbol });
             }
             let book_index = u16::try_from(books.len()).map_err(|_| {
-                FimlError::InvalidArgument(format!(
-                    "order-book count exceeds limit of {}",
-                    u16::MAX
-                ))
+                FimlError::InvalidArgument(InvalidArgumentError::LimitExceeded {
+                    target: LimitTarget::OrderBooks,
+                    count: books.len() + 1,
+                    limit: usize::from(u16::MAX),
+                })
             })?;
             symbol_to_index[symbol.index()] = Some(book_index);
             books.push(book);

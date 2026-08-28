@@ -2,7 +2,10 @@ use std::marker::PhantomData;
 use std::time::Duration;
 
 use crate::ring_buffer::{HeapRingBuffer, RingBuffer, new_heap_ring_buffer};
-use crate::{FimlError, Float, Result, WarmupPolicy};
+use crate::{
+    DurationField, FimlError, Float, IndicatorKind, IntegerTarget, InvalidArgumentError, Result,
+    WarmupPolicy,
+};
 
 /// One fixed-duration bucket: the trades that fell into `[timestamp, timestamp +
 /// aggregation)`, counted.
@@ -53,21 +56,23 @@ where
         let periods = validate_durations(aggregation, window)?;
         // One extra slot so the oldest bucket has expired from the window before
         // the ring evicts it (mirrors the OBV invariant).
-        let capacity = periods
-            .checked_add(1)
-            .ok_or_else(|| FimlError::InvalidArgument("trade count window is too large".into()))?;
+        let capacity = periods.checked_add(1).ok_or(FimlError::InvalidArgument(
+            InvalidArgumentError::TimedPeriodTooLarge {
+                indicator: IndicatorKind::TradeCountTimed,
+            },
+        ))?;
         let data = new_heap_ring_buffer::<CountBucket>(capacity);
         Ok(Self {
             data,
             millis_aggregation: i64::try_from(aggregation.as_millis()).map_err(|_| {
-                FimlError::InvalidArgument(
-                    "trade count aggregation must fit signed 64-bit milliseconds".into(),
-                )
+                FimlError::InvalidArgument(InvalidArgumentError::DurationOutOfRange {
+                    field: DurationField::Aggregation,
+                })
             })?,
             window_duration: i64::try_from(window.as_millis()).map_err(|_| {
-                FimlError::InvalidArgument(
-                    "trade count window must fit signed 64-bit milliseconds".into(),
-                )
+                FimlError::InvalidArgument(InvalidArgumentError::DurationOutOfRange {
+                    field: DurationField::Window,
+                })
             })?,
             window_count: 0,
             front_offset: 0,
@@ -184,36 +189,41 @@ pub(crate) fn validate_durations(aggregation: Duration, window: Duration) -> Res
         || !window.subsec_nanos().is_multiple_of(1_000_000)
     {
         return Err(FimlError::InvalidArgument(
-            "trade count durations must use whole-millisecond precision".to_string(),
+            InvalidArgumentError::DurationPrecision {
+                field: DurationField::TimedWindow,
+            },
         ));
     }
     if aggregation_millis == 0 {
         return Err(FimlError::InvalidArgument(
-            "trade count aggregation must be at least 1 millisecond".to_string(),
+            InvalidArgumentError::AggregationTooShort,
         ));
     }
     if window_millis < aggregation_millis {
         return Err(FimlError::InvalidArgument(
-            "trade count window cannot be less than aggregation".to_string(),
+            InvalidArgumentError::WindowShorterThanAggregation,
         ));
     }
     if !window_millis.is_multiple_of(aggregation_millis) {
         return Err(FimlError::InvalidArgument(
-            "trade count window must be a multiple of aggregation".to_string(),
+            InvalidArgumentError::WindowNotMultipleOfAggregation,
         ));
     }
     i64::try_from(aggregation_millis).map_err(|_| {
-        FimlError::InvalidArgument(
-            "trade count aggregation must fit signed 64-bit milliseconds".to_string(),
-        )
+        FimlError::InvalidArgument(InvalidArgumentError::DurationOutOfRange {
+            field: DurationField::Aggregation,
+        })
     })?;
     i64::try_from(window_millis).map_err(|_| {
-        FimlError::InvalidArgument(
-            "trade count window must fit signed 64-bit milliseconds".to_string(),
-        )
+        FimlError::InvalidArgument(InvalidArgumentError::DurationOutOfRange {
+            field: DurationField::Window,
+        })
     })?;
-    usize::try_from(window_millis / aggregation_millis)
-        .map_err(|_| FimlError::InvalidArgument("trade count period must fit usize".to_string()))
+    usize::try_from(window_millis / aggregation_millis).map_err(|_| {
+        FimlError::InvalidArgument(InvalidArgumentError::WindowPeriodOutOfRange {
+            target: IntegerTarget::Usize,
+        })
+    })
 }
 
 #[cfg(test)]

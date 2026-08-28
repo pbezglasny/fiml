@@ -5,8 +5,9 @@ use crate::features::derivation::{self, FeatureDerivation};
 use crate::features::feature_extractor::EventRouter;
 use crate::features::{FeatureRoute, FeatureSource, MAX_OUTPUTS_PER_INDICATOR};
 use crate::{
-    EventField, EventKind, FeatureDefinition, FeatureId, FeatureKey, FimlError, Float, Result,
-    Symbol, WarmupPolicy,
+    DefinitionDurationField, EventField, EventKind, FeatureDefinition, FeatureId, FeatureKey,
+    FimlError, Float, IndicatorKind, InvalidArgumentError, InvalidIndicatorDefinitionError,
+    LimitTarget, Result, Symbol, WarmupPolicy,
 };
 
 /// Contiguous section of the output feature vector written by one derivation.
@@ -188,7 +189,9 @@ impl FeatureGroup {
             return invalid_definition(
                 definition_index,
                 feature_key,
-                format!("compatible feature group exceeds {MAX_OUTPUTS_PER_INDICATOR} outputs"),
+                InvalidIndicatorDefinitionError::CompatibleGroupOutputLimitExceeded {
+                    limit: MAX_OUTPUTS_PER_INDICATOR,
+                },
             );
         }
 
@@ -203,7 +206,7 @@ impl FeatureGroup {
                 return invalid_definition(
                     definition_index,
                     feature_key,
-                    "duplicates a scalar runtime derivation",
+                    InvalidIndicatorDefinitionError::DuplicateScalarDerivation,
                 );
             }
             _ => unreachable!("group key and output shape must agree"),
@@ -235,14 +238,14 @@ pub(crate) fn compile<F: Float>(
             return invalid_definition(
                 definition_index,
                 &definition.key,
-                "duplicates an earlier feature key",
+                InvalidIndicatorDefinitionError::DuplicateFeatureKey,
             );
         }
         if !feature_ids.insert(definition.id.clone()) {
             return invalid_definition(
                 definition_index,
                 &definition.key,
-                format!("duplicates feature ID {:?}", definition.id.as_str()),
+                InvalidIndicatorDefinitionError::DuplicateFeatureId,
             );
         }
 
@@ -267,11 +270,13 @@ pub(crate) fn compile<F: Float>(
     }
 
     if groups.len() > usize::from(u16::MAX) {
-        return Err(FimlError::InvalidArgument(format!(
-            "runtime feature count {} exceeds router limit of {}",
-            groups.len(),
-            u16::MAX
-        )));
+        return Err(FimlError::InvalidArgument(
+            InvalidArgumentError::LimitExceeded {
+                target: LimitTarget::RuntimeFeatures,
+                count: groups.len(),
+                limit: usize::from(u16::MAX),
+            },
+        ));
     }
 
     let mut features = Vec::with_capacity(groups.len());
@@ -285,11 +290,17 @@ pub(crate) fn compile<F: Float>(
             count: group.feature_ids.len(),
         };
         let feature = build_group::<F>(&group).map_err(|error| {
-            invalid_definition_error(
-                group.first_definition_index,
-                group_kind(&group.key),
-                error.to_string(),
-            )
+            let reason = match error {
+                FimlError::InvalidArgument(reason) => {
+                    InvalidIndicatorDefinitionError::InvalidArgument(reason)
+                }
+                _ => InvalidIndicatorDefinitionError::ConstructionFailed,
+            };
+            FimlError::InvalidIndicatorDefinition {
+                index: group.first_definition_index,
+                indicator: group_kind(&group.key),
+                reason,
+            }
         })?;
         routes.push((group.key.symbol(), group.key.route()));
         compiled_ids.extend(group.feature_ids);
@@ -516,7 +527,11 @@ fn build_group<F: Float>(group: &FeatureGroup) -> Result<FeatureDerivation<F>> {
 fn scalar_source(index: usize, key: &FeatureKey, source: FeatureSource) -> Result<EventField> {
     match source {
         FeatureSource::Field(field) => Ok(field),
-        _ => invalid_definition(index, key, "requires a scalar event-field source"),
+        _ => invalid_definition(
+            index,
+            key,
+            InvalidIndicatorDefinitionError::ScalarEventFieldSourceRequired,
+        ),
     }
 }
 
@@ -524,7 +539,11 @@ fn validate_trade_source(index: usize, key: &FeatureKey, source: FeatureSource) 
     if source == FeatureSource::Event(EventKind::Trade) {
         Ok(())
     } else {
-        invalid_definition(index, key, "requires Event(Trade) as its source")
+        invalid_definition(
+            index,
+            key,
+            InvalidIndicatorDefinitionError::TradeEventSourceRequired,
+        )
     }
 }
 
@@ -535,10 +554,10 @@ fn validate_sample_window(
     allows_max: bool,
 ) -> Result<()> {
     if window == 0 {
-        return invalid_definition(index, key, "window must be at least 1");
+        return invalid_definition(index, key, InvalidIndicatorDefinitionError::WindowTooShort);
     }
     if !allows_max && window == usize::MAX {
-        return invalid_definition(index, key, "window is too large");
+        return invalid_definition(index, key, InvalidIndicatorDefinitionError::WindowTooLarge);
     }
     Ok(())
 }
@@ -549,51 +568,67 @@ fn validate_timed_window(
     aggregation: Duration,
     window: Duration,
 ) -> Result<usize> {
-    let aggregation_millis = duration_millis(index, key, "aggregation", aggregation)?;
+    let aggregation_millis = duration_millis(
+        index,
+        key,
+        DefinitionDurationField::Aggregation,
+        aggregation,
+    )?;
     if aggregation_millis == 0 {
-        return invalid_definition(index, key, "aggregation must be at least 1 millisecond");
+        return invalid_definition(
+            index,
+            key,
+            InvalidIndicatorDefinitionError::AggregationTooShort,
+        );
     }
-    let window_millis = duration_millis(index, key, "window", window)?;
+    let window_millis = duration_millis(index, key, DefinitionDurationField::Window, window)?;
     if window_millis < aggregation_millis {
         return invalid_definition(
             index,
             key,
-            format!(
-                "window must be at least aggregation {aggregation_millis}ms, got {window_millis}ms"
-            ),
+            InvalidIndicatorDefinitionError::WindowShorterThanAggregation {
+                aggregation_millis,
+                window_millis,
+            },
         );
     }
     if window_millis % aggregation_millis != 0 {
         return invalid_definition(
             index,
             key,
-            format!(
-                "window must be an exact multiple of aggregation {aggregation_millis}ms, got {window_millis}ms"
-            ),
+            InvalidIndicatorDefinitionError::WindowNotMultipleOfAggregation {
+                aggregation_millis,
+                window_millis,
+            },
         );
     }
     usize::try_from(window_millis / aggregation_millis).map_err(|_| {
         invalid_definition_error(
             index,
-            group_kind_from_feature_key(key),
-            "derived bucket period does not fit usize",
+            key,
+            InvalidIndicatorDefinitionError::BucketPeriodOutOfRange,
         )
     })
 }
 
-fn duration_millis(index: usize, key: &FeatureKey, field: &str, duration: Duration) -> Result<i64> {
+fn duration_millis(
+    index: usize,
+    key: &FeatureKey,
+    field: DefinitionDurationField,
+    duration: Duration,
+) -> Result<i64> {
     if !duration.subsec_nanos().is_multiple_of(1_000_000) {
         return invalid_definition(
             index,
             key,
-            format!("{field} must use whole-millisecond precision, got {duration:?}"),
+            InvalidIndicatorDefinitionError::DurationPrecision { field, duration },
         );
     }
     i64::try_from(duration.as_millis()).map_err(|_| {
         invalid_definition_error(
             index,
-            group_kind_from_feature_key(key),
-            format!("{field} must fit signed 64-bit milliseconds, got {duration:?}"),
+            key,
+            InvalidIndicatorDefinitionError::DurationOutOfRange { field, duration },
         )
     })
 }
@@ -605,14 +640,18 @@ fn validate_utc_offset(index: usize, key: &FeatureKey, utc_offset_millis: i64) -
         return invalid_definition(
             index,
             key,
-            format!("UTC offset must be within -14h..=+14h, got {utc_offset_millis}ms"),
+            InvalidIndicatorDefinitionError::UtcOffsetOutOfRange {
+                offset_millis: utc_offset_millis,
+            },
         );
     }
     if utc_offset_millis % MINUTE_MILLIS != 0 {
         return invalid_definition(
             index,
             key,
-            format!("UTC offset must use whole-minute precision, got {utc_offset_millis}ms"),
+            InvalidIndicatorDefinitionError::UtcOffsetPrecision {
+                offset_millis: utc_offset_millis,
+            },
         );
     }
     Ok(())
@@ -626,44 +665,49 @@ fn route_for_source(source: FeatureSource) -> FeatureRoute {
     }
 }
 
-fn group_kind(key: &GroupKey) -> &'static str {
+fn group_kind(key: &GroupKey) -> IndicatorKind {
     match key {
-        GroupKey::Sma { .. } => "SMA",
-        GroupKey::Ema { .. } => "EMA",
-        GroupKey::Cvd { .. } => "CVD",
-        GroupKey::SmaTimed { .. } => "timed SMA",
-        GroupKey::ObvTimed { .. } => "timed OBV",
-        GroupKey::TradeCountTimed { .. } => "timed trade count",
-        GroupKey::DayOfWeek { .. } => "day of week",
-        GroupKey::TimeSinceFirstEventOfDay { .. } => "time since first event of day",
+        GroupKey::Sma { .. } => IndicatorKind::Sma,
+        GroupKey::Ema { .. } => IndicatorKind::Ema,
+        GroupKey::Cvd { .. } => IndicatorKind::Cvd,
+        GroupKey::SmaTimed { .. } => IndicatorKind::SmaTimed,
+        GroupKey::ObvTimed { .. } => IndicatorKind::ObvTimed,
+        GroupKey::TradeCountTimed { .. } => IndicatorKind::TradeCountTimed,
+        GroupKey::DayOfWeek { .. } => IndicatorKind::DayOfWeek,
+        GroupKey::TimeSinceFirstEventOfDay { .. } => IndicatorKind::TimeSinceFirstEventOfDay,
     }
 }
 
-fn group_kind_from_feature_key(key: &FeatureKey) -> &'static str {
+fn group_kind_from_feature_key(key: &FeatureKey) -> IndicatorKind {
     match key {
-        FeatureKey::Sma { .. } => "SMA",
-        FeatureKey::Ema { .. } => "EMA",
-        FeatureKey::Cvd { .. } => "CVD",
-        FeatureKey::SmaTimed { .. } => "timed SMA",
-        FeatureKey::ObvTimed { .. } => "timed OBV",
-        FeatureKey::TradeCountTimed { .. } => "timed trade count",
-        FeatureKey::DayOfWeek { .. } => "day of week",
-        FeatureKey::TimeSinceFirstEventOfDay { .. } => "time since first event of day",
+        FeatureKey::Sma { .. } => IndicatorKind::Sma,
+        FeatureKey::Ema { .. } => IndicatorKind::Ema,
+        FeatureKey::Cvd { .. } => IndicatorKind::Cvd,
+        FeatureKey::SmaTimed { .. } => IndicatorKind::SmaTimed,
+        FeatureKey::ObvTimed { .. } => IndicatorKind::ObvTimed,
+        FeatureKey::TradeCountTimed { .. } => IndicatorKind::TradeCountTimed,
+        FeatureKey::DayOfWeek { .. } => IndicatorKind::DayOfWeek,
+        FeatureKey::TimeSinceFirstEventOfDay { .. } => IndicatorKind::TimeSinceFirstEventOfDay,
     }
 }
 
-fn invalid_definition<T>(index: usize, key: &FeatureKey, reason: impl Into<String>) -> Result<T> {
-    Err(invalid_definition_error(
-        index,
-        group_kind_from_feature_key(key),
-        reason,
-    ))
+fn invalid_definition<T>(
+    index: usize,
+    key: &FeatureKey,
+    reason: InvalidIndicatorDefinitionError,
+) -> Result<T> {
+    Err(invalid_definition_error(index, key, reason))
 }
 
-fn invalid_definition_error(index: usize, kind: &str, reason: impl Into<String>) -> FimlError {
+fn invalid_definition_error(
+    index: usize,
+    key: &FeatureKey,
+    reason: InvalidIndicatorDefinitionError,
+) -> FimlError {
     FimlError::InvalidIndicatorDefinition {
         index,
-        reason: format!("{kind}: {}", reason.into()),
+        indicator: group_kind_from_feature_key(key),
+        reason,
     }
 }
 
@@ -768,7 +812,18 @@ mod tests {
             warmup_policy: WarmupPolicy::FullWindow,
         };
 
-        assert!(compile::<f64>(vec![definition(key)], 1).is_err());
+        let error = compile::<f64>(vec![definition(key)], 1).err().unwrap();
+        assert!(matches!(
+            error,
+            FimlError::InvalidIndicatorDefinition {
+                index: 0,
+                indicator: IndicatorKind::SmaTimed,
+                reason: InvalidIndicatorDefinitionError::WindowNotMultipleOfAggregation {
+                    aggregation_millis: 1_000,
+                    window_millis: 1_500,
+                },
+            }
+        ));
         assert!(compile::<f64>(Vec::new(), 1).is_err());
     }
 }
