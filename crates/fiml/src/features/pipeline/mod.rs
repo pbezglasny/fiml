@@ -3,7 +3,7 @@ use std::mem::MaybeUninit;
 
 use crate::features::IndicatorFeatures;
 use crate::features::transformers::Transformation;
-use crate::{Event, FeatureVector, FimlError, Float, Result};
+use crate::{Event, FeatureVector, FimlError, Float, InvalidArgumentError, LimitTarget, Result};
 
 pub struct Pipeline<I, T, F, V, const TRANSFORMER_SIZE: usize>
 where
@@ -48,10 +48,13 @@ where
             );
             Ok(())
         } else {
-            Err(FimlError::InvalidArgument(format!(
-                "cannot add more than {} transformers",
-                self.num_transformers
-            )))
+            Err(FimlError::InvalidArgument(
+                InvalidArgumentError::LimitExceeded {
+                    target: LimitTarget::Transformers,
+                    count: self.num_transformers + 1,
+                    limit: NUM_TRANSFORMERS_SIZE,
+                },
+            ))
         }
     }
 

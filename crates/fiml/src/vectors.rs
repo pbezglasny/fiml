@@ -1,4 +1,4 @@
-use crate::{FimlError, Float, Result};
+use crate::{FimlError, Float, InvalidArgumentError, Result};
 
 /// Abstraction layer for feature vector.
 /// It supposed to set and get feature values
@@ -27,11 +27,12 @@ pub trait FeatureVector {
 
     fn try_set_value_at(&mut self, index: usize, value: Self::F) -> Result<()> {
         if index >= self.len() {
-            return Err(FimlError::InvalidArgument(format!(
-                "index {} is out of bounds for feature vector of len {}",
-                index,
-                self.len()
-            )));
+            return Err(FimlError::InvalidArgument(
+                InvalidArgumentError::FeatureVectorIndexOutOfBounds {
+                    index,
+                    length: self.len(),
+                },
+            ));
         }
         self.set_value_at(index, value);
         Ok(())
@@ -50,25 +51,29 @@ pub trait FeatureVector {
         values: &[Self::F],
     ) -> Result<()> {
         if size > values.len() {
-            return Err(FimlError::InvalidArgument(format!(
-                "Size {} is greater than the number of provided values {}",
-                size,
-                values.len()
-            )));
+            return Err(FimlError::InvalidArgument(
+                InvalidArgumentError::SourceValuesTooShort {
+                    requested: size,
+                    available: values.len(),
+                },
+            ));
         }
         let Some(end) = insert_index_start.checked_add(size) else {
-            return Err(FimlError::InvalidArgument(format!(
-                "range starting at {} with size {} overflows usize",
-                insert_index_start, size
-            )));
+            return Err(FimlError::InvalidArgument(
+                InvalidArgumentError::FeatureVectorRangeOverflow {
+                    start: insert_index_start,
+                    size,
+                },
+            ));
         };
         if end > self.capacity() {
-            return Err(FimlError::InvalidArgument(format!(
-                "range {}..{} is out of bounds for feature vector of len {}",
-                insert_index_start,
-                end,
-                self.capacity()
-            )));
+            return Err(FimlError::InvalidArgument(
+                InvalidArgumentError::FeatureVectorRangeOutOfBounds {
+                    start: insert_index_start,
+                    end,
+                    capacity: self.capacity(),
+                },
+            ));
         }
         self.set_values_range(insert_index_start, size, values);
         Ok(())
@@ -196,9 +201,15 @@ mod tests {
     fn try_set_value_at_rejects_out_of_bounds_index() {
         let mut values = ArrayFeatureVector::<f64, 2>::new();
 
-        let result = values.try_set_value_at(2, 4.0);
+        let error = values.try_set_value_at(2, 4.0).unwrap_err();
 
-        assert!(result.is_err());
+        assert!(matches!(
+            error,
+            FimlError::InvalidArgument(InvalidArgumentError::FeatureVectorIndexOutOfBounds {
+                index: 2,
+                length: 2
+            })
+        ));
     }
 
     #[test]
@@ -214,9 +225,16 @@ mod tests {
     fn try_set_values_range_rejects_out_of_bounds_range() {
         let mut values = ArrayFeatureVector::<f64, 3>::new();
 
-        let result = values.try_set_values_range(2, 2, &[4.0, 5.0]);
+        let error = values.try_set_values_range(2, 2, &[4.0, 5.0]).unwrap_err();
 
-        assert!(result.is_err());
+        assert!(matches!(
+            error,
+            FimlError::InvalidArgument(InvalidArgumentError::FeatureVectorRangeOutOfBounds {
+                start: 2,
+                end: 4,
+                capacity: 3
+            })
+        ));
     }
 
     #[test]

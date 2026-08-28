@@ -1,4 +1,7 @@
-use crate::{FeatureDefinition, FeatureExtractor, FeatureSource, FeatureVector, FimlError, Float};
+use crate::{
+    FeatureDefinition, FeatureExtractor, FeatureSource, FeatureVector, FimlError, Float,
+    InvalidArgumentError,
+};
 
 use crate::features::FeatureKey;
 
@@ -42,19 +45,20 @@ impl FeatureVectorSpec {
     ) -> Result<Self, FimlError> {
         let mut definitions = definitions.into_iter().collect::<Vec<_>>();
         if feature_vector_capacity < definitions.len() {
-            return Err(FimlError::InvalidArgument(format!(
-                "feature vector capacity {feature_vector_capacity} is smaller than active length {}",
-                definitions.len()
-            )));
+            return Err(FimlError::InvalidArgument(
+                InvalidArgumentError::FeatureVectorCapacityTooSmall {
+                    capacity: feature_vector_capacity,
+                    active_length: definitions.len(),
+                },
+            ));
         }
-        if let Some(definition) = definitions
+        if let Some(definition_index) = definitions
             .iter()
-            .find(|definition| definition.id.as_str().starts_with(RESERVED_ID_PREFIX))
+            .position(|definition| definition.id.as_str().starts_with(RESERVED_ID_PREFIX))
         {
-            return Err(FimlError::InvalidArgument(format!(
-                "feature ID {:?} uses the reserved namespace {RESERVED_ID_PREFIX:?}",
-                definition.id.as_str()
-            )));
+            return Err(FimlError::InvalidArgument(
+                InvalidArgumentError::ReservedFeatureId { definition_index },
+            ));
         }
         definitions.sort_by_cached_key(|definition| canonical_sort_key(&definition.key));
         Ok(Self {

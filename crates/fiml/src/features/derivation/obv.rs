@@ -6,7 +6,10 @@ use crate::features::compiler::OutputSpan;
 use crate::features::derivation::{FeatureDerivation, write_outputs};
 use crate::indicators::{ObvBucket, OnBalanceVolumeTimed};
 use crate::vectors::FeatureVector;
-use crate::{FimlError, Float, HeapRingBuffer, Result, Symbol, WarmupPolicy};
+use crate::{
+    FimlError, Float, HeapRingBuffer, IndicatorKind, InvalidArgumentError, Result, Symbol,
+    WarmupPolicy,
+};
 
 pub(crate) struct ObvTimedFeature<F: Float> {
     symbol: Symbol,
@@ -47,9 +50,11 @@ pub(crate) fn build_timed<F: Float>(
     max_period: usize,
     warmup_policy: WarmupPolicy,
 ) -> Result<FeatureDerivation<F>> {
-    let capacity = max_period
-        .checked_add(1)
-        .ok_or_else(|| FimlError::InvalidArgument("OBV timed period is too large".to_string()))?;
+    let capacity = max_period.checked_add(1).ok_or(FimlError::InvalidArgument(
+        InvalidArgumentError::TimedPeriodTooLarge {
+            indicator: IndicatorKind::ObvTimed,
+        },
+    ))?;
     let mut obv =
         OnBalanceVolumeTimed::<
             HeapRingBuffer<ObvBucket<F>>,

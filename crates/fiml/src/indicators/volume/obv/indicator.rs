@@ -4,7 +4,9 @@ use std::time::Duration;
 use crate::ring_buffer::{
     HeapRingBuffer, RingBuffer, StackRingBuffer, new_heap_ring_buffer, new_stack_ring_buffer,
 };
-use crate::{FimlError, Float, Result, WarmupPolicy};
+use crate::{
+    DurationField, FimlError, Float, IntegerTarget, InvalidArgumentError, Result, WarmupPolicy,
+};
 
 struct ObvWindowTimed<F: Float> {
     duration: i64,
@@ -59,7 +61,7 @@ where
     pub fn new_stack(aggregation: Duration, warmup_policy: WarmupPolicy) -> Result<Self> {
         if N == 0 {
             return Err(FimlError::InvalidArgument(
-                "Ring buffer capacity must be greater than 0".to_string(),
+                InvalidArgumentError::RingBufferCapacityZero,
             ));
         }
         let stack_data = new_stack_ring_buffer::<N, ObvBucket<F>>();
@@ -78,7 +80,7 @@ where
     ) -> Result<Self> {
         if capacity == 0 {
             return Err(FimlError::InvalidArgument(
-                "Ring buffer capacity must be greater than 0".to_string(),
+                InvalidArgumentError::RingBufferCapacityZero,
             ));
         }
         let heap_data = new_heap_ring_buffer::<ObvBucket<F>>(capacity);
@@ -99,24 +101,26 @@ where
     ) -> Result<Self> {
         if capacity == 0 {
             return Err(FimlError::InvalidArgument(
-                "Ring buffer capacity must be greater than 0".to_string(),
+                InvalidArgumentError::RingBufferCapacityZero,
             ));
         }
         let aggregation_millis = aggregation.as_millis();
         if aggregation_millis == 0 {
             return Err(FimlError::InvalidArgument(
-                "Aggregation duration must be at least 1 millisecond".to_string(),
+                InvalidArgumentError::AggregationTooShort,
             ));
         }
         if !aggregation.subsec_nanos().is_multiple_of(1_000_000) {
             return Err(FimlError::InvalidArgument(
-                "Aggregation duration must use whole-millisecond precision".to_string(),
+                InvalidArgumentError::DurationPrecision {
+                    field: DurationField::Aggregation,
+                },
             ));
         }
         let millis_aggregation = i64::try_from(aggregation_millis).map_err(|_| {
-            FimlError::InvalidArgument(
-                "Aggregation duration must fit signed 64-bit milliseconds".to_string(),
-            )
+            FimlError::InvalidArgument(InvalidArgumentError::DurationOutOfRange {
+                field: DurationField::Aggregation,
+            })
         })?;
         Ok(Self {
             data,
@@ -132,35 +136,39 @@ where
     pub fn add_window_with_periods(&mut self, periods: usize) -> Result<()> {
         if self.window_count >= WINDOWS {
             return Err(FimlError::InvalidArgument(
-                "Maximum number of windows reached".to_string(),
+                InvalidArgumentError::WindowLimitReached { limit: WINDOWS },
             ));
         }
         if periods == 0 {
             return Err(FimlError::InvalidArgument(
-                "Window period must be greater than 0".to_string(),
+                InvalidArgumentError::WindowPeriodZero,
             ));
         }
         if periods >= self.data.capacity() {
             return Err(FimlError::InvalidArgument(
-                "Window period must be less than ring buffer capacity".to_string(),
+                InvalidArgumentError::WindowPeriodMustBeLessThanCapacity {
+                    period: periods,
+                    capacity: self.data.capacity(),
+                },
             ));
         }
         if self.data.len() > 0 {
             return Err(FimlError::InvalidArgument(
-                "Cannot add window after data has been added".to_string(),
+                InvalidArgumentError::WindowAddedAfterData,
             ));
         }
 
         let periods_i64 = i64::try_from(periods).map_err(|_| {
-            FimlError::InvalidArgument("Window period must fit signed 64-bit".to_string())
+            FimlError::InvalidArgument(InvalidArgumentError::WindowPeriodOutOfRange {
+                target: IntegerTarget::Signed64,
+            })
         })?;
-        let duration = periods_i64
-            .checked_mul(self.millis_aggregation)
-            .ok_or_else(|| {
-                FimlError::InvalidArgument(
-                    "Window duration must fit signed 64-bit milliseconds".to_string(),
-                )
-            })?;
+        let duration =
+            periods_i64
+                .checked_mul(self.millis_aggregation)
+                .ok_or(FimlError::InvalidArgument(
+                    InvalidArgumentError::WindowDurationOutOfRange,
+                ))?;
         self.windows[self.window_count].write(ObvWindowTimed {
             duration,
             value: F::ZERO,

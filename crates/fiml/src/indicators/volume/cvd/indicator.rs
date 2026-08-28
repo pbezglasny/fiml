@@ -4,7 +4,7 @@ use crate::event::TradeSide;
 use crate::ring_buffer::{
     HeapRingBuffer, RingBuffer, StackRingBuffer, new_heap_ring_buffer, new_stack_ring_buffer,
 };
-use crate::{FimlError, Float, Result, WarmupPolicy};
+use crate::{FimlError, Float, InvalidArgumentError, Result, WarmupPolicy};
 
 struct CvdWindow<F: Float> {
     period: usize,
@@ -74,22 +74,25 @@ where
     pub fn add_window(&mut self, period: usize) -> Result<()> {
         if self.window_count >= WINDOWS {
             return Err(FimlError::InvalidArgument(
-                "Maximum number of windows reached".to_string(),
+                InvalidArgumentError::WindowLimitReached { limit: WINDOWS },
             ));
         }
         if !self.data.is_empty() {
             return Err(FimlError::InvalidArgument(
-                "Cannot add window after data has been added".to_string(),
+                InvalidArgumentError::WindowAddedAfterData,
             ));
         }
         if period > self.data.capacity() {
             return Err(FimlError::InvalidArgument(
-                "Window period cannot be greater than ring buffer capacity".to_string(),
+                InvalidArgumentError::WindowPeriodExceedsCapacity {
+                    period,
+                    capacity: self.data.capacity(),
+                },
             ));
         }
         if period == 0 {
             return Err(FimlError::InvalidArgument(
-                "Window period must be greater than 0".to_string(),
+                InvalidArgumentError::WindowPeriodZero,
             ));
         }
 
