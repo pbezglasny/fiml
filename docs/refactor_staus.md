@@ -1,6 +1,6 @@
 # Refactor status
 
-Status as of 2026-08-24.
+Status as of 2026-08-28.
 
 ## Current architecture
 
@@ -64,6 +64,10 @@ subscriber lists, and derivations write directly into the output vector.
 - Removed the legacy extractor, obsolete examples, and stale benchmark.
 - Updated the maintained Rust examples to use `FeatureExtractor`, added a JSON
   `FeatureVectorSpec` example, and registered them as explicit Cargo targets.
+- Added a deterministic historical trade replay example with a checked-in CSV
+  fixture. It exercises trade-price SMA/EMA, trade-volume SMA, CVD, and timed
+  trade count, emits feature columns from `feature_ids()`, and verifies schema,
+  warm-up `NaN` values, ordering, row count, and final feature values.
 - Updated `docs/project-schema.md` for the current architecture.
 
 ## Available feature derivations
@@ -86,14 +90,15 @@ when an event does not provide a matching sample.
 
 ## Verification
 
-As of 2026-08-24, the current tree passes:
+As of 2026-08-28, the current Rust workspace passes:
 
-- 141 Rust unit tests;
-- 52 Python tests;
-- the maintained end-to-end notebook;
+- 159 core unit tests and 2 historical replay example tests;
 - compilation and execution of all workspace test targets, benchmarks, and
   registered examples with all Cargo features enabled;
 - `cargo clippy --workspace --all-targets --all-features -- -D warnings`.
+
+The most recent Python-specific verification, on 2026-08-24, also passed 52
+Python tests and the maintained end-to-end notebook.
 
 The project remains in pre-release development, so breaking API changes are
 still expected. The extractor refactor, pipeline source restoration, and
@@ -108,8 +113,7 @@ feature-vector spec serialization are committed.
 - `StandardScaler` and `ParallelTransformer` are Rust-only. Transformations are
   not represented in `FeatureVectorSpec`, serialized into the model artifact,
   or exposed through the Python binding.
-- There is no deterministic Rust historical-trade replay example yet. The
-  library also does not provide an exchange-specific historical-data loader.
+- The library does not provide an exchange-specific historical-data loader.
 - Label generation and model training remain outside the core API.
 - Events from multiple live sources must be merged into globally nondecreasing
   timestamp order before they are passed to the extractor.
@@ -122,30 +126,11 @@ feature-vector spec serialization are committed.
 
 ## Recommended next implementation
 
-The next bounded implementation should be a deterministic historical trade
-replay. It would exercise the complete public Rust path without adding an
-exchange client or model-training concerns to the core library:
+Decide whether transformations are part of the versioned cross-language model
+artifact before exposing or adapting `Pipeline`. This decision must define how
+transformation configuration is serialized and how Rust and Python preserve
+identical calculation order and output layouts.
 
-1. Read a checked-in, timestamp-sorted trade CSV containing timestamp, symbol,
-   price, quantity, and aggressor side.
-2. Construct scalar definitions for trade-price SMA/EMA, trade-volume SMA,
-   CVD, and timed trade count.
-3. Build one `FeatureExtractor` with output storage sized to the number of
-   definitions.
-4. Convert each input row to `Event::Trade` and call `handle_event`.
-5. Write raw fields and current feature-vector values to an output CSV, using
-   `feature_ids()` as the feature-column names.
-6. Add a deterministic test covering the output schema, warm-up `NaN` values,
-   row count, and final feature values.
-
-`crates/fiml/examples/binance_trades.rs` remains the live-serving example. It
-connects to the Binance trade WebSocket, converts messages to `Event::Trade`,
-updates trade-price EMA and SMA derivations, and prints CSV rows. The historical
-replay should become the primary end-to-end example because it is repeatable
-and suitable for automated verification.
-
-After the replay example, decide whether transformations are part of the
-versioned cross-language model artifact before exposing or adapting `Pipeline`.
 Order-book derivations should follow as a separate design task because they
 must define ownership of order-book state and conversion from `Decimal` book
 values to the extractor's `Float` output type.
