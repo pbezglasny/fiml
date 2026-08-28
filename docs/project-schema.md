@@ -40,7 +40,7 @@ not yet exposed as a feature derivation.
 | Core default features | Empty. |
 | `serde` | Enables Serde for `Symbol`, `WarmupPolicy`, and `EventKind`; feature definitions have no serialization module. |
 | `tracing` | Enables optional diagnostics in selected standalone indicators. |
-| Examples | Automatic discovery is disabled; `feature_extractor` and `binance_trades` are explicit targets. |
+| Examples | Automatic discovery is disabled; `feature_extractor`, `binance_trades`, `historical_trade_replay`, and `feature_vector_spec_from_json` are explicit targets. |
 | Benchmarks | Automatic discovery is disabled; `sma` and `ring_buffer` are explicit targets. |
 | Python dependency | `fiml-python` uses the core without optional features. |
 

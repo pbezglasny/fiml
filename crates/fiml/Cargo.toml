@@ -44,5 +44,8 @@ name = "feature_extractor"
 name = "binance_trades"
 
 [[example]]
+name = "historical_trade_replay"
+
+[[example]]
 name = "feature_vector_spec_from_json"
 required-features = ["serde"]
