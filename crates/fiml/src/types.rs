@@ -21,6 +21,7 @@ pub trait Float:
 
     fn from_usize(value: usize) -> Self;
     fn abs(self) -> Self;
+    fn is_finite(self) -> bool;
 }
 
 macro_rules! impl_float {
@@ -36,6 +37,10 @@ macro_rules! impl_float {
             #[inline]
             fn abs(self) -> Self {
                 Self::abs(self)
+            }
+            #[inline]
+            fn is_finite(self) -> bool {
+                Self::is_finite(self)
             }
         }
     };

@@ -13,8 +13,8 @@ mod feature_extractor_builder;
 mod feature_id;
 mod feature_key;
 mod feature_source;
+mod pipeline;
 mod serde;
-pub mod transformers;
 
 use crate::event::EventKind;
 
@@ -41,7 +41,14 @@ pub use feature_extractor_builder::FeatureExtractorBuilder;
 pub use feature_id::FeatureId;
 pub use feature_key::FeatureKey;
 pub use feature_source::{EventField, FeatureSource};
+pub use pipeline::{ModelInputSpec, Pipeline, TransformationDefinition};
 pub use serde::FeatureVectorSpec;
+
+const RESERVED_ID_PREFIX: &str = "__reserved_";
+
+pub(crate) fn is_reserved_feature_id(id: &FeatureId) -> bool {
+    id.as_str().starts_with(RESERVED_ID_PREFIX)
+}
 
 /// Declaration of one scalar output in a feature vector.
 ///

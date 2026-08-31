@@ -5,8 +5,6 @@ use crate::{
 
 use crate::features::FeatureKey;
 
-const RESERVED_ID_PREFIX: &str = "__reserved_";
-
 /// Versioned configuration for one complete model-input feature vector.
 ///
 /// The spec owns canonically ordered scalar definitions plus the model width.
@@ -54,7 +52,7 @@ impl FeatureVectorSpec {
         }
         if let Some(definition_index) = definitions
             .iter()
-            .position(|definition| definition.id.as_str().starts_with(RESERVED_ID_PREFIX))
+            .position(|definition| crate::features::is_reserved_feature_id(&definition.id))
         {
             return Err(FimlError::InvalidArgument(
                 InvalidArgumentError::ReservedFeatureId { definition_index },

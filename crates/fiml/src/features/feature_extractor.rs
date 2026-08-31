@@ -433,6 +433,7 @@ where
         }
     }
 
+    #[must_use = "event errors must be handled before using updated feature values"]
     pub fn handle_event(&mut self, event: Event<F>) -> Result<UpdateResult> {
         // TODO: use separate counters for each symbol
         if let Some(previous_timestamp) = self.last_timestamp

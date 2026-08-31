@@ -35,5 +35,18 @@
         }
       ]
     }
+  ],
+  "transformers": [
+    {
+      "type": "standard_scaler",
+      "indicies": {
+        "input": 1,
+        "output": 2
+      },
+      "parameters": {
+        "mean": 4,
+        "deviation": 2
+      }
+    }
   ]
 }
