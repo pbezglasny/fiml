@@ -17,7 +17,8 @@ pub use event::{
 };
 pub use features::{
     EventField, FeatureDefinition, FeatureExtractor, FeatureExtractorBuilder, FeatureId,
-    FeatureKey, FeatureSource, FeatureVectorSpec, MAX_OUTPUTS_PER_INDICATOR, UpdateResult,
+    FeatureKey, FeatureSource, FeatureVectorSpec, MAX_OUTPUTS_PER_INDICATOR, ModelInputSpec,
+    Pipeline, TransformationDefinition, UpdateResult,
 };
 pub use indicators::{CumulativeVolumeDelta, ObvBucket, OnBalanceVolumeTimed};
 pub use ring_buffer::{
@@ -44,11 +45,23 @@ pub enum FimlError {
         indicator: IndicatorKind,
         reason: InvalidIndicatorDefinitionError,
     },
+    InvalidTransformationDefinition {
+        index: usize,
+        reason: InvalidTransformationDefinitionError,
+    },
     OutputCountMismatch {
         expected: usize,
         actual: usize,
     },
     FeatureVectorCapacityMismatch {
+        expected: usize,
+        actual: usize,
+    },
+    ModelVectorLengthMismatch {
+        expected: usize,
+        actual: usize,
+    },
+    ModelVectorCapacityMismatch {
         expected: usize,
         actual: usize,
     },
@@ -146,7 +159,6 @@ pub enum LimitTarget {
     Subscribers,
     SubscriberGroup,
     OrderBooks,
-    Transformers,
 }
 
 /// Duration argument involved in validation.
@@ -222,6 +234,19 @@ pub enum InvalidIndicatorDefinitionError {
     ConstructionFailed,
 }
 
+/// Allocation-free reason why a scalar model-input transformation is invalid.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum InvalidTransformationDefinitionError {
+    InputFeatureNotFound,
+    DuplicateOutputFeature,
+    ReservedOutputFeature,
+    MeanNotFinite,
+    ScaleNotFinite,
+    ScaleNotPositive,
+    InverseScaleNotFinite,
+}
+
 /// Duration field in an invalid compiled feature definition.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
@@ -251,6 +276,12 @@ impl Display for FimlError {
                     "invalid indicator definition at index {index}: {indicator}: {reason}"
                 )
             }
+            FimlError::InvalidTransformationDefinition { index, reason } => {
+                write!(
+                    f,
+                    "invalid transformation definition at index {index}: {reason}"
+                )
+            }
             FimlError::OutputCountMismatch { expected, actual } => {
                 write!(
                     f,
@@ -260,6 +291,14 @@ impl Display for FimlError {
             FimlError::FeatureVectorCapacityMismatch { expected, actual } => write!(
                 f,
                 "output storage has capacity {actual}, but the feature-vector spec requires capacity {expected}"
+            ),
+            FimlError::ModelVectorLengthMismatch { expected, actual } => write!(
+                f,
+                "model-input storage has {actual} active cells, but the model-input spec requires exactly {expected}"
+            ),
+            FimlError::ModelVectorCapacityMismatch { expected, actual } => write!(
+                f,
+                "model-input storage has capacity {actual}, but the model-input spec requires capacity {expected}"
             ),
             FimlError::TimestampOutOfOrder {
                 symbol,
@@ -390,7 +429,6 @@ impl Display for LimitTarget {
             Self::Subscribers => "subscriber",
             Self::SubscriberGroup => "subscriber group",
             Self::OrderBooks => "order-book",
-            Self::Transformers => "transformer",
         })
     }
 }
@@ -481,6 +519,20 @@ impl Display for InvalidIndicatorDefinitionError {
             Self::InvalidArgument(reason) => write!(f, "invalid argument: {reason}"),
             Self::ConstructionFailed => f.write_str("indicator construction failed"),
         }
+    }
+}
+
+impl Display for InvalidTransformationDefinitionError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::InputFeatureNotFound => "input feature ID does not exist in the raw layout",
+            Self::DuplicateOutputFeature => "output feature ID duplicates an earlier output",
+            Self::ReservedOutputFeature => "output feature ID uses the reserved namespace",
+            Self::MeanNotFinite => "standard-scaler mean must be finite",
+            Self::ScaleNotFinite => "standard-scaler scale must be finite",
+            Self::ScaleNotPositive => "standard-scaler scale must be positive",
+            Self::InverseScaleNotFinite => "standard-scaler inverse scale must be finite",
+        })
     }
 }
 
