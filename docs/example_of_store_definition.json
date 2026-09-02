@@ -3,50 +3,62 @@
   "feature_vector_capacity": 4,
   "feature_vector_length": 2,
   "checksum": "opaque model metadata",
-  "features": [
-    {
-      "symbol": "__global__",
-      "indicators": [
-        {
-          "kind": "day_of_week",
-          "source": {
-            "type": "every_event"
+  "raw_feature_vector_spec": {
+    "version": "1.0",
+    "feature_vector_capacity": 4,
+    "feature_vector_length": 2,
+    "checksum": "opaque raw-feature metadata",
+    "features": [
+      {
+        "symbol": "__global__",
+        "indicators": [
+          {
+            "kind": "day_of_week",
+            "source": {
+              "type": "every_event"
+            },
+            "outputs": [
+              {
+                "id": "raw_day"
+              }
+            ]
           }
-        }
-      ]
+        ]
+      },
+      {
+        "symbol": "btcusd",
+        "indicators": [
+          {
+            "kind": "sma",
+            "source": {
+              "type": "field",
+              "event": "trade",
+              "field": "price"
+            },
+            "warmup_policy": "full_window",
+            "outputs": [
+              {
+                "window": 5,
+                "id": "raw_sma"
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "transformations": [
+    {
+      "type": "identity",
+      "input": "raw_day",
+      "output": "day"
     },
     {
-      "symbol": "btcusd",
-      "indicators": [
-        {
-          "kind": "sma",
-          "source": {
-            "type": "field",
-            "event": "trade",
-            "field": "price"
-          },
-          "warmup_policy": "full_window",
-          "outputs": [
-            {
-              "window": 5,
-              "id": "btc_trade_sma_5"
-            }
-          ]
-        }
-      ]
-    }
-  ],
-  "transformers": [
-    {
-      "type": "standard_scaler",
-      "indicies": {
-        "input": 1,
-        "output": 2
-      },
-      "parameters": {
-        "mean": 4,
-        "deviation": 2
-      }
+      "type": "standard_scale",
+      "input": "raw_sma",
+      "output": "scaled_sma",
+      "mean": 4.0,
+      "scale": 2.0
     }
   ]
 }
