@@ -25,7 +25,7 @@ pub use ring_buffer::{
     HeapRingBuffer, RingBuffer, StackRingBuffer, new_heap_ring_buffer, new_stack_ring_buffer,
 };
 pub use symbols::Symbol;
-pub use types::{Float, WarmupPolicy};
+pub use types::WarmupPolicy;
 pub use vectors::{ArrayFeatureVector, FeatureVector, VecFeatureVector};
 
 use crate::order_book::OrderBookUpdateError;

@@ -57,10 +57,8 @@ Standalone indicators expose `is_ready_at(index)` for one output and
 `is_ready()` for all configured outputs. Their `value_at(index)` methods return
 `None` when an output is warming up, unavailable, or not configured.
 
-Floating feature-vector cells are initialized to NaN and remain NaN while
-`value_at` returns `None`. The core `Float` abstraction supports IEEE
-floating-point values only; Decimal support is removed because Decimal cannot
-represent the missing-value contract.
+Feature-vector cells are `f64`, initialized to NaN, and remain NaN while
+`value_at` returns `None`. Decimal cannot represent this missing-value contract.
 
 ## Configuration and parity
 

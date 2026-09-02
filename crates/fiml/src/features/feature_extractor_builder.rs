@@ -1,21 +1,19 @@
 use crate::features::compiler;
 use crate::order_book::OrderBook;
-use crate::{FeatureDefinition, FeatureExtractor, FeatureVector, FimlError, Float, Symbol};
+use crate::{FeatureDefinition, FeatureExtractor, FeatureVector, FimlError, Symbol};
 
-pub struct FeatureExtractorBuilder<F, V>
+pub struct FeatureExtractorBuilder<V>
 where
-    F: Float,
-    V: FeatureVector<F = F>,
+    V: FeatureVector,
 {
     definitions: Vec<FeatureDefinition>,
     order_books: Vec<(Symbol, OrderBook)>,
     output_vector: V,
 }
 
-impl<F, V> FeatureExtractorBuilder<F, V>
+impl<V> FeatureExtractorBuilder<V>
 where
-    F: Float,
-    V: FeatureVector<F = F>,
+    V: FeatureVector,
 {
     pub(crate) fn new(output_vector: V) -> Self {
         Self {
@@ -40,7 +38,7 @@ where
         self
     }
 
-    pub fn build(self) -> Result<FeatureExtractor<F, V>, FimlError> {
+    pub fn build(self) -> Result<FeatureExtractor<V>, FimlError> {
         let compilation = compiler::compile(self.definitions, self.output_vector.len())?;
         FeatureExtractor::new(self.output_vector, compilation, self.order_books)
     }

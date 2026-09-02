@@ -29,7 +29,7 @@ fn bench_sma_update(c: &mut Criterion) {
             let id = BenchmarkId::new("stack", format!("period={},windows={}", $period, $windows));
             group.bench_function(id, |b| {
                 b.iter(|| {
-                    let mut sma: SimpleMovingAverage<StackRingBuffer<$period, f64>, f64, $windows> =
+                    let mut sma: SimpleMovingAverage<StackRingBuffer<$period, f64>, $windows> =
                         SimpleMovingAverage::new_stack(WarmupPolicy::FirstValue);
                     for w in 1..=$windows {
                         sma.add_window(w * ($period / $windows).max(1)).unwrap();
@@ -53,7 +53,7 @@ fn bench_sma_update(c: &mut Criterion) {
             let id = BenchmarkId::new("heap", format!("period={},windows={}", $period, $windows));
             group.bench_function(id, |b| {
                 b.iter(|| {
-                    let mut sma: SimpleMovingAverage<HeapRingBuffer<f64>, f64, $windows> =
+                    let mut sma: SimpleMovingAverage<HeapRingBuffer<f64>, $windows> =
                         SimpleMovingAverage::new_heap($period, WarmupPolicy::FirstValue);
                     for w in 1..=$windows {
                         sma.add_window(w * ($period / $windows).max(1)).unwrap();
@@ -85,7 +85,7 @@ fn bench_sma_steady_state(c: &mut Criterion) {
     group.bench_function("stack_period200_windows3", |b| {
         b.iter_batched(
             || {
-                let mut sma: SimpleMovingAverage<StackRingBuffer<200, f64>, f64, 3> =
+                let mut sma: SimpleMovingAverage<StackRingBuffer<200, f64>, 3> =
                     SimpleMovingAverage::new_stack(WarmupPolicy::FirstValue);
                 sma.add_window(50).unwrap();
                 sma.add_window(100).unwrap();
@@ -109,7 +109,7 @@ fn bench_sma_steady_state(c: &mut Criterion) {
     group.bench_function("heap_period200_windows3", |b| {
         b.iter_batched(
             || {
-                let mut sma: SimpleMovingAverage<HeapRingBuffer<f64>, f64, 3> =
+                let mut sma: SimpleMovingAverage<HeapRingBuffer<f64>, 3> =
                     SimpleMovingAverage::new_heap(200, WarmupPolicy::FirstValue);
                 sma.add_window(50).unwrap();
                 sma.add_window(100).unwrap();

@@ -1,9 +1,8 @@
-use std::marker::PhantomData;
 use std::time::Duration;
 
 use crate::ring_buffer::{HeapRingBuffer, RingBuffer, new_heap_ring_buffer};
 use crate::{
-    DurationField, FimlError, Float, IndicatorKind, IntegerTarget, InvalidArgumentError, Result,
+    DurationField, FimlError, IndicatorKind, IntegerTarget, InvalidArgumentError, Result,
     WarmupPolicy,
 };
 
@@ -21,10 +20,9 @@ pub struct CountBucket {
 /// [`OnBalanceVolumeTimed`](crate::indicators::OnBalanceVolumeTimed) but sums a
 /// plain per-bucket trade count instead of signed volume, so it carries a single
 /// window rather than a configurable set.
-pub struct TradeCountTimed<R, F>
+pub struct TradeCountTimed<R>
 where
     R: RingBuffer<Item = CountBucket>,
-    F: Float,
 {
     data: R,
     millis_aggregation: i64,
@@ -38,13 +36,9 @@ where
     first_timestamp: Option<i64>,
     last_observed_timestamp: Option<i64>,
     ready: bool,
-    _marker: PhantomData<F>,
 }
 
-impl<F> TradeCountTimed<HeapRingBuffer<CountBucket>, F>
-where
-    F: Float,
-{
+impl TradeCountTimed<HeapRingBuffer<CountBucket>> {
     /// Build a heap-backed timed trade counter over `window`, bucketed by
     /// `aggregation`. Both durations are in milliseconds; `window` must be a
     /// non-zero multiple of a non-zero `aggregation`.
@@ -80,15 +74,13 @@ where
             first_timestamp: None,
             last_observed_timestamp: None,
             ready: false,
-            _marker: PhantomData,
         })
     }
 }
 
-impl<R, F> TradeCountTimed<R, F>
+impl<R> TradeCountTimed<R>
 where
     R: RingBuffer<Item = CountBucket>,
-    F: Float,
 {
     fn bucket_start(&self, timestamp: i64) -> i64 {
         timestamp - timestamp.rem_euclid(self.millis_aggregation)
@@ -168,9 +160,8 @@ where
     }
 
     /// Current rolling trade count over the window.
-    pub fn window_value(&self) -> Option<F> {
-        self.ready
-            .then(|| F::from_usize(self.window_count as usize))
+    pub fn window_value(&self) -> Option<f64> {
+        self.ready.then_some(self.window_count as f64)
     }
 
     pub fn is_ready_at(&self, index: usize) -> bool {
@@ -236,13 +227,12 @@ mod tests {
 
     #[test]
     fn counts_trades_in_the_same_bucket() {
-        let mut counter: TradeCountTimed<HeapRingBuffer<CountBucket>, f64> =
-            TradeCountTimed::new_heap(
-                Duration::from_millis(1_000),
-                Duration::from_millis(2_000),
-                WarmupPolicy::FirstValue,
-            )
-            .unwrap();
+        let mut counter: TradeCountTimed<HeapRingBuffer<CountBucket>> = TradeCountTimed::new_heap(
+            Duration::from_millis(1_000),
+            Duration::from_millis(2_000),
+            WarmupPolicy::FirstValue,
+        )
+        .unwrap();
 
         counter.update(0);
         counter.update(100);
@@ -253,13 +243,12 @@ mod tests {
 
     #[test]
     fn full_window_readiness_advances_with_time_and_empty_window_is_zero() {
-        let mut counter: TradeCountTimed<HeapRingBuffer<CountBucket>, f64> =
-            TradeCountTimed::new_heap(
-                Duration::from_millis(1_000),
-                Duration::from_millis(2_000),
-                WarmupPolicy::FullWindow,
-            )
-            .unwrap();
+        let mut counter: TradeCountTimed<HeapRingBuffer<CountBucket>> = TradeCountTimed::new_heap(
+            Duration::from_millis(1_000),
+            Duration::from_millis(2_000),
+            WarmupPolicy::FullWindow,
+        )
+        .unwrap();
 
         counter.update(0);
         counter.update(1_000);
@@ -278,13 +267,12 @@ mod tests {
 
     #[test]
     fn sums_counts_across_buckets_in_window() {
-        let mut counter: TradeCountTimed<HeapRingBuffer<CountBucket>, f64> =
-            TradeCountTimed::new_heap(
-                Duration::from_millis(1_000),
-                Duration::from_millis(3_000),
-                WarmupPolicy::FirstValue,
-            )
-            .unwrap();
+        let mut counter: TradeCountTimed<HeapRingBuffer<CountBucket>> = TradeCountTimed::new_heap(
+            Duration::from_millis(1_000),
+            Duration::from_millis(3_000),
+            WarmupPolicy::FirstValue,
+        )
+        .unwrap();
 
         counter.update(0); // bucket 0
         counter.update(1_000); // bucket 1
@@ -296,13 +284,12 @@ mod tests {
 
     #[test]
     fn old_buckets_expire_from_window() {
-        let mut counter: TradeCountTimed<HeapRingBuffer<CountBucket>, f64> =
-            TradeCountTimed::new_heap(
-                Duration::from_millis(1_000),
-                Duration::from_millis(2_000),
-                WarmupPolicy::FirstValue,
-            )
-            .unwrap();
+        let mut counter: TradeCountTimed<HeapRingBuffer<CountBucket>> = TradeCountTimed::new_heap(
+            Duration::from_millis(1_000),
+            Duration::from_millis(2_000),
+            WarmupPolicy::FirstValue,
+        )
+        .unwrap();
 
         counter.update(0); // bucket 0
         counter.update(1_000); // bucket 1
@@ -315,13 +302,12 @@ mod tests {
 
     #[test]
     fn survives_ring_eviction() {
-        let mut counter: TradeCountTimed<HeapRingBuffer<CountBucket>, f64> =
-            TradeCountTimed::new_heap(
-                Duration::from_millis(1_000),
-                Duration::from_millis(2_000),
-                WarmupPolicy::FirstValue,
-            )
-            .unwrap();
+        let mut counter: TradeCountTimed<HeapRingBuffer<CountBucket>> = TradeCountTimed::new_heap(
+            Duration::from_millis(1_000),
+            Duration::from_millis(2_000),
+            WarmupPolicy::FirstValue,
+        )
+        .unwrap();
 
         for i in 0..10 {
             counter.update(i * 1_000);
@@ -334,7 +320,7 @@ mod tests {
     #[test]
     fn rejects_invalid_configuration() {
         assert!(
-            TradeCountTimed::<HeapRingBuffer<CountBucket>, f64>::new_heap(
+            TradeCountTimed::<HeapRingBuffer<CountBucket>>::new_heap(
                 Duration::ZERO,
                 Duration::from_millis(1_000),
                 WarmupPolicy::FirstValue,
@@ -342,7 +328,7 @@ mod tests {
             .is_err()
         );
         assert!(
-            TradeCountTimed::<HeapRingBuffer<CountBucket>, f64>::new_heap(
+            TradeCountTimed::<HeapRingBuffer<CountBucket>>::new_heap(
                 Duration::from_millis(1_000),
                 Duration::from_millis(1_500),
                 WarmupPolicy::FirstValue,

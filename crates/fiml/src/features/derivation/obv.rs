@@ -7,26 +7,25 @@ use crate::features::derivation::{FeatureDerivation, write_outputs};
 use crate::indicators::{ObvBucket, OnBalanceVolumeTimed};
 use crate::vectors::FeatureVector;
 use crate::{
-    FimlError, Float, HeapRingBuffer, IndicatorKind, InvalidArgumentError, Result, Symbol,
-    WarmupPolicy,
+    FimlError, HeapRingBuffer, IndicatorKind, InvalidArgumentError, Result, Symbol, WarmupPolicy,
 };
 
-pub(crate) struct ObvTimedFeature<F: Float> {
+pub(crate) struct ObvTimedFeature {
     symbol: Symbol,
-    obv: OnBalanceVolumeTimed<HeapRingBuffer<ObvBucket<F>>, F, MAX_OUTPUTS_PER_INDICATOR>,
+    obv: OnBalanceVolumeTimed<HeapRingBuffer<ObvBucket>, MAX_OUTPUTS_PER_INDICATOR>,
 }
 
-impl<F: Float> ObvTimedFeature<F> {
+impl ObvTimedFeature {
     pub(crate) fn new(
         symbol: Symbol,
-        obv: OnBalanceVolumeTimed<HeapRingBuffer<ObvBucket<F>>, F, MAX_OUTPUTS_PER_INDICATOR>,
+        obv: OnBalanceVolumeTimed<HeapRingBuffer<ObvBucket>, MAX_OUTPUTS_PER_INDICATOR>,
     ) -> Self {
         Self { symbol, obv }
     }
 
-    pub(in crate::features) fn update<O: FeatureVector<F = F>>(
+    pub(in crate::features) fn update<O: FeatureVector>(
         &mut self,
-        event: &Event<F>,
+        event: &Event,
         output_span: OutputSpan,
         output: &mut O,
     ) {
@@ -43,24 +42,24 @@ impl<F: Float> ObvTimedFeature<F> {
     }
 }
 
-pub(crate) fn build_timed<F: Float>(
+pub(crate) fn build_timed(
     symbol: Symbol,
     aggregation: Duration,
     periods: &[usize],
     max_period: usize,
     warmup_policy: WarmupPolicy,
-) -> Result<FeatureDerivation<F>> {
+) -> Result<FeatureDerivation> {
     let capacity = max_period.checked_add(1).ok_or(FimlError::InvalidArgument(
         InvalidArgumentError::TimedPeriodTooLarge {
             indicator: IndicatorKind::ObvTimed,
         },
     ))?;
     let mut obv =
-        OnBalanceVolumeTimed::<
-            HeapRingBuffer<ObvBucket<F>>,
-            F,
-            MAX_OUTPUTS_PER_INDICATOR,
-        >::new_heap(aggregation, capacity, warmup_policy)?;
+        OnBalanceVolumeTimed::<HeapRingBuffer<ObvBucket>, MAX_OUTPUTS_PER_INDICATOR>::new_heap(
+            aggregation,
+            capacity,
+            warmup_policy,
+        )?;
     for &period in periods {
         obv.add_window_with_periods(period)?;
     }
@@ -82,17 +81,14 @@ mod tests {
     fn obv_timed_ingests_matching_trades_and_observes_other_events() {
         let aapl = symbols::intern("AAPL");
         let googl = symbols::intern("GOOGL");
-        let mut fv: ArrayFeatureVector<f64, 1> = ArrayFeatureVector::new();
-        let mut obv: OnBalanceVolumeTimed<
-            HeapRingBuffer<ObvBucket<f64>>,
-            f64,
-            MAX_OUTPUTS_PER_INDICATOR,
-        > = OnBalanceVolumeTimed::new_heap(
-            Duration::from_millis(1_000),
-            3,
-            WarmupPolicy::FirstValue,
-        )
-        .unwrap();
+        let mut fv: ArrayFeatureVector<1> = ArrayFeatureVector::new();
+        let mut obv: OnBalanceVolumeTimed<HeapRingBuffer<ObvBucket>, MAX_OUTPUTS_PER_INDICATOR> =
+            OnBalanceVolumeTimed::new_heap(
+                Duration::from_millis(1_000),
+                3,
+                WarmupPolicy::FirstValue,
+            )
+            .unwrap();
         obv.add_window_with_periods(2).unwrap();
 
         let mut feat = ObvTimedFeature::new(aapl, obv);

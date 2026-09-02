@@ -1,31 +1,31 @@
 use super::{Pipeline, ScalarOperation};
 use crate::{
-    FeatureId, FeatureVector, FeatureVectorSpec, FimlError, Float, InvalidArgumentError,
+    FeatureId, FeatureVector, FeatureVectorSpec, FimlError, InvalidArgumentError,
     InvalidTransformationDefinitionError, Result,
 };
 
 /// One named scalar transformation from the raw feature layout to model input.
 #[derive(Debug, Clone, PartialEq)]
-pub enum TransformationDefinition<F> {
+pub enum TransformationDefinition {
     /// Copies one raw scalar without changing its value.
     Identity { input: FeatureId, output: FeatureId },
     /// Applies `(input - mean) / scale` to one raw scalar.
     StandardScale {
         input: FeatureId,
         output: FeatureId,
-        mean: F,
-        scale: F,
+        mean: f64,
+        scale: f64,
     },
 }
 
-impl<F> TransformationDefinition<F> {
+impl TransformationDefinition {
     /// Creates a scalar identity transformation.
     pub fn identity(input: FeatureId, output: FeatureId) -> Self {
         Self::Identity { input, output }
     }
 
     /// Creates a scalar standard-scaling transformation.
-    pub fn standard_scale(input: FeatureId, output: FeatureId, mean: F, scale: F) -> Self {
+    pub fn standard_scale(input: FeatureId, output: FeatureId, mean: f64, scale: f64) -> Self {
         Self::StandardScale {
             input,
             output,
@@ -52,18 +52,18 @@ impl<F> TransformationDefinition<F> {
 /// Transformations remain in authored order, which is also final vector order.
 /// Raw and final IDs occupy separate layouts and may therefore use the same name.
 #[derive(Debug, Clone, PartialEq)]
-pub struct ModelInputSpec<F> {
+pub struct ModelInputSpec {
     raw_feature_vector_spec: FeatureVectorSpec,
-    transformation_definitions: Vec<TransformationDefinition<F>>,
+    transformation_definitions: Vec<TransformationDefinition>,
     feature_vector_capacity: usize,
     checksum: Option<String>,
 }
 
-impl<F: Float> ModelInputSpec<F> {
+impl ModelInputSpec {
     /// Creates a spec whose final width equals its transformation count.
     pub fn new(
         raw_feature_vector_spec: FeatureVectorSpec,
-        transformation_definitions: impl IntoIterator<Item = TransformationDefinition<F>>,
+        transformation_definitions: impl IntoIterator<Item = TransformationDefinition>,
     ) -> Result<Self> {
         let transformation_definitions = transformation_definitions.into_iter().collect::<Vec<_>>();
         let capacity = transformation_definitions.len();
@@ -78,7 +78,7 @@ impl<F: Float> ModelInputSpec<F> {
     /// Creates a spec with explicit final width and trailing reserved cells.
     pub fn with_capacity(
         raw_feature_vector_spec: FeatureVectorSpec,
-        transformation_definitions: impl IntoIterator<Item = TransformationDefinition<F>>,
+        transformation_definitions: impl IntoIterator<Item = TransformationDefinition>,
         feature_vector_capacity: usize,
     ) -> Result<Self> {
         Self::with_metadata(
@@ -92,7 +92,7 @@ impl<F: Float> ModelInputSpec<F> {
     /// Creates a spec with explicit final width and opaque checksum metadata.
     pub fn with_metadata(
         raw_feature_vector_spec: FeatureVectorSpec,
-        transformation_definitions: impl IntoIterator<Item = TransformationDefinition<F>>,
+        transformation_definitions: impl IntoIterator<Item = TransformationDefinition>,
         feature_vector_capacity: usize,
         checksum: Option<String>,
     ) -> Result<Self> {
@@ -145,13 +145,13 @@ impl<F: Float> ModelInputSpec<F> {
                         InvalidTransformationDefinitionError::ScaleNotFinite,
                     );
                 }
-                if *scale <= F::ZERO {
+                if *scale <= 0.0 {
                     return invalid_definition(
                         index,
                         InvalidTransformationDefinitionError::ScaleNotPositive,
                     );
                 }
-                if !(F::ONE / *scale).is_finite() {
+                if !(1.0 / *scale).is_finite() {
                     return invalid_definition(
                         index,
                         InvalidTransformationDefinitionError::InverseScaleNotFinite,
@@ -174,7 +174,7 @@ impl<F: Float> ModelInputSpec<F> {
     }
 
     /// Returns scalar transformations in final model-vector order.
-    pub fn transformation_definitions(&self) -> &[TransformationDefinition<F>] {
+    pub fn transformation_definitions(&self) -> &[TransformationDefinition] {
         &self.transformation_definitions
     }
 
@@ -198,10 +198,10 @@ impl<F: Float> ModelInputSpec<F> {
         &self,
         raw_vector: RawV,
         mut model_vector: ModelV,
-    ) -> Result<Pipeline<F, RawV, ModelV>>
+    ) -> Result<Pipeline<RawV, ModelV>>
     where
-        RawV: FeatureVector<F = F>,
-        ModelV: FeatureVector<F = F>,
+        RawV: FeatureVector,
+        ModelV: FeatureVector,
     {
         if model_vector.capacity() != self.feature_vector_capacity {
             return Err(FimlError::ModelVectorCapacityMismatch {
@@ -233,7 +233,7 @@ impl<F: Float> ModelInputSpec<F> {
                         input_index,
                         output_index,
                         mean: *mean,
-                        inverse_scale: F::ONE / *scale,
+                        inverse_scale: 1.0 / *scale,
                     }
                 }
             };
@@ -241,7 +241,7 @@ impl<F: Float> ModelInputSpec<F> {
             output_ids.push(definition.output().clone());
         }
         for index in 0..model_vector.capacity() {
-            model_vector.set_value_at(index, F::NAN);
+            model_vector.set_value_at(index, f64::NAN);
         }
 
         Ok(Pipeline {

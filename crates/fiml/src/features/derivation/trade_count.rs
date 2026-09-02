@@ -5,26 +5,26 @@ use crate::features::compiler::OutputSpan;
 use crate::features::derivation::{FeatureDerivation, write_outputs};
 use crate::indicators::{CountBucket, TradeCountTimed};
 use crate::vectors::FeatureVector;
-use crate::{Float, HeapRingBuffer, Result, Symbol, WarmupPolicy};
+use crate::{HeapRingBuffer, Result, Symbol, WarmupPolicy};
 
 /// Rolling count of trades over a time window, wired to one output cell. Reacts
 /// to [`Trade`](crate::event::EventKind::Trade) events for its symbol.
-pub(crate) struct TradeCountTimedFeature<F: Float> {
+pub(crate) struct TradeCountTimedFeature {
     symbol: Symbol,
-    counter: TradeCountTimed<HeapRingBuffer<CountBucket>, F>,
+    counter: TradeCountTimed<HeapRingBuffer<CountBucket>>,
 }
 
-impl<F: Float> TradeCountTimedFeature<F> {
+impl TradeCountTimedFeature {
     pub(crate) fn new(
         symbol: Symbol,
-        counter: TradeCountTimed<HeapRingBuffer<CountBucket>, F>,
+        counter: TradeCountTimed<HeapRingBuffer<CountBucket>>,
     ) -> Self {
         Self { symbol, counter }
     }
 
-    pub(in crate::features) fn update<O: FeatureVector<F = F>>(
+    pub(in crate::features) fn update<O: FeatureVector>(
         &mut self,
-        event: &Event<F>,
+        event: &Event,
         output_span: OutputSpan,
         output: &mut O,
     ) {
@@ -40,13 +40,13 @@ impl<F: Float> TradeCountTimedFeature<F> {
     }
 }
 
-pub(crate) fn build<F: Float>(
+pub(crate) fn build(
     symbol: Symbol,
     aggregation: Duration,
     window: Duration,
     warmup_policy: WarmupPolicy,
-) -> Result<FeatureDerivation<F>> {
-    let counter = TradeCountTimed::<HeapRingBuffer<CountBucket>, F>::new_heap(
+) -> Result<FeatureDerivation> {
+    let counter = TradeCountTimed::<HeapRingBuffer<CountBucket>>::new_heap(
         aggregation,
         window,
         warmup_policy,
@@ -69,8 +69,8 @@ mod tests {
     fn counts_only_trades_for_its_symbol() {
         let aapl = symbols::intern("AAPL");
         let googl = symbols::intern("GOOGL");
-        let mut fv: ArrayFeatureVector<f64, 1> = ArrayFeatureVector::new();
-        let counter = TradeCountTimed::<HeapRingBuffer<CountBucket>, f64>::new_heap(
+        let mut fv: ArrayFeatureVector<1> = ArrayFeatureVector::new();
+        let counter = TradeCountTimed::<HeapRingBuffer<CountBucket>>::new_heap(
             Duration::from_millis(1_000),
             Duration::from_millis(2_000),
             WarmupPolicy::FirstValue,

@@ -4,63 +4,54 @@ use crate::event::TradeSide;
 use crate::ring_buffer::{
     HeapRingBuffer, RingBuffer, StackRingBuffer, new_heap_ring_buffer, new_stack_ring_buffer,
 };
-use crate::{FimlError, Float, InvalidArgumentError, Result, WarmupPolicy};
+use crate::{FimlError, InvalidArgumentError, Result, WarmupPolicy};
 
-struct CvdWindow<F: Float> {
+struct CvdWindow {
     period: usize,
-    current_value: F,
+    current_value: f64,
 }
 
 /// Cumulative volume delta (CVD) over one or more rolling trade windows.
 ///
 /// Aggressor-buy volume is positive and aggressor-sell volume is negative.
 /// Each configured window contains exactly its latest `period` trade deltas.
-pub struct CumulativeVolumeDelta<R, F, const WINDOWS: usize>
+pub struct CumulativeVolumeDelta<R, const WINDOWS: usize>
 where
-    R: RingBuffer<Item = F>,
-    F: Float,
+    R: RingBuffer<Item = f64>,
 {
     data: R,
-    windows: [MaybeUninit<CvdWindow<F>>; WINDOWS],
+    windows: [MaybeUninit<CvdWindow>; WINDOWS],
     window_count: usize,
     warmup_policy: WarmupPolicy,
 }
 
-impl<const N: usize, F, const WINDOWS: usize>
-    CumulativeVolumeDelta<StackRingBuffer<N, F>, F, WINDOWS>
-where
-    F: Float,
-{
+impl<const N: usize, const WINDOWS: usize> CumulativeVolumeDelta<StackRingBuffer<N, f64>, WINDOWS> {
     pub fn new_stack(warmup_policy: WarmupPolicy) -> Self {
         Self::new(
             new_stack_ring_buffer(),
-            [const { MaybeUninit::<CvdWindow<F>>::uninit() }; WINDOWS],
+            [const { MaybeUninit::<CvdWindow>::uninit() }; WINDOWS],
             warmup_policy,
         )
     }
 }
 
-impl<F, const WINDOWS: usize> CumulativeVolumeDelta<HeapRingBuffer<F>, F, WINDOWS>
-where
-    F: Float,
-{
+impl<const WINDOWS: usize> CumulativeVolumeDelta<HeapRingBuffer<f64>, WINDOWS> {
     pub fn new_heap(periods: usize, warmup_policy: WarmupPolicy) -> Self {
         Self::new(
             new_heap_ring_buffer(periods),
-            [const { MaybeUninit::<CvdWindow<F>>::uninit() }; WINDOWS],
+            [const { MaybeUninit::<CvdWindow>::uninit() }; WINDOWS],
             warmup_policy,
         )
     }
 }
 
-impl<R, F, const WINDOWS: usize> CumulativeVolumeDelta<R, F, WINDOWS>
+impl<R, const WINDOWS: usize> CumulativeVolumeDelta<R, WINDOWS>
 where
-    R: RingBuffer<Item = F>,
-    F: Float,
+    R: RingBuffer<Item = f64>,
 {
     fn new(
         data: R,
-        windows: [MaybeUninit<CvdWindow<F>>; WINDOWS],
+        windows: [MaybeUninit<CvdWindow>; WINDOWS],
         warmup_policy: WarmupPolicy,
     ) -> Self {
         Self {
@@ -98,19 +89,19 @@ where
 
         self.windows[self.window_count].write(CvdWindow {
             period,
-            current_value: F::ZERO,
+            current_value: 0.0,
         });
 
         self.window_count += 1;
         Ok(())
     }
 
-    pub fn update(&mut self, volume: F, trade_side: TradeSide) -> Result<()> {
+    pub fn update(&mut self, volume: f64, trade_side: TradeSide) -> Result<()> {
         self.update_inner(volume, trade_side);
         Ok(())
     }
 
-    pub(crate) fn update_inner(&mut self, volume: F, trade_side: TradeSide) {
+    pub(crate) fn update_inner(&mut self, volume: f64, trade_side: TradeSide) {
         let delta = match trade_side {
             TradeSide::AgressorBuy => volume,
             TradeSide::AgressorSell => -volume,
@@ -125,7 +116,7 @@ where
         self.data.push_back(delta);
     }
 
-    pub fn value_at(&self, index: usize) -> Option<F> {
+    pub fn value_at(&self, index: usize) -> Option<f64> {
         if !self.is_ready_at(index) {
             return None;
         }
@@ -148,8 +139,8 @@ where
         self.window_count > 0 && (0..self.window_count).all(|index| self.is_ready_at(index))
     }
 
-    pub fn values(&self) -> [F; WINDOWS] {
-        let mut result = [F::NAN; WINDOWS];
+    pub fn values(&self) -> [f64; WINDOWS] {
+        let mut result = [f64::NAN; WINDOWS];
         for (index, value) in result.iter_mut().enumerate().take(self.window_count) {
             if let Some(current) = self.value_at(index) {
                 *value = current;
@@ -164,7 +155,7 @@ mod tests {
     use super::*;
 
     fn new_cvd<const CAPACITY: usize, const WINDOWS: usize>()
-    -> CumulativeVolumeDelta<StackRingBuffer<CAPACITY, f64>, f64, WINDOWS> {
+    -> CumulativeVolumeDelta<StackRingBuffer<CAPACITY, f64>, WINDOWS> {
         CumulativeVolumeDelta::new_stack(WarmupPolicy::FirstValue)
     }
 
@@ -182,7 +173,7 @@ mod tests {
 
     #[test]
     fn full_window_policy_withholds_cvd_until_enough_classified_trades() {
-        let mut cvd: CumulativeVolumeDelta<StackRingBuffer<3, f64>, f64, 2> =
+        let mut cvd: CumulativeVolumeDelta<StackRingBuffer<3, f64>, 2> =
             CumulativeVolumeDelta::new_stack(WarmupPolicy::FullWindow);
         cvd.add_window(2).unwrap();
         cvd.add_window(3).unwrap();

@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use fiml::order_book::OrderBookDelta;
 use fiml::{
-    Event, EventField, EventKind, FeatureDefinition, FeatureExtractor as GenericFeatureExtractor,
+    Event, EventField, EventKind, FeatureDefinition, FeatureExtractor as RustFeatureExtractor,
     FeatureKey, FeatureSource, FeatureVector, FeatureVectorSpec as CoreFeatureVectorSpec,
     FimlError, Symbol, TradeSide, VecFeatureVector, WarmupPolicy as CoreWarmupPolicy, symbols,
 };
@@ -515,7 +515,7 @@ impl OutputBuffer {
     }
 }
 
-type CoreFeatureExtractor = GenericFeatureExtractor<f64, VecFeatureVector<f64>>;
+type CoreFeatureExtractor = RustFeatureExtractor<VecFeatureVector>;
 
 fn build_core(feature_vector_spec: &FeatureVectorSpec) -> PyResult<CoreFeatureExtractor> {
     let output_vector = VecFeatureVector::new_of_length(
@@ -591,7 +591,7 @@ impl FeatureExtractor {
         side: Option<u8>,
         bid: Option<f64>,
         ask: Option<f64>,
-    ) -> PyResult<Event<f64>> {
+    ) -> PyResult<Event> {
         Ok(match kind {
             KIND_PRICE => {
                 Event::price(self.symbol_at(symbol)?, require("price", price)?, timestamp)

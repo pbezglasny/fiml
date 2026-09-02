@@ -4,13 +4,11 @@ use std::time::Duration;
 use crate::ring_buffer::{
     HeapRingBuffer, RingBuffer, StackRingBuffer, new_heap_ring_buffer, new_stack_ring_buffer,
 };
-use crate::{
-    DurationField, FimlError, Float, IntegerTarget, InvalidArgumentError, Result, WarmupPolicy,
-};
+use crate::{DurationField, FimlError, IntegerTarget, InvalidArgumentError, Result, WarmupPolicy};
 
-struct ObvWindowTimed<F: Float> {
+struct ObvWindowTimed {
     duration: i64,
-    value: F,
+    value: f64,
     ready: bool,
     /// Front-relative index of the oldest bucket still inside this window.
     /// Buckets before it are already expired and subtracted from `value`; since
@@ -19,17 +17,17 @@ struct ObvWindowTimed<F: Float> {
     front_offset: usize,
 }
 
-pub struct ObvBucket<F: Float> {
+pub struct ObvBucket {
     timestamp: i64,
-    close_price: F,
-    commulative_volume: F,
-    sign: F,
+    close_price: f64,
+    commulative_volume: f64,
+    sign: f64,
 }
 
-impl<F: Float> ObvBucket<F> {
+impl ObvBucket {
     #[inline]
-    fn signed_volume(&self) -> F {
-        self.commulative_volume.mul(self.sign)
+    fn signed_volume(&self) -> f64 {
+        self.commulative_volume * self.sign
     }
 }
 
@@ -39,24 +37,21 @@ impl<F: Float> ObvBucket<F> {
 /// volume is signed by comparing its close price with the previous bucket's
 /// close price, and each configured window exposes the rolling sum
 /// of those signed bucket deltas.
-pub struct OnBalanceVolumeTimed<R, F, const WINDOWS: usize>
+pub struct OnBalanceVolumeTimed<R, const WINDOWS: usize>
 where
-    R: RingBuffer<Item = ObvBucket<F>>,
-    F: Float,
+    R: RingBuffer<Item = ObvBucket>,
 {
     data: R,
     millis_aggregation: i64,
-    windows: [MaybeUninit<ObvWindowTimed<F>>; WINDOWS],
+    windows: [MaybeUninit<ObvWindowTimed>; WINDOWS],
     window_count: usize,
     warmup_policy: WarmupPolicy,
     first_timestamp: Option<i64>,
     last_observed_timestamp: Option<i64>,
 }
 
-impl<const N: usize, F, const WINDOWS: usize>
-    OnBalanceVolumeTimed<StackRingBuffer<N, ObvBucket<F>>, F, WINDOWS>
-where
-    F: Float,
+impl<const N: usize, const WINDOWS: usize>
+    OnBalanceVolumeTimed<StackRingBuffer<N, ObvBucket>, WINDOWS>
 {
     pub fn new_stack(aggregation: Duration, warmup_policy: WarmupPolicy) -> Result<Self> {
         if N == 0 {
@@ -64,15 +59,12 @@ where
                 InvalidArgumentError::RingBufferCapacityZero,
             ));
         }
-        let stack_data = new_stack_ring_buffer::<N, ObvBucket<F>>();
+        let stack_data = new_stack_ring_buffer::<N, ObvBucket>();
         Self::new_with_buffer(stack_data, aggregation, N, warmup_policy)
     }
 }
 
-impl<F, const WINDOWS: usize> OnBalanceVolumeTimed<HeapRingBuffer<ObvBucket<F>>, F, WINDOWS>
-where
-    F: Float,
-{
+impl<const WINDOWS: usize> OnBalanceVolumeTimed<HeapRingBuffer<ObvBucket>, WINDOWS> {
     pub fn new_heap(
         aggregation: Duration,
         capacity: usize,
@@ -83,15 +75,14 @@ where
                 InvalidArgumentError::RingBufferCapacityZero,
             ));
         }
-        let heap_data = new_heap_ring_buffer::<ObvBucket<F>>(capacity);
+        let heap_data = new_heap_ring_buffer::<ObvBucket>(capacity);
         Self::new_with_buffer(heap_data, aggregation, capacity, warmup_policy)
     }
 }
 
-impl<R, F, const WINDOWS: usize> OnBalanceVolumeTimed<R, F, WINDOWS>
+impl<R, const WINDOWS: usize> OnBalanceVolumeTimed<R, WINDOWS>
 where
-    R: RingBuffer<Item = ObvBucket<F>>,
-    F: Float,
+    R: RingBuffer<Item = ObvBucket>,
 {
     fn new_with_buffer(
         data: R,
@@ -125,7 +116,7 @@ where
         Ok(Self {
             data,
             millis_aggregation,
-            windows: [const { MaybeUninit::<ObvWindowTimed<F>>::uninit() }; WINDOWS],
+            windows: [const { MaybeUninit::<ObvWindowTimed>::uninit() }; WINDOWS],
             window_count: 0,
             warmup_policy,
             first_timestamp: None,
@@ -171,7 +162,7 @@ where
                 ))?;
         self.windows[self.window_count].write(ObvWindowTimed {
             duration,
-            value: F::ZERO,
+            value: 0.0,
             ready: false,
             front_offset: 0,
         });
@@ -195,17 +186,17 @@ where
     }
 
     #[inline]
-    fn sign(prev_price: Option<F>, current_price: F) -> F {
+    fn sign(prev_price: Option<f64>, current_price: f64) -> f64 {
         if let Some(prev_price) = prev_price {
             if current_price > prev_price {
-                F::ONE
+                1.0
             } else if current_price < prev_price {
-                F::ZERO.sub(F::ONE)
+                -1.0
             } else {
-                F::ZERO
+                0.0
             }
         } else {
-            F::ZERO
+            0.0
         }
     }
 
@@ -223,7 +214,7 @@ where
                 if bucket.timestamp + window.duration > current_window_start {
                     break;
                 }
-                window.value = window.value.sub(bucket.signed_volume());
+                window.value -= bucket.signed_volume();
                 window.front_offset += 1;
             }
         }
@@ -243,10 +234,10 @@ where
         }
     }
 
-    fn add_delta_to_windows(&mut self, delta: F) {
+    fn add_delta_to_windows(&mut self, delta: f64) {
         for window_index in 0..self.window_count {
             let window = unsafe { self.windows[window_index].assume_init_mut() };
-            window.value = window.value.add(delta);
+            window.value += delta;
         }
     }
 
@@ -281,7 +272,7 @@ where
         true
     }
 
-    pub(crate) fn update_inner(&mut self, price: F, volume: F, now: i64) {
+    pub(crate) fn update_inner(&mut self, price: f64, volume: f64, now: i64) {
         if self.first_timestamp.is_none() {
             self.first_timestamp = Some(now);
             self.update_readiness(now);
@@ -299,8 +290,8 @@ where
             let previous_close = self.data.peek_back_at(1).map(|bucket| bucket.close_price);
             let sign = Self::sign(previous_close, price);
             let mut bucket = self.data.pop_back().unwrap();
-            let new_volume = bucket.commulative_volume.add(volume);
-            let delta = sign.mul(new_volume).sub(bucket.signed_volume());
+            let new_volume = bucket.commulative_volume + volume;
+            let delta = sign * new_volume - bucket.signed_volume();
             bucket.sign = sign;
             bucket.commulative_volume = new_volume;
             bucket.close_price = price;
@@ -318,11 +309,11 @@ where
             if self.data.push_back(bucket).is_some() {
                 self.shift_front_offsets_after_eviction();
             }
-            self.add_delta_to_windows(volume.mul(sign));
+            self.add_delta_to_windows(volume * sign);
         }
     }
 
-    pub fn update(&mut self, price: F, volume: F) {
+    pub fn update(&mut self, price: f64, volume: f64) {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .expect("Time went backwards")
@@ -330,7 +321,7 @@ where
         self.update_inner(price, volume, now);
     }
 
-    pub fn window_value(&self, window_idx: usize) -> Option<F> {
+    pub fn window_value(&self, window_idx: usize) -> Option<f64> {
         if !self.is_ready_at(window_idx) {
             return None;
         }
@@ -361,7 +352,7 @@ mod tests {
 
     #[test]
     fn first_trade_initializes_price_without_volume_delta() {
-        let mut obv: OnBalanceVolumeTimed<HeapRingBuffer<ObvBucket<f64>>, f64, 1> =
+        let mut obv: OnBalanceVolumeTimed<HeapRingBuffer<ObvBucket>, 1> =
             OnBalanceVolumeTimed::new_heap(
                 Duration::from_millis(1_000),
                 3,
@@ -377,7 +368,7 @@ mod tests {
 
     #[test]
     fn full_window_readiness_advances_with_time_and_empty_window_is_zero() {
-        let mut obv: OnBalanceVolumeTimed<HeapRingBuffer<ObvBucket<f64>>, f64, 1> =
+        let mut obv: OnBalanceVolumeTimed<HeapRingBuffer<ObvBucket>, 1> =
             OnBalanceVolumeTimed::new_heap(
                 Duration::from_millis(1_000),
                 3,
@@ -403,7 +394,7 @@ mod tests {
 
     #[test]
     fn rising_falling_and_equal_prices_create_signed_volume() {
-        let mut obv: OnBalanceVolumeTimed<HeapRingBuffer<ObvBucket<f64>>, f64, 1> =
+        let mut obv: OnBalanceVolumeTimed<HeapRingBuffer<ObvBucket>, 1> =
             OnBalanceVolumeTimed::new_heap(
                 Duration::from_millis(1_000),
                 5,
@@ -422,7 +413,7 @@ mod tests {
 
     #[test]
     fn first_bucket_keeps_zero_delta_for_same_bucket_trades() {
-        let mut obv: OnBalanceVolumeTimed<HeapRingBuffer<ObvBucket<f64>>, f64, 1> =
+        let mut obv: OnBalanceVolumeTimed<HeapRingBuffer<ObvBucket>, 1> =
             OnBalanceVolumeTimed::new_heap(
                 Duration::from_millis(1_000),
                 3,
@@ -440,7 +431,7 @@ mod tests {
 
     #[test]
     fn same_bucket_update_recomputes_aggregate_delta() {
-        let mut obv: OnBalanceVolumeTimed<HeapRingBuffer<ObvBucket<f64>>, f64, 1> =
+        let mut obv: OnBalanceVolumeTimed<HeapRingBuffer<ObvBucket>, 1> =
             OnBalanceVolumeTimed::new_heap(
                 Duration::from_millis(1_000),
                 3,
@@ -460,7 +451,7 @@ mod tests {
 
     #[test]
     fn bucket_delta_compares_close_prices_not_average_prices() {
-        let mut obv: OnBalanceVolumeTimed<HeapRingBuffer<ObvBucket<f64>>, f64, 1> =
+        let mut obv: OnBalanceVolumeTimed<HeapRingBuffer<ObvBucket>, 1> =
             OnBalanceVolumeTimed::new_heap(
                 Duration::from_millis(1_000),
                 3,
@@ -478,7 +469,7 @@ mod tests {
 
     #[test]
     fn old_buckets_expire_from_window_sum() {
-        let mut obv: OnBalanceVolumeTimed<HeapRingBuffer<ObvBucket<f64>>, f64, 1> =
+        let mut obv: OnBalanceVolumeTimed<HeapRingBuffer<ObvBucket>, 1> =
             OnBalanceVolumeTimed::new_heap(
                 Duration::from_millis(1_000),
                 3,
@@ -497,7 +488,7 @@ mod tests {
 
     #[test]
     fn multiple_windows_share_one_indicator() {
-        let mut obv: OnBalanceVolumeTimed<HeapRingBuffer<ObvBucket<f64>>, f64, 2> =
+        let mut obv: OnBalanceVolumeTimed<HeapRingBuffer<ObvBucket>, 2> =
             OnBalanceVolumeTimed::new_heap(
                 Duration::from_millis(1_000),
                 4,
@@ -520,7 +511,7 @@ mod tests {
     fn cursor_survives_ring_eviction_across_windows() {
         // Capacity is well above both periods, so buckets stay in the ring for
         // several trades after expiring and the front is evicted repeatedly.
-        let mut obv: OnBalanceVolumeTimed<HeapRingBuffer<ObvBucket<f64>>, f64, 2> =
+        let mut obv: OnBalanceVolumeTimed<HeapRingBuffer<ObvBucket>, 2> =
             OnBalanceVolumeTimed::new_heap(
                 Duration::from_millis(1_000),
                 5,
@@ -544,7 +535,7 @@ mod tests {
 
     #[test]
     fn rejects_window_after_data_has_been_added() {
-        let mut obv: OnBalanceVolumeTimed<HeapRingBuffer<ObvBucket<f64>>, f64, 2> =
+        let mut obv: OnBalanceVolumeTimed<HeapRingBuffer<ObvBucket>, 2> =
             OnBalanceVolumeTimed::new_heap(
                 Duration::from_millis(1_000),
                 4,
@@ -561,15 +552,15 @@ mod tests {
 
     #[test]
     fn rejects_invalid_configuration() {
-        let zero_aggregation: Result<OnBalanceVolumeTimed<HeapRingBuffer<ObvBucket<f64>>, f64, 1>> =
+        let zero_aggregation: Result<OnBalanceVolumeTimed<HeapRingBuffer<ObvBucket>, 1>> =
             OnBalanceVolumeTimed::new_heap(Duration::ZERO, 2, WarmupPolicy::FirstValue);
         assert!(zero_aggregation.is_err());
 
-        let zero_capacity: Result<OnBalanceVolumeTimed<HeapRingBuffer<ObvBucket<f64>>, f64, 1>> =
+        let zero_capacity: Result<OnBalanceVolumeTimed<HeapRingBuffer<ObvBucket>, 1>> =
             OnBalanceVolumeTimed::new_heap(Duration::from_millis(1), 0, WarmupPolicy::FirstValue);
         assert!(zero_capacity.is_err());
 
-        let mut obv: OnBalanceVolumeTimed<HeapRingBuffer<ObvBucket<f64>>, f64, 1> =
+        let mut obv: OnBalanceVolumeTimed<HeapRingBuffer<ObvBucket>, 1> =
             OnBalanceVolumeTimed::new_heap(Duration::from_millis(1), 2, WarmupPolicy::FirstValue)
                 .unwrap();
         assert!(obv.add_window_with_periods(0).is_err());

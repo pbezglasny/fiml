@@ -5,21 +5,16 @@ use std::time::Duration;
 use crate::ring_buffer::{
     HeapRingBuffer, RingBuffer, StackRingBuffer, new_heap_ring_buffer, new_stack_ring_buffer,
 };
-use crate::{
-    DurationField, FimlError, Float, IntegerTarget, InvalidArgumentError, Result, WarmupPolicy,
-};
+use crate::{DurationField, FimlError, IntegerTarget, InvalidArgumentError, Result, WarmupPolicy};
 
 /// Represents a single Simple Moving Average (SMA) window, which tracks the period
-pub struct SmaWindow<F: Float> {
+pub struct SmaWindow {
     period: usize,
-    sum: F,
-    moving_avg: F,
+    sum: f64,
+    moving_avg: f64,
 }
 
-impl<F> Display for SmaWindow<F>
-where
-    F: Float + Display,
-{
+impl Display for SmaWindow {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
@@ -35,21 +30,19 @@ where
 /// winndows is reached.
 /// You can add windows with different periods, but they must be added before any data is added to
 /// the SMA. Once data is added, you cannot add more windows.
-pub struct SimpleMovingAverage<R, F, const WINDOWS: usize>
+pub struct SimpleMovingAverage<R, const WINDOWS: usize>
 where
-    R: RingBuffer<Item = F>,
-    F: Float,
+    R: RingBuffer<Item = f64>,
 {
     data: R,
-    windows: [MaybeUninit<SmaWindow<F>>; WINDOWS],
+    windows: [MaybeUninit<SmaWindow>; WINDOWS],
     window_count: usize,
     warmup_policy: WarmupPolicy,
 }
 
-impl<R, T, const WINDOWS: usize> Display for SimpleMovingAverage<R, T, WINDOWS>
+impl<R, const WINDOWS: usize> Display for SimpleMovingAverage<R, WINDOWS>
 where
-    R: RingBuffer<Item = T>,
-    T: Float + Display,
+    R: RingBuffer<Item = f64>,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "SMA with {} windows:", self.window_count)?;
@@ -61,14 +54,13 @@ where
     }
 }
 
-impl<R, T, const WINDOWS: usize> SimpleMovingAverage<R, T, WINDOWS>
+impl<R, const WINDOWS: usize> SimpleMovingAverage<R, WINDOWS>
 where
-    R: RingBuffer<Item = T>,
-    T: Float,
+    R: RingBuffer<Item = f64>,
 {
     fn new(
         data: R,
-        windows: [MaybeUninit<SmaWindow<T>>; WINDOWS],
+        windows: [MaybeUninit<SmaWindow>; WINDOWS],
         warmup_policy: WarmupPolicy,
     ) -> Self {
         Self {
@@ -80,33 +72,27 @@ where
     }
 }
 
-impl<const PERIODS: usize, F, const WINDOWS: usize>
-    SimpleMovingAverage<StackRingBuffer<PERIODS, F>, F, WINDOWS>
-where
-    F: Float,
+impl<const PERIODS: usize, const WINDOWS: usize>
+    SimpleMovingAverage<StackRingBuffer<PERIODS, f64>, WINDOWS>
 {
     pub fn new_stack(warmup_policy: WarmupPolicy) -> Self {
-        let stack_data = new_stack_ring_buffer::<PERIODS, F>();
-        let windows = [const { MaybeUninit::<SmaWindow<F>>::uninit() }; WINDOWS];
+        let stack_data = new_stack_ring_buffer::<PERIODS, f64>();
+        let windows = [const { MaybeUninit::<SmaWindow>::uninit() }; WINDOWS];
         Self::new(stack_data, windows, warmup_policy)
     }
 }
 
-impl<T, const WINDOWS: usize> SimpleMovingAverage<HeapRingBuffer<T>, T, WINDOWS>
-where
-    T: Float,
-{
+impl<const WINDOWS: usize> SimpleMovingAverage<HeapRingBuffer<f64>, WINDOWS> {
     pub fn new_heap(periods: usize, warmup_policy: WarmupPolicy) -> Self {
-        let heap_data = new_heap_ring_buffer::<T>(periods);
-        let windows = [const { MaybeUninit::<SmaWindow<T>>::uninit() }; WINDOWS];
+        let heap_data = new_heap_ring_buffer::<f64>(periods);
+        let windows = [const { MaybeUninit::<SmaWindow>::uninit() }; WINDOWS];
         Self::new(heap_data, windows, warmup_policy)
     }
 }
 
-impl<R, F, const WINDOWS: usize> SimpleMovingAverage<R, F, WINDOWS>
+impl<R, const WINDOWS: usize> SimpleMovingAverage<R, WINDOWS>
 where
-    R: RingBuffer<Item = F>,
-    F: Float,
+    R: RingBuffer<Item = f64>,
 {
     pub fn add_window(&mut self, period: usize) -> Result<()> {
         if self.window_count >= WINDOWS {
@@ -134,8 +120,8 @@ where
         }
         self.windows[self.window_count].write(SmaWindow {
             period,
-            sum: F::ZERO,
-            moving_avg: F::ZERO,
+            sum: 0.0,
+            moving_avg: 0.0,
         });
         self.window_count += 1;
         #[cfg(feature = "tracing")]
@@ -150,7 +136,7 @@ where
         Ok(())
     }
 
-    pub fn update(&mut self, value: F) {
+    pub fn update(&mut self, value: f64) {
         let old_value = self.data.push_back(value);
         for i in 0..self.window_count {
             let window = unsafe { self.windows[i].assume_init_mut() };
@@ -162,16 +148,13 @@ where
                 None
             };
 
-            window.sum = window
-                .sum
-                .add(value)
-                .sub(prev_value.copied().unwrap_or(F::ZERO));
-            let divisor = F::from_usize(self.data.len().min(window.period));
-            window.moving_avg = window.sum.div(divisor);
+            window.sum += value - prev_value.copied().unwrap_or(0.0);
+            let divisor = self.data.len().min(window.period) as f64;
+            window.moving_avg = window.sum / divisor;
         }
     }
 
-    pub fn value_at(&self, window_id: usize) -> Option<F> {
+    pub fn value_at(&self, window_id: usize) -> Option<f64> {
         if !self.is_ready_at(window_id) {
             return None;
         }
@@ -194,8 +177,8 @@ where
         self.window_count > 0 && (0..self.window_count).all(|index| self.is_ready_at(index))
     }
 
-    pub fn values(&self) -> [F; WINDOWS] {
-        let mut result = [F::NAN; WINDOWS];
+    pub fn values(&self) -> [f64; WINDOWS] {
+        let mut result = [f64::NAN; WINDOWS];
         for (i, item) in result.iter_mut().enumerate().take(self.window_count) {
             if let Some(value) = self.value_at(i) {
                 *item = value;
@@ -205,11 +188,11 @@ where
     }
 }
 
-struct SmaWindowTimed<T: Float> {
+struct SmaWindowTimed {
     duration: i64,
     bucket_count: usize,
-    sum: T,
-    moving_avg: T,
+    sum: f64,
+    moving_avg: f64,
     ready: bool,
 }
 
@@ -219,26 +202,23 @@ struct SmaWindowTimed<T: Float> {
 ///Window cannot be less than the aggregation duration, and all windows must be multiples of the
 ///aggregation duration.
 ///Aggeregation can not be less than one millisecond.
-pub struct SimpleMovingAverageTimed<R, F, const WINDOWS: usize>
+pub struct SimpleMovingAverageTimed<R, const WINDOWS: usize>
 where
-    R: RingBuffer<Item = (i64, F)>,
-    F: Float,
+    R: RingBuffer<Item = (i64, f64)>,
 {
     data: R,
     millis_aggregation: i64,
-    last_sum: Option<F>,
+    last_sum: Option<f64>,
     last_cnt: usize,
-    windows: [MaybeUninit<SmaWindowTimed<F>>; WINDOWS],
+    windows: [MaybeUninit<SmaWindowTimed>; WINDOWS],
     window_count: usize,
     warmup_policy: WarmupPolicy,
     first_timestamp: Option<i64>,
     last_observed_timestamp: Option<i64>,
 }
 
-impl<const N: usize, T, const WINDOWS: usize>
-    SimpleMovingAverageTimed<StackRingBuffer<N, (i64, T)>, T, WINDOWS>
-where
-    T: Float,
+impl<const N: usize, const WINDOWS: usize>
+    SimpleMovingAverageTimed<StackRingBuffer<N, (i64, f64)>, WINDOWS>
 {
     ///Create new SimpleMovingAverageTimed with stack ring buffer.
     pub fn new_stack(aggeregation: Duration, warmup_policy: WarmupPolicy) -> Result<Self> {
@@ -247,15 +227,12 @@ where
                 InvalidArgumentError::RingBufferCapacityZero,
             ));
         }
-        let stack_data = new_stack_ring_buffer::<N, (i64, T)>();
+        let stack_data = new_stack_ring_buffer::<N, (i64, f64)>();
         Self::new_with_buffer(stack_data, aggeregation, N, warmup_policy)
     }
 }
 
-impl<T, const WINDOWS: usize> SimpleMovingAverageTimed<HeapRingBuffer<(i64, T)>, T, WINDOWS>
-where
-    T: Float,
-{
+impl<const WINDOWS: usize> SimpleMovingAverageTimed<HeapRingBuffer<(i64, f64)>, WINDOWS> {
     /// Create new SimpleMovingAverageTimed with heap ring buffer.
     pub fn new_heap(
         aggeregation: Duration,
@@ -267,15 +244,14 @@ where
                 InvalidArgumentError::RingBufferCapacityZero,
             ));
         }
-        let heap_data = new_heap_ring_buffer::<(i64, T)>(capacity);
+        let heap_data = new_heap_ring_buffer::<(i64, f64)>(capacity);
         Self::new_with_buffer(heap_data, aggeregation, capacity, warmup_policy)
     }
 }
 
-impl<R, T, const WINDOWS: usize> SimpleMovingAverageTimed<R, T, WINDOWS>
+impl<R, const WINDOWS: usize> SimpleMovingAverageTimed<R, WINDOWS>
 where
-    R: RingBuffer<Item = (i64, T)>,
-    T: Float,
+    R: RingBuffer<Item = (i64, f64)>,
 {
     fn new_with_buffer(
         data: R,
@@ -311,7 +287,7 @@ where
             millis_aggregation,
             last_sum: None,
             last_cnt: 0,
-            windows: [const { MaybeUninit::<SmaWindowTimed<T>>::uninit() }; WINDOWS],
+            windows: [const { MaybeUninit::<SmaWindowTimed>::uninit() }; WINDOWS],
             window_count: 0,
             warmup_policy,
             first_timestamp: None,
@@ -352,8 +328,8 @@ where
         self.windows[self.window_count].write(SmaWindowTimed {
             duration,
             bucket_count: 0,
-            sum: T::ZERO,
-            moving_avg: T::ZERO,
+            sum: 0.0,
+            moving_avg: 0.0,
             ready: false,
         });
         self.window_count += 1;
@@ -402,29 +378,29 @@ where
         self.add_window_with_periods(period_in_aggregations)
     }
 
-    fn expire_old_buckets(data: &R, window: &mut SmaWindowTimed<T>, now: i64) {
+    fn expire_old_buckets(data: &R, window: &mut SmaWindowTimed, now: i64) {
         while window.bucket_count > 0 {
             let index = data.len() - window.bucket_count;
             let (date, value) = data.peek_front_at(index).unwrap();
             if *date + window.duration > now {
                 break;
             }
-            window.sum = window.sum.sub(*value);
+            window.sum -= *value;
             window.bucket_count -= 1;
         }
         window.moving_avg = if window.bucket_count > 0 {
-            window.sum.div(T::from_usize(window.bucket_count))
+            window.sum / window.bucket_count as f64
         } else {
-            T::ZERO
+            0.0
         };
     }
 
     #[inline]
-    fn update_moving_avg(window: &mut SmaWindowTimed<T>) {
+    fn update_moving_avg(window: &mut SmaWindowTimed) {
         window.moving_avg = if window.bucket_count > 0 {
-            window.sum.div(T::from_usize(window.bucket_count))
+            window.sum / window.bucket_count as f64
         } else {
-            T::ZERO
+            0.0
         };
     }
 
@@ -466,7 +442,7 @@ where
         true
     }
 
-    pub fn update(&mut self, value: T, event_timestamp: i64) {
+    pub fn update(&mut self, value: f64, event_timestamp: i64) {
         if self.first_timestamp.is_none() {
             self.first_timestamp = Some(event_timestamp);
             self.update_readiness(event_timestamp);
@@ -481,17 +457,17 @@ where
 
         // We are in the same aggregation bucket as the last update. Update the last value
         if update_last_bucket {
-            self.last_sum = self.last_sum.or(Some(T::ZERO)).map(|v| v.add(value));
+            self.last_sum = self.last_sum.or(Some(0.0)).map(|v| v + value);
             self.last_cnt += 1;
             let (prev_date, prev_value) = self.data.pop_back().unwrap();
-            let new_value = self.last_sum.unwrap().div(T::from_usize(self.last_cnt));
+            let new_value = self.last_sum.unwrap() / self.last_cnt as f64;
             self.data.push_back((prev_date, new_value));
             for i in 0..self.window_count {
                 let window = unsafe { self.windows[i].assume_init_mut() };
                 if window.bucket_count > 0 {
-                    window.sum = window.sum.sub(prev_value).add(new_value);
+                    window.sum = window.sum - prev_value + new_value;
                 } else if prev_date + window.duration > event_timestamp {
-                    window.sum = window.sum.add(new_value);
+                    window.sum += new_value;
                     window.bucket_count = 1;
                 }
                 Self::update_moving_avg(window);
@@ -506,11 +482,11 @@ where
                 if let Some((_, old_value)) = old_value.as_ref()
                     && window.bucket_count == len_before
                 {
-                    window.sum = window.sum.sub(*old_value);
+                    window.sum -= *old_value;
                     window.bucket_count -= 1;
                 }
                 if window.duration > 0 {
-                    window.sum = window.sum.add(value);
+                    window.sum += value;
                     window.bucket_count += 1;
                 }
                 Self::update_moving_avg(window);
@@ -519,7 +495,7 @@ where
     }
 
     /// Return value of i-th Window
-    pub fn value_at(&self, index: usize) -> Option<T> {
+    pub fn value_at(&self, index: usize) -> Option<f64> {
         if !self.is_ready_at(index) {
             return None;
         }
@@ -540,8 +516,8 @@ where
     }
 
     /// Return values of windows
-    pub fn values(&self) -> [T; WINDOWS] {
-        let mut result = [T::NAN; WINDOWS];
+    pub fn values(&self) -> [f64; WINDOWS] {
+        let mut result = [f64::NAN; WINDOWS];
         for (i, item) in result.iter_mut().enumerate().take(self.window_count) {
             if let Some(value) = self.value_at(i) {
                 *item = value;
@@ -560,7 +536,7 @@ mod tests {
     }
 
     fn timed_value_at<R, const WINDOWS: usize>(
-        sma: &SimpleMovingAverageTimed<R, f64, WINDOWS>,
+        sma: &SimpleMovingAverageTimed<R, WINDOWS>,
         index: usize,
     ) -> f64
     where
@@ -571,7 +547,7 @@ mod tests {
     }
 
     fn timed_bucket_count<R, const WINDOWS: usize>(
-        sma: &SimpleMovingAverageTimed<R, f64, WINDOWS>,
+        sma: &SimpleMovingAverageTimed<R, WINDOWS>,
         index: usize,
     ) -> usize
     where
@@ -583,7 +559,7 @@ mod tests {
 
     #[test]
     fn new_stack_has_no_windows() {
-        let sma: SimpleMovingAverage<StackRingBuffer<4, f64>, f64, 2> =
+        let sma: SimpleMovingAverage<StackRingBuffer<4, f64>, 2> =
             SimpleMovingAverage::new_stack(WarmupPolicy::FirstValue);
         assert_eq!(sma.value_at(0), None);
         assert_eq!(sma.value_at(1), None);
@@ -591,7 +567,7 @@ mod tests {
 
     #[test]
     fn add_window_increments_count() {
-        let mut sma: SimpleMovingAverage<StackRingBuffer<4, f64>, f64, 2> =
+        let mut sma: SimpleMovingAverage<StackRingBuffer<4, f64>, 2> =
             SimpleMovingAverage::new_stack(WarmupPolicy::FirstValue);
         assert!(sma.add_window(2).is_ok());
         assert!(sma.add_window(3).is_ok());
@@ -602,7 +578,7 @@ mod tests {
 
     #[test]
     fn add_window_errors_when_full() {
-        let mut sma: SimpleMovingAverage<StackRingBuffer<4, f64>, f64, 2> =
+        let mut sma: SimpleMovingAverage<StackRingBuffer<4, f64>, 2> =
             SimpleMovingAverage::new_stack(WarmupPolicy::FirstValue);
         sma.add_window(2).unwrap();
         sma.add_window(3).unwrap();
@@ -611,7 +587,7 @@ mod tests {
 
     #[test]
     fn add_window_errors_after_data() {
-        let mut sma: SimpleMovingAverage<StackRingBuffer<4, f64>, f64, 2> =
+        let mut sma: SimpleMovingAverage<StackRingBuffer<4, f64>, 2> =
             SimpleMovingAverage::new_stack(WarmupPolicy::FirstValue);
         sma.add_window(2).unwrap();
         sma.update(1.0);
@@ -620,7 +596,7 @@ mod tests {
 
     #[test]
     fn moving_average_uses_available_samples_during_warmup() {
-        let mut sma: SimpleMovingAverage<StackRingBuffer<4, f64>, f64, 1> =
+        let mut sma: SimpleMovingAverage<StackRingBuffer<4, f64>, 1> =
             SimpleMovingAverage::new_stack(WarmupPolicy::FirstValue);
         sma.add_window(3).unwrap();
 
@@ -636,7 +612,7 @@ mod tests {
 
     #[test]
     fn full_window_policy_readies_each_sample_window_independently() {
-        let mut sma: SimpleMovingAverage<StackRingBuffer<3, f64>, f64, 2> =
+        let mut sma: SimpleMovingAverage<StackRingBuffer<3, f64>, 2> =
             SimpleMovingAverage::new_stack(WarmupPolicy::FullWindow);
         sma.add_window(2).unwrap();
         sma.add_window(3).unwrap();
@@ -661,7 +637,7 @@ mod tests {
 
     #[test]
     fn moving_average_slides_at_capacity() {
-        let mut sma: SimpleMovingAverage<StackRingBuffer<3, f64>, f64, 1> =
+        let mut sma: SimpleMovingAverage<StackRingBuffer<3, f64>, 1> =
             SimpleMovingAverage::new_stack(WarmupPolicy::FirstValue);
         sma.add_window(3).unwrap();
 
@@ -679,7 +655,7 @@ mod tests {
 
     #[test]
     fn multiple_windows_independent() {
-        let mut sma: SimpleMovingAverage<StackRingBuffer<5, f64>, f64, 2> =
+        let mut sma: SimpleMovingAverage<StackRingBuffer<5, f64>, 2> =
             SimpleMovingAverage::new_stack(WarmupPolicy::FirstValue);
         sma.add_window(2).unwrap();
         sma.add_window(5).unwrap();
@@ -694,7 +670,7 @@ mod tests {
 
     #[test]
     fn values_returns_all_window_averages() {
-        let mut sma: SimpleMovingAverage<StackRingBuffer<5, f64>, f64, 2> =
+        let mut sma: SimpleMovingAverage<StackRingBuffer<5, f64>, 2> =
             SimpleMovingAverage::new_stack(WarmupPolicy::FirstValue);
         sma.add_window(2).unwrap();
         sma.add_window(5).unwrap();
@@ -710,9 +686,9 @@ mod tests {
 
     #[test]
     fn heap_variant_matches_stack() {
-        let mut stack_sma: SimpleMovingAverage<StackRingBuffer<4, f64>, f64, 1> =
+        let mut stack_sma: SimpleMovingAverage<StackRingBuffer<4, f64>, 1> =
             SimpleMovingAverage::new_stack(WarmupPolicy::FirstValue);
-        let mut heap_sma: SimpleMovingAverage<HeapRingBuffer<f64>, f64, 1> =
+        let mut heap_sma: SimpleMovingAverage<HeapRingBuffer<f64>, 1> =
             SimpleMovingAverage::new_heap(4, WarmupPolicy::FirstValue);
         stack_sma.add_window(3).unwrap();
         heap_sma.add_window(3).unwrap();
@@ -729,7 +705,7 @@ mod tests {
 
     #[test]
     fn timed_moving_average_updates_before_buffer_is_full() {
-        let mut sma: SimpleMovingAverageTimed<HeapRingBuffer<(i64, f64)>, f64, 1> =
+        let mut sma: SimpleMovingAverageTimed<HeapRingBuffer<(i64, f64)>, 1> =
             SimpleMovingAverageTimed::new_heap(
                 Duration::from_millis(1_000),
                 8,
@@ -747,7 +723,7 @@ mod tests {
 
     #[test]
     fn timed_full_window_readiness_uses_elapsed_time_and_latches() {
-        let mut sma: SimpleMovingAverageTimed<HeapRingBuffer<(i64, f64)>, f64, 1> =
+        let mut sma: SimpleMovingAverageTimed<HeapRingBuffer<(i64, f64)>, 1> =
             SimpleMovingAverageTimed::new_heap(
                 Duration::from_millis(1_000),
                 3,
@@ -774,7 +750,7 @@ mod tests {
 
     #[test]
     fn timed_stack_variant_uses_const_capacity() {
-        let mut sma: SimpleMovingAverageTimed<StackRingBuffer<3, (i64, f64)>, f64, 1> =
+        let mut sma: SimpleMovingAverageTimed<StackRingBuffer<3, (i64, f64)>, 1> =
             SimpleMovingAverageTimed::new_stack(
                 Duration::from_millis(1_000),
                 WarmupPolicy::FirstValue,
@@ -793,7 +769,7 @@ mod tests {
 
     #[test]
     fn timed_new_heap_rejects_zero_capacity() {
-        let sma: Result<SimpleMovingAverageTimed<HeapRingBuffer<(i64, f64)>, f64, 1>> =
+        let sma: Result<SimpleMovingAverageTimed<HeapRingBuffer<(i64, f64)>, 1>> =
             SimpleMovingAverageTimed::new_heap(
                 Duration::from_millis(1_000),
                 0,
@@ -805,7 +781,7 @@ mod tests {
 
     #[test]
     fn timed_new_stack_rejects_zero_capacity() {
-        let sma: Result<SimpleMovingAverageTimed<StackRingBuffer<0, (i64, f64)>, f64, 1>> =
+        let sma: Result<SimpleMovingAverageTimed<StackRingBuffer<0, (i64, f64)>, 1>> =
             SimpleMovingAverageTimed::new_stack(
                 Duration::from_millis(1_000),
                 WarmupPolicy::FirstValue,
@@ -816,7 +792,7 @@ mod tests {
 
     #[test]
     fn timed_add_window_with_duration_rejects_invalid_duration() {
-        let mut sma: SimpleMovingAverageTimed<HeapRingBuffer<(i64, f64)>, f64, 2> =
+        let mut sma: SimpleMovingAverageTimed<HeapRingBuffer<(i64, f64)>, 2> =
             SimpleMovingAverageTimed::new_heap(
                 Duration::from_millis(1_000),
                 4,
@@ -840,7 +816,7 @@ mod tests {
 
     #[test]
     fn timed_add_window_with_periods_rejects_invalid_periods() {
-        let mut sma: SimpleMovingAverageTimed<HeapRingBuffer<(i64, f64)>, f64, 2> =
+        let mut sma: SimpleMovingAverageTimed<HeapRingBuffer<(i64, f64)>, 2> =
             SimpleMovingAverageTimed::new_heap(
                 Duration::from_millis(1_000),
                 3,
@@ -856,7 +832,7 @@ mod tests {
 
     #[test]
     fn timed_moving_average_uses_same_bucket_average() {
-        let mut sma: SimpleMovingAverageTimed<HeapRingBuffer<(i64, f64)>, f64, 1> =
+        let mut sma: SimpleMovingAverageTimed<HeapRingBuffer<(i64, f64)>, 1> =
             SimpleMovingAverageTimed::new_heap(
                 Duration::from_millis(1_000),
                 4,
@@ -874,7 +850,7 @@ mod tests {
 
     #[test]
     fn timed_moving_average_aligns_buckets_to_aggregation_boundaries() {
-        let mut sma: SimpleMovingAverageTimed<HeapRingBuffer<(i64, f64)>, f64, 1> =
+        let mut sma: SimpleMovingAverageTimed<HeapRingBuffer<(i64, f64)>, 1> =
             SimpleMovingAverageTimed::new_heap(
                 Duration::from_millis(1_000),
                 4,
@@ -893,7 +869,7 @@ mod tests {
 
     #[test]
     fn timed_same_bucket_update_can_readd_expired_bucket() {
-        let mut sma: SimpleMovingAverageTimed<HeapRingBuffer<(i64, f64)>, f64, 1> =
+        let mut sma: SimpleMovingAverageTimed<HeapRingBuffer<(i64, f64)>, 1> =
             SimpleMovingAverageTimed::new_heap(
                 Duration::from_millis(1_000),
                 4,
@@ -913,7 +889,7 @@ mod tests {
 
     #[test]
     fn timed_moving_average_expires_old_buckets() {
-        let mut sma: SimpleMovingAverageTimed<HeapRingBuffer<(i64, f64)>, f64, 1> =
+        let mut sma: SimpleMovingAverageTimed<HeapRingBuffer<(i64, f64)>, 1> =
             SimpleMovingAverageTimed::new_heap(
                 Duration::from_millis(1_000),
                 4,
@@ -932,7 +908,7 @@ mod tests {
 
     #[test]
     fn timed_multiple_windows_are_independent() {
-        let mut sma: SimpleMovingAverageTimed<HeapRingBuffer<(i64, f64)>, f64, 2> =
+        let mut sma: SimpleMovingAverageTimed<HeapRingBuffer<(i64, f64)>, 2> =
             SimpleMovingAverageTimed::new_heap(
                 Duration::from_millis(1_000),
                 4,
@@ -956,7 +932,7 @@ mod tests {
 
     #[test]
     fn timed_moving_average_handles_capacity_overwrite() {
-        let mut sma: SimpleMovingAverageTimed<HeapRingBuffer<(i64, f64)>, f64, 1> =
+        let mut sma: SimpleMovingAverageTimed<HeapRingBuffer<(i64, f64)>, 1> =
             SimpleMovingAverageTimed::new_heap(
                 Duration::from_millis(1_000),
                 3,
@@ -977,7 +953,7 @@ mod tests {
 
     #[test]
     fn timed_moving_average_window_period_must_be_less_than_capacity() {
-        let mut sma: SimpleMovingAverageTimed<HeapRingBuffer<(i64, f64)>, f64, 1> =
+        let mut sma: SimpleMovingAverageTimed<HeapRingBuffer<(i64, f64)>, 1> =
             SimpleMovingAverageTimed::new_heap(
                 Duration::from_millis(1_000),
                 3,

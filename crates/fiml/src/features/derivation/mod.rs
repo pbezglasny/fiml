@@ -1,4 +1,3 @@
-use crate::Float;
 use crate::event::Event;
 use crate::features::compiler::OutputSpan;
 use crate::order_book::OrderBook;
@@ -26,21 +25,21 @@ use trade_count::TradeCountTimedFeature;
 /// Each variant consumes events, updates its calculation state, and writes its
 /// current values into an assigned output span. Dispatch is a match of direct
 /// calls, with no `Box` or vtable.
-pub(crate) enum FeatureDerivation<F: Float> {
-    Cvd(CvdFeature<F>),
-    Sma(SmaFeature<F>),
-    Ema(EmaFeature<F>),
-    SmaTimed(SmaTimedFeature<F>),
-    ObvTimed(ObvTimedFeature<F>),
-    TradeCountTimed(TradeCountTimedFeature<F>),
+pub(crate) enum FeatureDerivation {
+    Cvd(CvdFeature),
+    Sma(SmaFeature),
+    Ema(EmaFeature),
+    SmaTimed(SmaTimedFeature),
+    ObvTimed(ObvTimedFeature),
+    TradeCountTimed(TradeCountTimedFeature),
     DayOfWeek(DayOfWeek),
     TimeSinceFirstEventOfDay(TimeSinceFirstEventOfDay),
 }
 
-impl<F: Float> FeatureDerivation<F> {
-    pub(crate) fn update<O: FeatureVector<F = F>>(
+impl FeatureDerivation {
+    pub(crate) fn update<O: FeatureVector>(
         &mut self,
-        event: &Event<F>,
+        event: &Event,
         output_span: OutputSpan,
         output: &mut O,
     ) {
@@ -61,7 +60,7 @@ impl<F: Float> FeatureDerivation<F> {
     /// Event-based derivations return `false`. Concrete order-book variants
     /// add their direct-dispatch arm here and return `true` after writing their
     /// output span.
-    pub(crate) fn update_order_book<O: FeatureVector<F = F>>(
+    pub(crate) fn update_order_book<O: FeatureVector>(
         &mut self,
         order_book: &OrderBook,
         timestamp: i64,
@@ -83,18 +82,17 @@ impl<F: Float> FeatureDerivation<F> {
 }
 
 #[inline]
-pub(crate) fn write_outputs<F, O>(
+pub(crate) fn write_outputs<O>(
     span: OutputSpan,
     output: &mut O,
-    mut value_at: impl FnMut(usize) -> Option<F>,
+    mut value_at: impl FnMut(usize) -> Option<f64>,
 ) where
-    F: Float,
-    O: FeatureVector<F = F>,
+    O: FeatureVector,
 {
     for output_index in 0..span.count {
         output.set_value_at(
             span.start + output_index,
-            value_at(output_index).unwrap_or(F::NAN),
+            value_at(output_index).unwrap_or(f64::NAN),
         );
     }
 }

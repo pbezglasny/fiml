@@ -4,19 +4,19 @@ use crate::features::compiler::OutputSpan;
 use crate::features::derivation::{FeatureDerivation, write_outputs};
 use crate::indicators::ExponentialMovingAverage;
 use crate::vectors::FeatureVector;
-use crate::{EventField, Float, Result, Symbol, WarmupPolicy};
+use crate::{EventField, Result, Symbol, WarmupPolicy};
 
-pub(crate) struct EmaFeature<F: Float> {
+pub(crate) struct EmaFeature {
     symbol: Symbol,
     source: EventField,
-    ema: ExponentialMovingAverage<F, MAX_OUTPUTS_PER_INDICATOR>,
+    ema: ExponentialMovingAverage<MAX_OUTPUTS_PER_INDICATOR>,
 }
 
-impl<F: Float> EmaFeature<F> {
+impl EmaFeature {
     pub(crate) fn new(
         symbol: Symbol,
         source: EventField,
-        ema: ExponentialMovingAverage<F, MAX_OUTPUTS_PER_INDICATOR>,
+        ema: ExponentialMovingAverage<MAX_OUTPUTS_PER_INDICATOR>,
     ) -> Self {
         Self {
             symbol,
@@ -25,9 +25,9 @@ impl<F: Float> EmaFeature<F> {
         }
     }
 
-    pub(in crate::features) fn update<O: FeatureVector<F = F>>(
+    pub(in crate::features) fn update<O: FeatureVector>(
         &mut self,
-        event: &Event<F>,
+        event: &Event,
         output_span: OutputSpan,
         output: &mut O,
     ) {
@@ -40,13 +40,13 @@ impl<F: Float> EmaFeature<F> {
     }
 }
 
-pub(crate) fn build<F: Float>(
+pub(crate) fn build(
     symbol: Symbol,
     source: EventField,
     windows: &[usize],
     warmup_policy: WarmupPolicy,
-) -> Result<FeatureDerivation<F>> {
-    let mut ema = ExponentialMovingAverage::<F, MAX_OUTPUTS_PER_INDICATOR>::new(warmup_policy);
+) -> Result<FeatureDerivation> {
+    let mut ema = ExponentialMovingAverage::<MAX_OUTPUTS_PER_INDICATOR>::new(warmup_policy);
     for &window in windows {
         ema.add_window(window)?;
     }
@@ -66,8 +66,8 @@ mod tests {
     fn ema_reacts_to_price_events() {
         let aapl = symbols::intern("AAPL");
         let googl = symbols::intern("GOOGL");
-        let mut fv: ArrayFeatureVector<f64, 1> = ArrayFeatureVector::new();
-        let mut ema: ExponentialMovingAverage<f64, MAX_OUTPUTS_PER_INDICATOR> =
+        let mut fv: ArrayFeatureVector<1> = ArrayFeatureVector::new();
+        let mut ema: ExponentialMovingAverage<MAX_OUTPUTS_PER_INDICATOR> =
             ExponentialMovingAverage::new(WarmupPolicy::FirstValue);
         ema.add_window(3).unwrap();
 
@@ -87,8 +87,8 @@ mod tests {
     fn ema_reacts_to_volume_events() {
         let aapl = symbols::intern("AAPL");
         let googl = symbols::intern("GOOGL");
-        let mut fv: ArrayFeatureVector<f64, 1> = ArrayFeatureVector::new();
-        let mut ema: ExponentialMovingAverage<f64, MAX_OUTPUTS_PER_INDICATOR> =
+        let mut fv: ArrayFeatureVector<1> = ArrayFeatureVector::new();
+        let mut ema: ExponentialMovingAverage<MAX_OUTPUTS_PER_INDICATOR> =
             ExponentialMovingAverage::new(WarmupPolicy::FirstValue);
         ema.add_window(3).unwrap();
 
@@ -108,8 +108,8 @@ mod tests {
     fn ema_reacts_to_trade_price_events() {
         let aapl = symbols::intern("AAPL");
         let googl = symbols::intern("GOOGL");
-        let mut fv: ArrayFeatureVector<f64, 1> = ArrayFeatureVector::new();
-        let mut ema: ExponentialMovingAverage<f64, MAX_OUTPUTS_PER_INDICATOR> =
+        let mut fv: ArrayFeatureVector<1> = ArrayFeatureVector::new();
+        let mut ema: ExponentialMovingAverage<MAX_OUTPUTS_PER_INDICATOR> =
             ExponentialMovingAverage::new(WarmupPolicy::FirstValue);
         ema.add_window(3).unwrap();
 
