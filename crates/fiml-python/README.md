@@ -185,6 +185,50 @@ loading JSON with an explicit output `id`.
 ASCII symbol identity is case-insensitive throughout the library and canonical
 names use lowercase symbols.
 
+## Fitted model-input pipelines
+
+Keep raw indicator extraction separate from the fitted scalar transformations
+consumed by a model. `ModelInputSpec` clones its raw `FeatureVectorSpec`, keeps
+transformations in authored order, and serializes the canonical artifact read by
+the Rust `ModelInputSpec`:
+
+```python
+raw_spec = fiml.FeatureVectorSpec(checksum="raw-v1").sma(
+    "BTCUSDT", [12, 24], source="trade_price"
+)
+model_spec = fiml.ModelInputSpec(raw_spec, checksum="model-v1")
+
+# Transfer fitted arrays explicitly in the raw spec's canonical order.
+for feature_id, mean, scale in zip(
+    raw_spec.feature_ids(), scaler.mean_, scaler.scale_, strict=True
+):
+    model_spec.standard_scale(
+        feature_id, mean=float(mean), scale=float(scale)
+    )
+
+pipeline = fiml.ModelInputPipeline(model_spec, output_dtype="float64")
+```
+
+`identity(input, *, output=None)` and
+`standard_scale(input, *, mean, scale, output=None)` append one final scalar and
+return the spec for fluent use. Omitting `output` reuses the input ID. Omitting
+model capacity tracks the transformation count; an explicit capacity stays
+fixed and creates trailing `__reserved_<index>` cells. `feature_ids()` and
+`raw_feature_ids()` exclude reserved cells. Raw and model checksums are
+independent opaque metadata.
+
+`ModelInputPipeline` mirrors the extractor's stateful `symbol`, `update`,
+`transform`, and `compute_features` event-replay APIs. `values()` and
+`feature_names()` describe final model input; `raw_values()` and
+`raw_feature_names()` expose only the current diagnostic raw snapshot. A
+pipeline DataFrame contains copied symbol/time metadata followed by final model
+columns only. Final and raw calculations stay in `float64`, while returned
+arrays use `output_dtype`, which locks after the first accepted event.
+
+See `examples/model_input_pipeline.py` for a focused runnable example. Each
+independent dataset needs its own pipeline instance because indicator state is
+intentionally cumulative and no reset/clone API is provided.
+
 ## Low-level event API
 
 For raw event arrays (mixed streams, custom sources), `transform` replays a

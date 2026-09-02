@@ -36,6 +36,14 @@ def test_fluent_spec_uses_core_json_and_round_trips_metadata():
     assert json.loads(restored.to_json()) == document
 
 
+def test_feature_ids_returns_only_active_stable_ids():
+    feature_vector_spec = configured_spec()
+
+    assert feature_vector_spec.feature_ids() == fiml.FeatureExtractor(
+        feature_vector_spec
+    ).feature_names()[:2]
+
+
 def test_omitted_capacity_tracks_outputs_and_explicit_capacity_is_fixed():
     dynamic = fiml.FeatureVectorSpec().sma("BTCUSDT", [2]).ema("BTCUSDT", [3, 4])
     assert dynamic.capacity == 3
