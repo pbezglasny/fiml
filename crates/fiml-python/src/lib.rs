@@ -11,8 +11,10 @@ use std::time::Duration;
 use fiml::order_book::OrderBookDelta;
 use fiml::{
     Event, EventField, EventKind, FeatureDefinition, FeatureExtractor as RustFeatureExtractor,
-    FeatureKey, FeatureSource, FeatureVector, FeatureVectorSpec as CoreFeatureVectorSpec,
-    FimlError, Symbol, TradeSide, VecFeatureVector, WarmupPolicy as CoreWarmupPolicy, symbols,
+    FeatureId, FeatureKey, FeatureSource, FeatureVector,
+    FeatureVectorSpec as CoreFeatureVectorSpec, FimlError, ModelInputSpec as CoreModelInputSpec,
+    Pipeline as RustPipeline, Symbol, TradeSide, TransformationDefinition, VecFeatureVector,
+    WarmupPolicy as CoreWarmupPolicy, symbols,
 };
 use numpy::ndarray::Array2;
 use numpy::{Element, IntoPyArray, PyArray1, PyReadonlyArray1};
@@ -136,6 +138,23 @@ fn parse_tz(tz: &str) -> PyResult<i64> {
     Ok(sign * (hours * 3_600_000 + minutes * 60_000))
 }
 
+fn core_feature_ids(spec: &CoreFeatureVectorSpec) -> Vec<String> {
+    spec.definitions()
+        .iter()
+        .map(|definition| definition.id.as_str().to_owned())
+        .collect()
+}
+
+fn model_output_ids(spec: &CoreModelInputSpec) -> Vec<String> {
+    spec.transformation_definitions()
+        .iter()
+        .map(|definition| match definition {
+            TransformationDefinition::Identity { output, .. }
+            | TransformationDefinition::StandardScale { output, .. } => output.as_str().to_owned(),
+        })
+        .collect()
+}
+
 /// Declarative feature-vector spec: the ordered list of features an extractor produces
 /// and the parity contract between Python (batch) and Rust (live). Author it
 /// with the fluent builder methods, then construct a [`FeatureExtractor`] from
@@ -234,6 +253,11 @@ impl FeatureVectorSpec {
     #[getter]
     fn checksum(&self) -> Option<&str> {
         self.core.checksum()
+    }
+
+    /// Active stable feature IDs in canonical raw-vector order.
+    fn feature_ids(&self) -> Vec<String> {
+        core_feature_ids(&self.core)
     }
 
     /// Grouped simple moving averages over ordered sample windows.
@@ -445,6 +469,140 @@ impl FeatureVectorSpec {
     }
 }
 
+/// Validated raw-feature and fitted scalar-transformation specification.
+///
+/// The raw spec is cloned at construction so later Python builder mutations do
+/// not change the model artifact. Transformations remain in authored order.
+#[pyclass]
+pub struct ModelInputSpec {
+    core: CoreModelInputSpec,
+    explicit_capacity: bool,
+}
+
+impl ModelInputSpec {
+    fn add_transformation(&mut self, definition: TransformationDefinition) -> PyResult<()> {
+        let mut definitions = self.core.transformation_definitions().to_vec();
+        definitions.push(definition);
+        let capacity = if self.explicit_capacity {
+            self.core.feature_vector_capacity()
+        } else {
+            definitions.len()
+        };
+        let candidate = CoreModelInputSpec::with_metadata(
+            self.core.raw_feature_vector_spec().clone(),
+            definitions,
+            capacity,
+            self.core.checksum().map(str::to_owned),
+        )
+        .map_err(|error| PyValueError::new_err(error.to_string()))?;
+        self.core = candidate;
+        Ok(())
+    }
+}
+
+#[pymethods]
+impl ModelInputSpec {
+    #[new]
+    #[pyo3(signature = (raw_feature_vector_spec, *, capacity=None, checksum=None))]
+    fn new(
+        raw_feature_vector_spec: PyRef<'_, FeatureVectorSpec>,
+        capacity: Option<usize>,
+        checksum: Option<String>,
+    ) -> PyResult<Self> {
+        let explicit_capacity = capacity.is_some();
+        let core = CoreModelInputSpec::with_metadata(
+            raw_feature_vector_spec.core.clone(),
+            [],
+            capacity.unwrap_or(0),
+            checksum,
+        )
+        .map_err(|error| PyValueError::new_err(error.to_string()))?;
+        Ok(Self {
+            core,
+            explicit_capacity,
+        })
+    }
+
+    /// Loads the strict versioned canonical model-input artifact.
+    #[staticmethod]
+    fn from_json(json: &str) -> PyResult<Self> {
+        let core =
+            serde_json::from_str(json).map_err(|error| PyValueError::new_err(error.to_string()))?;
+        Ok(Self {
+            core,
+            explicit_capacity: true,
+        })
+    }
+
+    /// Serializes this spec using the canonical Rust JSON adapter.
+    fn to_json(&self) -> PyResult<String> {
+        serde_json::to_string_pretty(&self.core)
+            .map_err(|error| PyValueError::new_err(error.to_string()))
+    }
+
+    /// Append an unchanged scalar to the final model vector.
+    #[pyo3(signature = (input, *, output=None))]
+    fn identity<'py>(
+        mut slf: PyRefMut<'py, Self>,
+        input: &str,
+        output: Option<&str>,
+    ) -> PyResult<PyRefMut<'py, Self>> {
+        let output = output.unwrap_or(input);
+        slf.add_transformation(TransformationDefinition::identity(
+            FeatureId::new(input),
+            FeatureId::new(output),
+        ))?;
+        Ok(slf)
+    }
+
+    /// Append a fitted `(input - mean) / scale` scalar transformation.
+    #[pyo3(signature = (input, *, mean, scale, output=None))]
+    fn standard_scale<'py>(
+        mut slf: PyRefMut<'py, Self>,
+        input: &str,
+        mean: f64,
+        scale: f64,
+        output: Option<&str>,
+    ) -> PyResult<PyRefMut<'py, Self>> {
+        let output = output.unwrap_or(input);
+        slf.add_transformation(TransformationDefinition::standard_scale(
+            FeatureId::new(input),
+            FeatureId::new(output),
+            mean,
+            scale,
+        ))?;
+        Ok(slf)
+    }
+
+    /// Active final IDs in authored transformation order.
+    fn feature_ids(&self) -> Vec<String> {
+        model_output_ids(&self.core)
+    }
+
+    /// Active raw IDs in canonical extraction order.
+    fn raw_feature_ids(&self) -> Vec<String> {
+        core_feature_ids(self.core.raw_feature_vector_spec())
+    }
+
+    /// Complete configured final width, including trailing reserved cells.
+    #[getter]
+    fn capacity(&self) -> usize {
+        self.core.feature_vector_capacity()
+    }
+
+    /// Number of configured final outputs, excluding reserved cells.
+    #[getter]
+    fn active_feature_count(&self) -> usize {
+        self.core.feature_vector_length()
+    }
+
+    /// Opaque model checksum, independent of the raw-spec checksum.
+    #[getter]
+    fn checksum(&self) -> Option<&str> {
+        self.core.checksum()
+    }
+}
+
 fn definition(key: FeatureKey) -> FeatureDefinition {
     FeatureDefinition::with_default_id(key)
 }
@@ -516,6 +674,7 @@ impl OutputBuffer {
 }
 
 type CoreFeatureExtractor = RustFeatureExtractor<VecFeatureVector>;
+type CorePipeline = RustPipeline<VecFeatureVector, VecFeatureVector>;
 
 fn build_core(feature_vector_spec: &FeatureVectorSpec) -> PyResult<CoreFeatureExtractor> {
     let output_vector = VecFeatureVector::new_of_length(
@@ -528,38 +687,109 @@ fn build_core(feature_vector_spec: &FeatureVectorSpec) -> PyResult<CoreFeatureEx
         .map_err(|error| PyValueError::new_err(error.to_string()))
 }
 
-/// A configured, runnable feature extractor.
-#[pyclass(subclass)]
-pub struct FeatureExtractor {
-    inner: CoreFeatureExtractor,
-    /// Handle (index) -> interned symbol, so Python can pass cheap integer ids
-    /// in array columns instead of strings per row.
-    symbols: Vec<Symbol>,
-    feature_names: Vec<String>,
-    n_features: usize,
-    active_feature_count: usize,
-    output_dtype: OutputDtype,
+fn complete_names(active_ids: &[String], capacity: usize) -> Vec<String> {
+    let mut names = active_ids.to_vec();
+    names.extend((active_ids.len()..capacity).map(|index| format!("__reserved_{index}")));
+    names
 }
 
-impl FeatureExtractor {
-    fn from_core(inner: CoreFeatureExtractor, output_dtype: OutputDtype) -> Self {
-        let active_feature_count = inner.feature_ids().len();
-        let n_features = inner.feature_vector().capacity();
-        let mut feature_names = inner
-            .feature_ids()
-            .iter()
-            .map(|id| id.as_str().to_owned())
-            .collect::<Vec<_>>();
-        feature_names
-            .extend((active_feature_count..n_features).map(|index| format!("__reserved_{index}")));
+trait EventRuntime {
+    fn handle_event(&mut self, event: Event) -> fiml::Result<()>;
+    fn last_timestamp(&self) -> Option<i64>;
+    fn values(&self) -> &[f64];
+}
+
+impl EventRuntime for CoreFeatureExtractor {
+    fn handle_event(&mut self, event: Event) -> fiml::Result<()> {
+        RustFeatureExtractor::handle_event(self, event).map(|_| ())
+    }
+
+    fn last_timestamp(&self) -> Option<i64> {
+        RustFeatureExtractor::last_timestamp(self)
+    }
+
+    fn values(&self) -> &[f64] {
+        self.feature_vector().values()
+    }
+}
+
+impl EventRuntime for CorePipeline {
+    fn handle_event(&mut self, event: Event) -> fiml::Result<()> {
+        RustPipeline::handle_event(self, event).map(|_| ())
+    }
+
+    fn last_timestamp(&self) -> Option<i64> {
+        RustPipeline::last_timestamp(self)
+    }
+
+    fn values(&self) -> &[f64] {
+        RustPipeline::values(self)
+    }
+}
+
+struct RuntimeDriver<R>
+where
+    R: EventRuntime,
+{
+    inner: R,
+    symbols: Vec<Symbol>,
+    feature_names: Vec<String>,
+    raw_feature_names: Vec<String>,
+    active_feature_count: usize,
+    output_dtype: OutputDtype,
+    runtime_name: &'static str,
+    lock_subject: &'static str,
+}
+
+struct RuntimeLayout {
+    active_ids: Vec<String>,
+    capacity: usize,
+    raw_active_ids: Vec<String>,
+    raw_capacity: usize,
+    runtime_name: &'static str,
+    lock_subject: &'static str,
+}
+
+impl<R> RuntimeDriver<R>
+where
+    R: EventRuntime,
+{
+    fn new(inner: R, output_dtype: OutputDtype, layout: RuntimeLayout) -> Self {
+        let active_feature_count = layout.active_ids.len();
         Self {
             inner,
             symbols: Vec::new(),
-            feature_names,
-            n_features,
+            feature_names: complete_names(&layout.active_ids, layout.capacity),
+            raw_feature_names: complete_names(&layout.raw_active_ids, layout.raw_capacity),
             active_feature_count,
             output_dtype,
+            runtime_name: layout.runtime_name,
+            lock_subject: layout.lock_subject,
         }
+    }
+
+    fn set_output_dtype(&mut self, value: &str) -> PyResult<()> {
+        if self.inner.last_timestamp().is_some() {
+            return Err(PyValueError::new_err(format!(
+                "output_dtype cannot be changed after the {} has processed an event",
+                self.lock_subject
+            )));
+        }
+        self.output_dtype = OutputDtype::parse(value)?;
+        Ok(())
+    }
+
+    fn symbol(&mut self, name: &str) -> usize {
+        let symbol = symbols::intern(name);
+        if let Some(index) = self
+            .symbols
+            .iter()
+            .position(|candidate| *candidate == symbol)
+        {
+            return index;
+        }
+        self.symbols.push(symbol);
+        self.symbols.len() - 1
     }
 
     fn symbol_at(&self, handle: i64) -> PyResult<Symbol> {
@@ -568,18 +798,12 @@ impl FeatureExtractor {
             .and_then(|index| self.symbols.get(index).copied())
             .ok_or_else(|| {
                 PyValueError::new_err(format!(
-                    "unknown symbol handle {handle}; call FeatureExtractor.symbol(name) first"
+                    "unknown symbol handle {handle}; call {}.symbol(name) first",
+                    self.runtime_name
                 ))
             })
     }
 
-    /// Build an [`Event`] from the row's event kind and whichever payload
-    /// columns it needs. Each kind reads only its required columns; a missing
-    /// required column is a `ValueError`. This is the single source of truth for
-    /// the kind -> field mapping shared by [`update`](Self::update) (scalars) and
-    /// [`transform`](Self::transform) (one row of its columns).
-    // The argument list mirrors the extractor's event payload fields and the
-    // per-kind columns of the Python API, so it stays flat by design.
     #[allow(clippy::too_many_arguments)]
     fn build_event(
         &self,
@@ -625,6 +849,141 @@ impl FeatureExtractor {
                 )));
             }
         })
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn update(
+        &mut self,
+        kind: u8,
+        symbol: i64,
+        timestamp: i64,
+        price: Option<f64>,
+        volume: Option<f64>,
+        side: Option<u8>,
+        bid: Option<f64>,
+        ask: Option<f64>,
+    ) -> PyResult<()> {
+        let event = self.build_event(kind, symbol, timestamp, price, volume, side, bid, ask)?;
+        self.inner
+            .handle_event(event)
+            .map_err(|error| PyValueError::new_err(error.to_string()))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn transform<'py>(
+        &mut self,
+        py: Python<'py>,
+        kind: PyReadonlyArray1<'py, u8>,
+        symbol: PyReadonlyArray1<'py, i64>,
+        timestamp: PyReadonlyArray1<'py, i64>,
+        price: Option<PyReadonlyArray1<'py, f64>>,
+        volume: Option<PyReadonlyArray1<'py, f64>>,
+        side: Option<PyReadonlyArray1<'py, u8>>,
+        bid: Option<PyReadonlyArray1<'py, f64>>,
+        ask: Option<PyReadonlyArray1<'py, f64>>,
+    ) -> PyResult<Py<PyAny>> {
+        let kind = kind.as_slice()?;
+        let symbol = symbol.as_slice()?;
+        let timestamp = timestamp.as_slice()?;
+        let n_rows = kind.len();
+        if symbol.len() != n_rows || timestamp.len() != n_rows {
+            return Err(PyValueError::new_err(
+                "kind, symbol and timestamp must have the same length",
+            ));
+        }
+
+        let price = column("price", &price, n_rows)?;
+        let volume = column("volume", &volume, n_rows)?;
+        let side = column("side", &side, n_rows)?;
+        let bid = column("bid", &bid, n_rows)?;
+        let ask = column("ask", &ask, n_rows)?;
+
+        let mut events = Vec::with_capacity(n_rows);
+        for row in 0..n_rows {
+            let event = self
+                .build_event(
+                    kind[row],
+                    symbol[row],
+                    timestamp[row],
+                    price.map(|values| values[row]),
+                    volume.map(|values| values[row]),
+                    side.map(|values| values[row]),
+                    bid.map(|values| values[row]),
+                    ask.map(|values| values[row]),
+                )
+                .map_err(|error| {
+                    PyValueError::new_err(format!("row {row}: {}", error.value(py)))
+                })?;
+            events.push(event);
+        }
+
+        let mut previous_timestamp = self.inner.last_timestamp();
+        for (row, event) in events.iter().enumerate() {
+            if let Some(previous_timestamp) = previous_timestamp
+                && previous_timestamp > event.timestamp()
+            {
+                let error = FimlError::TimestampOutOfOrder {
+                    symbol: event.symbol(),
+                    event_kind: event.kind(),
+                    timestamp: event.timestamp(),
+                    previous_timestamp,
+                };
+                return Err(PyValueError::new_err(format!("row {row}: {error}")));
+            }
+            previous_timestamp = Some(event.timestamp());
+        }
+
+        let n_features = self.feature_names.len();
+        let mut output = OutputBuffer::new(self.output_dtype, n_rows * n_features);
+        for (row, event) in events.into_iter().enumerate() {
+            self.inner
+                .handle_event(event)
+                .map_err(|error| PyValueError::new_err(format!("row {row}: {error}")))?;
+            output.write_row(row, n_features, self.inner.values());
+        }
+        output.into_pyarray(py, n_rows, n_features)
+    }
+}
+
+fn values_to_pyarray(py: Python<'_>, dtype: OutputDtype, values: &[f64]) -> Py<PyAny> {
+    match dtype {
+        OutputDtype::Float32 => {
+            PyArray1::from_vec(py, values.iter().map(|&value| value as f32).collect())
+                .into_any()
+                .unbind()
+        }
+        OutputDtype::Float64 => PyArray1::from_slice(py, values).into_any().unbind(),
+    }
+}
+
+/// A configured, runnable feature extractor.
+#[pyclass(subclass)]
+pub struct FeatureExtractor {
+    driver: RuntimeDriver<CoreFeatureExtractor>,
+}
+
+impl FeatureExtractor {
+    fn from_core(inner: CoreFeatureExtractor, output_dtype: OutputDtype) -> Self {
+        let active_ids = inner
+            .feature_ids()
+            .iter()
+            .map(|id| id.as_str().to_owned())
+            .collect::<Vec<_>>();
+        let capacity = inner.feature_vector().capacity();
+        Self {
+            driver: RuntimeDriver::new(
+                inner,
+                output_dtype,
+                RuntimeLayout {
+                    active_ids: active_ids.clone(),
+                    capacity,
+                    raw_active_ids: active_ids,
+                    raw_capacity: capacity,
+                    runtime_name: "FeatureExtractor",
+                    lock_subject: "extractor",
+                },
+            ),
+        }
     }
 }
 
@@ -696,65 +1055,40 @@ impl FeatureExtractor {
     /// Numeric dtype used by arrays returned to Python.
     #[getter]
     fn output_dtype(&self) -> &'static str {
-        self.output_dtype.name()
+        self.driver.output_dtype.name()
     }
 
     /// Change the output dtype before the first event is processed.
     #[setter]
     fn set_output_dtype(&mut self, value: &str) -> PyResult<()> {
-        if self.inner.last_timestamp().is_some() {
-            return Err(PyValueError::new_err(
-                "output_dtype cannot be changed after the extractor has processed an event",
-            ));
-        }
-        self.output_dtype = OutputDtype::parse(value)?;
-        Ok(())
+        self.driver.set_output_dtype(value)
     }
 
     /// Intern `name` and return a stable integer handle to use in the `symbol`
     /// column of [`transform`](Self::transform) / [`update`](Self::update).
     fn symbol(&mut self, name: &str) -> usize {
-        let symbol = symbols::intern(name);
-        if let Some(index) = self.symbols.iter().position(|s| *s == symbol) {
-            return index;
-        }
-        self.symbols.push(symbol);
-        self.symbols.len() - 1
+        self.driver.symbol(name)
     }
 
     /// Feature (column) names in output order.
     fn feature_names(&self) -> Vec<String> {
-        self.feature_names.clone()
+        self.driver.feature_names.clone()
     }
 
     /// Number of feature columns.
     fn n_features(&self) -> usize {
-        self.n_features
+        self.driver.feature_names.len()
     }
 
     /// Number of configured outputs, excluding trailing reserved cells.
     fn active_feature_count(&self) -> usize {
-        self.active_feature_count
+        self.driver.active_feature_count
     }
 
     /// Current feature values in output order. A window cell is NaN until its
     /// configured warm-up policy is satisfied and a current value exists.
     fn values(&self, py: Python<'_>) -> Py<PyAny> {
-        match self.output_dtype {
-            OutputDtype::Float32 => {
-                let values: Vec<f32> = self
-                    .inner
-                    .feature_vector()
-                    .values()
-                    .iter()
-                    .map(|&value| value as f32)
-                    .collect();
-                PyArray1::from_vec(py, values).into_any().unbind()
-            }
-            OutputDtype::Float64 => PyArray1::from_slice(py, self.inner.feature_vector().values())
-                .into_any()
-                .unbind(),
-        }
+        values_to_pyarray(py, self.driver.output_dtype, self.driver.inner.values())
     }
 
     /// Apply a single event and update the feature vector. Useful for live
@@ -787,11 +1121,8 @@ impl FeatureExtractor {
         bid: Option<f64>,
         ask: Option<f64>,
     ) -> PyResult<()> {
-        let event = self.build_event(kind, symbol, timestamp, price, volume, side, bid, ask)?;
-        self.inner
-            .handle_event(event)
-            .map_err(|error| PyValueError::new_err(error.to_string()))?;
-        Ok(())
+        self.driver
+            .update(kind, symbol, timestamp, price, volume, side, bid, ask)
     }
 
     /// Replay a full event stream and return one feature row per input row.
@@ -838,69 +1169,170 @@ impl FeatureExtractor {
         bid: Option<PyReadonlyArray1<'py, f64>>,
         ask: Option<PyReadonlyArray1<'py, f64>>,
     ) -> PyResult<Py<PyAny>> {
-        let kind = kind.as_slice()?;
-        let symbol = symbol.as_slice()?;
-        let timestamp = timestamp.as_slice()?;
-        let n_rows = kind.len();
+        self.driver
+            .transform(py, kind, symbol, timestamp, price, volume, side, bid, ask)
+    }
+}
 
-        if symbol.len() != n_rows || timestamp.len() != n_rows {
-            return Err(PyValueError::new_err(
-                "kind, symbol and timestamp must have the same length",
-            ));
-        }
+/// Stateful raw-feature extraction plus fitted model-input transformations.
+#[pyclass(subclass)]
+pub struct ModelInputPipeline {
+    driver: RuntimeDriver<CorePipeline>,
+}
 
-        // Resolve each optional payload column to a slice once, validating its
-        // length here so the per-row hot loop only indexes (no allocation).
-        let price = column("price", &price, n_rows)?;
-        let volume = column("volume", &volume, n_rows)?;
-        let side = column("side", &side, n_rows)?;
-        let bid = column("bid", &bid, n_rows)?;
-        let ask = column("ask", &ask, n_rows)?;
+impl ModelInputPipeline {
+    fn from_spec(spec: &CoreModelInputSpec, output_dtype: OutputDtype) -> PyResult<Self> {
+        let raw_spec = spec.raw_feature_vector_spec();
+        let raw_vector = VecFeatureVector::new_of_length(
+            raw_spec.feature_vector_capacity(),
+            raw_spec.feature_vector_length(),
+        );
+        let model_vector = VecFeatureVector::new_of_length(
+            spec.feature_vector_capacity(),
+            spec.feature_vector_length(),
+        );
+        let final_ids = model_output_ids(spec);
+        let raw_ids = core_feature_ids(raw_spec);
+        let inner = spec
+            .build(raw_vector, model_vector)
+            .map_err(|error| PyValueError::new_err(error.to_string()))?;
+        Ok(Self {
+            driver: RuntimeDriver::new(
+                inner,
+                output_dtype,
+                RuntimeLayout {
+                    active_ids: final_ids,
+                    capacity: spec.feature_vector_capacity(),
+                    raw_active_ids: raw_ids,
+                    raw_capacity: raw_spec.feature_vector_capacity(),
+                    runtime_name: "ModelInputPipeline",
+                    lock_subject: "pipeline",
+                },
+            ),
+        })
+    }
+}
 
-        // All-or-nothing: build and validate every event, including ordering
-        // against both extractor state and earlier rows in this batch, before
-        // dispatching any event or allocating the output matrix.
-        let mut events = Vec::with_capacity(n_rows);
-        for row in 0..n_rows {
-            let event = self
-                .build_event(
-                    kind[row],
-                    symbol[row],
-                    timestamp[row],
-                    price.map(|column| column[row]),
-                    volume.map(|column| column[row]),
-                    side.map(|column| column[row]),
-                    bid.map(|column| column[row]),
-                    ask.map(|column| column[row]),
-                )
-                .map_err(|err| PyValueError::new_err(format!("row {row}: {}", err.value(py))))?;
-            events.push(event);
-        }
-        let mut previous_timestamp = self.inner.last_timestamp();
-        for (row, event) in events.iter().enumerate() {
-            if let Some(previous_timestamp) = previous_timestamp
-                && previous_timestamp > event.timestamp()
-            {
-                let error = FimlError::TimestampOutOfOrder {
-                    symbol: event.symbol(),
-                    event_kind: event.kind(),
-                    timestamp: event.timestamp(),
-                    previous_timestamp,
-                };
-                return Err(PyValueError::new_err(format!("row {row}: {error}")));
-            }
-            previous_timestamp = Some(event.timestamp());
-        }
+#[pymethods]
+impl ModelInputPipeline {
+    /// Compile a validated model-input spec into an independent runtime.
+    #[new]
+    #[pyo3(signature = (model_input_spec, output_dtype="float64"))]
+    fn new(model_input_spec: PyRef<'_, ModelInputSpec>, output_dtype: &str) -> PyResult<Self> {
+        Self::from_spec(&model_input_spec.core, OutputDtype::parse(output_dtype)?)
+    }
 
-        let n_features = self.n_features;
-        let mut output = OutputBuffer::new(self.output_dtype, n_rows * n_features);
-        for (row, event) in events.into_iter().enumerate() {
-            self.inner
-                .handle_event(event)
-                .map_err(|err| PyValueError::new_err(format!("row {row}: {err}")))?;
-            output.write_row(row, n_features, self.inner.feature_vector().values());
-        }
-        output.into_pyarray(py, n_rows, n_features)
+    /// Compile directly from strict canonical model-input JSON.
+    #[staticmethod]
+    #[pyo3(signature = (json, output_dtype="float64"))]
+    fn from_json(json: &str, output_dtype: &str) -> PyResult<Self> {
+        let spec: CoreModelInputSpec =
+            serde_json::from_str(json).map_err(|error| PyValueError::new_err(error.to_string()))?;
+        Self::from_spec(&spec, OutputDtype::parse(output_dtype)?)
+    }
+
+    /// Numeric dtype used by final and raw arrays returned to Python.
+    #[getter]
+    fn output_dtype(&self) -> &'static str {
+        self.driver.output_dtype.name()
+    }
+
+    /// Change the output dtype before the first event is processed.
+    #[setter]
+    fn set_output_dtype(&mut self, value: &str) -> PyResult<()> {
+        self.driver.set_output_dtype(value)
+    }
+
+    /// Intern a symbol and return its runtime-local integer handle.
+    fn symbol(&mut self, name: &str) -> usize {
+        self.driver.symbol(name)
+    }
+
+    /// Final model-input names, including reserved cells.
+    fn feature_names(&self) -> Vec<String> {
+        self.driver.feature_names.clone()
+    }
+
+    /// Raw diagnostic names, including raw reserved cells.
+    fn raw_feature_names(&self) -> Vec<String> {
+        self.driver.raw_feature_names.clone()
+    }
+
+    /// Complete final width, including reserved cells.
+    fn n_features(&self) -> usize {
+        self.driver.feature_names.len()
+    }
+
+    /// Active final output count, excluding reserved cells.
+    fn active_feature_count(&self) -> usize {
+        self.driver.active_feature_count
+    }
+
+    /// Current final transformed snapshot.
+    fn values(&self, py: Python<'_>) -> Py<PyAny> {
+        values_to_pyarray(py, self.driver.output_dtype, self.driver.inner.values())
+    }
+
+    /// Current raw feature snapshot for diagnostics.
+    fn raw_values(&self, py: Python<'_>) -> Py<PyAny> {
+        values_to_pyarray(py, self.driver.output_dtype, self.driver.inner.raw_values())
+    }
+
+    /// Apply one event and refresh both raw and final snapshots.
+    #[pyo3(signature = (
+        kind,
+        symbol,
+        timestamp,
+        *,
+        price=None,
+        volume=None,
+        side=None,
+        bid=None,
+        ask=None
+    ))]
+    #[allow(clippy::too_many_arguments)]
+    fn update(
+        &mut self,
+        kind: u8,
+        symbol: i64,
+        timestamp: i64,
+        price: Option<f64>,
+        volume: Option<f64>,
+        side: Option<u8>,
+        bid: Option<f64>,
+        ask: Option<f64>,
+    ) -> PyResult<()> {
+        self.driver
+            .update(kind, symbol, timestamp, price, volume, side, bid, ask)
+    }
+
+    /// Replay an event stream and return one final model row per event.
+    #[pyo3(signature = (
+        kind,
+        symbol,
+        timestamp,
+        *,
+        price=None,
+        volume=None,
+        side=None,
+        bid=None,
+        ask=None
+    ))]
+    #[allow(clippy::too_many_arguments)]
+    fn transform<'py>(
+        &mut self,
+        py: Python<'py>,
+        kind: PyReadonlyArray1<'py, u8>,
+        symbol: PyReadonlyArray1<'py, i64>,
+        timestamp: PyReadonlyArray1<'py, i64>,
+        price: Option<PyReadonlyArray1<'py, f64>>,
+        volume: Option<PyReadonlyArray1<'py, f64>>,
+        side: Option<PyReadonlyArray1<'py, u8>>,
+        bid: Option<PyReadonlyArray1<'py, f64>>,
+        ask: Option<PyReadonlyArray1<'py, f64>>,
+    ) -> PyResult<Py<PyAny>> {
+        self.driver
+            .transform(py, kind, symbol, timestamp, price, volume, side, bid, ask)
     }
 }
 
@@ -908,7 +1340,9 @@ impl FeatureExtractor {
 fn _fiml(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyWarmupPolicy>()?;
     m.add_class::<FeatureVectorSpec>()?;
+    m.add_class::<ModelInputSpec>()?;
     m.add_class::<FeatureExtractor>()?;
+    m.add_class::<ModelInputPipeline>()?;
     m.add("KIND_PRICE", KIND_PRICE)?;
     m.add("KIND_VOLUME", KIND_VOLUME)?;
     m.add("KIND_TRADE", KIND_TRADE)?;
