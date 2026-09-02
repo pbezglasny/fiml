@@ -1,11 +1,13 @@
-//! Owns the versioned feature-vector specification and its Serde adapter.
+//! Owns versioned feature and model-input specifications and Serde adapters.
 //!
-//! The module's intent is to keep model-layout metadata and wire-format rules
-//! at one seam. [`FeatureVectorSpec`] remains available without optional Cargo
-//! features; enabling the `serde` feature adds serialization and deserialization
-//! without changing the spec's public interface.
+//! The module's intent is to keep layout metadata and wire-format rules at one
+//! seam. The specification types remain available without optional Cargo
+//! features; enabling `serde` adds canonical serialization and strict
+//! deserialization without changing their public interfaces.
 
 mod feature_vector_spec;
+#[cfg(feature = "serde")]
+mod model_input_spec;
 #[cfg(feature = "serde")]
 mod serialization;
 

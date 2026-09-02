@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "fiml ModelInputSpec 1.0",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "feature_vector_capacity",
+    "feature_vector_length",
+    "raw_feature_vector_spec",
+    "transformations"
+  ],
+  "properties": {
+    "version": { "const": "1.0" },
+    "feature_vector_capacity": { "type": "integer", "minimum": 0 },
+    "feature_vector_length": { "type": "integer", "minimum": 0 },
+    "checksum": { "type": "string" },
+    "raw_feature_vector_spec": { "$ref": "feature-vector-spec.schema.json" },
+    "transformations": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/transformation" }
+    }
+  },
+  "$defs": {
+    "transformation": {
+      "oneOf": [
+        { "$ref": "#/$defs/identity" },
+        { "$ref": "#/$defs/standard_scale" }
+      ]
+    },
+    "identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "input", "output"],
+      "properties": {
+        "type": { "const": "identity" },
+        "input": { "$ref": "#/$defs/feature_id" },
+        "output": { "$ref": "#/$defs/output_feature_id" }
+      }
+    },
+    "standard_scale": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "input", "output", "mean", "scale"],
+      "properties": {
+        "type": { "const": "standard_scale" },
+        "input": { "$ref": "#/$defs/feature_id" },
+        "output": { "$ref": "#/$defs/output_feature_id" },
+        "mean": { "type": "number" },
+        "scale": { "type": "number", "exclusiveMinimum": 0 }
+      }
+    },
+    "feature_id": { "type": "string" },
+    "output_feature_id": {
+      "type": "string",
+      "not": { "pattern": "^__reserved_" }
+    }
+  }
+}
