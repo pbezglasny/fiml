@@ -6,8 +6,8 @@ use crate::order_book::{
     OrderBook, OrderBookUpdate, OrderBookUpdateOutcome, OrderBookUpdateRef, PreparedOrderBookUpdate,
 };
 use crate::{
-    EVENT_KIND_COUNT, Event, EventKind, FeatureId, FeatureVector, FimlError, Float,
-    InvalidArgumentError, LimitTarget, Result, Symbol,
+    EVENT_KIND_COUNT, Event, EventKind, FeatureId, FeatureVector, FimlError, InvalidArgumentError,
+    LimitTarget, Result, Symbol,
 };
 
 #[derive(Clone, Copy, Default)]
@@ -289,14 +289,13 @@ impl OrderBookStorage {
 /// The extractor owns the runtime feature state and the output feature vector.
 /// Handling an event updates the subscribed features directly in that vector
 /// without allocating on the event-processing path.
-pub struct FeatureExtractor<F, V>
+pub struct FeatureExtractor<V>
 where
-    F: Float,
-    V: FeatureVector<F = F>,
+    V: FeatureVector,
 {
     feature_vector: V,
     /// Runtime features indexed by the event router.
-    features: Box<[FeatureDerivation<F>]>,
+    features: Box<[FeatureDerivation]>,
     /// Output spans corresponding one-to-one with [`Self::features`].
     ///
     /// Each slice index is a runtime feature index. Its value is the contiguous
@@ -324,14 +323,13 @@ impl UpdateResult {
     }
 }
 
-impl<F, V> FeatureExtractor<F, V>
+impl<V> FeatureExtractor<V>
 where
-    F: Float,
-    V: FeatureVector<F = F>,
+    V: FeatureVector,
 {
     pub(crate) fn new(
         feature_vector: V,
-        compilation: Compilation<F>,
+        compilation: Compilation,
         configured_order_books: Vec<(Symbol, OrderBook)>,
     ) -> Result<Self> {
         debug_assert_eq!(compilation.features.len(), compilation.output_spans.len());
@@ -349,7 +347,7 @@ where
         })
     }
 
-    pub fn builder(output_vector: V) -> FeatureExtractorBuilder<F, V> {
+    pub fn builder(output_vector: V) -> FeatureExtractorBuilder<V> {
         FeatureExtractorBuilder::new(output_vector)
     }
 
@@ -404,7 +402,7 @@ where
         Ok(UpdateResult { features_updated })
     }
 
-    fn update_any_features(&mut self, event: &Event<F>) -> UpdateResult {
+    fn update_any_features(&mut self, event: &Event) -> UpdateResult {
         let any_features = self.event_router.any();
         Self::update_subscribers(
             &mut self.features,
@@ -418,7 +416,7 @@ where
         }
     }
 
-    fn update_event_features(&mut self, event: &Event<F>) -> UpdateResult {
+    fn update_event_features(&mut self, event: &Event) -> UpdateResult {
         let subscribed_features = self.event_router.route(event.symbol(), event.kind());
         Self::update_subscribers(
             &mut self.features,
@@ -434,7 +432,7 @@ where
     }
 
     #[must_use = "event errors must be handled before using updated feature values"]
-    pub fn handle_event(&mut self, event: Event<F>) -> Result<UpdateResult> {
+    pub fn handle_event(&mut self, event: Event) -> Result<UpdateResult> {
         // TODO: use separate counters for each symbol
         if let Some(previous_timestamp) = self.last_timestamp
             && previous_timestamp > event.timestamp()
@@ -519,11 +517,11 @@ where
     }
 
     fn update_subscribers(
-        features: &mut [FeatureDerivation<F>],
+        features: &mut [FeatureDerivation],
         output_spans: &[OutputSpan],
         feature_vector: &mut V,
         subscribers: &[u16],
-        event: &Event<F>,
+        event: &Event,
     ) {
         for &feature_index in subscribers {
             let feature_index = usize::from(feature_index);
@@ -533,7 +531,7 @@ where
     }
 
     fn update_order_book_subscribers(
-        features: &mut [FeatureDerivation<F>],
+        features: &mut [FeatureDerivation],
         output_spans: &[OutputSpan],
         feature_vector: &mut V,
         subscribers: &[u16],
@@ -571,7 +569,7 @@ mod tests {
 
     #[test]
     fn builder_infers_types_from_output_vector() {
-        let _builder = FeatureExtractor::builder(ArrayFeatureVector::<f64, 2>::new());
+        let _builder = FeatureExtractor::builder(ArrayFeatureVector::<2>::new());
     }
 
     #[test]
@@ -591,7 +589,7 @@ mod tests {
         };
         let first_id = FeatureId::from(&first_key);
         let second_id = FeatureId::from(&second_key);
-        let mut extractor = FeatureExtractor::builder(ArrayFeatureVector::<f64, 2>::new())
+        let mut extractor = FeatureExtractor::builder(ArrayFeatureVector::<2>::new())
             .add_feature(FeatureDefinition::with_default_id(first_key))
             .add_feature(FeatureDefinition::with_default_id(second_key))
             .build()
@@ -627,7 +625,7 @@ mod tests {
             source: FeatureSource::EveryEvent,
         };
 
-        let result = FeatureExtractor::builder(ArrayFeatureVector::<f64, 2>::new())
+        let result = FeatureExtractor::builder(ArrayFeatureVector::<2>::new())
             .add_feature(FeatureDefinition::with_default_id(key))
             .build();
 
@@ -694,7 +692,7 @@ mod tests {
     #[test]
     fn builder_configures_and_updates_order_book_by_symbol() {
         let symbol = Symbol::new("extractor-order-book");
-        let mut extractor = FeatureExtractor::builder(ArrayFeatureVector::<f64, 0>::new())
+        let mut extractor = FeatureExtractor::builder(ArrayFeatureVector::<0>::new())
             .add_order_book(symbol, OrderBook::new(UpdatePolicy::Contiguous, 4))
             .build()
             .unwrap();
@@ -730,7 +728,7 @@ mod tests {
             symbol,
             source: FeatureSource::Event(EventKind::OrderBookDelta),
         };
-        let mut extractor = FeatureExtractor::builder(ArrayFeatureVector::<f64, 2>::new())
+        let mut extractor = FeatureExtractor::builder(ArrayFeatureVector::<2>::new())
             .add_feature(FeatureDefinition::with_default_id(any_event))
             .add_feature(FeatureDefinition::with_default_id(raw_delta))
             .add_order_book(symbol, OrderBook::new(UpdatePolicy::Contiguous, 4))
@@ -780,7 +778,7 @@ mod tests {
             symbol: Symbol::GLOBAL,
             source: FeatureSource::EveryEvent,
         };
-        let mut extractor = FeatureExtractor::builder(ArrayFeatureVector::<f64, 1>::new())
+        let mut extractor = FeatureExtractor::builder(ArrayFeatureVector::<1>::new())
             .add_feature(FeatureDefinition::with_default_id(any_event))
             .add_order_book(symbol, OrderBook::new(UpdatePolicy::Contiguous, 4))
             .build()
@@ -834,7 +832,7 @@ mod tests {
             symbol,
             source: FeatureSource::Event(EventKind::OrderBookDelta),
         };
-        let mut extractor = FeatureExtractor::builder(ArrayFeatureVector::<f64, 1>::new())
+        let mut extractor = FeatureExtractor::builder(ArrayFeatureVector::<1>::new())
             .add_feature(FeatureDefinition::with_default_id(key))
             .build()
             .unwrap();
@@ -855,7 +853,7 @@ mod tests {
     #[test]
     fn builder_rejects_duplicate_order_books() {
         let symbol = Symbol::new("duplicate-extractor-order-book");
-        let result = FeatureExtractor::builder(ArrayFeatureVector::<f64, 0>::new())
+        let result = FeatureExtractor::builder(ArrayFeatureVector::<0>::new())
             .add_order_book(symbol, OrderBook::new(UpdatePolicy::Monotonic, 1))
             .add_order_book(symbol, OrderBook::new(UpdatePolicy::Contiguous, 2))
             .build();
@@ -892,7 +890,7 @@ mod tests {
         let features = vec![crate::features::derivation::day_of_week::build()].into_boxed_slice();
         let output_spans = vec![OutputSpan { start: 1, count: 1 }].into_boxed_slice();
 
-        let mut vector = FeatureExtractor::<f64, ArrayFeatureVector<f64, 2>> {
+        let mut vector = FeatureExtractor::<ArrayFeatureVector<2>> {
             feature_vector: ArrayFeatureVector::new(),
             features,
             output_spans,

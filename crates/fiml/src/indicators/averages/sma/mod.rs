@@ -6,7 +6,7 @@ use std::time::Duration;
 
 pub use indicator::{SimpleMovingAverage, SimpleMovingAverageTimed};
 
-use crate::{FimlError, Float, HeapRingBuffer, InvalidArgumentError, Result, WarmupPolicy};
+use crate::{FimlError, HeapRingBuffer, InvalidArgumentError, Result, WarmupPolicy};
 
 /// Calculates the final simple moving average after processing a slice of values.
 ///
@@ -23,17 +23,17 @@ use crate::{FimlError, Float, HeapRingBuffer, InvalidArgumentError, Result, Warm
 /// # Errors
 ///
 /// Returns [`FimlError::InvalidArgument`] when `window_length` is zero.
-pub fn sma<F: Float>(
-    values: &[F],
+pub fn sma(
+    values: &[f64],
     window_length: usize,
     warmup_policy: WarmupPolicy,
-) -> Result<Option<F>> {
+) -> Result<Option<f64>> {
     if window_length == 0 {
         return Err(FimlError::InvalidArgument(
             InvalidArgumentError::WindowPeriodZero,
         ));
     }
-    let mut calculator: SimpleMovingAverage<HeapRingBuffer<F>, F, 1> =
+    let mut calculator: SimpleMovingAverage<HeapRingBuffer<f64>, 1> =
         SimpleMovingAverage::new_heap(window_length, warmup_policy);
     calculator.add_window(window_length)?;
     for &value in values {
@@ -63,14 +63,14 @@ pub fn sma<F: Float>(
 ///
 /// Returns [`FimlError::InvalidArgument`] when the aggregation, window duration, or capacity is
 /// invalid.
-pub fn sma_timed<F: Float>(
-    values: &[(i64, F)],
+pub fn sma_timed(
+    values: &[(i64, f64)],
     window_duration: Duration,
     aggregation: Duration,
     capacity: usize,
     warmup_policy: WarmupPolicy,
-) -> Result<Option<F>> {
-    let mut calculator: SimpleMovingAverageTimed<HeapRingBuffer<(i64, F)>, F, 1> =
+) -> Result<Option<f64>> {
+    let mut calculator: SimpleMovingAverageTimed<HeapRingBuffer<(i64, f64)>, 1> =
         SimpleMovingAverageTimed::new_heap(aggregation, capacity, warmup_policy)?;
 
     calculator.add_window_with_duration(window_duration)?;

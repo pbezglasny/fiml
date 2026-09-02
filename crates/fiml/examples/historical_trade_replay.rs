@@ -98,9 +98,7 @@ where
     Ok(())
 }
 
-fn build_extractor(
-    symbol: Symbol,
-) -> Result<FeatureExtractor<f64, VecFeatureVector<f64>>, fiml::FimlError> {
+fn build_extractor(symbol: Symbol) -> Result<FeatureExtractor<VecFeatureVector>, fiml::FimlError> {
     let trade_price = FeatureSource::Field(EventField::TradePrice);
     let trade_volume = FeatureSource::Field(EventField::TradeVolume);
     let trade_event = FeatureSource::Event(EventKind::Trade);

@@ -6,8 +6,8 @@ use crate::features::feature_extractor::EventRouter;
 use crate::features::{FeatureRoute, FeatureSource, MAX_OUTPUTS_PER_INDICATOR};
 use crate::{
     DefinitionDurationField, EventField, EventKind, FeatureDefinition, FeatureId, FeatureKey,
-    FimlError, Float, IndicatorKind, InvalidArgumentError, InvalidIndicatorDefinitionError,
-    LimitTarget, Result, Symbol, WarmupPolicy,
+    FimlError, IndicatorKind, InvalidArgumentError, InvalidIndicatorDefinitionError, LimitTarget,
+    Result, Symbol, WarmupPolicy,
 };
 
 /// Contiguous section of the output feature vector written by one derivation.
@@ -29,9 +29,9 @@ pub(crate) struct OutputSpan {
 /// [`FeatureExtractor`](crate::FeatureExtractor). All temporary grouping maps
 /// have already been discarded. Entries in `features` and `output_spans`
 /// correspond one-to-one, while `feature_ids` follows output-vector order.
-pub(crate) struct Compilation<F: Float> {
+pub(crate) struct Compilation {
     /// Stateful derivations indexed by the event router.
-    pub(crate) features: Box<[FeatureDerivation<F>]>,
+    pub(crate) features: Box<[FeatureDerivation]>,
     /// Output-vector span belonging to each derivation at the same index.
     pub(crate) output_spans: Box<[OutputSpan]>,
     /// Stable feature IDs ordered by their final output-vector indices.
@@ -217,10 +217,10 @@ impl FeatureGroup {
 }
 
 /// Compile scalar definitions into grouped runtime derivations and routing state.
-pub(crate) fn compile<F: Float>(
+pub(crate) fn compile(
     definitions: Vec<FeatureDefinition>,
     output_count: usize,
-) -> Result<Compilation<F>> {
+) -> Result<Compilation> {
     if definitions.len() != output_count {
         return Err(FimlError::OutputCountMismatch {
             expected: definitions.len(),
@@ -289,7 +289,7 @@ pub(crate) fn compile<F: Float>(
             start: compiled_ids.len(),
             count: group.feature_ids.len(),
         };
-        let feature = build_group::<F>(&group).map_err(|error| {
+        let feature = build_group(&group).map_err(|error| {
             let reason = match error {
                 FimlError::InvalidArgument(reason) => {
                     InvalidIndicatorDefinitionError::InvalidArgument(reason)
@@ -444,7 +444,7 @@ fn group_key(index: usize, key: &FeatureKey) -> Result<(GroupKey, GroupOutput)> 
     }
 }
 
-fn build_group<F: Float>(group: &FeatureGroup) -> Result<FeatureDerivation<F>> {
+fn build_group(group: &FeatureGroup) -> Result<FeatureDerivation> {
     match (&group.key, &group.outputs) {
         (
             GroupKey::Sma {
@@ -741,7 +741,7 @@ mod tests {
             warmup_policy: WarmupPolicy::FullWindow,
         };
 
-        let compilation = compile::<f64>(
+        let compilation = compile(
             vec![
                 definition(sma_one),
                 definition(ema_two),
@@ -774,7 +774,7 @@ mod tests {
             FeatureDefinition::new(key, FeatureId::new("one")),
             FeatureDefinition::new(key, FeatureId::new("two")),
         ];
-        assert!(compile::<f64>(duplicate_key, 2).is_err());
+        assert!(compile(duplicate_key, 2).is_err());
 
         let duplicate_id = vec![
             FeatureDefinition::new(key, FeatureId::new("same")),
@@ -787,7 +787,7 @@ mod tests {
                 FeatureId::new("same"),
             ),
         ];
-        assert!(compile::<f64>(duplicate_id, 2).is_err());
+        assert!(compile(duplicate_id, 2).is_err());
     }
 
     #[test]
@@ -799,7 +799,7 @@ mod tests {
             warmup_policy: WarmupPolicy::FullWindow,
         });
 
-        assert!(compile::<f64>(vec![definition], 1).is_err());
+        assert!(compile(vec![definition], 1).is_err());
     }
 
     #[test]
@@ -812,7 +812,7 @@ mod tests {
             warmup_policy: WarmupPolicy::FullWindow,
         };
 
-        let error = compile::<f64>(vec![definition(key)], 1).err().unwrap();
+        let error = compile(vec![definition(key)], 1).err().unwrap();
         assert!(matches!(
             error,
             FimlError::InvalidIndicatorDefinition {
@@ -824,6 +824,6 @@ mod tests {
                 },
             }
         ));
-        assert!(compile::<f64>(Vec::new(), 1).is_err());
+        assert!(compile(Vec::new(), 1).is_err());
     }
 }

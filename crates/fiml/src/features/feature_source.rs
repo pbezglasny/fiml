@@ -1,4 +1,4 @@
-use crate::{Event, EventKind, Float};
+use crate::{Event, EventKind};
 
 /// Source of value to calculate feature
 /// Each event could provide multiple sources or
@@ -63,7 +63,7 @@ macro_rules! define_event_field {
                   }
               }
 
-              pub fn extract<F: Float>(self, event: &Event<F>) -> Option<F>
+              pub fn extract(self, event: &Event) -> Option<f64>
               {
                   match (self, event) {
                       $(

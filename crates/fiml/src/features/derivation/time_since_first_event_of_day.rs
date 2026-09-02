@@ -1,4 +1,3 @@
-use crate::Float;
 use crate::event::Event;
 use crate::features::compiler::OutputSpan;
 use crate::features::derivation::FeatureDerivation;
@@ -32,9 +31,9 @@ impl TimeSinceFirstEventOfDay {
         }
     }
 
-    pub(in crate::features) fn update<F: Float, O: FeatureVector<F = F>>(
+    pub(in crate::features) fn update<O: FeatureVector>(
         &mut self,
-        event: &Event<F>,
+        event: &Event,
         output_span: OutputSpan,
         output: &mut O,
     ) {
@@ -46,11 +45,11 @@ impl TimeSinceFirstEventOfDay {
             self.first_event_timestamp = timestamp;
         }
         let elapsed = timestamp.saturating_sub(self.first_event_timestamp).max(0);
-        output.set_value_at(output_span.start, F::from_usize(elapsed as usize));
+        output.set_value_at(output_span.start, elapsed as f64);
     }
 }
 
-pub(crate) fn build<F: Float>(utc_offset_millis: i64) -> FeatureDerivation<F> {
+pub(crate) fn build(utc_offset_millis: i64) -> FeatureDerivation {
     FeatureDerivation::TimeSinceFirstEventOfDay(TimeSinceFirstEventOfDay::new(utc_offset_millis))
 }
 
@@ -66,7 +65,7 @@ mod tests {
     #[test]
     fn measures_elapsed_since_first_event_of_the_day() {
         let aapl = symbols::intern("AAPL");
-        let mut fv: ArrayFeatureVector<f64, 1> = ArrayFeatureVector::new();
+        let mut fv: ArrayFeatureVector<1> = ArrayFeatureVector::new();
         let mut feat = TimeSinceFirstEventOfDay::new(0);
         let output_span = OutputSpan { start: 0, count: 1 };
 
@@ -87,7 +86,7 @@ mod tests {
     #[test]
     fn resets_at_the_next_day_boundary() {
         let aapl = symbols::intern("AAPL");
-        let mut fv: ArrayFeatureVector<f64, 1> = ArrayFeatureVector::new();
+        let mut fv: ArrayFeatureVector<1> = ArrayFeatureVector::new();
         let mut feat = TimeSinceFirstEventOfDay::new(0);
         let output_span = OutputSpan { start: 0, count: 1 };
 

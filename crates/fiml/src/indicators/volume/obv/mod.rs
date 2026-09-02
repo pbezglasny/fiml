@@ -6,9 +6,7 @@ pub use indicator::{ObvBucket, OnBalanceVolumeTimed};
 
 use std::time::Duration;
 
-use crate::{
-    FimlError, Float, HeapRingBuffer, IndicatorKind, InvalidArgumentError, Result, WarmupPolicy,
-};
+use crate::{FimlError, HeapRingBuffer, IndicatorKind, InvalidArgumentError, Result, WarmupPolicy};
 
 /// Calculates the final time-bucketed on-balance volume over a rolling window.
 ///
@@ -29,12 +27,12 @@ use crate::{
 /// # Errors
 ///
 /// Returns [`FimlError::InvalidArgument`] when the aggregation or window length is invalid.
-pub fn obv_timed<F: Float>(
-    trades: &[(i64, F, F)],
+pub fn obv_timed(
+    trades: &[(i64, f64, f64)],
     window_periods: usize,
     aggregation: Duration,
     warmup_policy: WarmupPolicy,
-) -> Result<Option<F>> {
+) -> Result<Option<f64>> {
     let capacity = window_periods
         .checked_add(1)
         .ok_or(FimlError::InvalidArgument(
@@ -42,7 +40,7 @@ pub fn obv_timed<F: Float>(
                 indicator: IndicatorKind::ObvTimed,
             },
         ))?;
-    let mut calculator: OnBalanceVolumeTimed<HeapRingBuffer<ObvBucket<F>>, F, 1> =
+    let mut calculator: OnBalanceVolumeTimed<HeapRingBuffer<ObvBucket>, 1> =
         OnBalanceVolumeTimed::new_heap(aggregation, capacity, warmup_policy)?;
     calculator.add_window_with_periods(window_periods)?;
     for &(timestamp, price, volume) in trades {

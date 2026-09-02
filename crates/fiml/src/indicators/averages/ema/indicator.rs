@@ -1,19 +1,16 @@
 use std::fmt::Display;
 use std::mem::MaybeUninit;
 
-use crate::{FimlError, Float, IntegerTarget, InvalidArgumentError, Result, WarmupPolicy};
+use crate::{FimlError, IntegerTarget, InvalidArgumentError, Result, WarmupPolicy};
 
 /// Represents a single Exponential Moving Average (EMA) window.
-pub struct EmaWindow<F: Float> {
+pub struct EmaWindow {
     period: usize,
-    multiplier: F,
-    moving_avg: Option<F>,
+    multiplier: f64,
+    moving_avg: Option<f64>,
 }
 
-impl<F> Display for EmaWindow<F>
-where
-    F: Float + Display,
-{
+impl Display for EmaWindow {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.moving_avg {
             Some(moving_avg) => write!(
@@ -34,20 +31,14 @@ where
 ///
 /// Number of windows is fixed at compile time, but they can be added dynamically until number of
 /// windows is reached. Windows must be added before any data is added to the EMA.
-pub struct ExponentialMovingAverage<T, const WINDOWS: usize>
-where
-    T: Float,
-{
-    windows: [MaybeUninit<EmaWindow<T>>; WINDOWS],
+pub struct ExponentialMovingAverage<const WINDOWS: usize> {
+    windows: [MaybeUninit<EmaWindow>; WINDOWS],
     window_count: usize,
     update_count: usize,
     warmup_policy: WarmupPolicy,
 }
 
-impl<T, const WINDOWS: usize> Display for ExponentialMovingAverage<T, WINDOWS>
-where
-    T: Float + Display,
-{
+impl<const WINDOWS: usize> Display for ExponentialMovingAverage<WINDOWS> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "EMA with {} windows:", self.window_count)?;
         for i in 0..self.window_count {
@@ -58,13 +49,10 @@ where
     }
 }
 
-impl<T, const WINDOWS: usize> ExponentialMovingAverage<T, WINDOWS>
-where
-    T: Float,
-{
+impl<const WINDOWS: usize> ExponentialMovingAverage<WINDOWS> {
     pub fn new(warmup_policy: WarmupPolicy) -> Self {
         Self {
-            windows: [const { MaybeUninit::<EmaWindow<T>>::uninit() }; WINDOWS],
+            windows: [const { MaybeUninit::<EmaWindow>::uninit() }; WINDOWS],
             window_count: 0,
             update_count: 0,
             warmup_policy,
@@ -93,7 +81,7 @@ where
                 target: IntegerTarget::Usize,
             },
         ))?;
-        let multiplier = T::from_usize(2).div(T::from_usize(divisor));
+        let multiplier = 2.0 / divisor as f64;
         self.windows[self.window_count].write(EmaWindow {
             period,
             multiplier,
@@ -112,20 +100,20 @@ where
         Ok(())
     }
 
-    pub fn update(&mut self, value: T) {
+    pub fn update(&mut self, value: f64) {
         self.update_count += 1;
         for i in 0..self.window_count {
             let window = unsafe { self.windows[i].assume_init_mut() };
             window.moving_avg = Some(if let Some(moving_avg) = window.moving_avg {
-                let retained = T::ONE.sub(window.multiplier);
-                value.mul(window.multiplier).add(moving_avg.mul(retained))
+                let retained = 1.0 - window.multiplier;
+                value * window.multiplier + moving_avg * retained
             } else {
                 value
             });
         }
     }
 
-    pub fn value_at(&self, index: usize) -> Option<T> {
+    pub fn value_at(&self, index: usize) -> Option<f64> {
         if !self.is_ready_at(index) {
             return None;
         }
@@ -148,8 +136,8 @@ where
         self.window_count > 0 && (0..self.window_count).all(|index| self.is_ready_at(index))
     }
 
-    pub fn values(&self) -> [T; WINDOWS] {
-        let mut result = [T::NAN; WINDOWS];
+    pub fn values(&self) -> [f64; WINDOWS] {
+        let mut result = [f64::NAN; WINDOWS];
         for (i, item) in result.iter_mut().enumerate().take(self.window_count) {
             if let Some(value) = self.value_at(i) {
                 *item = value;
@@ -169,7 +157,7 @@ mod tests {
 
     #[test]
     fn exponential_moving_average_updates() {
-        let mut ema: ExponentialMovingAverage<f64, 2> =
+        let mut ema: ExponentialMovingAverage<2> =
             ExponentialMovingAverage::new(WarmupPolicy::FirstValue);
         ema.add_window(3).unwrap();
         ema.add_window(5).unwrap();
@@ -189,7 +177,7 @@ mod tests {
 
     #[test]
     fn full_window_policy_withholds_ema_until_its_period_is_observed() {
-        let mut ema: ExponentialMovingAverage<f64, 2> =
+        let mut ema: ExponentialMovingAverage<2> =
             ExponentialMovingAverage::new(WarmupPolicy::FullWindow);
         ema.add_window(2).unwrap();
         ema.add_window(3).unwrap();
@@ -210,7 +198,7 @@ mod tests {
 
     #[test]
     fn exponential_moving_average_rejects_invalid_windows() {
-        let mut ema: ExponentialMovingAverage<f64, 1> =
+        let mut ema: ExponentialMovingAverage<1> =
             ExponentialMovingAverage::new(WarmupPolicy::FirstValue);
 
         assert!(ema.add_window(0).is_err());
@@ -218,7 +206,7 @@ mod tests {
         ema.add_window(3).unwrap();
         assert!(ema.add_window(5).is_err());
 
-        let mut updated_ema: ExponentialMovingAverage<f64, 2> =
+        let mut updated_ema: ExponentialMovingAverage<2> =
             ExponentialMovingAverage::new(WarmupPolicy::FirstValue);
         updated_ema.add_window(3).unwrap();
         updated_ema.update(10.0);

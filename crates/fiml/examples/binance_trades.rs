@@ -37,7 +37,7 @@ async fn main() -> anyhow::Result<()> {
     let symbol = symbols::intern(&symbol_name);
 
     let source = FeatureSource::Field(EventField::TradePrice);
-    let mut extractor = FeatureExtractor::builder(ArrayFeatureVector::<f64, 2>::new())
+    let mut extractor = FeatureExtractor::builder(ArrayFeatureVector::<2>::new())
         .add_feature(FeatureDefinition::with_default_id(FeatureKey::Ema {
             symbol,
             source,

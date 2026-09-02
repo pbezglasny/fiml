@@ -6,7 +6,7 @@ pub use trade_count::{CountBucket, TradeCountTimed};
 
 use std::time::Duration;
 
-use crate::{Float, HeapRingBuffer, Result, WarmupPolicy};
+use crate::{HeapRingBuffer, Result, WarmupPolicy};
 
 /// Calculates the final rolling trade count from a slice of trade timestamps.
 ///
@@ -26,13 +26,13 @@ use crate::{Float, HeapRingBuffer, Result, WarmupPolicy};
 /// # Errors
 ///
 /// Returns an error when the aggregation or window duration is invalid.
-pub fn trade_count_timed<F: Float>(
+pub fn trade_count_timed(
     timestamps: &[i64],
     window: Duration,
     aggregation: Duration,
     warmup_policy: WarmupPolicy,
-) -> Result<Option<F>> {
-    let mut calculator: TradeCountTimed<HeapRingBuffer<CountBucket>, F> =
+) -> Result<Option<f64>> {
+    let mut calculator: TradeCountTimed<HeapRingBuffer<CountBucket>> =
         TradeCountTimed::new_heap(aggregation, window, warmup_policy)?;
     for &timestamp in timestamps {
         calculator.update(timestamp);

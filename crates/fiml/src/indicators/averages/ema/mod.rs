@@ -4,7 +4,7 @@ mod indicator;
 
 pub use indicator::ExponentialMovingAverage;
 
-use crate::{Float, Result, WarmupPolicy};
+use crate::{Result, WarmupPolicy};
 
 /// Calculates the final exponential moving average after processing a slice of values.
 ///
@@ -22,12 +22,8 @@ use crate::{Float, Result, WarmupPolicy};
 /// # Errors
 ///
 /// Returns an error when `period` is zero or too large.
-pub fn ema<F: Float>(
-    values: &[F],
-    period: usize,
-    warmup_policy: WarmupPolicy,
-) -> Result<Option<F>> {
-    let mut calculator = ExponentialMovingAverage::<F, 1>::new(warmup_policy);
+pub fn ema(values: &[f64], period: usize, warmup_policy: WarmupPolicy) -> Result<Option<f64>> {
+    let mut calculator = ExponentialMovingAverage::<1>::new(warmup_policy);
     calculator.add_window(period)?;
     for &value in values {
         calculator.update(value);

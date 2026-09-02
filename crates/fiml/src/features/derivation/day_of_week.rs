@@ -1,4 +1,3 @@
-use crate::Float;
 use crate::event::Event;
 use crate::features::compiler::OutputSpan;
 use crate::features::derivation::FeatureDerivation;
@@ -14,20 +13,20 @@ const MILLIS_PER_DAY: i64 = 86_400_000;
 pub(crate) struct DayOfWeek;
 
 impl DayOfWeek {
-    pub(in crate::features) fn update<F: Float, O: FeatureVector<F = F>>(
+    pub(in crate::features) fn update<O: FeatureVector>(
         &mut self,
-        event: &Event<F>,
+        event: &Event,
         output_span: OutputSpan,
         output: &mut O,
     ) {
         // Unix epoch (1970-01-01) was a Thursday, index 4 in a Sunday-based week.
         let days = event.timestamp().div_euclid(MILLIS_PER_DAY);
         let dow = (days + 4).rem_euclid(7);
-        output.set_value_at(output_span.start, F::from_usize(dow as usize));
+        output.set_value_at(output_span.start, dow as f64);
     }
 }
 
-pub(crate) fn build<F: Float>() -> FeatureDerivation<F> {
+pub(crate) fn build() -> FeatureDerivation {
     FeatureDerivation::DayOfWeek(DayOfWeek)
 }
 
@@ -43,7 +42,7 @@ mod tests {
     #[test]
     fn day_of_week_reacts_to_every_event() {
         let aapl = symbols::intern("AAPL");
-        let mut fv: ArrayFeatureVector<f64, 1> = ArrayFeatureVector::new();
+        let mut fv: ArrayFeatureVector<1> = ArrayFeatureVector::new();
         let mut feat = DayOfWeek;
         let output_span = OutputSpan { start: 0, count: 1 };
 

@@ -7,21 +7,21 @@ use crate::features::derivation::{FeatureDerivation, write_outputs};
 use crate::indicators::{SimpleMovingAverage, SimpleMovingAverageTimed};
 use crate::vectors::FeatureVector;
 use crate::{
-    EventField, FimlError, Float, HeapRingBuffer, IndicatorKind, InvalidArgumentError, Result,
-    Symbol, WarmupPolicy,
+    EventField, FimlError, HeapRingBuffer, IndicatorKind, InvalidArgumentError, Result, Symbol,
+    WarmupPolicy,
 };
 
-pub(crate) struct SmaFeature<F: Float> {
+pub(crate) struct SmaFeature {
     symbol: Symbol,
     source: EventField,
-    sma: SimpleMovingAverage<HeapRingBuffer<F>, F, MAX_OUTPUTS_PER_INDICATOR>,
+    sma: SimpleMovingAverage<HeapRingBuffer<f64>, MAX_OUTPUTS_PER_INDICATOR>,
 }
 
-impl<F: Float> SmaFeature<F> {
+impl SmaFeature {
     pub(crate) fn new(
         symbol: Symbol,
         source: EventField,
-        sma: SimpleMovingAverage<HeapRingBuffer<F>, F, MAX_OUTPUTS_PER_INDICATOR>,
+        sma: SimpleMovingAverage<HeapRingBuffer<f64>, MAX_OUTPUTS_PER_INDICATOR>,
     ) -> Self {
         Self {
             symbol,
@@ -30,9 +30,9 @@ impl<F: Float> SmaFeature<F> {
         }
     }
 
-    pub(in crate::features) fn update<O: FeatureVector<F = F>>(
+    pub(in crate::features) fn update<O: FeatureVector>(
         &mut self,
-        event: &Event<F>,
+        event: &Event,
         output_span: OutputSpan,
         output: &mut O,
     ) {
@@ -45,17 +45,17 @@ impl<F: Float> SmaFeature<F> {
     }
 }
 
-pub(crate) struct SmaTimedFeature<F: Float> {
+pub(crate) struct SmaTimedFeature {
     symbol: Symbol,
     source: EventField,
-    sma: SimpleMovingAverageTimed<HeapRingBuffer<(i64, F)>, F, MAX_OUTPUTS_PER_INDICATOR>,
+    sma: SimpleMovingAverageTimed<HeapRingBuffer<(i64, f64)>, MAX_OUTPUTS_PER_INDICATOR>,
 }
 
-impl<F: Float> SmaTimedFeature<F> {
+impl SmaTimedFeature {
     pub(crate) fn new(
         symbol: Symbol,
         source: EventField,
-        sma: SimpleMovingAverageTimed<HeapRingBuffer<(i64, F)>, F, MAX_OUTPUTS_PER_INDICATOR>,
+        sma: SimpleMovingAverageTimed<HeapRingBuffer<(i64, f64)>, MAX_OUTPUTS_PER_INDICATOR>,
     ) -> Self {
         Self {
             symbol,
@@ -64,9 +64,9 @@ impl<F: Float> SmaTimedFeature<F> {
         }
     }
 
-    pub(in crate::features) fn update<O: FeatureVector<F = F>>(
+    pub(in crate::features) fn update<O: FeatureVector>(
         &mut self,
-        event: &Event<F>,
+        event: &Event,
         output_span: OutputSpan,
         output: &mut O,
     ) {
@@ -82,14 +82,14 @@ impl<F: Float> SmaTimedFeature<F> {
     }
 }
 
-pub(crate) fn build<F: Float>(
+pub(crate) fn build(
     symbol: Symbol,
     source: EventField,
     windows: &[usize],
     warmup_policy: WarmupPolicy,
-) -> Result<FeatureDerivation<F>> {
+) -> Result<FeatureDerivation> {
     let max_window = windows.iter().copied().max().unwrap_or(0);
-    let mut sma = SimpleMovingAverage::<HeapRingBuffer<F>, F, MAX_OUTPUTS_PER_INDICATOR>::new_heap(
+    let mut sma = SimpleMovingAverage::<HeapRingBuffer<f64>, MAX_OUTPUTS_PER_INDICATOR>::new_heap(
         max_window,
         warmup_policy,
     );
@@ -99,22 +99,21 @@ pub(crate) fn build<F: Float>(
     Ok(FeatureDerivation::Sma(SmaFeature::new(symbol, source, sma)))
 }
 
-pub(crate) fn build_timed<F: Float>(
+pub(crate) fn build_timed(
     symbol: Symbol,
     source: EventField,
     aggregation: Duration,
     periods: &[usize],
     max_period: usize,
     warmup_policy: WarmupPolicy,
-) -> Result<FeatureDerivation<F>> {
+) -> Result<FeatureDerivation> {
     let capacity = max_period.checked_add(1).ok_or(FimlError::InvalidArgument(
         InvalidArgumentError::TimedPeriodTooLarge {
             indicator: IndicatorKind::SmaTimed,
         },
     ))?;
     let mut sma = SimpleMovingAverageTimed::<
-        HeapRingBuffer<(i64, F)>,
-        F,
+        HeapRingBuffer<(i64, f64)>,
         MAX_OUTPUTS_PER_INDICATOR,
     >::new_heap(aggregation, capacity, warmup_policy)?;
     for &period in periods {
@@ -138,13 +137,11 @@ mod tests {
     fn grouped_sma_writes_adjacent_outputs() {
         let symbol = symbols::intern("AAPL");
         let mut feature =
-            match build::<f64>(symbol, EventField::Price, &[2, 3], WarmupPolicy::FullWindow)
-                .unwrap()
-            {
+            match build(symbol, EventField::Price, &[2, 3], WarmupPolicy::FullWindow).unwrap() {
                 FeatureDerivation::Sma(feature) => feature,
                 _ => unreachable!(),
             };
-        let mut output = ArrayFeatureVector::<f64, 2>::new();
+        let mut output = ArrayFeatureVector::<2>::new();
         let output_span = OutputSpan { start: 0, count: 2 };
 
         for value in [1.0, 2.0, 3.0] {
@@ -158,7 +155,7 @@ mod tests {
     #[test]
     fn sma_can_consume_trade_volume() {
         let symbol = symbols::intern("AAPL");
-        let mut feature = match build::<f64>(
+        let mut feature = match build(
             symbol,
             EventField::TradeVolume,
             &[2],
@@ -169,7 +166,7 @@ mod tests {
             FeatureDerivation::Sma(feature) => feature,
             _ => unreachable!(),
         };
-        let mut output = ArrayFeatureVector::<f64, 1>::new();
+        let mut output = ArrayFeatureVector::<1>::new();
         let output_span = OutputSpan { start: 0, count: 1 };
 
         feature.update(

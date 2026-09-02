@@ -1,5 +1,5 @@
 use crate::{
-    FeatureDefinition, FeatureExtractor, FeatureSource, FeatureVector, FimlError, Float,
+    FeatureDefinition, FeatureExtractor, FeatureSource, FeatureVector, FimlError,
     InvalidArgumentError,
 };
 
@@ -106,10 +106,9 @@ impl FeatureVectorSpec {
     /// Storage capacity must equal the configured model width and its active
     /// length must equal the number of definitions. Every cell is reset to
     /// `NaN`, including trailing reserved cells, before compilation.
-    pub fn build<F, V>(&self, mut output_vector: V) -> Result<FeatureExtractor<F, V>, FimlError>
+    pub fn build<V>(&self, mut output_vector: V) -> Result<FeatureExtractor<V>, FimlError>
     where
-        F: Float,
-        V: FeatureVector<F = F>,
+        V: FeatureVector,
     {
         if output_vector.capacity() != self.feature_vector_capacity {
             return Err(FimlError::FeatureVectorCapacityMismatch {
@@ -124,7 +123,7 @@ impl FeatureVectorSpec {
             });
         }
         for index in 0..output_vector.capacity() {
-            output_vector.set_value_at(index, F::NAN);
+            output_vector.set_value_at(index, f64::NAN);
         }
 
         let compilation =
@@ -253,7 +252,7 @@ mod tests {
     #[test]
     fn build_initializes_active_and_reserved_cells_to_nan() {
         let spec = FeatureVectorSpec::with_capacity([day_of_week("day")], 3).unwrap();
-        let mut output = ArrayFeatureVector::<f64, 3>::new_of_length(1);
+        let mut output = ArrayFeatureVector::<3>::new_of_length(1);
         output.set_value_at(0, 1.0);
         output.set_value_at(1, 2.0);
         output.set_value_at(2, 3.0);
@@ -280,11 +279,10 @@ mod tests {
     #[test]
     fn build_rejects_capacity_and_active_length_mismatches() {
         let spec = FeatureVectorSpec::with_capacity([day_of_week("day")], 3).unwrap();
-        let capacity_error =
-            match spec.build::<f64, _>(ArrayFeatureVector::<f64, 2>::new_of_length(1)) {
-                Err(error) => error,
-                Ok(_) => panic!("capacity mismatch should fail"),
-            };
+        let capacity_error = match spec.build(ArrayFeatureVector::<2>::new_of_length(1)) {
+            Err(error) => error,
+            Ok(_) => panic!("capacity mismatch should fail"),
+        };
         assert!(matches!(
             capacity_error,
             FimlError::FeatureVectorCapacityMismatch {
@@ -293,11 +291,10 @@ mod tests {
             }
         ));
 
-        let length_error =
-            match spec.build::<f64, _>(ArrayFeatureVector::<f64, 3>::new_of_length(2)) {
-                Err(error) => error,
-                Ok(_) => panic!("active length mismatch should fail"),
-            };
+        let length_error = match spec.build(ArrayFeatureVector::<3>::new_of_length(2)) {
+            Err(error) => error,
+            Ok(_) => panic!("active length mismatch should fail"),
+        };
         assert!(matches!(
             length_error,
             FimlError::OutputCountMismatch {

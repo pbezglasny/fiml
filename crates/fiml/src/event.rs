@@ -1,7 +1,7 @@
 use std::fmt;
 
 use crate::{
-    Float, Symbol,
+    Symbol,
     order_book::{OrderBookDelta, OrderBookSnapshot, OrderBookUpdate, OrderBookUpdateRef},
 };
 
@@ -39,16 +39,16 @@ impl fmt::Display for EventKind {
 }
 
 /// A price tick.
-pub struct PriceUpdate<F: Float> {
+pub struct PriceUpdate {
     pub symbol: Symbol,
-    pub value: F,
+    pub value: f64,
     pub timestamp: i64,
 }
 
 /// A volume tick.
-pub struct VolumeUpdate<F: Float> {
+pub struct VolumeUpdate {
     pub symbol: Symbol,
-    pub value: F,
+    pub value: f64,
     pub timestamp: i64,
 }
 
@@ -62,10 +62,10 @@ pub enum TradeSide {
 }
 
 /// A trade tick carrying price and volume.
-pub struct TradeUpdate<F: Float> {
+pub struct TradeUpdate {
     pub symbol: Symbol,
-    pub price: F,
-    pub volume: F,
+    pub price: f64,
+    pub volume: f64,
     pub timestamp: i64,
     pub side: Option<TradeSide>,
 }
@@ -112,16 +112,16 @@ impl OrderBookSnapshotEvent {
 }
 
 /// An incoming change. Each variant carries only the payload its kind needs.
-pub enum Event<F: Float> {
-    Price(PriceUpdate<F>),
-    Volume(VolumeUpdate<F>),
-    Trade(TradeUpdate<F>),
+pub enum Event {
+    Price(PriceUpdate),
+    Volume(VolumeUpdate),
+    Trade(TradeUpdate),
     OrderBookDelta(OrderBookDeltaEvent),
     OrderBookSnapshot(OrderBookSnapshotEvent),
     Time(TimeUpdate),
 }
 
-impl<F: Float> Event<F> {
+impl Event {
     /// Routing tag for this event.
     pub fn kind(&self) -> EventKind {
         match self {
@@ -176,7 +176,7 @@ impl<F: Float> Event<F> {
         }
     }
 
-    pub fn price(symbol: Symbol, value: F, timestamp: i64) -> Self {
+    pub fn price(symbol: Symbol, value: f64, timestamp: i64) -> Self {
         Event::Price(PriceUpdate {
             symbol,
             value,
@@ -184,7 +184,7 @@ impl<F: Float> Event<F> {
         })
     }
 
-    pub fn volume(symbol: Symbol, value: F, timestamp: i64) -> Self {
+    pub fn volume(symbol: Symbol, value: f64, timestamp: i64) -> Self {
         Event::Volume(VolumeUpdate {
             symbol,
             value,
@@ -194,8 +194,8 @@ impl<F: Float> Event<F> {
 
     pub fn trade(
         symbol: Symbol,
-        price: F,
-        volume: F,
+        price: f64,
+        volume: f64,
         timestamp: i64,
         side: Option<TradeSide>,
     ) -> Self {

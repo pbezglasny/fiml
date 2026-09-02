@@ -48,16 +48,6 @@ not yet exposed as a feature derivation.
 
 ```mermaid
 classDiagram
-    class Float {
-        <<trait>>
-        ZERO
-        ONE
-        NAN
-        from_usize()
-    }
-    Float <|.. f32
-    Float <|.. f64
-
     class RingBuffer {
         <<trait>>
         type Item
@@ -72,7 +62,6 @@ classDiagram
 
     class FeatureVector {
         <<trait>>
-        type F: Float
         values()
         value_at()
         capacity()
@@ -84,23 +73,12 @@ classDiagram
     FeatureVector <|.. ArrayFeatureVector
     FeatureVector <|.. VecFeatureVector
 
-    class Transformation {
-        <<trait>>
-        type F: Float
-        type OutputVector
-        transform()
-        output_values()
-    }
-    Transformation <|.. StandardScaler
-    Transformation <|.. ParallelTransformer
 ```
 
 | Type | Role |
 |---|---|
-| `Float` | Numeric contract used by events, indicators, derivations, and feature vectors. |
 | `RingBuffer` | Bounded history contract implemented by stack- and heap-backed buffers. |
-| `FeatureVector` | Mutable output storage. `ArrayFeatureVector<F, N>` avoids allocation; `VecFeatureVector<F>` chooses size at runtime. |
-| `Transformation` | Independent post-processing interface currently implemented by `StandardScaler` and `ParallelTransformer`; it is not owned by the extractor. |
+| `FeatureVector` | Mutable `f64` output storage. `ArrayFeatureVector<N>` avoids allocation; `VecFeatureVector` chooses size at runtime. |
 | `WarmupPolicy` | Shared readiness policy for windowed calculations. |
 | `FimlError` | Shared public error type; `Result<T>` aliases `Result<T, FimlError>`. |
 
@@ -123,8 +101,8 @@ flowchart LR
     Builder *-- Output["V: FeatureVector"]
     Builder --> Compiler["compiler::compile"]
     Compiler --> Groups["FeatureGroup"]
-    Groups --> Compilation["Compilation<F>"]
-    Compilation *-- Derivations["Box<[FeatureDerivation<F>]> "]
+    Groups --> Compilation["Compilation"]
+    Compilation *-- Derivations["Box<[FeatureDerivation]> "]
     Compilation *-- Spans["Box<[OutputSpan]>"]
     Compilation *-- Ids["Box<[FeatureId]>"]
     Compilation *-- Router["EventRouter"]
@@ -137,10 +115,10 @@ flowchart LR
 | `FeatureId` | Public | Output lookup/schema name; it may be explicit or deterministically generated from a key. |
 | `FeatureSource` | Public | `Field(EventField)`, `Event(EventKind)`, or `EveryEvent`. |
 | `EventField` | Public | Extractable scalar event fields: price, volume, trade price, and trade volume. |
-| `FeatureExtractorBuilder<F, V>` | Public | Collects scalar definitions and owns the caller-selected output vector until `build`. |
+| `FeatureExtractorBuilder<V>` | Public | Collects scalar definitions and owns the caller-selected output vector until `build`. |
 | `FeatureGroup` / `GroupKey` | Internal | Cold-path grouping state for definitions that can share calculation history. |
 | `OutputSpan` | Internal | Start/count of adjacent output cells written by one derivation. |
-| `Compilation<F>` | Internal | Validated derivations, spans, IDs, and routing state handed to the extractor. |
+| `Compilation` | Internal | Validated derivations, spans, IDs, and routing state handed to the extractor. |
 
 The compiler rejects duplicate keys and IDs, validates windows and sources,
 groups compatible definitions, assigns contiguous output spans, and constructs
@@ -150,12 +128,12 @@ the router. Temporary maps are dropped before event processing.
 
 | `FeatureKey` variant | Runtime derivation | Calculation state | Route |
 |---|---|---|---|
-| `Sma` | `SmaFeature<F>` | `SimpleMovingAverage<HeapRingBuffer<F>, F, 16>` | Event kind selected by `EventField` and the configured symbol. |
-| `Ema` | `EmaFeature<F>` | `ExponentialMovingAverage<F, 16>` | Event kind selected by `EventField` and the configured symbol. |
-| `Cvd` | `CvdFeature<F>` | `CumulativeVolumeDelta<HeapRingBuffer<F>, F, 16>` | Trade events for the configured symbol. |
-| `SmaTimed` | `SmaTimedFeature<F>` | `SimpleMovingAverageTimed<HeapRingBuffer<(i64, F)>, F, 16>` | Every event, so time advances even without a matching scalar sample. |
-| `ObvTimed` | `ObvTimedFeature<F>` | `OnBalanceVolumeTimed<HeapRingBuffer<ObvBucket<F>>, F, 16>` | Every event. |
-| `TradeCountTimed` | `TradeCountTimedFeature<F>` | `TradeCountTimed<HeapRingBuffer<CountBucket>, F>` | Every event. |
+| `Sma` | `SmaFeature` | `SimpleMovingAverage<HeapRingBuffer<f64>, 16>` | Event kind selected by `EventField` and the configured symbol. |
+| `Ema` | `EmaFeature` | `ExponentialMovingAverage<16>` | Event kind selected by `EventField` and the configured symbol. |
+| `Cvd` | `CvdFeature` | `CumulativeVolumeDelta<HeapRingBuffer<f64>, 16>` | Trade events for the configured symbol. |
+| `SmaTimed` | `SmaTimedFeature` | `SimpleMovingAverageTimed<HeapRingBuffer<(i64, f64)>, 16>` | Every event, so time advances even without a matching scalar sample. |
+| `ObvTimed` | `ObvTimedFeature` | `OnBalanceVolumeTimed<HeapRingBuffer<ObvBucket>, 16>` | Every event. |
+| `TradeCountTimed` | `TradeCountTimedFeature` | `TradeCountTimed<HeapRingBuffer<CountBucket>>` | Every event. |
 | `DayOfWeek` | `DayOfWeek` | Clock state in the derivation. | Every event. |
 | `TimeSinceFirstEventOfDay` | `TimeSinceFirstEventOfDay` | Clock state in the derivation. | Every event. |
 
@@ -166,7 +144,7 @@ outputs that can share one runtime derivation.
 
 ```mermaid
 flowchart LR
-    Event["Event<F>"] --> Kind["EventKind"]
+    Event["Event"] --> Kind["EventKind"]
     Event --> Symbol
     Event --> Timestamp
 
@@ -196,19 +174,19 @@ by time events and global feature keys.
 ```mermaid
 flowchart LR
     Builder["FeatureExtractor::builder(output)"] --> Compile["build / compile"]
-    Compile --> Extractor["FeatureExtractor<F, V>"]
-    Extractor *-- Vector["V: FeatureVector<F=F>"]
-    Extractor *-- Features["Box<[FeatureDerivation<F>]> "]
+    Compile --> Extractor["FeatureExtractor<V>"]
+    Extractor *-- Vector["V: FeatureVector"]
+    Extractor *-- Features["Box<[FeatureDerivation]> "]
     Extractor *-- Spans["Box<[OutputSpan]>"]
     Extractor *-- Ids["Box<[FeatureId]>"]
     Extractor *-- Router["EventRouter"]
-    Incoming["Event<F>"] -->|handle_event| Extractor
+    Incoming["Event"] -->|handle_event| Extractor
     Router --> Features
     Features -->|write assigned span| Vector
 ```
 
-`FeatureExtractor<F, V>` is the single runtime owner. It uses static dispatch
-through the closed `FeatureDerivation<F>` enum; there are no boxed feature
+`FeatureExtractor<V>` is the single runtime owner. It uses static dispatch
+through the closed `FeatureDerivation` enum; there are no boxed feature
 trait objects. `handle_event` performs no allocation: it validates the global
 timestamp watermark, runs symbol/kind subscribers, runs always-subscribers,
 and writes directly into `V`.
@@ -220,12 +198,12 @@ Public lookup/read methods are `last_timestamp`, `feature_vector`,
 
 | Standalone type | History/state | Extractor derivation |
 |---|---|---|
-| `SimpleMovingAverage<R, F, WINDOWS>` | `R::Item = F`; inline window array | `SmaFeature` |
-| `SimpleMovingAverageTimed<R, F, WINDOWS>` | `R::Item = (i64, F)` | `SmaTimedFeature` |
-| `ExponentialMovingAverage<F, WINDOWS>` | Inline EMA window array | `EmaFeature` |
-| `CumulativeVolumeDelta<R, F, WINDOWS>` | `R::Item = F` | `CvdFeature` |
-| `OnBalanceVolumeTimed<R, F, WINDOWS>` | `R::Item = ObvBucket<F>` | `ObvTimedFeature` |
-| `TradeCountTimed<R, F>` | `R::Item = CountBucket` | `TradeCountTimedFeature` |
+| `SimpleMovingAverage<R, WINDOWS>` | `R::Item = f64`; inline window array | `SmaFeature` |
+| `SimpleMovingAverageTimed<R, WINDOWS>` | `R::Item = (i64, f64)` | `SmaTimedFeature` |
+| `ExponentialMovingAverage<WINDOWS>` | Inline EMA window array | `EmaFeature` |
+| `CumulativeVolumeDelta<R, WINDOWS>` | `R::Item = f64` | `CvdFeature` |
+| `OnBalanceVolumeTimed<R, WINDOWS>` | `R::Item = ObvBucket` | `ObvTimedFeature` |
+| `TradeCountTimed<R>` | `R::Item = CountBucket` | `TradeCountTimedFeature` |
 
 Standalone indicators can use stack-backed history when capacity is known at
 compile time. Compiled feature derivations use heap-backed history because
@@ -245,7 +223,7 @@ flowchart LR
 ```
 
 Order-book prices and sizes use `rust_decimal::Decimal`, independently of the
-extractor's `Float` abstraction. `BookSide` and its ordered-map key are internal;
+extractor's `f64` feature calculations. `BookSide` and its ordered-map key are internal;
 updates, snapshots, policies, outcomes, errors, and query results are public.
 
 ## Serialization boundary
@@ -261,9 +239,9 @@ remain private, and core does not depend on `serde_json` at runtime.
 flowchart LR
     PySpec["Python FeatureVectorSpec"] *-- RustSpec["Rust FeatureVectorSpec"]
     RustSpec *-- Definitions["Vec<FeatureDefinition>"]
-    PyExtractor["Python FeatureExtractor"] *-- Core["FeatureExtractor<f64, VecFeatureVector<f64>>"]
+    PyExtractor["Python FeatureExtractor"] *-- Core["FeatureExtractor<VecFeatureVector>"]
     PyExtractor *-- Handles["Vec<Symbol>"]
-    PyExtractor --> Events["Event<f64>"]
+    PyExtractor --> Events["Event"]
     Core --> Numpy["NumPy float32/float64 snapshots"]
 ```
 

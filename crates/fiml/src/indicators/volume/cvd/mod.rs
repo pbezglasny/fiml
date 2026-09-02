@@ -4,9 +4,7 @@ mod indicator;
 
 pub use indicator::CumulativeVolumeDelta;
 
-use crate::{
-    FimlError, Float, HeapRingBuffer, InvalidArgumentError, Result, TradeSide, WarmupPolicy,
-};
+use crate::{FimlError, HeapRingBuffer, InvalidArgumentError, Result, TradeSide, WarmupPolicy};
 
 /// Calculates the final cumulative volume delta over a rolling trade window.
 ///
@@ -24,17 +22,17 @@ use crate::{
 /// # Errors
 ///
 /// Returns [`FimlError::InvalidArgument`] when `window_length` is zero.
-pub fn cvd<F: Float>(
-    trades: &[(F, TradeSide)],
+pub fn cvd(
+    trades: &[(f64, TradeSide)],
     window_length: usize,
     warmup_policy: WarmupPolicy,
-) -> Result<Option<F>> {
+) -> Result<Option<f64>> {
     if window_length == 0 {
         return Err(FimlError::InvalidArgument(
             InvalidArgumentError::WindowPeriodZero,
         ));
     }
-    let mut calculator: CumulativeVolumeDelta<HeapRingBuffer<F>, F, 1> =
+    let mut calculator: CumulativeVolumeDelta<HeapRingBuffer<f64>, 1> =
         CumulativeVolumeDelta::new_heap(window_length, warmup_policy);
     calculator.add_window(window_length)?;
     for &(volume, trade_side) in trades {

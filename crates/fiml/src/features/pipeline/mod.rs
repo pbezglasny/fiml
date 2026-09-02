@@ -8,9 +8,9 @@ mod specs;
 
 pub use specs::{ModelInputSpec, TransformationDefinition};
 
-use crate::{Event, FeatureExtractor, FeatureId, FeatureVector, Float, Result, UpdateResult};
+use crate::{Event, FeatureExtractor, FeatureId, FeatureVector, Result, UpdateResult};
 
-enum ScalarOperation<F> {
+enum ScalarOperation {
     Identity {
         input_index: usize,
         output_index: usize,
@@ -18,33 +18,31 @@ enum ScalarOperation<F> {
     StandardScale {
         input_index: usize,
         output_index: usize,
-        mean: F,
-        inverse_scale: F,
+        mean: f64,
+        inverse_scale: f64,
     },
 }
 
 /// Allocation-free event runtime for raw extraction and final model input.
-pub struct Pipeline<F, RawV, ModelV>
+pub struct Pipeline<RawV, ModelV>
 where
-    F: Float,
-    RawV: FeatureVector<F = F>,
-    ModelV: FeatureVector<F = F>,
+    RawV: FeatureVector,
+    ModelV: FeatureVector,
 {
-    feature_extractor: FeatureExtractor<F, RawV>,
-    operations: Box<[ScalarOperation<F>]>,
+    feature_extractor: FeatureExtractor<RawV>,
+    operations: Box<[ScalarOperation]>,
     model_vector: ModelV,
     output_ids: Box<[FeatureId]>,
 }
 
-impl<F, RawV, ModelV> Pipeline<F, RawV, ModelV>
+impl<RawV, ModelV> Pipeline<RawV, ModelV>
 where
-    F: Float,
-    RawV: FeatureVector<F = F>,
-    ModelV: FeatureVector<F = F>,
+    RawV: FeatureVector,
+    ModelV: FeatureVector,
 {
     /// Applies an accepted event to raw features and then refreshes model input.
     #[must_use = "event errors must be handled before using updated model-input values"]
-    pub fn handle_event(&mut self, event: Event<F>) -> Result<UpdateResult> {
+    pub fn handle_event(&mut self, event: Event) -> Result<UpdateResult> {
         let update_result = self.feature_extractor.handle_event(event)?;
         let raw_values = self.feature_extractor.feature_vector().values();
         for operation in &self.operations {
@@ -70,12 +68,12 @@ where
     }
 
     /// Returns the raw extractor vector, including reserved cells.
-    pub fn raw_values(&self) -> &[F] {
+    pub fn raw_values(&self) -> &[f64] {
         self.feature_extractor.feature_vector().values()
     }
 
     /// Returns final model input, including reserved cells.
-    pub fn values(&self) -> &[F] {
+    pub fn values(&self) -> &[f64] {
         self.model_vector.values()
     }
 
@@ -132,45 +130,38 @@ mod tests {
         )
     }
 
-    macro_rules! test_scalar_transformations {
-        ($name:ident, $float:ty) => {
-            #[test]
-            fn $name() {
-                let raw_spec = FeatureVectorSpec::new([day_of_week("day")]).unwrap();
-                let spec = ModelInputSpec::new(
-                    raw_spec,
-                    [
-                        TransformationDefinition::identity(
-                            FeatureId::new("day"),
-                            FeatureId::new("identity"),
-                        ),
-                        TransformationDefinition::standard_scale(
-                            FeatureId::new("day"),
-                            FeatureId::new("scaled"),
-                            2.0 as $float,
-                            2.0 as $float,
-                        ),
-                    ],
-                )
-                .unwrap();
-                let mut pipeline = spec
-                    .build(
-                        ArrayFeatureVector::<$float, 1>::new(),
-                        ArrayFeatureVector::<$float, 2>::new(),
-                    )
-                    .unwrap();
+    #[test]
+    fn identity_and_standard_scaling_work() {
+        let raw_spec = FeatureVectorSpec::new([day_of_week("day")]).unwrap();
+        let spec = ModelInputSpec::new(
+            raw_spec,
+            [
+                TransformationDefinition::identity(
+                    FeatureId::new("day"),
+                    FeatureId::new("identity"),
+                ),
+                TransformationDefinition::standard_scale(
+                    FeatureId::new("day"),
+                    FeatureId::new("scaled"),
+                    2.0,
+                    2.0,
+                ),
+            ],
+        )
+        .unwrap();
+        let mut pipeline = spec
+            .build(
+                ArrayFeatureVector::<1>::new(),
+                ArrayFeatureVector::<2>::new(),
+            )
+            .unwrap();
 
-                assert!(pipeline.values().iter().all(|value| value.is_nan()));
-                pipeline.handle_event(Event::time(0)).unwrap();
+        assert!(pipeline.values().iter().all(|value| value.is_nan()));
+        pipeline.handle_event(Event::time(0)).unwrap();
 
-                assert_eq!(pipeline.raw_values(), &[4.0 as $float]);
-                assert_eq!(pipeline.values(), &[4.0 as $float, 1.0 as $float]);
-            }
-        };
+        assert_eq!(pipeline.raw_values(), &[4.0]);
+        assert_eq!(pipeline.values(), &[4.0, 1.0]);
     }
-
-    test_scalar_transformations!(identity_and_standard_scaling_work_for_f32, f32);
-    test_scalar_transformations!(identity_and_standard_scaling_work_for_f64, f64);
 
     #[test]
     fn authored_order_is_final_order_and_raw_and_final_ids_are_separate() {
@@ -202,8 +193,8 @@ mod tests {
 
         let mut pipeline = spec
             .build(
-                ArrayFeatureVector::<f64, 2>::new(),
-                ArrayFeatureVector::<f64, 4>::new_of_length(2),
+                ArrayFeatureVector::<2>::new(),
+                ArrayFeatureVector::<4>::new_of_length(2),
             )
             .unwrap();
         pipeline.handle_event(Event::time(0)).unwrap();
@@ -231,8 +222,8 @@ mod tests {
         .unwrap();
         let mut pipeline = spec
             .build(
-                ArrayFeatureVector::<f64, 2>::new(),
-                ArrayFeatureVector::<f64, 1>::new(),
+                ArrayFeatureVector::<2>::new(),
+                ArrayFeatureVector::<1>::new(),
             )
             .unwrap();
 
@@ -258,8 +249,8 @@ mod tests {
         .unwrap();
         let mut pipeline = spec
             .build(
-                ArrayFeatureVector::<f64, 1>::new(),
-                ArrayFeatureVector::<f64, 1>::new(),
+                ArrayFeatureVector::<1>::new(),
+                ArrayFeatureVector::<1>::new(),
             )
             .unwrap();
 
@@ -287,7 +278,7 @@ mod tests {
 
     #[test]
     fn rejects_unknown_duplicate_and_reserved_ids_and_insufficient_capacity() {
-        let unknown = ModelInputSpec::<f64>::new(
+        let unknown = ModelInputSpec::new(
             FeatureVectorSpec::new([day_of_week("day")]).unwrap(),
             [TransformationDefinition::identity(
                 FeatureId::new("missing"),
@@ -303,7 +294,7 @@ mod tests {
             }
         ));
 
-        let duplicate = ModelInputSpec::<f64>::new(
+        let duplicate = ModelInputSpec::new(
             FeatureVectorSpec::new([day_of_week("day")]).unwrap(),
             [
                 TransformationDefinition::identity(FeatureId::new("day"), FeatureId::new("output")),
@@ -319,7 +310,7 @@ mod tests {
             }
         ));
 
-        let reserved = ModelInputSpec::<f64>::new(
+        let reserved = ModelInputSpec::new(
             FeatureVectorSpec::new([day_of_week("day")]).unwrap(),
             [TransformationDefinition::identity(
                 FeatureId::new("day"),
@@ -335,7 +326,7 @@ mod tests {
             }
         ));
 
-        let capacity = ModelInputSpec::<f64>::with_capacity(
+        let capacity = ModelInputSpec::with_capacity(
             FeatureVectorSpec::new([day_of_week("day")]).unwrap(),
             [TransformationDefinition::identity(
                 FeatureId::new("day"),
@@ -405,7 +396,7 @@ mod tests {
     #[test]
     fn rejects_raw_and_model_storage_mismatches() {
         let make_spec = || {
-            ModelInputSpec::<f64>::with_capacity(
+            ModelInputSpec::with_capacity(
                 FeatureVectorSpec::new([day_of_week("day")]).unwrap(),
                 [TransformationDefinition::identity(
                     FeatureId::new("day"),
@@ -417,8 +408,8 @@ mod tests {
         };
 
         let capacity_error = match make_spec().build(
-            ArrayFeatureVector::<f64, 1>::new(),
-            ArrayFeatureVector::<f64, 1>::new(),
+            ArrayFeatureVector::<1>::new(),
+            ArrayFeatureVector::<1>::new(),
         ) {
             Err(error) => error,
             Ok(_) => panic!("model capacity mismatch should fail"),
@@ -432,8 +423,8 @@ mod tests {
         ));
 
         let length_error = match make_spec().build(
-            ArrayFeatureVector::<f64, 1>::new(),
-            ArrayFeatureVector::<f64, 2>::new_of_length(0),
+            ArrayFeatureVector::<1>::new(),
+            ArrayFeatureVector::<2>::new_of_length(0),
         ) {
             Err(error) => error,
             Ok(_) => panic!("model length mismatch should fail"),
@@ -447,8 +438,8 @@ mod tests {
         ));
 
         let raw_error = match make_spec().build(
-            ArrayFeatureVector::<f64, 2>::new_of_length(1),
-            ArrayFeatureVector::<f64, 2>::new_of_length(1),
+            ArrayFeatureVector::<2>::new_of_length(1),
+            ArrayFeatureVector::<2>::new_of_length(1),
         ) {
             Err(error) => error,
             Ok(_) => panic!("raw capacity mismatch should fail"),
@@ -464,7 +455,7 @@ mod tests {
 
     #[test]
     fn supports_empty_transformations_and_completely_empty_layouts() {
-        let spec = ModelInputSpec::<f64>::with_capacity(
+        let spec = ModelInputSpec::with_capacity(
             FeatureVectorSpec::new([day_of_week("day")]).unwrap(),
             [],
             2,
@@ -472,8 +463,8 @@ mod tests {
         .unwrap();
         let mut pipeline = spec
             .build(
-                ArrayFeatureVector::<f64, 1>::new(),
-                ArrayFeatureVector::<f64, 2>::new_of_length(0),
+                ArrayFeatureVector::<1>::new(),
+                ArrayFeatureVector::<2>::new_of_length(0),
             )
             .unwrap();
         pipeline.handle_event(Event::time(0)).unwrap();
@@ -482,11 +473,11 @@ mod tests {
         assert!(pipeline.output_ids().is_empty());
 
         let empty_raw = FeatureVectorSpec::new(Vec::<FeatureDefinition>::new()).unwrap();
-        let empty_spec = ModelInputSpec::<f64>::new(empty_raw, []).unwrap();
+        let empty_spec = ModelInputSpec::new(empty_raw, []).unwrap();
         let mut empty_pipeline = empty_spec
             .build(
-                ArrayFeatureVector::<f64, 0>::new(),
-                ArrayFeatureVector::<f64, 0>::new(),
+                ArrayFeatureVector::<0>::new(),
+                ArrayFeatureVector::<0>::new(),
             )
             .unwrap();
         empty_pipeline.handle_event(Event::time(1)).unwrap();

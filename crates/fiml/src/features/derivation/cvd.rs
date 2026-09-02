@@ -4,24 +4,24 @@ use crate::features::compiler::OutputSpan;
 use crate::features::derivation::{FeatureDerivation, write_outputs};
 use crate::indicators::CumulativeVolumeDelta;
 use crate::vectors::FeatureVector;
-use crate::{Float, HeapRingBuffer, Result, Symbol, WarmupPolicy};
+use crate::{HeapRingBuffer, Result, Symbol, WarmupPolicy};
 
-pub(crate) struct CvdFeature<F: Float> {
+pub(crate) struct CvdFeature {
     symbol: Symbol,
-    cvd: CumulativeVolumeDelta<HeapRingBuffer<F>, F, MAX_OUTPUTS_PER_INDICATOR>,
+    cvd: CumulativeVolumeDelta<HeapRingBuffer<f64>, MAX_OUTPUTS_PER_INDICATOR>,
 }
 
-impl<F: Float> CvdFeature<F> {
+impl CvdFeature {
     pub(crate) fn new(
         symbol: Symbol,
-        cvd: CumulativeVolumeDelta<HeapRingBuffer<F>, F, MAX_OUTPUTS_PER_INDICATOR>,
+        cvd: CumulativeVolumeDelta<HeapRingBuffer<f64>, MAX_OUTPUTS_PER_INDICATOR>,
     ) -> Self {
         Self { symbol, cvd }
     }
 
-    pub(in crate::features) fn update<O: FeatureVector<F = F>>(
+    pub(in crate::features) fn update<O: FeatureVector>(
         &mut self,
-        event: &Event<F>,
+        event: &Event,
         output_span: OutputSpan,
         output: &mut O,
     ) {
@@ -35,17 +35,16 @@ impl<F: Float> CvdFeature<F> {
     }
 }
 
-pub(crate) fn build<F: Float>(
+pub(crate) fn build(
     symbol: Symbol,
     windows: &[usize],
     warmup_policy: WarmupPolicy,
-) -> Result<FeatureDerivation<F>> {
+) -> Result<FeatureDerivation> {
     let max_window = windows.iter().copied().max().unwrap_or(0);
-    let mut cvd =
-        CumulativeVolumeDelta::<HeapRingBuffer<F>, F, MAX_OUTPUTS_PER_INDICATOR>::new_heap(
-            max_window,
-            warmup_policy,
-        );
+    let mut cvd = CumulativeVolumeDelta::<HeapRingBuffer<f64>, MAX_OUTPUTS_PER_INDICATOR>::new_heap(
+        max_window,
+        warmup_policy,
+    );
     for &window in windows {
         cvd.add_window(window)?;
     }
@@ -62,11 +61,11 @@ mod tests {
     fn grouped_cvd_uses_trade_side_and_ignores_unclassified_trades() {
         let aapl = symbols::intern("AAPL");
         let googl = symbols::intern("GOOGL");
-        let mut feature = match build::<f64>(aapl, &[1, 2], WarmupPolicy::FirstValue).unwrap() {
+        let mut feature = match build(aapl, &[1, 2], WarmupPolicy::FirstValue).unwrap() {
             FeatureDerivation::Cvd(feature) => feature,
             _ => unreachable!(),
         };
-        let mut output = ArrayFeatureVector::<f64, 2>::new();
+        let mut output = ArrayFeatureVector::<2>::new();
         let output_span = OutputSpan { start: 0, count: 2 };
 
         feature.update(
