@@ -693,6 +693,11 @@ fn complete_names(active_ids: &[String], capacity: usize) -> Vec<String> {
     names
 }
 
+/// Common event-processing interface used by the Python runtime driver.
+///
+/// This allows raw feature extractors and model-input pipelines to share event
+/// validation, replay, and output buffering while retaining their concrete
+/// Rust runtime types.
 trait EventRuntime {
     fn handle_event(&mut self, event: Event) -> fiml::Result<()>;
     fn last_timestamp(&self) -> Option<i64>;
