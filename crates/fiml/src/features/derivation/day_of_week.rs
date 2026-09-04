@@ -8,7 +8,7 @@ use crate::vectors::FeatureVector;
 const MILLIS_PER_DAY: i64 = 86_400_000;
 
 /// Day-of-week feature. Writes `0 = Sunday ..= 6 = Saturday` derived from the
-/// event timestamp to its output cell. An every-event clock feature: it refreshes
+/// event timestamp to its output cell. An any-event clock feature: it refreshes
 /// from each event's timestamp regardless of kind, so it has a value on every row.
 pub(crate) struct DayOfWeek;
 
@@ -40,7 +40,7 @@ mod tests {
     }
 
     #[test]
-    fn day_of_week_reacts_to_every_event() {
+    fn day_of_week_reacts_to_any_event() {
         let aapl = symbols::intern("AAPL");
         let mut fv: ArrayFeatureVector<1> = ArrayFeatureVector::new();
         let mut feat = DayOfWeek;

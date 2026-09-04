@@ -1,12 +1,10 @@
 {
   "version": "1.0",
-  "feature_vector_capacity": 4,
-  "feature_vector_length": 2,
   "checksum": "opaque model metadata",
   "feature_extractor": {
     "version": "1.0",
-    "feature_vector_capacity": 4,
-    "feature_vector_length": 2,
+    "capacity": 4,
+    "length": 2,
     "checksum": "opaque raw-feature metadata",
     "features": [
       {
@@ -15,7 +13,7 @@
           {
             "kind": "day_of_week",
             "source": {
-              "type": "every_event"
+              "type": "any_event"
             },
             "outputs": [
               {
@@ -47,18 +45,22 @@
       }
     ]
   },
-  "transformations": [
-    {
-      "type": "identity",
-      "input": "raw_day",
-      "output": "day"
-    },
-    {
-      "type": "standard_scale",
-      "input": "raw_sma",
-      "output": "scaled_sma",
-      "mean": 4.0,
-      "scale": 2.0
-    }
-  ]
+  "model_input": {
+    "capacity": 4,
+    "length": 2,
+    "transformations": [
+      {
+        "type": "identity",
+        "input": "raw_day",
+        "output": "day"
+      },
+      {
+        "type": "standard_scale",
+        "input": "raw_sma",
+        "output": "scaled_sma",
+        "mean": 4.0,
+        "scale": 2.0
+      }
+    ]
+  }
 }

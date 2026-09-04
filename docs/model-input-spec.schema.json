@@ -5,23 +5,29 @@
   "additionalProperties": false,
   "required": [
     "version",
-    "feature_vector_capacity",
-    "feature_vector_length",
     "feature_extractor",
-    "transformations"
+    "model_input"
   ],
   "properties": {
     "version": { "const": "1.0" },
-    "feature_vector_capacity": { "type": "integer", "minimum": 0 },
-    "feature_vector_length": { "type": "integer", "minimum": 0 },
     "checksum": { "type": "string" },
     "feature_extractor": { "$ref": "feature-vector-spec.schema.json" },
-    "transformations": {
-      "type": "array",
-      "items": { "$ref": "#/$defs/transformation" }
-    }
+    "model_input": { "$ref": "#/$defs/model_input" }
   },
   "$defs": {
+    "model_input": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["capacity", "length", "transformations"],
+      "properties": {
+        "capacity": { "type": "integer", "minimum": 0 },
+        "length": { "type": "integer", "minimum": 0 },
+        "transformations": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/transformation" }
+        }
+      }
+    },
     "transformation": {
       "oneOf": [
         { "$ref": "#/$defs/identity" },

@@ -661,7 +661,7 @@ fn route_for_source(source: FeatureSource) -> FeatureRoute {
     match source {
         FeatureSource::Field(field) => FeatureRoute::Kind(field.event_kind()),
         FeatureSource::Event(event_kind) => FeatureRoute::Kind(event_kind),
-        FeatureSource::EveryEvent => FeatureRoute::Any,
+        FeatureSource::AnyEvent => FeatureRoute::Any,
     }
 }
 
@@ -768,7 +768,7 @@ mod tests {
     fn rejects_duplicate_keys_and_ids() {
         let key = FeatureKey::DayOfWeek {
             symbol: Symbol::GLOBAL,
-            source: FeatureSource::EveryEvent,
+            source: FeatureSource::AnyEvent,
         };
         let duplicate_key = vec![
             FeatureDefinition::new(key, FeatureId::new("one")),
@@ -781,7 +781,7 @@ mod tests {
             FeatureDefinition::new(
                 FeatureKey::TimeSinceFirstEventOfDay {
                     symbol: Symbol::GLOBAL,
-                    source: FeatureSource::EveryEvent,
+                    source: FeatureSource::AnyEvent,
                     utc_offset_millis: 0,
                 },
                 FeatureId::new("same"),

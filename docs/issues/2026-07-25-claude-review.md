@@ -100,13 +100,13 @@ after 3 BTC trades   = [3.0, 4.0]
 
 "Trades in the last 2 seconds" still reads 3 an hour after the last trade. Live, a quiet
 market keeps reporting the last burst forever; in batch, every row whose event belongs to
-another symbol carries a stale as-of timestamp. Clock features refresh on every event
+another symbol carries a stale as-of timestamp. Clock features refresh on any event
 (`FeatureRoute::Any`), so a snapshot mixes a live clock with frozen windows — the two
 disagree about what "now" is.
 
 Recommendation: add a refresh hook (`fn observe(&mut self, now: i64, output: &mut O)`) that
 runs for every dispatch on timed features — expire buckets against `now` and rewrite the
-output cells — and route timed indicators into the every-event group as well as their kind
+output cells — and route timed indicators into the any-event group as well as their kind
 group. This is also the fix that makes multi-symbol batch extraction correct.
 
 **Resolved 2026-07-26.** Compiled vectors retain fixed-capacity indexes of timed
@@ -271,7 +271,7 @@ routine, and this is the hot loop the whole design is organised around.
 Recommendation: key the dispatch table by `(kind, symbol)` instead of `kind` alone — the
 compiler already knows each indicator's symbol and route, so it can build per-symbol spans
 at compile time and look up an event's span with one probe. Global/clock features keep
-their every-event group. This also composes with the refresh hook from 1.3.
+their any-event group. This also composes with the refresh hook from 1.3.
 
 ### 3.2 The capacity ladder buys nothing and costs a lot
 

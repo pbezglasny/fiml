@@ -1,7 +1,7 @@
 {
   "version": "1.0",
-  "feature_vector_capacity": 9,
-  "feature_vector_length": 9,
+  "capacity": 9,
+  "length": 9,
   "features": [
     {
       "symbol": "__global__",
@@ -9,7 +9,7 @@
         {
           "kind": "day_of_week",
           "source": {
-            "type": "every_event"
+            "type": "any_event"
           }
         }
       ]

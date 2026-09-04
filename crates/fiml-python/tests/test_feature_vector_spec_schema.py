@@ -13,8 +13,8 @@ VALIDATOR = Draft202012Validator(SCHEMA)
 def document_with_source(source):
     return {
         "version": "1.0",
-        "feature_vector_capacity": 1,
-        "feature_vector_length": 1,
+        "capacity": 1,
+        "length": 1,
         "features": [
             {
                 "symbol": "BTCUSDT",
@@ -78,5 +78,5 @@ def test_schema_still_accepts_whole_event_sources(event):
     assert_valid_source({"type": "event", "event": event})
 
 
-def test_schema_still_accepts_every_event_source():
-    assert_valid_source({"type": "every_event"})
+def test_schema_still_accepts_any_event_source():
+    assert_valid_source({"type": "any_event"})

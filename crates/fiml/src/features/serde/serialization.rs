@@ -15,8 +15,8 @@ const FORMAT_VERSION: &str = "1.0";
 #[serde(deny_unknown_fields)]
 struct FeatureVectorSpecWire {
     version: String,
-    feature_vector_capacity: usize,
-    feature_vector_length: usize,
+    capacity: usize,
+    length: usize,
     #[serde(
         default,
         deserialize_with = "deserialize_present_option",
@@ -247,8 +247,8 @@ impl TryFrom<&FeatureVectorSpec> for FeatureVectorSpecWire {
 
         Ok(Self {
             version: FORMAT_VERSION.to_owned(),
-            feature_vector_capacity: feature_vector_spec.feature_vector_capacity(),
-            feature_vector_length: feature_vector_spec.feature_vector_length(),
+            capacity: feature_vector_spec.feature_vector_capacity(),
+            length: feature_vector_spec.feature_vector_length(),
             checksum: feature_vector_spec.checksum().map(str::to_owned),
             features: groups,
         })
@@ -442,20 +442,20 @@ impl TryFrom<FeatureVectorSpecWire> for FeatureVectorSpec {
                 deserialize_indicator(symbol, indicator, &mut definitions)?;
             }
         }
-        if wire.feature_vector_length != definitions.len() {
+        if wire.length != definitions.len() {
             return Err(format!(
-                "feature_vector_length {} does not match expanded definition count {}",
-                wire.feature_vector_length,
+                "length {} does not match expanded definition count {}",
+                wire.length,
                 definitions.len()
             ));
         }
-        if wire.feature_vector_capacity < wire.feature_vector_length {
+        if wire.capacity < wire.length {
             return Err(format!(
-                "feature_vector_capacity {} is smaller than feature_vector_length {}",
-                wire.feature_vector_capacity, wire.feature_vector_length
+                "capacity {} is smaller than length {}",
+                wire.capacity, wire.length
             ));
         }
-        FeatureVectorSpec::with_metadata(definitions, wire.feature_vector_capacity, wire.checksum)
+        FeatureVectorSpec::with_metadata(definitions, wire.capacity, wire.checksum)
             .map_err(|error| error.to_string())
     }
 }
@@ -675,7 +675,7 @@ fn validate_scope_and_source(
             !global && source == FeatureSource::Event(EventKind::Trade)
         }
         "day_of_week" | "time_since_first_event_of_day" => {
-            global && source == FeatureSource::EveryEvent
+            global && source == FeatureSource::AnyEvent
         }
         _ => return Err(format!("unknown indicator kind {kind:?}")),
     };
@@ -708,8 +708,8 @@ fn serialize_source(source: FeatureSource) -> SourceWire {
             event: Some(event_name(event).to_owned()),
             field: None,
         },
-        FeatureSource::EveryEvent => SourceWire {
-            source_type: "every_event".to_owned(),
+        FeatureSource::AnyEvent => SourceWire {
+            source_type: "any_event".to_owned(),
             event: None,
             field: None,
         },
@@ -750,11 +750,11 @@ fn deserialize_source(source: SourceWire) -> Result<FeatureSource, String> {
                 .ok_or("event source requires event")?;
             Ok(FeatureSource::Event(parse_event(event)?))
         }
-        "every_event" => {
+        "any_event" => {
             if source.event.is_some() || source.field.is_some() {
-                return Err("every_event source does not allow event or field".to_owned());
+                return Err("any_event source does not allow event or field".to_owned());
             }
-            Ok(FeatureSource::EveryEvent)
+            Ok(FeatureSource::AnyEvent)
         }
         _ => Err(format!("unknown source type {:?}", source.source_type)),
     }
@@ -933,11 +933,11 @@ mod tests {
                 }),
                 default(FeatureKey::DayOfWeek {
                     symbol: Symbol::GLOBAL,
-                    source: FeatureSource::EveryEvent,
+                    source: FeatureSource::AnyEvent,
                 }),
                 default(FeatureKey::TimeSinceFirstEventOfDay {
                     symbol: Symbol::GLOBAL,
-                    source: FeatureSource::EveryEvent,
+                    source: FeatureSource::AnyEvent,
                     utc_offset_millis: 7_200_000,
                 }),
             ],
@@ -954,8 +954,8 @@ mod tests {
         let value: Value = serde_json::from_str(&text).unwrap();
 
         assert_eq!(value["version"], "1.0");
-        assert_eq!(value["feature_vector_capacity"], 12);
-        assert_eq!(value["feature_vector_length"], 9);
+        assert_eq!(value["capacity"], 12);
+        assert_eq!(value["length"], 9);
         assert_eq!(value["checksum"], "opaque-value");
         assert_eq!(value["features"][0]["symbol"], "__global__");
         assert_eq!(value["features"][1]["symbol"], "btcusdt");
@@ -1061,13 +1061,13 @@ mod tests {
     fn valid_day_set() -> Value {
         json!({
             "version": "1.0",
-            "feature_vector_capacity": 1,
-            "feature_vector_length": 1,
+            "capacity": 1,
+            "length": 1,
             "features": [{
                 "symbol": "__global__",
                 "indicators": [{
                     "kind": "day_of_week",
-                    "source": {"type": "every_event"}
+                    "source": {"type": "any_event"}
                 }]
             }]
         })
@@ -1083,15 +1083,15 @@ mod tests {
     fn unsorted_input_is_accepted_and_reserialized_canonically() {
         let value = json!({
             "version": "1.0",
-            "feature_vector_capacity": 3,
-            "feature_vector_length": 3,
+            "capacity": 3,
+            "length": 3,
             "features": [
                 {"symbol":"z", "indicators":[{
                     "kind":"sma", "source":{"type":"field","event":"trade","field":"price"},
                     "warmup_policy":"full_window", "outputs":[{"window":3},{"window":2}]
                 }]},
                 {"symbol":"__global__", "indicators":[{
-                    "kind":"day_of_week", "source":{"type":"every_event"}, "outputs":[{}]
+                    "kind":"day_of_week", "source":{"type":"any_event"}, "outputs":[{}]
                 }]}
             ]
         });
@@ -1124,26 +1124,33 @@ mod tests {
         assert!(error(value).contains("unknown field"));
 
         let mut value = valid_day_set();
+        let capacity = value.as_object_mut().unwrap().remove("capacity").unwrap();
+        let length = value.as_object_mut().unwrap().remove("length").unwrap();
+        value["feature_vector_capacity"] = capacity;
+        value["feature_vector_length"] = length;
+        assert!(error(value).contains("unknown field"));
+
+        let mut value = valid_day_set();
         value["checksum"] = Value::Null;
         assert!(error(value).contains("string"));
 
         let mut value = valid_day_set();
-        value["feature_vector_length"] = json!(2);
+        value["length"] = json!(2);
         assert!(error(value).contains("does not match expanded definition count"));
 
         let mut value = valid_day_set();
-        value["feature_vector_length"] = json!(usize::MAX);
+        value["length"] = json!(usize::MAX);
         assert!(error(value).contains("does not match expanded definition count"));
 
         let mut value = valid_day_set();
-        value["feature_vector_capacity"] = json!(0);
-        assert!(error(value).contains("smaller than feature_vector_length"));
+        value["capacity"] = json!(0);
+        assert!(error(value).contains("smaller than length"));
     }
 
     #[test]
     fn rejects_duplicate_normalized_scopes_and_empty_groups() {
         let value = json!({
-            "version":"1.0", "feature_vector_capacity":2, "feature_vector_length":2,
+            "version":"1.0", "capacity":2, "length":2,
             "features":[
                 {"symbol":"BTC", "indicators":[{"kind":"sma","source":{"type":"field","event":"price","field":"value"},"warmup_policy":"first_value","outputs":[{"window":1}]}]},
                 {"symbol":"btc", "indicators":[{"kind":"ema","source":{"type":"field","event":"price","field":"value"},"warmup_policy":"first_value","outputs":[{"window":1}]}]}
@@ -1162,6 +1169,10 @@ mod tests {
         value["features"][0]["indicators"][0]["source"] =
             json!({"type":"field","event":"trade","field":"value"});
         assert!(error(value).contains("invalid field source"));
+
+        let mut value = valid_day_set();
+        value["features"][0]["indicators"][0]["source"] = json!({"type":"every_event"});
+        assert!(error(value).contains("unknown source type"));
 
         let mut value = valid_day_set();
         value["features"][0]["symbol"] = json!("btc");
@@ -1183,7 +1194,7 @@ mod tests {
     #[test]
     fn rejects_malformed_durations_and_structurally_invalid_outputs() {
         let value = json!({
-            "version":"1.0", "feature_vector_capacity":1, "feature_vector_length":1,
+            "version":"1.0", "capacity":1, "length":1,
             "features":[{"symbol":"btc","indicators":[{
                 "kind":"trade_count_timed", "source":{"type":"event","event":"trade"},
                 "warmup_policy":"full_window", "options":{"aggregation":"01s"},

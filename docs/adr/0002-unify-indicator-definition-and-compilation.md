@@ -186,7 +186,7 @@ metadata instead of an ambiguous `len()`.
 
 ## Clock features
 
-Current clock features update from every event and do not filter by symbol.
+Current clock features update from any event and do not filter by symbol.
 They are therefore modeled as global definitions without a symbol.
 
 `DayOfWeek` remains a global clock feature.

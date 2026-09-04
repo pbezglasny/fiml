@@ -622,7 +622,7 @@ mod tests {
     fn builder_validates_output_vector_length() {
         let key = FeatureKey::DayOfWeek {
             symbol: Symbol::GLOBAL,
-            source: FeatureSource::EveryEvent,
+            source: FeatureSource::AnyEvent,
         };
 
         let result = FeatureExtractor::builder(ArrayFeatureVector::<2>::new())
@@ -722,7 +722,7 @@ mod tests {
         let symbol = Symbol::new("rejected-extractor-order-book");
         let any_event = FeatureKey::DayOfWeek {
             symbol: Symbol::GLOBAL,
-            source: FeatureSource::EveryEvent,
+            source: FeatureSource::AnyEvent,
         };
         let raw_delta = FeatureKey::DayOfWeek {
             symbol,
@@ -776,7 +776,7 @@ mod tests {
         let symbol = Symbol::new("sequence-gap-extractor-order-book");
         let any_event = FeatureKey::DayOfWeek {
             symbol: Symbol::GLOBAL,
-            source: FeatureSource::EveryEvent,
+            source: FeatureSource::AnyEvent,
         };
         let mut extractor = FeatureExtractor::builder(ArrayFeatureVector::<1>::new())
             .add_feature(FeatureDefinition::with_default_id(any_event))

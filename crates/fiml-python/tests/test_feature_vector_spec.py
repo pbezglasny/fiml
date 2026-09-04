@@ -26,8 +26,8 @@ def test_fluent_spec_uses_core_json_and_round_trips_metadata():
 
     document = json.loads(feature_vector_spec.to_json())
     assert document["version"] == "1.0"
-    assert document["feature_vector_capacity"] == 4
-    assert document["feature_vector_length"] == 2
+    assert document["capacity"] == 4
+    assert document["length"] == 2
     assert document["checksum"] == "opaque"
     assert [output["window"] for output in document["features"][0]["indicators"][0]["outputs"]] == [2, 3]
     assert all("id" not in output for output in document["features"][0]["indicators"][0]["outputs"])

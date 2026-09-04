@@ -107,7 +107,7 @@ feature-vector cells.
 
 ## Global clock feature
 
-A feature derived from every event timestamp rather than a symbol-specific
+A feature derived from any event timestamp rather than a symbol-specific
 market payload. Day of week and time since the first event of the local day are
 global clock features.
 

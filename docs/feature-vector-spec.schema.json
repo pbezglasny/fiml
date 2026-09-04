@@ -3,11 +3,11 @@
   "title": "fiml FeatureVectorSpec 1.0",
   "type": "object",
   "additionalProperties": false,
-  "required": ["version", "feature_vector_capacity", "feature_vector_length", "features"],
+  "required": ["version", "capacity", "length", "features"],
   "properties": {
     "version": { "const": "1.0" },
-    "feature_vector_capacity": { "type": "integer", "minimum": 0 },
-    "feature_vector_length": { "type": "integer", "minimum": 0 },
+    "capacity": { "type": "integer", "minimum": 0 },
+    "length": { "type": "integer", "minimum": 0 },
     "checksum": { "type": "string" },
     "features": { "type": "array", "items": { "$ref": "#/$defs/group" } }
   },
@@ -80,7 +80,7 @@
         {
           "type": "object", "additionalProperties": false,
           "required": ["type"],
-          "properties": { "type": { "const": "every_event" } }
+          "properties": { "type": { "const": "any_event" } }
         }
       ]
     },

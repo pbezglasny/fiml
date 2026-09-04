@@ -223,7 +223,7 @@ const fn source_rank(source: FeatureSource) -> u8 {
         FeatureSource::Field(crate::EventField::TradeVolume) => 2,
         FeatureSource::Field(crate::EventField::Volume) => 3,
         FeatureSource::Event(kind) => 16 + kind as u8,
-        FeatureSource::EveryEvent => u8::MAX,
+        FeatureSource::AnyEvent => u8::MAX,
     }
 }
 
@@ -243,7 +243,7 @@ mod tests {
         FeatureDefinition::new(
             FeatureKey::DayOfWeek {
                 symbol: Symbol::GLOBAL,
-                source: FeatureSource::EveryEvent,
+                source: FeatureSource::AnyEvent,
             },
             FeatureId::new(id),
         )
