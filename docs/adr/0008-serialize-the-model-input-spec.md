@@ -30,7 +30,7 @@ nested raw feature-spec version:
   "feature_vector_capacity": 2,
   "feature_vector_length": 2,
   "checksum": "optional model metadata",
-  "raw_feature_vector_spec": {
+  "feature_extractor": {
     "version": "1.0",
     "feature_vector_capacity": 2,
     "feature_vector_length": 2,
