@@ -24,8 +24,8 @@ The top-level shape is:
 ```json
 {
   "version": "1.0",
-  "feature_vector_capacity": 128,
-  "feature_vector_length": 100,
+  "capacity": 128,
+  "length": 100,
   "checksum": "optional opaque metadata",
   "features": []
 }
@@ -55,8 +55,8 @@ Canonical order is:
 Input need not be sorted; deserialization produces a canonically ordered
 runtime `FeatureVectorSpec`.
 
-The expanded output count must equal `feature_vector_length`, and
-`feature_vector_capacity` must be at least that length. Trailing capacity is
+The expanded output count must equal `length`, and `capacity` must be at least
+that length. Trailing capacity is
 reserved model width rather than active features. `checksum` is stored and
 round-tripped but is not calculated or verified. An empty feature-vector spec is valid;
 an empty feature group is not.

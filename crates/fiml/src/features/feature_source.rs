@@ -9,7 +9,7 @@ use crate::{Event, EventKind};
 pub enum FeatureSource {
     Field(EventField),
     Event(EventKind),
-    EveryEvent,
+    AnyEvent,
 }
 
 impl FeatureSource {
@@ -25,7 +25,7 @@ impl FeatureSource {
             Self::Event(EventKind::OrderBookDelta) => "event.order_book_delta",
             Self::Event(EventKind::OrderBookSnapshot) => "event.order_book_snapshot",
             Self::Event(EventKind::Time) => "event.time",
-            Self::EveryEvent => "every_event",
+            Self::AnyEvent => "any_event",
         }
     }
 }

@@ -45,9 +45,9 @@ def test_model_input_schema_is_valid_and_accepts_canonical_example():
 )
 def test_model_input_schema_accepts_strict_transformation_variants(transformation):
     document = canonical_example()
-    document["feature_vector_capacity"] = 1
-    document["feature_vector_length"] = 1
-    document["transformations"] = [transformation]
+    document["model_input"]["capacity"] = 1
+    document["model_input"]["length"] = 1
+    document["model_input"]["transformations"] = [transformation]
     document["feature_extractor"]["features"][0]["indicators"][0]["outputs"][
         0
     ]["id"] = "raw_price"
@@ -71,6 +71,6 @@ def test_model_input_schema_accepts_strict_transformation_variants(transformatio
 )
 def test_model_input_schema_rejects_malformed_transformations(transformation):
     document = canonical_example()
-    document["transformations"] = [transformation]
+    document["model_input"]["transformations"] = [transformation]
 
     assert list(VALIDATOR.iter_errors(document))

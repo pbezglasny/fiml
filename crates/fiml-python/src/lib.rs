@@ -444,11 +444,11 @@ impl FeatureVectorSpec {
     }
 
     /// Day-of-week clock feature (`0 = Sunday ..= 6 = Saturday`). Refreshes
-    /// from every event's timestamp, so it has a value on every row.
+    /// from any event's timestamp, so it has a value on every row.
     fn day_of_week(mut slf: PyRefMut<'_, Self>) -> PyResult<PyRefMut<'_, Self>> {
         slf.add_group([definition(FeatureKey::DayOfWeek {
             symbol: Symbol::GLOBAL,
-            source: FeatureSource::EveryEvent,
+            source: FeatureSource::AnyEvent,
         })])?;
         Ok(slf)
     }
@@ -462,7 +462,7 @@ impl FeatureVectorSpec {
         let utc_offset_millis = parse_tz(tz)?;
         slf.add_group([definition(FeatureKey::TimeSinceFirstEventOfDay {
             symbol: Symbol::GLOBAL,
-            source: FeatureSource::EveryEvent,
+            source: FeatureSource::AnyEvent,
             utc_offset_millis,
         })])?;
         Ok(slf)

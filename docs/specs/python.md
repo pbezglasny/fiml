@@ -219,19 +219,19 @@ re-implementation to keep in sync.
 
 > This guarantee used to be **violated** for time-derived features: a feature
 > subscribed to exactly one `EventKind`, so `day_of_week` (subscribed to `Time`)
-> stayed at `0` on a pure price/trade stream. Fixed by the every-event group in
+> stayed at `0` on a pure price/trade stream. Fixed by the any-event group in
 > §11a (asserted by the
-> `clock_features_run_on_every_event_while_others_stay_routed` test). ✅
+> `clock_features_run_on_any_event_while_others_stay_routed` test). ✅
 
 Derived features fall into two categories.
 
 ### 11a. Time-derived ("clock") features — must update every row ✅ (core change)
 
 Pure (or day-stateful) functions of the current timestamp: `day_of_week`,
-`time_of_day`, `time_since_first_event_of_day`, … Every event already carries a
+`time_of_day`, `time_since_first_event_of_day`, … Any event already carries a
 timestamp, so these can refresh on every row.
 
-- **Mechanism (A1):** an "every-event" feature group in core. In addition to the
+- **Mechanism (A1):** an "any-event" feature group in core. In addition to the
   per-kind groups, the extractor runs this group on **every** `dispatch`, using a new
   `Event::timestamp()` accessor. `day_of_week` moves out of the `Time`-only group
   into it. Result: a value on every row, on any stream, with no synthetic events
@@ -296,7 +296,7 @@ This work is no longer binding-only. To deliver the full-dataframe guarantee:
 
 ## Resolved decisions
 
-- Time-derived features update on **every event** via an "every-event" core group
+- Time-derived features update on **any event** via an "any-event" core group
   (A1), not synthetic `Time` events.
 - `time_since_first_event_of_day` records the first stream event after a day
   boundary; timezone is the only knob, default **UTC**, expressed as a

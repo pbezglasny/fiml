@@ -27,32 +27,35 @@ nested raw feature-spec version:
 ```json
 {
   "version": "1.0",
-  "feature_vector_capacity": 2,
-  "feature_vector_length": 2,
   "checksum": "optional model metadata",
   "feature_extractor": {
     "version": "1.0",
-    "feature_vector_capacity": 2,
-    "feature_vector_length": 2,
+    "capacity": 2,
+    "length": 2,
     "features": []
   },
-  "transformations": [
-    {
-      "type": "identity",
-      "input": "raw_day",
-      "output": "day"
-    },
-    {
-      "type": "standard_scale",
-      "input": "raw_sma",
-      "output": "scaled_sma",
-      "mean": 4.0,
-      "scale": 2.0
-    }
-  ]
+  "model_input": {
+    "capacity": 2,
+    "length": 2,
+    "transformations": [
+      {
+        "type": "identity",
+        "input": "raw_day",
+        "output": "day"
+      },
+      {
+        "type": "standard_scale",
+        "input": "raw_sma",
+        "output": "scaled_sma",
+        "mean": 4.0,
+        "scale": 2.0
+      }
+    ]
+  }
 }
 ```
 
+The `model_input` object owns the final vector dimensions and transformations.
 Transformations use stable feature IDs rather than compiled indexes. Their
 authored order is preserved because it is the final model-vector order.
 Standard-scale parameters use JSON numbers deserialized as `f64`, matching the

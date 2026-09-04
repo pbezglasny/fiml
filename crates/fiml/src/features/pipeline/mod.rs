@@ -101,7 +101,7 @@ mod tests {
         FeatureDefinition::new(
             FeatureKey::DayOfWeek {
                 symbol: Symbol::GLOBAL,
-                source: FeatureSource::EveryEvent,
+                source: FeatureSource::AnyEvent,
             },
             FeatureId::new(id),
         )
@@ -111,7 +111,7 @@ mod tests {
         FeatureDefinition::new(
             FeatureKey::TimeSinceFirstEventOfDay {
                 symbol: Symbol::GLOBAL,
-                source: FeatureSource::EveryEvent,
+                source: FeatureSource::AnyEvent,
                 utc_offset_millis: 0,
             },
             FeatureId::new(id),

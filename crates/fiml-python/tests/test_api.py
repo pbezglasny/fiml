@@ -235,8 +235,8 @@ def test_global_clock_features_have_no_symbol():
     )
 
     assert extractor.feature_names() == [
-        "day_of_week:symbol=10:__global__:source=every_event",
-        "time_since_first_event_of_day:symbol=10:__global__:source=every_event:utc_offset_ms=7200000",
+        "day_of_week:symbol=10:__global__:source=any_event",
+        "time_since_first_event_of_day:symbol=10:__global__:source=any_event:utc_offset_ms=7200000",
     ]
 
 

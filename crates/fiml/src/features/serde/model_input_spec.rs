@@ -10,8 +10,6 @@ const FORMAT_VERSION: &str = "1.0";
 #[serde(deny_unknown_fields)]
 struct ModelInputSpecWire {
     version: String,
-    feature_vector_capacity: usize,
-    feature_vector_length: usize,
     #[serde(
         default,
         deserialize_with = "deserialize_present_option",
@@ -19,6 +17,15 @@ struct ModelInputSpecWire {
     )]
     checksum: Option<String>,
     feature_extractor: FeatureVectorSpec,
+    model_input: ModelInputWire,
+}
+
+/// Private storage representation for the final model-vector layout.
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ModelInputWire {
+    capacity: usize,
+    length: usize,
     transformations: Vec<TransformationWire>,
 }
 
@@ -61,15 +68,17 @@ impl From<&ModelInputSpec> for ModelInputSpecWire {
     fn from(spec: &ModelInputSpec) -> Self {
         Self {
             version: FORMAT_VERSION.to_owned(),
-            feature_vector_capacity: spec.feature_vector_capacity(),
-            feature_vector_length: spec.feature_vector_length(),
             checksum: spec.checksum().map(str::to_owned),
             feature_extractor: spec.raw_feature_vector_spec().clone(),
-            transformations: spec
-                .transformation_definitions()
-                .iter()
-                .map(TransformationWire::from)
-                .collect(),
+            model_input: ModelInputWire {
+                capacity: spec.feature_vector_capacity(),
+                length: spec.feature_vector_length(),
+                transformations: spec
+                    .transformation_definitions()
+                    .iter()
+                    .map(TransformationWire::from)
+                    .collect(),
+            },
         }
     }
 }
@@ -106,21 +115,22 @@ impl TryFrom<ModelInputSpecWire> for ModelInputSpec {
                 wire.version
             ));
         }
-        if wire.feature_vector_length != wire.transformations.len() {
+        if wire.model_input.length != wire.model_input.transformations.len() {
             return Err(format!(
-                "feature_vector_length {} does not match transformation count {}",
-                wire.feature_vector_length,
-                wire.transformations.len()
+                "model_input.length {} does not match transformation count {}",
+                wire.model_input.length,
+                wire.model_input.transformations.len()
             ));
         }
-        if wire.feature_vector_capacity < wire.feature_vector_length {
+        if wire.model_input.capacity < wire.model_input.length {
             return Err(format!(
-                "feature_vector_capacity {} is smaller than feature_vector_length {}",
-                wire.feature_vector_capacity, wire.feature_vector_length
+                "model_input.capacity {} is smaller than model_input.length {}",
+                wire.model_input.capacity, wire.model_input.length
             ));
         }
 
         let transformations = wire
+            .model_input
             .transformations
             .into_iter()
             .map(TransformationDefinition::from)
@@ -128,7 +138,7 @@ impl TryFrom<ModelInputSpecWire> for ModelInputSpec {
         ModelInputSpec::with_metadata(
             wire.feature_extractor,
             transformations,
-            wire.feature_vector_capacity,
+            wire.model_input.capacity,
             wire.checksum,
         )
         .map_err(|error| error.to_string())
@@ -163,7 +173,7 @@ mod tests {
         FeatureDefinition::new(
             FeatureKey::DayOfWeek {
                 symbol: Symbol::GLOBAL,
-                source: FeatureSource::EveryEvent,
+                source: FeatureSource::AnyEvent,
             },
             FeatureId::new(id),
         )
@@ -173,7 +183,7 @@ mod tests {
         FeatureDefinition::new(
             FeatureKey::TimeSinceFirstEventOfDay {
                 symbol: Symbol::GLOBAL,
-                source: FeatureSource::EveryEvent,
+                source: FeatureSource::AnyEvent,
                 utc_offset_millis: 0,
             },
             FeatureId::new(id),
@@ -183,26 +193,28 @@ mod tests {
     fn valid_model_spec() -> Value {
         json!({
             "version": "1.0",
-            "feature_vector_capacity": 1,
-            "feature_vector_length": 1,
             "feature_extractor": {
                 "version": "1.0",
-                "feature_vector_capacity": 1,
-                "feature_vector_length": 1,
+                "capacity": 1,
+                "length": 1,
                 "features": [{
                     "symbol": "__global__",
                     "indicators": [{
                         "kind": "day_of_week",
-                        "source": {"type": "every_event"},
+                        "source": {"type": "any_event"},
                         "outputs": [{"id": "raw_day"}]
                     }]
                 }]
             },
-            "transformations": [{
-                "type": "identity",
-                "input": "raw_day",
-                "output": "day"
-            }]
+            "model_input": {
+                "capacity": 1,
+                "length": 1,
+                "transformations": [{
+                    "type": "identity",
+                    "input": "raw_day",
+                    "output": "day"
+                }]
+            }
         })
     }
 
@@ -247,45 +259,47 @@ mod tests {
             value,
             json!({
                 "version": "1.0",
-                "feature_vector_capacity": 4,
-                "feature_vector_length": 2,
                 "checksum": "model-checksum",
                 "feature_extractor": {
                     "version": "1.0",
-                    "feature_vector_capacity": 3,
-                    "feature_vector_length": 2,
+                    "capacity": 3,
+                    "length": 2,
                     "checksum": "raw-checksum",
                     "features": [{
                         "symbol": "__global__",
                         "indicators": [
                             {
                                 "kind": "day_of_week",
-                                "source": {"type": "every_event"},
+                                "source": {"type": "any_event"},
                                 "outputs": [{"id": "raw_day"}]
                             },
                             {
                                 "kind": "time_since_first_event_of_day",
-                                "source": {"type": "every_event"},
+                                "source": {"type": "any_event"},
                                 "options": {"utc_offset": "+00:00"},
                                 "outputs": [{"id": "raw_elapsed"}]
                             }
                         ]
                     }]
                 },
-                "transformations": [
-                    {
-                        "type": "standard_scale",
-                        "input": "raw_elapsed",
-                        "output": "scaled_elapsed",
-                        "mean": 4.0,
-                        "scale": 2.0
-                    },
-                    {
-                        "type": "identity",
-                        "input": "raw_day",
-                        "output": "day"
-                    }
-                ]
+                "model_input": {
+                    "capacity": 4,
+                    "length": 2,
+                    "transformations": [
+                        {
+                            "type": "standard_scale",
+                            "input": "raw_elapsed",
+                            "output": "scaled_elapsed",
+                            "mean": 4.0,
+                            "scale": 2.0
+                        },
+                        {
+                            "type": "identity",
+                            "input": "raw_day",
+                            "output": "day"
+                        }
+                    ]
+                }
             })
         );
 
@@ -330,12 +344,12 @@ mod tests {
         assert!(error(value).contains("unsupported feature-vector spec version"));
 
         let mut value = valid_model_spec();
-        value["feature_vector_length"] = json!(2);
+        value["model_input"]["length"] = json!(2);
         assert!(error(value).contains("does not match transformation count"));
 
         let mut value = valid_model_spec();
-        value["feature_vector_capacity"] = json!(0);
-        assert!(error(value).contains("smaller than feature_vector_length"));
+        value["model_input"]["capacity"] = json!(0);
+        assert!(error(value).contains("smaller than model_input.length"));
     }
 
     #[test]
@@ -353,13 +367,7 @@ mod tests {
         value["raw_feature_vector_spec"] = feature_extractor;
         assert!(error(value).contains("unknown field `raw_feature_vector_spec`"));
 
-        for field in [
-            "version",
-            "feature_vector_capacity",
-            "feature_vector_length",
-            "feature_extractor",
-            "transformations",
-        ] {
+        for field in ["version", "feature_extractor", "model_input"] {
             let mut value = valid_model_spec();
             value.as_object_mut().unwrap().remove(field);
             assert!(
@@ -367,20 +375,44 @@ mod tests {
                 "missing {field} should be rejected"
             );
         }
+
+        let mut value = valid_model_spec();
+        value["model_input"]["unknown"] = json!(true);
+        assert!(error(value).contains("unknown field"));
+
+        for field in ["capacity", "length", "transformations"] {
+            let mut value = valid_model_spec();
+            value["model_input"].as_object_mut().unwrap().remove(field);
+            assert!(
+                error(value).contains("missing field"),
+                "missing model_input.{field} should be rejected"
+            );
+        }
+
+        let mut value = valid_model_spec();
+        let model_input = value
+            .as_object_mut()
+            .unwrap()
+            .remove("model_input")
+            .unwrap();
+        value["feature_vector_capacity"] = model_input["capacity"].clone();
+        value["feature_vector_length"] = model_input["length"].clone();
+        value["transformations"] = model_input["transformations"].clone();
+        assert!(error(value).contains("unknown field"));
     }
 
     #[test]
     fn rejects_unknown_and_malformed_transformation_variants() {
         let mut value = valid_model_spec();
-        value["transformations"][0]["type"] = json!("normalize");
+        value["model_input"]["transformations"][0]["type"] = json!("normalize");
         assert!(error(value).contains("unknown variant"));
 
         let mut value = valid_model_spec();
-        value["transformations"][0]["extra"] = json!(1);
+        value["model_input"]["transformations"][0]["extra"] = json!(1);
         assert!(error(value).contains("unknown field"));
 
         let mut value = valid_model_spec();
-        value["transformations"][0] = json!({
+        value["model_input"]["transformations"][0] = json!({
             "type": "standard_scale",
             "input": "raw_day",
             "output": "day",
@@ -389,32 +421,32 @@ mod tests {
         assert!(error(value).contains("missing field `scale`"));
 
         let mut value = valid_model_spec();
-        value["transformations"] = Value::Null;
+        value["model_input"]["transformations"] = Value::Null;
         assert!(error(value).contains("sequence"));
     }
 
     #[test]
     fn deserialization_reuses_model_input_semantic_validation() {
         let mut value = valid_model_spec();
-        value["transformations"][0]["input"] = json!("missing");
+        value["model_input"]["transformations"][0]["input"] = json!("missing");
         assert!(error(value).contains("input feature ID does not exist"));
 
         let mut value = valid_model_spec();
-        value["feature_vector_capacity"] = json!(2);
-        value["feature_vector_length"] = json!(2);
-        value["transformations"] = json!([
+        value["model_input"]["capacity"] = json!(2);
+        value["model_input"]["length"] = json!(2);
+        value["model_input"]["transformations"] = json!([
             {"type":"identity", "input":"raw_day", "output":"day"},
             {"type":"identity", "input":"raw_day", "output":"day"}
         ]);
         assert!(error(value).contains("output feature ID duplicates an earlier output"));
 
         let mut value = valid_model_spec();
-        value["transformations"][0]["output"] = json!("__reserved_0");
+        value["model_input"]["transformations"][0]["output"] = json!("__reserved_0");
         assert!(error(value).contains("reserved namespace"));
 
         for scale in [json!(0.0), json!(-1.0)] {
             let mut value = valid_model_spec();
-            value["transformations"][0] = json!({
+            value["model_input"]["transformations"][0] = json!({
                 "type":"standard_scale", "input":"raw_day", "output":"day",
                 "mean":0.0, "scale":scale
             });
@@ -422,15 +454,15 @@ mod tests {
         }
 
         let mut value = valid_model_spec();
-        value["transformations"][0] = json!({
+        value["model_input"]["transformations"][0] = json!({
             "type":"standard_scale", "input":"raw_day", "output":"day",
             "mean":0.0, "scale":5e-324
         });
         assert!(error(value).contains("inverse scale must be finite"));
 
         for text in [
-            r#"{"version":"1.0","feature_vector_capacity":1,"feature_vector_length":1,"feature_extractor":{"version":"1.0","feature_vector_capacity":0,"feature_vector_length":0,"features":[]},"transformations":[{"type":"standard_scale","input":"raw_day","output":"day","mean":NaN,"scale":1.0}]}"#,
-            r#"{"version":"1.0","feature_vector_capacity":1,"feature_vector_length":1,"feature_extractor":{"version":"1.0","feature_vector_capacity":0,"feature_vector_length":0,"features":[]},"transformations":[{"type":"standard_scale","input":"raw_day","output":"day","mean":0.0,"scale":1e400}]}"#,
+            r#"{"version":"1.0","feature_extractor":{"version":"1.0","capacity":0,"length":0,"features":[]},"model_input":{"capacity":1,"length":1,"transformations":[{"type":"standard_scale","input":"raw_day","output":"day","mean":NaN,"scale":1.0}]}}"#,
+            r#"{"version":"1.0","feature_extractor":{"version":"1.0","capacity":0,"length":0,"features":[]},"model_input":{"capacity":1,"length":1,"transformations":[{"type":"standard_scale","input":"raw_day","output":"day","mean":0.0,"scale":1e400}]}}"#,
         ] {
             assert!(serde_json::from_str::<ModelInputSpec>(text).is_err());
         }

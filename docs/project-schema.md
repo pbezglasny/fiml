@@ -113,7 +113,7 @@ flowchart LR
 | `FeatureDefinition` | Public | A structural `FeatureKey` paired with a stable user-facing `FeatureId`. |
 | `FeatureKey` | Public closed enum | Complete calculation identity for one scalar output, including symbol, source, window, and warm-up policy. |
 | `FeatureId` | Public | Output lookup/schema name; it may be explicit or deterministically generated from a key. |
-| `FeatureSource` | Public | `Field(EventField)`, `Event(EventKind)`, or `EveryEvent`. |
+| `FeatureSource` | Public | `Field(EventField)`, `Event(EventKind)`, or `AnyEvent`. |
 | `EventField` | Public | Extractable scalar event fields: price, volume, trade price, and trade volume. |
 | `FeatureExtractorBuilder<V>` | Public | Collects scalar definitions and owns the caller-selected output vector until `build`. |
 | `FeatureGroup` / `GroupKey` | Internal | Cold-path grouping state for definitions that can share calculation history. |
@@ -131,11 +131,11 @@ the router. Temporary maps are dropped before event processing.
 | `Sma` | `SmaFeature` | `SimpleMovingAverage<HeapRingBuffer<f64>, 16>` | Event kind selected by `EventField` and the configured symbol. |
 | `Ema` | `EmaFeature` | `ExponentialMovingAverage<16>` | Event kind selected by `EventField` and the configured symbol. |
 | `Cvd` | `CvdFeature` | `CumulativeVolumeDelta<HeapRingBuffer<f64>, 16>` | Trade events for the configured symbol. |
-| `SmaTimed` | `SmaTimedFeature` | `SimpleMovingAverageTimed<HeapRingBuffer<(i64, f64)>, 16>` | Every event, so time advances even without a matching scalar sample. |
-| `ObvTimed` | `ObvTimedFeature` | `OnBalanceVolumeTimed<HeapRingBuffer<ObvBucket>, 16>` | Every event. |
-| `TradeCountTimed` | `TradeCountTimedFeature` | `TradeCountTimed<HeapRingBuffer<CountBucket>>` | Every event. |
-| `DayOfWeek` | `DayOfWeek` | Clock state in the derivation. | Every event. |
-| `TimeSinceFirstEventOfDay` | `TimeSinceFirstEventOfDay` | Clock state in the derivation. | Every event. |
+| `SmaTimed` | `SmaTimedFeature` | `SimpleMovingAverageTimed<HeapRingBuffer<(i64, f64)>, 16>` | Any event, so time advances even without a matching scalar sample. |
+| `ObvTimed` | `ObvTimedFeature` | `OnBalanceVolumeTimed<HeapRingBuffer<ObvBucket>, 16>` | Any event. |
+| `TradeCountTimed` | `TradeCountTimedFeature` | `TradeCountTimed<HeapRingBuffer<CountBucket>>` | Any event. |
+| `DayOfWeek` | `DayOfWeek` | Clock state in the derivation. | Any event. |
+| `TimeSinceFirstEventOfDay` | `TimeSinceFirstEventOfDay` | Clock state in the derivation. | Any event. |
 
 `MAX_OUTPUTS_PER_INDICATOR` is currently 16. It bounds the adjacent scalar
 outputs that can share one runtime derivation.

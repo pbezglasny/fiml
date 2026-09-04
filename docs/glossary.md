@@ -111,7 +111,7 @@ its kind-specific payload.
 
 The routing tag of an event (`EventKind`): `Price`, `Volume`, `Trade`,
 `OrderBook`, or `Time`. Indicators subscribe to one event kind, except global
-clock indicators, which observe every event.
+clock indicators, which observe any event.
 
 ### Event-time watermark
 
@@ -225,7 +225,7 @@ ignores trades whose side is not classified.
 
 ### Day of week
 
-A global clock indicator (`day_of_week`) derived from every event's timestamp.
+A global clock indicator (`day_of_week`) derived from any event's timestamp.
 It emits `0` for Sunday through `6` for Saturday.
 
 ### Exponential moving average (EMA)
@@ -270,7 +270,7 @@ group is either global or belongs to one normalized symbol. Runtime definitions
 remain flat, and only one serialized group may exist for each scope.
 
 Rust dispatch internals also use *feature group* or *dispatch group* for the
-collection of runtime features routed to one event kind (or every event). That
+collection of runtime features routed to one event kind (or any event). That
 is a separate concept from a serialized feature group.
 
 ### Feature-vector spec format version
