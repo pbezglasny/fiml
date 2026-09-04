@@ -1,0 +1,48 @@
+{
+  "raw": {
+    "capacity": 5,
+    "length": 3,
+    "active_ids": [
+      "raw_day",
+      "raw_elapsed",
+      "raw_sma"
+    ],
+    "names": [
+      "raw_day",
+      "raw_elapsed",
+      "raw_sma",
+      "__reserved_3",
+      "__reserved_4"
+    ]
+  },
+  "model": {
+    "capacity": 5,
+    "length": 3,
+    "active_ids": [
+      "scaled_sma",
+      "elapsed",
+      "day"
+    ],
+    "names": [
+      "scaled_sma",
+      "elapsed",
+      "day",
+      "__reserved_3",
+      "__reserved_4"
+    ]
+  },
+  "snapshots": [
+    {
+      "raw_values": [4.0, 0.0, null, null, null],
+      "model_values": [null, 0.0, 4.0, null, null]
+    },
+    {
+      "raw_values": [4.0, 1.0, 12.0, null, null],
+      "model_values": [1.0, 1.0, 4.0, null, null]
+    },
+    {
+      "raw_values": [4.0, 2.0, 12.0, null, null],
+      "model_values": [1.0, 2.0, 4.0, null, null]
+    }
+  ]
+}

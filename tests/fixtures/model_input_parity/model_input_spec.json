@@ -1,0 +1,83 @@
+{
+  "version": "1.0",
+  "feature_extractor": {
+    "version": "1.0",
+    "capacity": 5,
+    "length": 3,
+    "features": [
+      {
+        "symbol": "__global__",
+        "indicators": [
+          {
+            "kind": "day_of_week",
+            "source": {
+              "type": "any_event"
+            },
+            "outputs": [
+              {
+                "id": "raw_day"
+              }
+            ]
+          },
+          {
+            "kind": "time_since_first_event_of_day",
+            "source": {
+              "type": "any_event"
+            },
+            "options": {
+              "utc_offset": "+00:00"
+            },
+            "outputs": [
+              {
+                "id": "raw_elapsed"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "symbol": "btcusdt",
+        "indicators": [
+          {
+            "kind": "sma",
+            "source": {
+              "type": "field",
+              "event": "trade",
+              "field": "price"
+            },
+            "warmup_policy": "full_window",
+            "outputs": [
+              {
+                "window": 2,
+                "id": "raw_sma"
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "model_input": {
+    "capacity": 5,
+    "length": 3,
+    "transformations": [
+      {
+        "type": "standard_scale",
+        "input": "raw_sma",
+        "output": "scaled_sma",
+        "mean": 10.0,
+        "scale": 2.0
+      },
+      {
+        "type": "identity",
+        "input": "raw_elapsed",
+        "output": "elapsed"
+      },
+      {
+        "type": "identity",
+        "input": "raw_day",
+        "output": "day"
+      }
+    ]
+  }
+}
