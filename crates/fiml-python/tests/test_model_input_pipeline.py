@@ -59,7 +59,7 @@ def test_model_input_spec_capacity_cloning_metadata_and_atomic_failures():
     assert dynamic.checksum == "model"
     document = json.loads(dynamic.to_json())
     assert document["checksum"] == "model"
-    assert document["raw_feature_vector_spec"]["checksum"] == "raw"
+    assert document["feature_extractor"]["checksum"] == "raw"
 
     before = dynamic.to_json()
     with pytest.raises(ValueError, match="input feature ID does not exist"):

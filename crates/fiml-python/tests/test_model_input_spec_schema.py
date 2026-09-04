@@ -48,7 +48,7 @@ def test_model_input_schema_accepts_strict_transformation_variants(transformatio
     document["feature_vector_capacity"] = 1
     document["feature_vector_length"] = 1
     document["transformations"] = [transformation]
-    document["raw_feature_vector_spec"]["features"][0]["indicators"][0]["outputs"][
+    document["feature_extractor"]["features"][0]["indicators"][0]["outputs"][
         0
     ]["id"] = "raw_price"
 

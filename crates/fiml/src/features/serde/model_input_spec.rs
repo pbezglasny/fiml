@@ -18,7 +18,7 @@ struct ModelInputSpecWire {
         skip_serializing_if = "Option::is_none"
     )]
     checksum: Option<String>,
-    raw_feature_vector_spec: FeatureVectorSpec,
+    feature_extractor: FeatureVectorSpec,
     transformations: Vec<TransformationWire>,
 }
 
@@ -64,7 +64,7 @@ impl From<&ModelInputSpec> for ModelInputSpecWire {
             feature_vector_capacity: spec.feature_vector_capacity(),
             feature_vector_length: spec.feature_vector_length(),
             checksum: spec.checksum().map(str::to_owned),
-            raw_feature_vector_spec: spec.raw_feature_vector_spec().clone(),
+            feature_extractor: spec.raw_feature_vector_spec().clone(),
             transformations: spec
                 .transformation_definitions()
                 .iter()
@@ -126,7 +126,7 @@ impl TryFrom<ModelInputSpecWire> for ModelInputSpec {
             .map(TransformationDefinition::from)
             .collect::<Vec<_>>();
         ModelInputSpec::with_metadata(
-            wire.raw_feature_vector_spec,
+            wire.feature_extractor,
             transformations,
             wire.feature_vector_capacity,
             wire.checksum,
@@ -185,7 +185,7 @@ mod tests {
             "version": "1.0",
             "feature_vector_capacity": 1,
             "feature_vector_length": 1,
-            "raw_feature_vector_spec": {
+            "feature_extractor": {
                 "version": "1.0",
                 "feature_vector_capacity": 1,
                 "feature_vector_length": 1,
@@ -250,7 +250,7 @@ mod tests {
                 "feature_vector_capacity": 4,
                 "feature_vector_length": 2,
                 "checksum": "model-checksum",
-                "raw_feature_vector_spec": {
+                "feature_extractor": {
                     "version": "1.0",
                     "feature_vector_capacity": 3,
                     "feature_vector_length": 2,
@@ -308,14 +308,14 @@ mod tests {
         let value = serde_json::to_value(spec).unwrap();
 
         assert!(value.get("checksum").is_none());
-        assert!(value["raw_feature_vector_spec"].get("checksum").is_none());
+        assert!(value["feature_extractor"].get("checksum").is_none());
 
         let mut value = valid_model_spec();
         value["checksum"] = Value::Null;
         assert!(error(value).contains("string"));
 
         let mut value = valid_model_spec();
-        value["raw_feature_vector_spec"]["checksum"] = Value::Null;
+        value["feature_extractor"]["checksum"] = Value::Null;
         assert!(error(value).contains("string"));
     }
 
@@ -326,7 +326,7 @@ mod tests {
         assert!(error(value).contains("unsupported model-input spec version"));
 
         let mut value = valid_model_spec();
-        value["raw_feature_vector_spec"]["version"] = json!("2.0");
+        value["feature_extractor"]["version"] = json!("2.0");
         assert!(error(value).contains("unsupported feature-vector spec version"));
 
         let mut value = valid_model_spec();
@@ -344,11 +344,20 @@ mod tests {
         value["unknown"] = json!(true);
         assert!(error(value).contains("unknown field"));
 
+        let mut value = valid_model_spec();
+        let feature_extractor = value
+            .as_object_mut()
+            .unwrap()
+            .remove("feature_extractor")
+            .unwrap();
+        value["raw_feature_vector_spec"] = feature_extractor;
+        assert!(error(value).contains("unknown field `raw_feature_vector_spec`"));
+
         for field in [
             "version",
             "feature_vector_capacity",
             "feature_vector_length",
-            "raw_feature_vector_spec",
+            "feature_extractor",
             "transformations",
         ] {
             let mut value = valid_model_spec();
@@ -420,8 +429,8 @@ mod tests {
         assert!(error(value).contains("inverse scale must be finite"));
 
         for text in [
-            r#"{"version":"1.0","feature_vector_capacity":1,"feature_vector_length":1,"raw_feature_vector_spec":{"version":"1.0","feature_vector_capacity":0,"feature_vector_length":0,"features":[]},"transformations":[{"type":"standard_scale","input":"raw_day","output":"day","mean":NaN,"scale":1.0}]}"#,
-            r#"{"version":"1.0","feature_vector_capacity":1,"feature_vector_length":1,"raw_feature_vector_spec":{"version":"1.0","feature_vector_capacity":0,"feature_vector_length":0,"features":[]},"transformations":[{"type":"standard_scale","input":"raw_day","output":"day","mean":0.0,"scale":1e400}]}"#,
+            r#"{"version":"1.0","feature_vector_capacity":1,"feature_vector_length":1,"feature_extractor":{"version":"1.0","feature_vector_capacity":0,"feature_vector_length":0,"features":[]},"transformations":[{"type":"standard_scale","input":"raw_day","output":"day","mean":NaN,"scale":1.0}]}"#,
+            r#"{"version":"1.0","feature_vector_capacity":1,"feature_vector_length":1,"feature_extractor":{"version":"1.0","feature_vector_capacity":0,"feature_vector_length":0,"features":[]},"transformations":[{"type":"standard_scale","input":"raw_day","output":"day","mean":0.0,"scale":1e400}]}"#,
         ] {
             assert!(serde_json::from_str::<ModelInputSpec>(text).is_err());
         }

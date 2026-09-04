@@ -7,7 +7,7 @@
     "version",
     "feature_vector_capacity",
     "feature_vector_length",
-    "raw_feature_vector_spec",
+    "feature_extractor",
     "transformations"
   ],
   "properties": {
@@ -15,7 +15,7 @@
     "feature_vector_capacity": { "type": "integer", "minimum": 0 },
     "feature_vector_length": { "type": "integer", "minimum": 0 },
     "checksum": { "type": "string" },
-    "raw_feature_vector_spec": { "$ref": "feature-vector-spec.schema.json" },
+    "feature_extractor": { "$ref": "feature-vector-spec.schema.json" },
     "transformations": {
       "type": "array",
       "items": { "$ref": "#/$defs/transformation" }

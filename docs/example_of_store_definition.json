@@ -3,7 +3,7 @@
   "feature_vector_capacity": 4,
   "feature_vector_length": 2,
   "checksum": "opaque model metadata",
-  "raw_feature_vector_spec": {
+  "feature_extractor": {
     "version": "1.0",
     "feature_vector_capacity": 4,
     "feature_vector_length": 2,
