@@ -2,7 +2,7 @@
 
 Status: in progress
 
-Last updated: 2026-09-04
+Last updated: 2026-09-05
 
 The pipeline runtime, model-input serialization, and Python interface are
 implemented. The remaining work is verification and interface hardening rather
@@ -57,6 +57,8 @@ feature that observes any event is `any_event`.
   operations.
 - Direct writes into caller-owned model-vector storage after each accepted
   event.
+- Regression coverage proving accepted steady-state identity and
+  standard-scale events perform zero heap allocations.
 - `NaN` initialization and propagation through identity and standard scaling.
 - Rejected events leave raw and final snapshots unchanged.
 - Stable authored output ordering and separate raw/final ID layouts.
@@ -93,19 +95,16 @@ value mismatch before the literal was restored.
 
 ### P2: Allocation regression verification
 
-Status: open
+Status: complete
 
 Priority: high
 
-The compiled hot path contains no intentional allocation, but this requirement
-is currently established by code inspection rather than a regression test.
-
-Completion criteria:
-
-- Add an isolated allocation-counting test or benchmark.
-- Assert that accepted steady-state `Pipeline::handle_event` calls allocate
-  zero times.
-- Cover both identity and standard-scale operations.
+The isolated integration test in
+[`crates/fiml/tests/pipeline_allocations.rs`](../crates/fiml/tests/pipeline_allocations.rs)
+uses a thread-local allocation counter around repeated accepted
+`Pipeline::handle_event` calls. It covers identity and standard-scale operations
+independently and includes a sensitivity check proving that the counter detects
+a real heap allocation.
 
 ### P3: Transformation validation diagnostics
 
@@ -178,7 +177,7 @@ Completion criteria:
 
 The current tree passes:
 
-- 173 Rust tests across all workspace targets and features;
+- 176 Rust tests across all workspace targets and features;
 - 74 Python tests;
 - the maintained notebook;
 - `cargo fmt --all -- --check`;
