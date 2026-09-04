@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "fiml",
-    "jupyterlab>=4.6.1",
+    "marimo>=0.24.0",
     "pandas>=3.0.3",
     "pyarrow>=25.0.0",
 ]

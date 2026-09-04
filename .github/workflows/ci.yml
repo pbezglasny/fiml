@@ -34,7 +34,7 @@ jobs:
       - name: Install build and test tools
         run: >-
           python -m pip install "maturin>=1.5,<2.0" "pandas>=2.0"
-          "pytest>=8.0" "nbclient>=0.10" "ipykernel>=6.0"
+          "pytest>=8.0" "jsonschema>=4.0" "uv>=0.8.0"
       - name: Build wheel
         working-directory: crates/fiml-python
         run: maturin build --release --out dist
@@ -42,6 +42,5 @@ jobs:
         run: python -m pip install crates/fiml-python/dist/*.whl
       - name: Test Python API
         run: python -m pytest crates/fiml-python/tests
-      - name: Execute notebook
-        working-directory: notebooks
-        run: jupyter execute test.ipynb --timeout=120
+      - name: Execute marimo notebook
+        run: make test-notebook

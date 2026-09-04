@@ -18,6 +18,5 @@ __pycache__/
 # wheels produced by `make build`
 /crates/fiml-python/dist/
 
-#jupyter notebooks
-.ipynb_checkpoints/
-*/.ipynb_checkpoints/*
+# marimo notebook session data
+__marimo__/

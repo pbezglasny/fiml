@@ -2,7 +2,7 @@ PYTHON_VENV := .venv
 PYTHON := $(PYTHON_VENV)/bin/python
 MATURIN := $(PYTHON_VENV)/bin/maturin
 
-.PHONY: build build-rust build-python test test-rust test-python test-notebook python-venv jupyter-lab
+.PHONY: build build-rust build-python test test-rust test-python test-notebook python-venv marimo
 
 build: build-rust build-python
 
@@ -21,13 +21,13 @@ test-python: python-venv
 test-notebook:
 	cd notebooks && uv sync
 	uv pip install --python notebooks/.venv/bin/python --reinstall-package fiml ./crates/fiml-python
-	cd notebooks && uv run --no-sync jupyter execute test.ipynb --timeout=120
+	cd notebooks && uv run --no-sync marimo export html test.py --output /tmp/fiml-test.html --force
 
 build-python: python-venv
 	cd crates/fiml-python && ../../$(MATURIN) build --release --out dist
 
-jupyter-lab:
-	cd notebooks && uv run jupyter lab --ip=0.0.0.0
+marimo:
+	cd notebooks && uv run marimo edit --host=0.0.0.0 --headless
 
 python-venv: $(MATURIN)
 
