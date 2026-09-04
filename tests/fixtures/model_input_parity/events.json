@@ -1,0 +1,20 @@
+[
+  {
+    "kind": "trade",
+    "symbol": "BTCUSDT",
+    "timestamp": 0,
+    "price": 10.0,
+    "volume": 1.0
+  },
+  {
+    "kind": "trade",
+    "symbol": "BTCUSDT",
+    "timestamp": 1,
+    "price": 14.0,
+    "volume": 2.0
+  },
+  {
+    "kind": "time",
+    "timestamp": 2
+  }
+]
