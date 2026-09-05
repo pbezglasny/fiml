@@ -1,3 +1,9 @@
+//! Standalone streaming indicators and their window state.
+//!
+//! Direct callers must supply finite numeric inputs; indicator updates do not
+//! validate NaN or infinity and can retain poisoned state. Event ingestion via
+//! [`crate::FeatureExtractor`] or [`crate::Pipeline`] rejects these inputs.
+
 pub mod averages;
 pub mod counts;
 pub mod volume;

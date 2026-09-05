@@ -1,7 +1,7 @@
 use std::fmt;
 
 use crate::{
-    Symbol,
+    EventField, FimlError, InvalidArgumentError, Result, Symbol,
     order_book::{OrderBookDelta, OrderBookSnapshot, OrderBookUpdate, OrderBookUpdateRef},
 };
 
@@ -122,6 +122,31 @@ pub enum Event {
 }
 
 impl Event {
+    /// Rejects NaN and infinity in numeric payloads without allocating.
+    ///
+    /// Finite zero and negative values are accepted. Trade price is checked before
+    /// volume. Time and Decimal order-book payloads need no finiteness checks.
+    pub fn validate_finite_values(&self) -> Result<()> {
+        let validate = |value: f64, field| {
+            if value.is_finite() {
+                Ok(())
+            } else {
+                Err(FimlError::InvalidArgument(
+                    InvalidArgumentError::NonFiniteEventValue { field },
+                ))
+            }
+        };
+        match self {
+            Self::Price(update) => validate(update.value, EventField::Price),
+            Self::Volume(update) => validate(update.value, EventField::Volume),
+            Self::Trade(update) => {
+                validate(update.price, EventField::TradePrice)?;
+                validate(update.volume, EventField::TradeVolume)
+            }
+            Self::Time(_) | Self::OrderBookDelta(_) | Self::OrderBookSnapshot(_) => Ok(()),
+        }
+    }
+
     /// Routing tag for this event.
     pub fn kind(&self) -> EventKind {
         match self {
@@ -237,6 +262,58 @@ impl Event {
 mod tests {
     use super::*;
     use crate::symbols;
+
+    #[test]
+    fn numeric_payloads_must_be_finite() {
+        for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, 0.0, -1.0, 1.0] {
+            for (event, field, name) in [
+                (
+                    Event::price(Symbol::GLOBAL, value, 0),
+                    EventField::Price,
+                    "price",
+                ),
+                (
+                    Event::volume(Symbol::GLOBAL, value, 0),
+                    EventField::Volume,
+                    "volume",
+                ),
+                (
+                    Event::trade(Symbol::GLOBAL, value, 1.0, 0, None),
+                    EventField::TradePrice,
+                    "trade price",
+                ),
+                (
+                    Event::trade(Symbol::GLOBAL, 1.0, value, 0, None),
+                    EventField::TradeVolume,
+                    "trade volume",
+                ),
+            ] {
+                let result = event.validate_finite_values();
+                if value.is_finite() {
+                    result.unwrap();
+                } else {
+                    let error = result.unwrap_err();
+                    assert!(matches!(error, FimlError::InvalidArgument(
+                        InvalidArgumentError::NonFiniteEventValue { field: actual }
+                    ) if actual == field));
+                    assert!(
+                        error
+                            .to_string()
+                            .contains(&format!("{name} must be finite"))
+                    );
+                }
+            }
+        }
+        assert!(matches!(
+            Event::trade(Symbol::GLOBAL, f64::NAN, f64::INFINITY, 0, None).validate_finite_values(),
+            Err(FimlError::InvalidArgument(
+                InvalidArgumentError::NonFiniteEventValue {
+                    field: EventField::TradePrice
+                }
+            ))
+        ));
+        Event::time(0).validate_finite_values().unwrap();
+    }
 
     #[test]
     fn volume_event_has_volume_kind() {

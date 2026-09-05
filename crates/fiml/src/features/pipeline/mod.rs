@@ -41,6 +41,9 @@ where
     ModelV: FeatureVector,
 {
     /// Applies an accepted event to raw features and then refreshes model input.
+    /// Non-finite payloads are rejected before changing raw or final values,
+    /// timed state, or the timestamp watermark, even for unsubscribed symbols.
+    /// Finite zero and negative payloads are accepted.
     #[must_use = "event errors must be handled before using updated model-input values"]
     pub fn handle_event(&mut self, event: Event) -> Result<UpdateResult> {
         let update_result = self.feature_extractor.handle_event(event)?;

@@ -821,7 +821,7 @@ where
         bid: Option<f64>,
         ask: Option<f64>,
     ) -> PyResult<Event> {
-        Ok(match kind {
+        let event = match kind {
             KIND_PRICE => {
                 Event::price(self.symbol_at(symbol)?, require("price", price)?, timestamp)
             }
@@ -853,7 +853,11 @@ where
                      (expected 0=price, 1=volume, 2=trade, 3=orderbook, 4=time)"
                 )));
             }
-        })
+        };
+        event
+            .validate_finite_values()
+            .map_err(|error| PyValueError::new_err(error.to_string()))?;
+        Ok(event)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1098,6 +1102,9 @@ impl FeatureExtractor {
 
     /// Apply a single event and update the feature vector. Useful for live
     /// stepping and for checking parity against [`transform`](Self::transform).
+    /// Non-finite price or volume payloads raise `ValueError` before changing
+    /// feature values, timed state, or the timestamp watermark, regardless of
+    /// symbol subscriptions. Finite zero and negative values are accepted.
     ///
     /// Pass only the payload values the event kind needs (see
     /// [`transform`](Self::transform) for the per-kind columns): e.g.
@@ -1141,6 +1148,10 @@ impl FeatureExtractor {
     /// - `KIND_TRADE` -> `price`, `volume`, and optional `side`
     /// - `KIND_ORDERBOOK` -> `bid` and `ask`
     /// - `KIND_TIME` -> none
+    ///
+    /// Required price and volume values must be finite; zero and negative values
+    /// are accepted. Unused payload columns are ignored. A non-finite row raises
+    /// `ValueError` with `row N:` context before any events in the batch apply.
     ///
     /// A row whose kind needs a column that was not supplied raises a
     /// `ValueError` naming that column. Any provided payload column must match
@@ -1284,6 +1295,9 @@ impl ModelInputPipeline {
     }
 
     /// Apply one event and refresh both raw and final snapshots.
+    /// Non-finite price or volume payloads raise `ValueError` before changing
+    /// raw or final values, timed state, or the timestamp watermark, regardless
+    /// of subscriptions. Finite zero and negative values are accepted.
     #[pyo3(signature = (
         kind,
         symbol,
@@ -1312,6 +1326,10 @@ impl ModelInputPipeline {
     }
 
     /// Replay an event stream and return one final model row per event.
+    /// Required price and volume values must be finite; zero and negative values
+    /// are accepted and unused payload columns are ignored. A non-finite row
+    /// raises `ValueError` with `row N:` context before any batch events apply,
+    /// leaving raw/final values, timed state, and the timestamp watermark unchanged.
     #[pyo3(signature = (
         kind,
         symbol,
