@@ -431,6 +431,11 @@ where
         }
     }
 
+    /// Applies an event after checking timestamp order and numeric finiteness.
+    ///
+    /// NaN and infinity are rejected even for unsubscribed symbols, leaving all
+    /// feature values, timed state, and the timestamp watermark unchanged.
+    /// Finite zero and negative payloads are accepted.
     #[must_use = "event errors must be handled before using updated feature values"]
     pub fn handle_event(&mut self, event: Event) -> Result<UpdateResult> {
         // TODO: use separate counters for each symbol
@@ -444,6 +449,8 @@ where
                 previous_timestamp,
             });
         }
+
+        event.validate_finite_values()?;
 
         let symbol = event.symbol();
         let timestamp = event.timestamp();
@@ -566,6 +573,76 @@ mod tests {
         },
     };
     use rust_decimal::dec;
+
+    #[test]
+    fn non_finite_events_leave_features_timed_state_and_watermark_unchanged() {
+        let symbol = Symbol::new("finite-input");
+        let unsubscribed = Symbol::new("finite-input-unsubscribed");
+        let build = || {
+            FeatureExtractor::builder(ArrayFeatureVector::<2>::new())
+                .add_feature(FeatureDefinition::with_default_id(FeatureKey::Sma {
+                    symbol,
+                    source: FeatureSource::Field(EventField::Price),
+                    window: 2,
+                    warmup_policy: WarmupPolicy::FirstValue,
+                }))
+                .add_feature(FeatureDefinition::with_default_id(FeatureKey::SmaTimed {
+                    symbol,
+                    source: FeatureSource::Field(EventField::Price),
+                    aggregation: std::time::Duration::from_secs(1),
+                    window: std::time::Duration::from_secs(2),
+                    warmup_policy: WarmupPolicy::FirstValue,
+                }))
+                .build()
+                .unwrap()
+        };
+        for rejected_symbol in [symbol, unsubscribed] {
+            for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+                for event in [
+                    Event::price(rejected_symbol, value, 100_000),
+                    Event::volume(rejected_symbol, value, 100_000),
+                    Event::trade(rejected_symbol, value, 1.0, 100_000, None),
+                    Event::trade(rejected_symbol, 1.0, value, 100_000, None),
+                ] {
+                    let mut extractor = build();
+                    let mut reference = build();
+                    for runtime in [&mut extractor, &mut reference] {
+                        runtime
+                            .handle_event(Event::price(symbol, 100.0, 0))
+                            .unwrap();
+                    }
+                    assert!(matches!(
+                        extractor.handle_event(event),
+                        Err(FimlError::InvalidArgument(
+                            InvalidArgumentError::NonFiniteEventValue { .. }
+                        ))
+                    ));
+                    assert_eq!(extractor.last_timestamp(), Some(0));
+                    assert_eq!(
+                        extractor.feature_vector().values(),
+                        reference.feature_vector().values()
+                    );
+
+                    for (timestamp, price) in [(1000, 102.0), (2000, 103.0), (3000, 104.0)] {
+                        for runtime in [&mut extractor, &mut reference] {
+                            runtime
+                                .handle_event(Event::price(symbol, price, timestamp))
+                                .unwrap();
+                        }
+                        assert_eq!(
+                            extractor.feature_vector().values(),
+                            reference.feature_vector().values()
+                        );
+                    }
+                    assert_eq!(extractor.feature_vector().values()[0], 103.5);
+                    assert!(matches!(
+                        extractor.handle_event(Event::price(symbol, f64::NAN, 0)),
+                        Err(FimlError::TimestampOutOfOrder { .. })
+                    ));
+                }
+            }
+        }
+    }
 
     #[test]
     fn builder_infers_types_from_output_vector() {

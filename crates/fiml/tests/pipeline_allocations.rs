@@ -96,6 +96,19 @@ fn steady_state_identity_pipeline_events_do_not_allocate() {
     let allocations = count_allocations(|| {
         for timestamp in 1..=128 {
             black_box(pipeline.handle_event(Event::time(timestamp)).unwrap());
+            for value in [0.0, -1.0, 1.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+                for event in [
+                    Event::price(Symbol::GLOBAL, value, timestamp),
+                    Event::volume(Symbol::GLOBAL, value, timestamp),
+                    Event::trade(Symbol::GLOBAL, value, 1.0, timestamp, None),
+                    Event::trade(Symbol::GLOBAL, 1.0, value, timestamp, None),
+                ] {
+                    assert_eq!(
+                        black_box(pipeline.handle_event(event)).is_ok(),
+                        value.is_finite()
+                    );
+                }
+            }
         }
     });
 

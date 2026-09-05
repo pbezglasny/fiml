@@ -267,6 +267,15 @@ are dispatched in array order. `update(...)` takes the same keyword payloads as
 scalars. `KIND_ORDERBOOK` dispatches today but no builtin feature subscribes to
 it yet, so it does not change output on its own.
 
+For both extractors and pipelines, required price and volume payloads must be
+finite, even for unsubscribed symbols. NaN and ±infinity raise `ValueError`
+before changing raw/final snapshots, timed-feature state, or the timestamp
+watermark. `transform` checks every row before dispatch and includes `row N:`
+in the error, leaving the whole batch unapplied. A rejected first input does
+not lock `output_dtype`. Unused payload columns are ignored. These low-level
+APIs accept finite zero and negative values; DataFrame `compute_features`
+continues to require strictly positive values.
+
 ## Determinism rules (read these)
 
 To guarantee identical output between Python (batch) and Rust (live):

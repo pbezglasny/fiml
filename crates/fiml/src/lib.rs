@@ -89,6 +89,9 @@ pub enum FimlError {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum InvalidArgumentError {
+    NonFiniteEventValue {
+        field: EventField,
+    },
     FeatureVectorIndexOutOfBounds {
         index: usize,
         length: usize,
@@ -334,6 +337,15 @@ impl Error for FimlError {}
 impl Display for InvalidArgumentError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::NonFiniteEventValue { field } => {
+                let name = match field {
+                    EventField::Price => "price",
+                    EventField::Volume => "volume",
+                    EventField::TradePrice => "trade price",
+                    EventField::TradeVolume => "trade volume",
+                };
+                write!(f, "event {name} must be finite")
+            }
             Self::FeatureVectorIndexOutOfBounds { index, length } => write!(
                 f,
                 "index {index} is out of bounds for feature vector of length {length}"
