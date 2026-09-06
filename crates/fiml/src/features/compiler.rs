@@ -721,7 +721,7 @@ mod tests {
 
     #[test]
     fn groups_compatible_non_adjacent_definitions() {
-        let symbol = Symbol::new("compiler-grouped");
+        let symbol = Symbol::new("compiler-grouped").unwrap();
         let sma_one = FeatureKey::Sma {
             symbol,
             source: FeatureSource::Field(EventField::Price),
@@ -793,7 +793,7 @@ mod tests {
     #[test]
     fn rejects_non_scalar_moving_average_source() {
         let definition = definition(FeatureKey::Sma {
-            symbol: Symbol::new("compiler-source"),
+            symbol: Symbol::new("compiler-source").unwrap(),
             source: FeatureSource::Event(EventKind::Trade),
             window: 2,
             warmup_policy: WarmupPolicy::FullWindow,
@@ -805,7 +805,7 @@ mod tests {
     #[test]
     fn validates_output_count_and_timed_windows() {
         let key = FeatureKey::SmaTimed {
-            symbol: Symbol::new("compiler-timed"),
+            symbol: Symbol::new("compiler-timed").unwrap(),
             source: FeatureSource::Field(EventField::Price),
             aggregation: Duration::from_secs(1),
             window: Duration::from_millis(1_500),

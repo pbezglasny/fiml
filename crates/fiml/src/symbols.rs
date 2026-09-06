@@ -1,3 +1,10 @@
+//! Process-wide, ASCII-case-insensitive symbol interning with a fixed capacity.
+//!
+//! New names return a capacity error once all slots are used. Existing names
+//! remain usable, including case variants and [`Symbol::GLOBAL`].
+//! [`Symbol::new`], [`intern`], and string `TryFrom` conversions return
+//! [`crate::Result`]; callers can propagate capacity errors with `?`.
+
 use std::{
     borrow::Cow,
     collections::HashMap,
@@ -8,6 +15,9 @@ use std::{
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
+use crate::{FimlError, InvalidArgumentError, LimitTarget};
+
+/// Maximum interned names per process, including [`Symbol::GLOBAL`].
 pub const MAX_SYMBOL_NUMBER: u16 = 512;
 
 /// Internek representation of Symbol string
@@ -21,7 +31,8 @@ impl Symbol {
     /// Dummy symbol for gloval indicators like current time etc
     pub const GLOBAL: Self = Self(0);
 
-    pub fn new(name: &str) -> Self {
+    /// Interns a name, returning a capacity error for a new name at the limit.
+    pub fn new(name: &str) -> crate::Result<Self> {
         intern(name)
     }
 
@@ -71,8 +82,8 @@ impl<'de> Deserialize<'de> for Symbol {
     where
         D: serde::Deserializer<'de>,
     {
-        let symbol_name = String::deserialize(deserializer);
-        symbol_name.map(|symbol_name| intern(&symbol_name))
+        let symbol_name = String::deserialize(deserializer)?;
+        intern(&symbol_name).map_err(serde::de::Error::custom)
     }
 }
 struct SymbolInterner {
@@ -92,21 +103,26 @@ impl SymbolInterner {
         }
     }
 
-    fn intern(&mut self, name: &str) -> Symbol {
+    fn intern(&mut self, name: &str) -> crate::Result<Symbol> {
         let lower_case_name = normalize_name(name);
         if let Some(&symbol) = self.name_to_id.get(lower_case_name.as_ref()) {
-            return symbol;
+            return Ok(symbol);
         }
-        let id = self.id_to_normalize_name.len() as u16;
-        assert!(
-            id < MAX_SYMBOL_NUMBER,
-            "Exceeded max number of supported symbols"
-        );
-        let symbol = Symbol(id);
+        let id = self.id_to_normalize_name.len();
+        if id >= usize::from(MAX_SYMBOL_NUMBER) {
+            return Err(FimlError::InvalidArgument(
+                InvalidArgumentError::LimitExceeded {
+                    target: LimitTarget::Symbols,
+                    count: id + 1,
+                    limit: usize::from(MAX_SYMBOL_NUMBER),
+                },
+            ));
+        }
+        let symbol = Symbol(id as u16);
         let name_arc: Arc<str> = Arc::from(lower_case_name.as_ref());
         self.name_to_id.insert(name_arc.clone(), symbol);
         self.id_to_normalize_name.push(name_arc);
-        symbol
+        Ok(symbol)
     }
 
     fn resolve(&self, symbol: Symbol) -> Option<&str> {
@@ -127,7 +143,9 @@ fn normalize_name(symbol_name: &str) -> Cow<'_, str> {
     }
 }
 
-pub fn intern(symbol_name: &str) -> Symbol {
+/// Interns a name without changing the interner if capacity is exhausted.
+/// Existing names are returned even at capacity; normalization folds ASCII case.
+pub fn intern(symbol_name: &str) -> crate::Result<Symbol> {
     SYMBOL_INTERNER.lock().unwrap().intern(symbol_name)
 }
 
@@ -139,14 +157,18 @@ pub fn resolve(symbol: Symbol) -> Option<String> {
         .map(|s| s.to_string())
 }
 
-impl From<String> for Symbol {
-    fn from(value: String) -> Self {
+impl TryFrom<String> for Symbol {
+    type Error = FimlError;
+
+    fn try_from(value: String) -> crate::Result<Self> {
         intern(value.as_str())
     }
 }
 
-impl From<&str> for Symbol {
-    fn from(value: &str) -> Self {
+impl TryFrom<&str> for Symbol {
+    type Error = FimlError;
+
+    fn try_from(value: &str) -> crate::Result<Self> {
         intern(value)
     }
 }
@@ -157,20 +179,20 @@ mod tests {
 
     #[test]
     fn ascii_symbol_identity_is_case_insensitive() {
-        let uppercase = intern("BTCUSDT");
-        let mixed_case = intern("BtcUsdt");
-        let lowercase = intern("btcusdt");
+        let uppercase = intern("BTCUSDT").unwrap();
+        let mixed_case = intern("BtcUsdt").unwrap();
+        let lowercase = intern("btcusdt").unwrap();
 
         assert_eq!(uppercase, mixed_case);
         assert_eq!(mixed_case, lowercase);
         assert_eq!(resolve(uppercase).as_deref(), Some("btcusdt"));
-        assert_eq!(Symbol::GLOBAL, intern(GLOBAL_NAME));
+        assert_eq!(Symbol::GLOBAL, intern(GLOBAL_NAME).unwrap());
         assert_eq!(resolve(Symbol::GLOBAL).as_deref(), Some(GLOBAL_NAME));
     }
 
     #[test]
     fn non_ascii_characters_are_not_case_folded() {
-        assert_ne!(intern("ÄBC"), intern("äbc"));
-        assert_eq!(resolve(intern("ÄBC")).as_deref(), Some("Äbc"));
+        assert_ne!(intern("ÄBC").unwrap(), intern("äbc").unwrap());
+        assert_eq!(resolve(intern("ÄBC").unwrap()).as_deref(), Some("Äbc"));
     }
 }

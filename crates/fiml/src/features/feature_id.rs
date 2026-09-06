@@ -175,7 +175,7 @@ mod tests {
     #[test]
     fn creates_canonical_id_for_sample_window_feature() {
         let key = FeatureKey::Sma {
-            symbol: Symbol::new("BTCUSD"),
+            symbol: Symbol::new("BTCUSD").unwrap(),
             source: FeatureSource::Field(EventField::TradePrice),
             window: 20,
             warmup_policy: WarmupPolicy::FullWindow,
@@ -190,7 +190,7 @@ mod tests {
     #[test]
     fn creates_canonical_id_for_timed_feature() {
         let key = FeatureKey::ObvTimed {
-            symbol: Symbol::new("ETHUSD"),
+            symbol: Symbol::new("ETHUSD").unwrap(),
             source: FeatureSource::Event(crate::EventKind::Trade),
             aggregation: Duration::from_millis(100),
             window: Duration::from_secs(5),

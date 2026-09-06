@@ -41,7 +41,7 @@ mod tests {
 
     #[test]
     fn day_of_week_reacts_to_any_event() {
-        let aapl = symbols::intern("AAPL");
+        let aapl = symbols::intern("AAPL").unwrap();
         let mut fv: ArrayFeatureVector<1> = ArrayFeatureVector::new();
         let mut feat = DayOfWeek;
         let output_span = OutputSpan { start: 0, count: 1 };

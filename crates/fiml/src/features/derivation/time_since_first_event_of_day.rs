@@ -64,7 +64,7 @@ mod tests {
 
     #[test]
     fn measures_elapsed_since_first_event_of_the_day() {
-        let aapl = symbols::intern("AAPL");
+        let aapl = symbols::intern("AAPL").unwrap();
         let mut fv: ArrayFeatureVector<1> = ArrayFeatureVector::new();
         let mut feat = TimeSinceFirstEventOfDay::new(0);
         let output_span = OutputSpan { start: 0, count: 1 };
@@ -85,7 +85,7 @@ mod tests {
 
     #[test]
     fn resets_at_the_next_day_boundary() {
-        let aapl = symbols::intern("AAPL");
+        let aapl = symbols::intern("AAPL").unwrap();
         let mut fv: ArrayFeatureVector<1> = ArrayFeatureVector::new();
         let mut feat = TimeSinceFirstEventOfDay::new(0);
         let output_span = OutputSpan { start: 0, count: 1 };

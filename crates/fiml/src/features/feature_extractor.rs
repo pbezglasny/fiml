@@ -576,8 +576,8 @@ mod tests {
 
     #[test]
     fn non_finite_events_leave_features_timed_state_and_watermark_unchanged() {
-        let symbol = Symbol::new("finite-input");
-        let unsubscribed = Symbol::new("finite-input-unsubscribed");
+        let symbol = Symbol::new("finite-input").unwrap();
+        let unsubscribed = Symbol::new("finite-input-unsubscribed").unwrap();
         let build = || {
             FeatureExtractor::builder(ArrayFeatureVector::<2>::new())
                 .add_feature(FeatureDefinition::with_default_id(FeatureKey::Sma {
@@ -651,7 +651,7 @@ mod tests {
 
     #[test]
     fn builder_compiles_definitions_and_routes_events() {
-        let symbol = Symbol::new("extractor-builder");
+        let symbol = Symbol::new("extractor-builder").unwrap();
         let first_key = FeatureKey::Sma {
             symbol,
             source: FeatureSource::Field(EventField::Price),
@@ -711,8 +711,8 @@ mod tests {
 
     #[test]
     fn routes_runtime_feature_indices_by_symbol_and_event_kind() {
-        let btc = Symbol::new("router-btc");
-        let eth = Symbol::new("router-eth");
+        let btc = Symbol::new("router-btc").unwrap();
+        let eth = Symbol::new("router-eth").unwrap();
         let symbol_count = btc.index().max(eth.index()) + 1;
 
         let mut symbol_to_index = vec![None; symbol_count];
@@ -750,8 +750,8 @@ mod tests {
 
     #[test]
     fn routes_order_book_features_by_symbol() {
-        let btc = Symbol::new("router-book-btc");
-        let eth = Symbol::new("router-book-eth");
+        let btc = Symbol::new("router-book-btc").unwrap();
+        let eth = Symbol::new("router-book-eth").unwrap();
         let router = EventRouter::from_routes(&[
             (btc, FeatureRoute::OrderBook),
             (eth, FeatureRoute::Kind(EventKind::Trade)),
@@ -768,7 +768,7 @@ mod tests {
 
     #[test]
     fn builder_configures_and_updates_order_book_by_symbol() {
-        let symbol = Symbol::new("extractor-order-book");
+        let symbol = Symbol::new("extractor-order-book").unwrap();
         let mut extractor = FeatureExtractor::builder(ArrayFeatureVector::<0>::new())
             .add_order_book(symbol, OrderBook::new(UpdatePolicy::Contiguous, 4))
             .build()
@@ -796,7 +796,7 @@ mod tests {
 
     #[test]
     fn rejected_order_book_event_does_not_advance_features_or_timestamp() {
-        let symbol = Symbol::new("rejected-extractor-order-book");
+        let symbol = Symbol::new("rejected-extractor-order-book").unwrap();
         let any_event = FeatureKey::DayOfWeek {
             symbol: Symbol::GLOBAL,
             source: FeatureSource::AnyEvent,
@@ -850,7 +850,7 @@ mod tests {
 
     #[test]
     fn rejected_sequence_gap_is_buffered_without_advancing_features() {
-        let symbol = Symbol::new("sequence-gap-extractor-order-book");
+        let symbol = Symbol::new("sequence-gap-extractor-order-book").unwrap();
         let any_event = FeatureKey::DayOfWeek {
             symbol: Symbol::GLOBAL,
             source: FeatureSource::AnyEvent,
@@ -904,7 +904,7 @@ mod tests {
 
     #[test]
     fn raw_order_book_event_features_do_not_require_book_state() {
-        let symbol = Symbol::new("raw-order-book-event");
+        let symbol = Symbol::new("raw-order-book-event").unwrap();
         let key = FeatureKey::DayOfWeek {
             symbol,
             source: FeatureSource::Event(EventKind::OrderBookDelta),
@@ -929,7 +929,7 @@ mod tests {
 
     #[test]
     fn builder_rejects_duplicate_order_books() {
-        let symbol = Symbol::new("duplicate-extractor-order-book");
+        let symbol = Symbol::new("duplicate-extractor-order-book").unwrap();
         let result = FeatureExtractor::builder(ArrayFeatureVector::<0>::new())
             .add_order_book(symbol, OrderBook::new(UpdatePolicy::Monotonic, 1))
             .add_order_book(symbol, OrderBook::new(UpdatePolicy::Contiguous, 2))
@@ -940,7 +940,7 @@ mod tests {
 
     #[test]
     fn returns_empty_slice_for_unmapped_symbol() {
-        let configured = Symbol::new("router-configured");
+        let configured = Symbol::new("router-configured").unwrap();
         let mut symbol_to_index = vec![None; configured.index() + 1];
         symbol_to_index[configured.index()] = Some(0);
 
@@ -957,7 +957,7 @@ mod tests {
 
         assert!(
             router
-                .route(Symbol::new("router-unmapped"), EventKind::Trade)
+                .route(Symbol::new("router-unmapped").unwrap(), EventKind::Trade)
                 .is_empty()
         );
     }

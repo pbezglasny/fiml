@@ -317,7 +317,7 @@ mod tests {
 
     #[test]
     fn volume_event_has_volume_kind() {
-        let aapl = symbols::intern("AAPL");
+        let aapl = symbols::intern("AAPL").unwrap();
         let event = Event::volume(aapl, 42.0, 123);
 
         assert_eq!(event.kind(), EventKind::Volume);
@@ -325,7 +325,7 @@ mod tests {
 
     #[test]
     fn trade_event_has_trade_kind_and_payload() {
-        let aapl = symbols::intern("AAPL");
+        let aapl = symbols::intern("AAPL").unwrap();
         let event = Event::trade(aapl, 42.0, 100.0, 123, Some(TradeSide::AgressorSell));
 
         assert_eq!(event.kind(), EventKind::Trade);

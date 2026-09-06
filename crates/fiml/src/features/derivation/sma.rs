@@ -135,7 +135,7 @@ mod tests {
 
     #[test]
     fn grouped_sma_writes_adjacent_outputs() {
-        let symbol = symbols::intern("AAPL");
+        let symbol = symbols::intern("AAPL").unwrap();
         let mut feature =
             match build(symbol, EventField::Price, &[2, 3], WarmupPolicy::FullWindow).unwrap() {
                 FeatureDerivation::Sma(feature) => feature,
@@ -154,7 +154,7 @@ mod tests {
 
     #[test]
     fn sma_can_consume_trade_volume() {
-        let symbol = symbols::intern("AAPL");
+        let symbol = symbols::intern("AAPL").unwrap();
         let mut feature = match build(
             symbol,
             EventField::TradeVolume,

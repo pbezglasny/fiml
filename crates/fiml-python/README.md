@@ -185,6 +185,13 @@ loading JSON with an explicit output `id`.
 ASCII symbol identity is case-insensitive throughout the library and canonical
 names use lowercase symbols.
 
+The process-wide symbol interner holds at most 512 distinct names, including
+the reserved `__global__` name. Builders, JSON loading, and runtime `symbol()`
+calls raise `ValueError` when a new name would exceed this limit. Existing
+names and their ASCII case variants remain usable, and a rejected name does
+not change existing handles or feature state. The limit is shared across all
+extractors and pipelines; dropping a runtime does not free interned names.
+
 ## Fitted model-input pipelines
 
 Keep raw indicator extraction separate from the fitted scalar transformations
