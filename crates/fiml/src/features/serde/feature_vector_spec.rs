@@ -105,8 +105,8 @@ impl FeatureVectorSpec {
     ///
     /// Storage capacity must equal the configured model width and its active
     /// length must equal the number of definitions. Every cell is reset to
-    /// `NaN`, including trailing reserved cells, before compilation.
-    pub fn build<V>(&self, mut output_vector: V) -> Result<FeatureExtractor<V>, FimlError>
+    /// `NaN`, including trailing reserved cells, during extractor construction.
+    pub fn build<V>(&self, output_vector: V) -> Result<FeatureExtractor<V>, FimlError>
     where
         V: FeatureVector,
     {
@@ -122,10 +122,6 @@ impl FeatureVectorSpec {
                 actual: output_vector.len(),
             });
         }
-        for index in 0..output_vector.capacity() {
-            output_vector.set_value_at(index, f64::NAN);
-        }
-
         let compilation =
             crate::features::compiler::compile(self.definitions.clone(), output_vector.len())?;
         FeatureExtractor::new(output_vector, compilation, Vec::new())
