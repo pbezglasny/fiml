@@ -287,6 +287,7 @@ impl OrderBookStorage {
 /// Stateful extractor that routes events to subscribed features.
 ///
 /// The extractor owns the runtime feature state and the output feature vector.
+/// Construction resets every output cell to `NaN`, including reserved cells.
 /// Handling an event updates the subscribed features directly in that vector
 /// without allocating on the event-processing path.
 pub struct FeatureExtractor<V>
@@ -328,13 +329,16 @@ where
     V: FeatureVector,
 {
     pub(crate) fn new(
-        feature_vector: V,
+        mut feature_vector: V,
         compilation: Compilation,
         configured_order_books: Vec<(Symbol, OrderBook)>,
     ) -> Result<Self> {
         debug_assert_eq!(compilation.features.len(), compilation.output_spans.len());
 
         let order_books = OrderBookStorage::new(configured_order_books)?;
+        for index in 0..feature_vector.capacity() {
+            feature_vector.set_value_at(index, f64::NAN);
+        }
 
         Ok(Self {
             feature_vector,
@@ -647,6 +651,80 @@ mod tests {
     #[test]
     fn builder_infers_types_from_output_vector() {
         let _builder = FeatureExtractor::builder(ArrayFeatureVector::<2>::new());
+    }
+
+    #[test]
+    fn builder_and_spec_share_initial_values_and_warmup_behavior() {
+        for warmup_policy in [WarmupPolicy::FullWindow, WarmupPolicy::FirstValue] {
+            let definition = FeatureDefinition::with_default_id(FeatureKey::Sma {
+                symbol: Symbol::GLOBAL,
+                source: FeatureSource::Field(EventField::Price),
+                window: 2,
+                warmup_policy,
+            });
+            let spec = crate::FeatureVectorSpec::with_capacity([definition.clone()], 3).unwrap();
+            for initial_value in [0.0, 42.0] {
+                let output = || {
+                    let mut output = ArrayFeatureVector::<3>::new_of_length(1);
+                    for index in 0..output.capacity() {
+                        output.set_value_at(index, initial_value);
+                    }
+                    output
+                };
+                for mut extractor in [
+                    FeatureExtractor::builder(output())
+                        .add_feature(definition.clone())
+                        .build()
+                        .unwrap(),
+                    spec.build(output()).unwrap(),
+                ] {
+                    assert_eq!(extractor.feature_vector().len(), 1);
+                    assert_eq!(extractor.feature_vector().capacity(), 3);
+                    assert_eq!(
+                        extractor.feature_ids(),
+                        std::slice::from_ref(&definition.id)
+                    );
+                    assert_eq!(extractor.last_timestamp(), None);
+                    assert!(
+                        extractor
+                            .feature_vector()
+                            .values()
+                            .iter()
+                            .all(|v| v.is_nan())
+                    );
+
+                    extractor.handle_event(Event::time(0)).unwrap();
+                    extractor
+                        .handle_event(Event::volume(Symbol::GLOBAL, 10.0, 1))
+                        .unwrap();
+                    assert!(
+                        extractor
+                            .feature_vector()
+                            .values()
+                            .iter()
+                            .all(|v| v.is_nan())
+                    );
+
+                    extractor
+                        .handle_event(Event::price(Symbol::GLOBAL, 10.0, 2))
+                        .unwrap();
+                    let first = extractor.feature_vector().values()[0];
+                    match warmup_policy {
+                        WarmupPolicy::FullWindow => assert!(first.is_nan()),
+                        WarmupPolicy::FirstValue => assert_eq!(first, 10.0),
+                    }
+                    extractor
+                        .handle_event(Event::price(Symbol::GLOBAL, 20.0, 3))
+                        .unwrap();
+                    assert_eq!(extractor.feature_vector().values()[0], 15.0);
+                    assert!(
+                        extractor.feature_vector().values()[1..]
+                            .iter()
+                            .all(|v| v.is_nan())
+                    );
+                }
+            }
+        }
     }
 
     #[test]

@@ -38,6 +38,8 @@ where
         self
     }
 
+    /// Compiles the definitions and resets every output cell to `NaN`, including
+    /// reserved cells. Values appear as features receive events and warm up.
     pub fn build(self) -> Result<FeatureExtractor<V>, FimlError> {
         let compilation = compiler::compile(self.definitions, self.output_vector.len())?;
         FeatureExtractor::new(self.output_vector, compilation, self.order_books)

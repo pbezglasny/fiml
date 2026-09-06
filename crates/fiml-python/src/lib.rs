@@ -59,6 +59,11 @@ impl From<PyWarmupPolicy> for CoreWarmupPolicy {
     }
 }
 
+/// Interns a symbol and translates core errors for all Python callers.
+fn intern_symbol(name: &str) -> PyResult<Symbol> {
+    symbols::intern(name).map_err(|error| PyValueError::new_err(error.to_string()))
+}
+
 /// Parse a duration string such as `"500ms"`, `"1s"`, `"5m"` or `"1h"`.
 /// `field` names the argument in the error message.
 fn parse_duration(field: &str, text: &str) -> PyResult<Duration> {
@@ -276,8 +281,7 @@ impl FeatureVectorSpec {
         warmup: PyWarmupPolicy,
     ) -> PyResult<PyRefMut<'py, Self>> {
         Self::require_windows(&windows)?;
-        let symbol =
-            symbols::intern(symbol).map_err(|error| PyValueError::new_err(error.to_string()))?;
+        let symbol = intern_symbol(symbol)?;
         let field = parse_value_source("source", source)?;
         let warmup_policy = warmup.into();
         slf.add_group(windows.into_iter().map(|window| {
@@ -307,8 +311,7 @@ impl FeatureVectorSpec {
         warmup: PyWarmupPolicy,
     ) -> PyResult<PyRefMut<'py, Self>> {
         Self::require_windows(&windows)?;
-        let symbol =
-            symbols::intern(symbol).map_err(|error| PyValueError::new_err(error.to_string()))?;
+        let symbol = intern_symbol(symbol)?;
         let field = parse_value_source("source", source)?;
         let warmup_policy = warmup.into();
         slf.add_group(windows.into_iter().map(|window| {
@@ -336,8 +339,7 @@ impl FeatureVectorSpec {
         warmup: PyWarmupPolicy,
     ) -> PyResult<PyRefMut<'py, Self>> {
         Self::require_windows(&windows)?;
-        let symbol =
-            symbols::intern(symbol).map_err(|error| PyValueError::new_err(error.to_string()))?;
+        let symbol = intern_symbol(symbol)?;
         let warmup_policy = warmup.into();
         slf.add_group(windows.into_iter().map(|window| {
             definition(FeatureKey::Cvd {
@@ -368,8 +370,7 @@ impl FeatureVectorSpec {
         warmup: PyWarmupPolicy,
     ) -> PyResult<PyRefMut<'py, Self>> {
         Self::require_windows(&windows)?;
-        let symbol =
-            symbols::intern(symbol).map_err(|error| PyValueError::new_err(error.to_string()))?;
+        let symbol = intern_symbol(symbol)?;
         let field = parse_value_source("source", source)?;
         let aggregation = parse_duration("aggregation", aggregation)?;
         let windows = parse_durations("windows", windows)?;
@@ -402,8 +403,7 @@ impl FeatureVectorSpec {
         warmup: PyWarmupPolicy,
     ) -> PyResult<PyRefMut<'py, Self>> {
         Self::require_windows(&windows)?;
-        let symbol =
-            symbols::intern(symbol).map_err(|error| PyValueError::new_err(error.to_string()))?;
+        let symbol = intern_symbol(symbol)?;
         let aggregation = parse_duration("aggregation", aggregation)?;
         let windows = parse_durations("windows", windows)?;
         let warmup_policy = warmup.into();
@@ -435,8 +435,7 @@ impl FeatureVectorSpec {
         window: &str,
         warmup: PyWarmupPolicy,
     ) -> PyResult<PyRefMut<'py, Self>> {
-        let symbol =
-            symbols::intern(symbol).map_err(|error| PyValueError::new_err(error.to_string()))?;
+        let symbol = intern_symbol(symbol)?;
         let aggregation = parse_duration("aggregation", aggregation)?;
         let window = parse_duration("window", window)?;
         slf.add_group([definition(FeatureKey::TradeCountTimed {
@@ -791,8 +790,7 @@ where
     }
 
     fn symbol(&mut self, name: &str) -> PyResult<usize> {
-        let symbol =
-            symbols::intern(name).map_err(|error| PyValueError::new_err(error.to_string()))?;
+        let symbol = intern_symbol(name)?;
         if let Some(index) = self
             .symbols
             .iter()
