@@ -67,8 +67,8 @@ mod tests {
 
     #[test]
     fn counts_only_trades_for_its_symbol() {
-        let aapl = symbols::intern("AAPL");
-        let googl = symbols::intern("GOOGL");
+        let aapl = symbols::intern("AAPL").unwrap();
+        let googl = symbols::intern("GOOGL").unwrap();
         let mut fv: ArrayFeatureVector<1> = ArrayFeatureVector::new();
         let counter = TradeCountTimed::<HeapRingBuffer<CountBucket>>::new_heap(
             Duration::from_millis(1_000),

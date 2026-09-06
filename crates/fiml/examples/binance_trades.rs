@@ -34,7 +34,7 @@ async fn main() -> anyhow::Result<()> {
         .unwrap_or_else(|| "btcusdt".to_string())
         .to_lowercase();
     let symbol_name = stream_symbol.to_uppercase();
-    let symbol = symbols::intern(&symbol_name);
+    let symbol = symbols::intern(&symbol_name)?;
 
     let source = FeatureSource::Field(EventField::TradePrice);
     let mut extractor = FeatureExtractor::builder(ArrayFeatureVector::<2>::new())

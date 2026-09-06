@@ -157,6 +157,7 @@ pub enum InvalidArgumentError {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum LimitTarget {
+    Symbols,
     RuntimeFeatures,
     SymbolRouters,
     Subscribers,
@@ -436,6 +437,7 @@ impl Display for InvalidArgumentError {
 impl Display for LimitTarget {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
+            Self::Symbols => "symbol",
             Self::RuntimeFeatures => "runtime feature",
             Self::SymbolRouters => "symbol router",
             Self::Subscribers => "subscriber",

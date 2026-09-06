@@ -276,7 +276,8 @@ impl FeatureVectorSpec {
         warmup: PyWarmupPolicy,
     ) -> PyResult<PyRefMut<'py, Self>> {
         Self::require_windows(&windows)?;
-        let symbol = symbols::intern(symbol);
+        let symbol =
+            symbols::intern(symbol).map_err(|error| PyValueError::new_err(error.to_string()))?;
         let field = parse_value_source("source", source)?;
         let warmup_policy = warmup.into();
         slf.add_group(windows.into_iter().map(|window| {
@@ -306,7 +307,8 @@ impl FeatureVectorSpec {
         warmup: PyWarmupPolicy,
     ) -> PyResult<PyRefMut<'py, Self>> {
         Self::require_windows(&windows)?;
-        let symbol = symbols::intern(symbol);
+        let symbol =
+            symbols::intern(symbol).map_err(|error| PyValueError::new_err(error.to_string()))?;
         let field = parse_value_source("source", source)?;
         let warmup_policy = warmup.into();
         slf.add_group(windows.into_iter().map(|window| {
@@ -334,7 +336,8 @@ impl FeatureVectorSpec {
         warmup: PyWarmupPolicy,
     ) -> PyResult<PyRefMut<'py, Self>> {
         Self::require_windows(&windows)?;
-        let symbol = symbols::intern(symbol);
+        let symbol =
+            symbols::intern(symbol).map_err(|error| PyValueError::new_err(error.to_string()))?;
         let warmup_policy = warmup.into();
         slf.add_group(windows.into_iter().map(|window| {
             definition(FeatureKey::Cvd {
@@ -365,7 +368,8 @@ impl FeatureVectorSpec {
         warmup: PyWarmupPolicy,
     ) -> PyResult<PyRefMut<'py, Self>> {
         Self::require_windows(&windows)?;
-        let symbol = symbols::intern(symbol);
+        let symbol =
+            symbols::intern(symbol).map_err(|error| PyValueError::new_err(error.to_string()))?;
         let field = parse_value_source("source", source)?;
         let aggregation = parse_duration("aggregation", aggregation)?;
         let windows = parse_durations("windows", windows)?;
@@ -398,7 +402,8 @@ impl FeatureVectorSpec {
         warmup: PyWarmupPolicy,
     ) -> PyResult<PyRefMut<'py, Self>> {
         Self::require_windows(&windows)?;
-        let symbol = symbols::intern(symbol);
+        let symbol =
+            symbols::intern(symbol).map_err(|error| PyValueError::new_err(error.to_string()))?;
         let aggregation = parse_duration("aggregation", aggregation)?;
         let windows = parse_durations("windows", windows)?;
         let warmup_policy = warmup.into();
@@ -430,7 +435,8 @@ impl FeatureVectorSpec {
         window: &str,
         warmup: PyWarmupPolicy,
     ) -> PyResult<PyRefMut<'py, Self>> {
-        let symbol = symbols::intern(symbol);
+        let symbol =
+            symbols::intern(symbol).map_err(|error| PyValueError::new_err(error.to_string()))?;
         let aggregation = parse_duration("aggregation", aggregation)?;
         let window = parse_duration("window", window)?;
         slf.add_group([definition(FeatureKey::TradeCountTimed {
@@ -784,17 +790,18 @@ where
         Ok(())
     }
 
-    fn symbol(&mut self, name: &str) -> usize {
-        let symbol = symbols::intern(name);
+    fn symbol(&mut self, name: &str) -> PyResult<usize> {
+        let symbol =
+            symbols::intern(name).map_err(|error| PyValueError::new_err(error.to_string()))?;
         if let Some(index) = self
             .symbols
             .iter()
             .position(|candidate| *candidate == symbol)
         {
-            return index;
+            return Ok(index);
         }
         self.symbols.push(symbol);
-        self.symbols.len() - 1
+        Ok(self.symbols.len() - 1)
     }
 
     fn symbol_at(&self, handle: i64) -> PyResult<Symbol> {
@@ -1075,7 +1082,9 @@ impl FeatureExtractor {
 
     /// Intern `name` and return a stable integer handle to use in the `symbol`
     /// column of [`transform`](Self::transform) / [`update`](Self::update).
-    fn symbol(&mut self, name: &str) -> usize {
+    /// A new name beyond the process-wide 512-symbol limit (including GLOBAL)
+    /// raises `ValueError`. Existing names remain usable and handles are unchanged.
+    fn symbol(&mut self, name: &str) -> PyResult<usize> {
         self.driver.symbol(name)
     }
 
@@ -1260,7 +1269,9 @@ impl ModelInputPipeline {
     }
 
     /// Intern a symbol and return its runtime-local integer handle.
-    fn symbol(&mut self, name: &str) -> usize {
+    /// A new name beyond the process-wide 512-symbol limit (including GLOBAL)
+    /// raises `ValueError`. Existing names remain usable and handles are unchanged.
+    fn symbol(&mut self, name: &str) -> PyResult<usize> {
         self.driver.symbol(name)
     }
 

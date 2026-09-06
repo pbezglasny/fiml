@@ -6,7 +6,7 @@ use fiml::{
 };
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let btc = symbols::intern("BTCUSDT");
+    let btc = symbols::intern("BTCUSDT")?;
     let source = FeatureSource::Field(EventField::Price);
     let mut extractor = FeatureExtractor::builder(ArrayFeatureVector::<2>::new())
         .add_feature(FeatureDefinition::with_default_id(FeatureKey::Ema {

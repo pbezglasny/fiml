@@ -59,8 +59,8 @@ mod tests {
 
     #[test]
     fn grouped_cvd_uses_trade_side_and_ignores_unclassified_trades() {
-        let aapl = symbols::intern("AAPL");
-        let googl = symbols::intern("GOOGL");
+        let aapl = symbols::intern("AAPL").unwrap();
+        let googl = symbols::intern("GOOGL").unwrap();
         let mut feature = match build(aapl, &[1, 2], WarmupPolicy::FirstValue).unwrap() {
             FeatureDerivation::Cvd(feature) => feature,
             _ => unreachable!(),

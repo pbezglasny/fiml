@@ -53,7 +53,7 @@ where
         .into());
     }
 
-    let feature_symbol = symbols::intern(FEATURE_SYMBOL);
+    let feature_symbol = symbols::intern(FEATURE_SYMBOL)?;
     let mut extractor = build_extractor(feature_symbol)?;
     write!(output, "{INPUT_HEADER}")?;
     for id in extractor.feature_ids() {

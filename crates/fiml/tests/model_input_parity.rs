@@ -28,7 +28,13 @@ impl FixtureEvent {
                 timestamp,
                 price,
                 volume,
-            } => Event::trade(Symbol::new(&symbol), price, volume, timestamp, None),
+            } => Event::trade(
+                Symbol::new(&symbol).unwrap(),
+                price,
+                volume,
+                timestamp,
+                None,
+            ),
             Self::Time { timestamp } => Event::time(timestamp),
         }
     }

@@ -431,7 +431,7 @@ impl TryFrom<FeatureVectorSpecWire> for FeatureVectorSpec {
                     group.symbol
                 ));
             }
-            let symbol = Symbol::new(&group.symbol);
+            let symbol = Symbol::new(&group.symbol).map_err(|error| error.to_string())?;
             if !scopes.insert(symbol) {
                 return Err(format!(
                     "duplicate normalized symbol group {:?}",
@@ -880,7 +880,7 @@ mod tests {
     }
 
     fn complete_spec() -> FeatureVectorSpec {
-        let btc = Symbol::new("BTCUSDT");
+        let btc = Symbol::new("BTCUSDT").unwrap();
         FeatureVectorSpec::with_metadata(
             [
                 default(FeatureKey::TradeCountTimed {
@@ -1019,7 +1019,7 @@ mod tests {
 
     #[test]
     fn standalone_price_and_volume_use_the_value_field_literal() {
-        let symbol = Symbol::new("x");
+        let symbol = Symbol::new("x").unwrap();
         let spec = FeatureVectorSpec::new([
             default(FeatureKey::Sma {
                 symbol,
