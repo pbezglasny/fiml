@@ -7,13 +7,13 @@ and live outputs match given the same canonical spec and event stream.
 import numpy as np
 
 from ._fiml import (
-    FeatureVectorSpec,
+    FeatureExtractorSpec,
     KIND_ORDERBOOK,
     KIND_PRICE,
     KIND_TIME,
     KIND_TRADE,
     KIND_VOLUME,
-    ModelInputSpec,
+    PipelineSpec,
     SIDE_AGGRESSOR_BUY,
     SIDE_AGGRESSOR_SELL,
     WarmupPolicy,
@@ -23,9 +23,9 @@ from ._fiml import ModelInputPipeline as _ModelInputPipeline
 
 __all__ = [
     "FeatureExtractor",
-    "FeatureVectorSpec",
+    "FeatureExtractorSpec",
     "ModelInputPipeline",
-    "ModelInputSpec",
+    "PipelineSpec",
     "WarmupPolicy",
     "KIND_PRICE",
     "KIND_VOLUME",
@@ -215,15 +215,15 @@ def _compute_features(
 class FeatureExtractor(_FeatureExtractor):
     """A configured, runnable raw-feature extractor."""
 
-    def __new__(cls, feature_vector_spec, output_dtype="float64"):
+    def __new__(cls, feature_extractor_spec, output_dtype="float64"):
         return _FeatureExtractor.__new__(
-            cls, feature_vector_spec, _normalize_output_dtype(output_dtype)
+            cls, feature_extractor_spec, _normalize_output_dtype(output_dtype)
         )
 
     @classmethod
     def from_json(cls, json, output_dtype="float64"):
-        """Construct directly from a versioned FeatureVectorSpec artifact."""
-        return cls(FeatureVectorSpec.from_json(json), output_dtype=output_dtype)
+        """Construct directly from a versioned FeatureExtractorSpec artifact."""
+        return cls(FeatureExtractorSpec.from_json(json), output_dtype=output_dtype)
 
     @property
     def output_dtype(self):
@@ -258,15 +258,15 @@ class FeatureExtractor(_FeatureExtractor):
 class ModelInputPipeline(_ModelInputPipeline):
     """A stateful raw-feature and fitted-transformation runtime."""
 
-    def __new__(cls, model_input_spec, output_dtype="float64"):
+    def __new__(cls, pipeline_spec, output_dtype="float64"):
         return _ModelInputPipeline.__new__(
-            cls, model_input_spec, _normalize_output_dtype(output_dtype)
+            cls, pipeline_spec, _normalize_output_dtype(output_dtype)
         )
 
     @classmethod
     def from_json(cls, json, output_dtype="float64"):
-        """Construct directly from a versioned ModelInputSpec artifact."""
-        return cls(ModelInputSpec.from_json(json), output_dtype=output_dtype)
+        """Construct directly from a versioned PipelineSpec artifact."""
+        return cls(PipelineSpec.from_json(json), output_dtype=output_dtype)
 
     @property
     def output_dtype(self):

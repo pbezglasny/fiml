@@ -662,7 +662,7 @@ mod tests {
                 window: 2,
                 warmup_policy,
             });
-            let spec = crate::FeatureVectorSpec::with_capacity([definition.clone()], 3).unwrap();
+            let spec = crate::FeatureExtractorSpec::with_capacity([definition.clone()], 3).unwrap();
             for initial_value in [0.0, 42.0] {
                 let output = || {
                     let mut output = ArrayFeatureVector::<3>::new_of_length(1);

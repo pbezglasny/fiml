@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "fiml FeatureVectorSpec 1.0",
+  "title": "fiml FeatureExtractorSpec 1.0",
   "type": "object",
   "additionalProperties": false,
   "required": ["version", "capacity", "length", "features"],

@@ -16,9 +16,9 @@ pub use event::{
     TimeUpdate, TradeSide, TradeUpdate, VolumeUpdate,
 };
 pub use features::{
-    EventField, FeatureDefinition, FeatureExtractor, FeatureExtractorBuilder, FeatureId,
-    FeatureKey, FeatureSource, FeatureVectorSpec, MAX_OUTPUTS_PER_INDICATOR, ModelInputSpec,
-    Pipeline, TransformationDefinition, UpdateResult,
+    EventField, FeatureDefinition, FeatureExtractor, FeatureExtractorBuilder, FeatureExtractorSpec,
+    FeatureId, FeatureKey, FeatureSource, MAX_OUTPUTS_PER_INDICATOR, Pipeline, PipelineSpec,
+    TransformerDefinition, UpdateResult,
 };
 pub use indicators::{CumulativeVolumeDelta, ObvBucket, OnBalanceVolumeTimed};
 pub use ring_buffer::{
@@ -249,6 +249,7 @@ pub enum InvalidTransformationDefinitionError {
     ScaleNotFinite,
     ScaleNotPositive,
     InverseScaleNotFinite,
+    LagWindowZero,
 }
 
 /// Duration field in an invalid compiled feature definition.
@@ -546,6 +547,7 @@ impl Display for InvalidTransformationDefinitionError {
             Self::ScaleNotFinite => "standard-scaler scale must be finite",
             Self::ScaleNotPositive => "standard-scaler scale must be positive",
             Self::InverseScaleNotFinite => "standard-scaler inverse scale must be finite",
+            Self::LagWindowZero => "lag window must be positive",
         })
     }
 }

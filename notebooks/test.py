@@ -39,13 +39,13 @@ def _(pd):
 
 @app.cell
 def _(fiml, np):
-    feature_vector_spec = (fiml.FeatureVectorSpec()
+    feature_extractor_spec = (fiml.FeatureExtractorSpec()
         .obv_timed("BTCUSDT", aggregation="1ms", windows=["60s"])
         .trade_count_timed("BTCUSDT", aggregation="1ms", window="60s")
         .sma("BTCUSDT", [2], source="trade_price", warmup=fiml.WarmupPolicy.FIRST_VALUE)
         .ema("BTCUSDT", [2], source="trade_price", warmup=fiml.WarmupPolicy.FIRST_VALUE)
         .day_of_week())
-    extractor = fiml.FeatureExtractor(feature_vector_spec, output_dtype=np.float32)
+    extractor = fiml.FeatureExtractor(feature_extractor_spec, output_dtype=np.float32)
     return (extractor,)
 
 

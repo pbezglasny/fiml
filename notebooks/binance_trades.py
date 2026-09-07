@@ -90,10 +90,10 @@ def _(fiml, np, raw_trades):
 
 @app.cell
 def _(fiml, trades):
-    feature_vector_spec = fiml.FeatureVectorSpec().cvd(
+    feature_extractor_spec = fiml.FeatureExtractorSpec().cvd(
         "BTCUSDT", [5, 10, 20], warmup=fiml.WarmupPolicy.FIRST_VALUE
     )
-    extractor = fiml.FeatureExtractor(feature_vector_spec, output_dtype="float64")
+    extractor = fiml.FeatureExtractor(feature_extractor_spec, output_dtype="float64")
 
     features = extractor.compute_features(trades, side="side")
     cvd_names = extractor.feature_names()

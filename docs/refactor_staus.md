@@ -8,7 +8,7 @@ The feature-extraction path has one compilation flow:
 
 ```text
 FeatureDefinition / FeatureKey
-    -> FeatureExtractorBuilder or FeatureVectorSpec
+    -> FeatureExtractorBuilder or FeatureExtractorSpec
     -> feature compiler
     -> FeatureExtractor
 ```
@@ -17,7 +17,7 @@ Each `FeatureDefinition` describes one scalar output cell. During compilation,
 compatible definitions, such as moving averages with several windows, are
 grouped into one runtime derivation with a contiguous output span.
 
-`FeatureVectorSpec` is the versioned configuration and serialization boundary.
+`FeatureExtractorSpec` is the versioned configuration and serialization boundary.
 It owns canonically ordered scalar definitions, the complete model width, and
 optional checksum metadata. With the `serde` Cargo feature enabled, it maps to
 and from the strict grouped JSON format without exposing wire-only types in the
@@ -39,9 +39,9 @@ subscriber lists, and derivations write directly into the output vector.
 - Replaced the legacy grouped `IndicatorSpec`, `ScopedIndicator`, `TimeWindows`,
   and `ValueSource` core model with scalar `FeatureDefinition`, `FeatureKey`,
   `FeatureSource`, and `EventField` values.
-- Rebuilt `FeatureVectorSpec` as a versioned, canonically ordered configuration
+- Rebuilt `FeatureExtractorSpec` as a versioned, canonically ordered configuration
   that compiles through the same feature compiler as the fluent Rust builder.
-- Added strict `FeatureVectorSpec` serialization behind the optional `serde`
+- Added strict `FeatureExtractorSpec` serialization behind the optional `serde`
   feature. The adapter supports all current feature keys, validates the wire
   contract, and preserves capacity and checksum metadata.
 - Made the feature compiler the only path from definitions to runtime
@@ -51,7 +51,7 @@ subscriber lists, and derivations write directly into the output vector.
 - Added runtime-sized `VecFeatureVector` support alongside
   `ArrayFeatureVector`.
 - Migrated the Python binding to the new spec, compiler, and extractor. Its
-  fluent Python `FeatureVectorSpec` expands grouped calls into scalar core
+  fluent Python `FeatureExtractorSpec` expands grouped calls into scalar core
   definitions while retaining the established Python column names and
   canonical ordering.
 - Preserved Python batch validation, transactional replay, output dtype
@@ -63,7 +63,7 @@ subscriber lists, and derivations write directly into the output vector.
   model, including constructors and routing support.
 - Removed the legacy extractor, obsolete examples, and stale benchmark.
 - Updated the maintained Rust examples to use `FeatureExtractor`, added a JSON
-  `FeatureVectorSpec` example, and registered them as explicit Cargo targets.
+  `FeatureExtractorSpec` example, and registered them as explicit Cargo targets.
 - Added a deterministic historical trade replay example with a checked-in CSV
   fixture. It exercises trade-price SMA/EMA, trade-volume SMA, CVD, and timed
   trade count, emits feature columns from `feature_ids()`, and verifies schema,
@@ -111,7 +111,7 @@ feature-vector spec serialization are committed.
   Adapting it mechanically would not resolve how transformations are
   serialized or kept identical between Rust and Python.
 - `StandardScaler` and `ParallelTransformer` are Rust-only. Transformations are
-  not represented in `FeatureVectorSpec`, serialized into the model artifact,
+  not represented in `FeatureExtractorSpec`, serialized into the model artifact,
   or exposed through the Python binding.
 - The library does not provide an exchange-specific historical-data loader.
 - Label generation and model training remain outside the core API.

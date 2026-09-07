@@ -1,7 +1,7 @@
 // A separate integration-test process keeps exhaustion out of other tests.
 use fiml::{
-    ArrayFeatureVector, Event, EventField, FeatureDefinition, FeatureKey, FeatureSource,
-    FeatureVector, FeatureVectorSpec, FimlError, InvalidArgumentError, LimitTarget, Symbol,
+    ArrayFeatureVector, Event, EventField, FeatureDefinition, FeatureExtractorSpec, FeatureKey,
+    FeatureSource, FeatureVector, FimlError, InvalidArgumentError, LimitTarget, Symbol,
     WarmupPolicy,
     symbols::{self, MAX_SYMBOL_NUMBER},
 };
@@ -16,7 +16,7 @@ fn capacity_errors_preserve_existing_symbols_and_runtime() {
         .map(|name| symbols::intern(name).unwrap())
         .collect();
     let first = symbols[0];
-    let spec = FeatureVectorSpec::new([FeatureDefinition::with_default_id(FeatureKey::Sma {
+    let spec = FeatureExtractorSpec::new([FeatureDefinition::with_default_id(FeatureKey::Sma {
         symbol: first,
         source: FeatureSource::Field(EventField::Price),
         window: 1,
@@ -61,14 +61,14 @@ fn capacity_errors_preserve_existing_symbols_and_runtime() {
         );
         let json = serde_json::to_string(&spec).unwrap();
         let error =
-            serde_json::from_str::<FeatureVectorSpec>(&json.replace("capacity-0", "overflow"))
+            serde_json::from_str::<FeatureExtractorSpec>(&json.replace("capacity-0", "overflow"))
                 .unwrap_err();
         assert!(
             error
                 .to_string()
                 .contains("symbol count 513 exceeds limit 512")
         );
-        let restored: FeatureVectorSpec = serde_json::from_str(&json).unwrap();
+        let restored: FeatureExtractorSpec = serde_json::from_str(&json).unwrap();
         assert_eq!(serde_json::to_string(&restored).unwrap(), json);
         assert_eq!(
             serde_json::from_str::<Symbol>("\"CAPACITY-0\"").unwrap(),

@@ -5,10 +5,10 @@
 //! features; enabling `serde` adds canonical serialization and strict
 //! deserialization without changing their public interfaces.
 
-mod feature_vector_spec;
+mod feature_extractor_spec;
 #[cfg(feature = "serde")]
-mod model_input_spec;
+mod pipeline_spec;
 #[cfg(feature = "serde")]
 mod serialization;
 
-pub use feature_vector_spec::FeatureVectorSpec;
+pub use feature_extractor_spec::FeatureExtractorSpec;

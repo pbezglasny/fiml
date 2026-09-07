@@ -20,11 +20,11 @@ Python. The whole value proposition is **train/serve parity**: feature generatio
 on historical data in Python and live computation in Rust produce **identical
 `float64` output on identical data**.
 
-The contract that guarantees this is an identical **`FeatureVectorSpec`** configuration
+The contract that guarantees this is an identical **`FeatureExtractorSpec`** configuration
 describing the features in each environment.
 
 ```
-       FeatureVectorSpec configuration
+       FeatureExtractorSpec configuration
            /                \
    Python extractor     Rust extractor
    (batch/training)     (live/serving)
@@ -53,12 +53,12 @@ Both go through the identical dispatch path, so they preserve parity.
 ## 3. Authoring the feature-vector spec
 
 Feature-vector spec JSON is the shared training/serving artifact. Author specs with the
-fluent Python builder, then use `FeatureVectorSpec.to_json()`,
-`FeatureVectorSpec.from_json(...)`, or `FeatureExtractor.from_json(...)`. Python
-delegates canonical ordering and conversion to the Rust `FeatureVectorSpec`.
+fluent Python builder, then use `FeatureExtractorSpec.to_json()`,
+`FeatureExtractorSpec.from_json(...)`, or `FeatureExtractor.from_json(...)`. Python
+delegates canonical ordering and conversion to the Rust `FeatureExtractorSpec`.
 
 ```python
-spec = (fiml.FeatureVectorSpec()
+spec = (fiml.FeatureExtractorSpec()
       .sma("BTCUSDT", [12, 24], source="trade_price")
       .ema("BTCUSDT", [12], source="trade_price")
       .obv_timed("BTCUSDT", aggregation="1s", windows=["2s"])
@@ -180,7 +180,7 @@ all-or-nothing. See the dated contract linked above for the complete rules.
 
 1. **f64 calculation state on both sides.** Use `output_dtype="float64"` for an
    exact Python/Rust output comparison.
-2. **Same `FeatureVectorSpec`** — same periods, durations, symbol names, feature order.
+2. **Same `FeatureExtractorSpec`** — same periods, durations, symbol names, feature order.
 3. **Replay the full stream in the same order with the same millisecond
    timestamps.** Do not downsample or skip rows: timed indicators (`SmaTimed`,
    `ObvTimed`, `TradeCountTimed`) bucket by timestamp.
@@ -199,7 +199,7 @@ loaded pandas Trade DataFrame
 features DataFrame  ──►  train lightgbm/xgboost   ──►  model + features.json
         ▲                                                     │
         │                                                     ▼
-   same FeatureVectorSpec  ◄──────────────────────────────  Rust live extractor
+   same FeatureExtractorSpec  ◄──────────────────────────────  Rust live extractor
                                                       (update + values)
 ```
 
@@ -212,7 +212,7 @@ features DataFrame  ──►  train lightgbm/xgboost   ──►  model + featu
 
 ## 11. Non-market & derived features (the full-dataframe guarantee)
 
-**Guarantee:** every feature in the `FeatureVectorSpec` produces a value in **every**
+**Guarantee:** every feature in the `FeatureExtractorSpec` produces a value in **every**
 output row, in both Python and Rust. Because both sides run the same core extractor
 from the same feature-vector spec, "the same features in Rust" is the identical code path, not a
 re-implementation to keep in sync.
@@ -259,10 +259,10 @@ change** — just new builtins. Window semantics:
   Recommended. A per-bar count falls out of a window aligned to the bar.
 - **cumulative** (since start) — trivial to add.
 
-### FeatureVectorSpec / builder additions ✅
+### FeatureExtractorSpec / builder additions ✅
 
 ```python
-spec = (fiml.FeatureVectorSpec()
+spec = (fiml.FeatureExtractorSpec()
       .day_of_week()
       .time_since_first_event_of_day(tz="UTC")
       .trade_count_timed("BTCUSDT", aggregation="1s", window="60s"))
@@ -285,14 +285,14 @@ This work is no longer binding-only. To deliver the full-dataframe guarantee:
    **seconds** while the contract is **milliseconds** (§8.5). Fixed: divisor is
    `86_400_000`. ✅
 5. **Unify definitions and compilation in the Rust core:** ✅
-   - `FeatureVectorSpec` contains grouped `ScopedIndicator` values and `IndicatorSpec`
+   - `FeatureExtractorSpec` contains grouped `ScopedIndicator` values and `IndicatorSpec`
      stores ordered output windows.
-   - `DynIndicatorEngine::from_spec` → `from_feature_vector_spec`.
+   - `DynIndicatorEngine::from_spec` → `from_feature_extractor_spec`.
    - Feature-vector spec JSON entry points were subsequently disabled while the format
      is revised.
 6. **RENAME `Engine` → `FeatureExtractor`:** the Python binding class and the
    Rust runtime `DynIndicatorEngine` (`engine.rs` renamed to `extractor.rs`),
-   with constructors `from_feature_vector_spec` (Rust) / `FeatureExtractor(spec)`. ✅
+   with constructors `from_feature_extractor_spec` (Rust) / `FeatureExtractor(spec)`. ✅
 
 ## Resolved decisions
 

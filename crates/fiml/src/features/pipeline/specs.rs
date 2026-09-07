@@ -1,74 +1,31 @@
-use super::{Pipeline, ScalarOperation};
+use super::Pipeline;
 use crate::{
-    FeatureId, FeatureVector, FeatureVectorSpec, FimlError, InvalidArgumentError,
-    InvalidTransformationDefinitionError, Result,
+    FeatureExtractorSpec, FeatureVector, FimlError, InvalidArgumentError,
+    InvalidTransformationDefinitionError, Result, TransformerDefinition,
 };
-
-/// One named scalar transformation from the raw feature layout to model input.
-#[derive(Debug, Clone, PartialEq)]
-pub enum TransformationDefinition {
-    /// Copies one raw scalar without changing its value.
-    Identity { input: FeatureId, output: FeatureId },
-    /// Applies `(input - mean) / scale` to one raw scalar.
-    StandardScale {
-        input: FeatureId,
-        output: FeatureId,
-        mean: f64,
-        scale: f64,
-    },
-}
-
-impl TransformationDefinition {
-    /// Creates a scalar identity transformation.
-    pub fn identity(input: FeatureId, output: FeatureId) -> Self {
-        Self::Identity { input, output }
-    }
-
-    /// Creates a scalar standard-scaling transformation.
-    pub fn standard_scale(input: FeatureId, output: FeatureId, mean: f64, scale: f64) -> Self {
-        Self::StandardScale {
-            input,
-            output,
-            mean,
-            scale,
-        }
-    }
-
-    fn input(&self) -> &FeatureId {
-        match self {
-            Self::Identity { input, .. } | Self::StandardScale { input, .. } => input,
-        }
-    }
-
-    fn output(&self) -> &FeatureId {
-        match self {
-            Self::Identity { output, .. } | Self::StandardScale { output, .. } => output,
-        }
-    }
-}
 
 /// Validated configuration for raw extraction and the final model-input layout.
 ///
 /// Transformations remain in authored order, which is also final vector order.
 /// Raw and final IDs occupy separate layouts and may therefore use the same name.
 #[derive(Debug, Clone, PartialEq)]
-pub struct ModelInputSpec {
-    raw_feature_vector_spec: FeatureVectorSpec,
-    transformation_definitions: Vec<TransformationDefinition>,
+pub struct PipelineSpec {
+    raw_feature_extractor_spec: FeatureExtractorSpec,
+    transformation_definitions: Vec<TransformerDefinition>,
     feature_vector_capacity: usize,
     checksum: Option<String>,
 }
 
-impl ModelInputSpec {
+impl PipelineSpec {
     /// Creates a spec whose final width equals its transformation count.
     pub fn new(
-        raw_feature_vector_spec: FeatureVectorSpec,
-        transformation_definitions: impl IntoIterator<Item = TransformationDefinition>,
+        raw_feature_extractor_spec: FeatureExtractorSpec,
+        transformation_definitions: impl IntoIterator<Item = TransformerDefinition>,
     ) -> Result<Self> {
         let transformation_definitions = transformation_definitions.into_iter().collect::<Vec<_>>();
         let capacity = transformation_definitions.len();
         Self::with_metadata(
-            raw_feature_vector_spec,
+            raw_feature_extractor_spec,
             transformation_definitions,
             capacity,
             None,
@@ -77,12 +34,12 @@ impl ModelInputSpec {
 
     /// Creates a spec with explicit final width and trailing reserved cells.
     pub fn with_capacity(
-        raw_feature_vector_spec: FeatureVectorSpec,
-        transformation_definitions: impl IntoIterator<Item = TransformationDefinition>,
+        raw_feature_extractor_spec: FeatureExtractorSpec,
+        transformation_definitions: impl IntoIterator<Item = TransformerDefinition>,
         feature_vector_capacity: usize,
     ) -> Result<Self> {
         Self::with_metadata(
-            raw_feature_vector_spec,
+            raw_feature_extractor_spec,
             transformation_definitions,
             feature_vector_capacity,
             None,
@@ -91,8 +48,8 @@ impl ModelInputSpec {
 
     /// Creates a spec with explicit final width and opaque checksum metadata.
     pub fn with_metadata(
-        raw_feature_vector_spec: FeatureVectorSpec,
-        transformation_definitions: impl IntoIterator<Item = TransformationDefinition>,
+        raw_feature_extractor_spec: FeatureExtractorSpec,
+        transformation_definitions: impl IntoIterator<Item = TransformerDefinition>,
         feature_vector_capacity: usize,
         checksum: Option<String>,
     ) -> Result<Self> {
@@ -107,7 +64,7 @@ impl ModelInputSpec {
         }
 
         for (index, definition) in transformation_definitions.iter().enumerate() {
-            if !raw_feature_vector_spec
+            if !raw_feature_extractor_spec
                 .definitions()
                 .iter()
                 .any(|raw| raw.id == *definition.input())
@@ -132,36 +89,13 @@ impl ModelInputSpec {
                     InvalidTransformationDefinitionError::DuplicateOutputFeature,
                 );
             }
-            if let TransformationDefinition::StandardScale { mean, scale, .. } = definition {
-                if !mean.is_finite() {
-                    return invalid_definition(
-                        index,
-                        InvalidTransformationDefinitionError::MeanNotFinite,
-                    );
-                }
-                if !scale.is_finite() {
-                    return invalid_definition(
-                        index,
-                        InvalidTransformationDefinitionError::ScaleNotFinite,
-                    );
-                }
-                if *scale <= 0.0 {
-                    return invalid_definition(
-                        index,
-                        InvalidTransformationDefinitionError::ScaleNotPositive,
-                    );
-                }
-                if !(1.0 / *scale).is_finite() {
-                    return invalid_definition(
-                        index,
-                        InvalidTransformationDefinitionError::InverseScaleNotFinite,
-                    );
-                }
-            }
+            definition
+                .validate()
+                .map_err(|reason| FimlError::InvalidTransformationDefinition { index, reason })?;
         }
 
         Ok(Self {
-            raw_feature_vector_spec,
+            raw_feature_extractor_spec,
             transformation_definitions,
             feature_vector_capacity,
             checksum,
@@ -169,12 +103,12 @@ impl ModelInputSpec {
     }
 
     /// Returns the raw feature-extraction configuration.
-    pub fn raw_feature_vector_spec(&self) -> &FeatureVectorSpec {
-        &self.raw_feature_vector_spec
+    pub fn raw_feature_extractor_spec(&self) -> &FeatureExtractorSpec {
+        &self.raw_feature_extractor_spec
     }
 
     /// Returns scalar transformations in final model-vector order.
-    pub fn transformation_definitions(&self) -> &[TransformationDefinition] {
+    pub fn transformation_definitions(&self) -> &[TransformerDefinition] {
         &self.transformation_definitions
     }
 
@@ -216,28 +150,14 @@ impl ModelInputSpec {
             });
         }
 
-        let feature_extractor = self.raw_feature_vector_spec.build(raw_vector)?;
+        let feature_extractor = self.raw_feature_extractor_spec.build(raw_vector)?;
         let mut operations = Vec::with_capacity(self.transformation_definitions.len());
         let mut output_ids = Vec::with_capacity(self.transformation_definitions.len());
         for (output_index, definition) in self.transformation_definitions.iter().enumerate() {
             let input_index = feature_extractor
                 .feature_index(definition.input())
                 .expect("model-input construction validated every raw input ID");
-            let operation = match definition {
-                TransformationDefinition::Identity { .. } => ScalarOperation::Identity {
-                    input_index,
-                    output_index,
-                },
-                TransformationDefinition::StandardScale { mean, scale, .. } => {
-                    ScalarOperation::StandardScale {
-                        input_index,
-                        output_index,
-                        mean: *mean,
-                        inverse_scale: 1.0 / *scale,
-                    }
-                }
-            };
-            operations.push(operation);
+            operations.push(definition.compile(input_index, output_index));
             output_ids.push(definition.output().clone());
         }
         for index in 0..model_vector.capacity() {

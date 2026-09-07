@@ -5,8 +5,8 @@ use std::{
 };
 
 use fiml::{
-    ArrayFeatureVector, Event, FeatureDefinition, FeatureId, FeatureKey, FeatureSource,
-    FeatureVectorSpec, ModelInputSpec, Pipeline, Symbol, TransformationDefinition,
+    ArrayFeatureVector, Event, FeatureDefinition, FeatureExtractorSpec, FeatureId, FeatureKey,
+    FeatureSource, Pipeline, PipelineSpec, Symbol, TransformerDefinition,
 };
 
 thread_local! {
@@ -56,9 +56,9 @@ fn count_allocations(operation: impl FnOnce()) -> usize {
 }
 
 fn pipeline_with(
-    transformation: TransformationDefinition,
+    transformation: TransformerDefinition,
 ) -> Pipeline<ArrayFeatureVector<1>, ArrayFeatureVector<1>> {
-    let raw_spec = FeatureVectorSpec::new([FeatureDefinition::new(
+    let raw_spec = FeatureExtractorSpec::new([FeatureDefinition::new(
         FeatureKey::DayOfWeek {
             symbol: Symbol::GLOBAL,
             source: FeatureSource::AnyEvent,
@@ -66,13 +66,29 @@ fn pipeline_with(
         FeatureId::new("day"),
     )])
     .unwrap();
-    ModelInputSpec::new(raw_spec, [transformation])
+    PipelineSpec::new(raw_spec, [transformation])
         .unwrap()
         .build(
             ArrayFeatureVector::<1>::new(),
             ArrayFeatureVector::<1>::new(),
         )
         .unwrap()
+}
+
+#[test]
+fn lagged_pipeline_warmup_and_steady_state_do_not_allocate() {
+    let mut pipeline = pipeline_with(TransformerDefinition::lagged(
+        FeatureId::new("day"),
+        FeatureId::new("lagged_day"),
+        3,
+    ));
+    let allocations = count_allocations(|| {
+        for timestamp in 0..128 {
+            black_box(pipeline.handle_event(Event::time(timestamp)).unwrap());
+        }
+    });
+    assert_eq!(allocations, 0);
+    assert_eq!(pipeline.values(), &[4.0]);
 }
 
 #[test]
@@ -87,7 +103,7 @@ fn allocation_counter_detects_heap_allocation() {
 
 #[test]
 fn steady_state_identity_pipeline_events_do_not_allocate() {
-    let mut pipeline = pipeline_with(TransformationDefinition::identity(
+    let mut pipeline = pipeline_with(TransformerDefinition::identity(
         FeatureId::new("day"),
         FeatureId::new("model_day"),
     ));
@@ -117,7 +133,7 @@ fn steady_state_identity_pipeline_events_do_not_allocate() {
 
 #[test]
 fn steady_state_standard_scale_pipeline_events_do_not_allocate() {
-    let mut pipeline = pipeline_with(TransformationDefinition::standard_scale(
+    let mut pipeline = pipeline_with(TransformerDefinition::standard_scale(
         FeatureId::new("day"),
         FeatureId::new("scaled_day"),
         2.0,

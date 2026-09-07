@@ -5,7 +5,7 @@ import pytest
 from jsonschema import Draft202012Validator
 
 
-SCHEMA_PATH = Path(__file__).parents[3] / "docs" / "feature-vector-spec.schema.json"
+SCHEMA_PATH = Path(__file__).parents[3] / "docs" / "feature-extractor-spec.schema.json"
 SCHEMA = json.loads(SCHEMA_PATH.read_text())
 VALIDATOR = Draft202012Validator(SCHEMA)
 
@@ -39,7 +39,7 @@ def assert_invalid_source(source):
     assert list(VALIDATOR.iter_errors(document_with_source(source)))
 
 
-def test_feature_vector_spec_schema_is_valid_draft_2020_12():
+def test_feature_extractor_spec_schema_is_valid_draft_2020_12():
     Draft202012Validator.check_schema(SCHEMA)
 
 

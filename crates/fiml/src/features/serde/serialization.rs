@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use ::serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-use super::FeatureVectorSpec;
+use super::FeatureExtractorSpec;
 use crate::{
     EventField, EventKind, FeatureDefinition, FeatureId, FeatureKey, FeatureSource, Symbol,
     WarmupPolicy,
@@ -13,7 +13,7 @@ const FORMAT_VERSION: &str = "1.0";
 
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct FeatureVectorSpecWire {
+struct FeatureExtractorSpecWire {
     version: String,
     capacity: usize,
     length: usize,
@@ -26,7 +26,7 @@ struct FeatureVectorSpecWire {
     features: Vec<FeatureGroupWire>,
 }
 
-impl FeatureVectorSpecWire {
+impl FeatureExtractorSpecWire {
     fn scalar_output_count(&self) -> usize {
         let mut result = 0;
 
@@ -172,35 +172,35 @@ struct IndicatorAccumulator {
     wire: IndicatorWire,
 }
 
-impl Serialize for FeatureVectorSpec {
+impl Serialize for FeatureExtractorSpec {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
-        let wire = FeatureVectorSpecWire::try_from(self).map_err(::serde::ser::Error::custom)?;
+        let wire = FeatureExtractorSpecWire::try_from(self).map_err(::serde::ser::Error::custom)?;
         wire.serialize(serializer)
     }
 }
 
-impl<'de> Deserialize<'de> for FeatureVectorSpec {
+impl<'de> Deserialize<'de> for FeatureExtractorSpec {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
     {
-        let wire = FeatureVectorSpecWire::deserialize(deserializer)?;
-        FeatureVectorSpec::try_from(wire).map_err(::serde::de::Error::custom)
+        let wire = FeatureExtractorSpecWire::deserialize(deserializer)?;
+        FeatureExtractorSpec::try_from(wire).map_err(::serde::de::Error::custom)
     }
 }
 
-impl TryFrom<&FeatureVectorSpec> for FeatureVectorSpecWire {
+impl TryFrom<&FeatureExtractorSpec> for FeatureExtractorSpecWire {
     type Error = String;
 
-    fn try_from(feature_vector_spec: &FeatureVectorSpec) -> Result<Self, Self::Error> {
+    fn try_from(feature_extractor_spec: &FeatureExtractorSpec) -> Result<Self, Self::Error> {
         let mut groups = Vec::<FeatureGroupWire>::new();
         let mut current_symbol = None::<Symbol>;
         let mut indicators = Vec::<IndicatorAccumulator>::new();
 
-        for definition in feature_vector_spec.definitions() {
+        for definition in feature_extractor_spec.definitions() {
             let symbol = symbol_of(&definition.key);
             if current_symbol != Some(symbol) {
                 if let Some(previous_symbol) = current_symbol {
@@ -247,9 +247,9 @@ impl TryFrom<&FeatureVectorSpec> for FeatureVectorSpecWire {
 
         Ok(Self {
             version: FORMAT_VERSION.to_owned(),
-            capacity: feature_vector_spec.feature_vector_capacity(),
-            length: feature_vector_spec.feature_vector_length(),
-            checksum: feature_vector_spec.checksum().map(str::to_owned),
+            capacity: feature_extractor_spec.feature_vector_capacity(),
+            length: feature_extractor_spec.feature_vector_length(),
+            checksum: feature_extractor_spec.checksum().map(str::to_owned),
             features: groups,
         })
     }
@@ -409,10 +409,10 @@ fn serialize_definition(
     ))
 }
 
-impl TryFrom<FeatureVectorSpecWire> for FeatureVectorSpec {
+impl TryFrom<FeatureExtractorSpecWire> for FeatureExtractorSpec {
     type Error = String;
 
-    fn try_from(wire: FeatureVectorSpecWire) -> Result<Self, Self::Error> {
+    fn try_from(wire: FeatureExtractorSpecWire) -> Result<Self, Self::Error> {
         if wire.version != FORMAT_VERSION {
             return Err(format!(
                 "unsupported feature-vector spec version {:?}; expected {FORMAT_VERSION:?}",
@@ -455,7 +455,7 @@ impl TryFrom<FeatureVectorSpecWire> for FeatureVectorSpec {
                 wire.capacity, wire.length
             ));
         }
-        FeatureVectorSpec::with_metadata(definitions, wire.capacity, wire.checksum)
+        FeatureExtractorSpec::with_metadata(definitions, wire.capacity, wire.checksum)
             .map_err(|error| error.to_string())
     }
 }
@@ -879,9 +879,9 @@ mod tests {
         FeatureDefinition::with_default_id(key)
     }
 
-    fn complete_spec() -> FeatureVectorSpec {
+    fn complete_spec() -> FeatureExtractorSpec {
         let btc = Symbol::new("BTCUSDT").unwrap();
-        FeatureVectorSpec::with_metadata(
+        FeatureExtractorSpec::with_metadata(
             [
                 default(FeatureKey::TradeCountTimed {
                     symbol: btc,
@@ -1013,14 +1013,14 @@ mod tests {
         assert_eq!(timed["options"]["aggregation"], "1s");
         assert_eq!(timed["outputs"][0]["window"], "1m");
 
-        let restored: FeatureVectorSpec = serde_json::from_str(&text).unwrap();
+        let restored: FeatureExtractorSpec = serde_json::from_str(&text).unwrap();
         assert_eq!(restored, spec);
     }
 
     #[test]
     fn standalone_price_and_volume_use_the_value_field_literal() {
         let symbol = Symbol::new("x").unwrap();
-        let spec = FeatureVectorSpec::new([
+        let spec = FeatureExtractorSpec::new([
             default(FeatureKey::Sma {
                 symbol,
                 source: FeatureSource::Field(EventField::Price),
@@ -1074,7 +1074,7 @@ mod tests {
     }
 
     fn error(value: Value) -> String {
-        serde_json::from_value::<FeatureVectorSpec>(value)
+        serde_json::from_value::<FeatureExtractorSpec>(value)
             .unwrap_err()
             .to_string()
     }
@@ -1095,7 +1095,7 @@ mod tests {
                 }]}
             ]
         });
-        let spec: FeatureVectorSpec = serde_json::from_value(value).unwrap();
+        let spec: FeatureExtractorSpec = serde_json::from_value(value).unwrap();
         let canonical = serde_json::to_value(spec).unwrap();
         assert_eq!(canonical["features"][0]["symbol"], "__global__");
         assert!(

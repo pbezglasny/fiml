@@ -15,8 +15,8 @@ def test_symbol_capacity_is_recoverable():
 
 
 def check_capacity():
-    raw = fiml.FeatureVectorSpec().sma("capacity-0", [1])
-    model = fiml.ModelInputSpec(raw).identity(raw.feature_ids()[0])
+    raw = fiml.FeatureExtractorSpec().sma("capacity-0", [1])
+    model = fiml.PipelineSpec(raw).identity(raw.feature_ids()[0])
     extractor = fiml.FeatureExtractor(raw)
     pipeline = fiml.ModelInputPipeline(model)
     raw_json = raw.to_json()
@@ -47,7 +47,7 @@ def check_capacity():
         ("obv_timed", {"aggregation": "1s", "windows": ["2s"]}),
         ("trade_count_timed", {"aggregation": "1s", "window": "2s"}),
     ]:
-        spec = fiml.FeatureVectorSpec()
+        spec = fiml.FeatureExtractorSpec()
         before = spec.to_json()
         with pytest.raises(ValueError, match=error):
             getattr(spec, method)("overflow", **kwargs)
@@ -56,9 +56,9 @@ def check_capacity():
         assert spec.output_count() == 1
 
     for cls, text in [
-        (fiml.FeatureVectorSpec, raw_json),
+        (fiml.FeatureExtractorSpec, raw_json),
         (fiml.FeatureExtractor, raw_json),
-        (fiml.ModelInputSpec, model_json),
+        (fiml.PipelineSpec, model_json),
         (fiml.ModelInputPipeline, model_json),
     ]:
         with pytest.raises(ValueError, match=error):
