@@ -225,7 +225,7 @@ fixed and creates trailing `__reserved_<index>` cells. `feature_ids()` and
 independent opaque metadata.
 
 `lagged` reads the raw value from `lag_window` accepted events earlier. The
-window must be positive; outputs remain `NaN` until enough history exists.
+window must be between 1 and 10,000 inclusive; outputs remain `NaN` until enough history exists.
 Multiple lags of the same input share one history buffer.
 
 `ModelInputPipeline` mirrors the extractor's stateful `symbol`, `update`,

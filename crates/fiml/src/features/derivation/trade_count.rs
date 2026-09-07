@@ -22,7 +22,7 @@ impl TradeCountTimedFeature {
         Self { symbol, counter }
     }
 
-    pub(in crate::features) fn update<O: FeatureVector>(
+    pub(crate) fn update<O: FeatureVector>(
         &mut self,
         event: &Event,
         output_span: OutputSpan,

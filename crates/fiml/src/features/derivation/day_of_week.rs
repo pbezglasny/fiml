@@ -13,7 +13,7 @@ const MILLIS_PER_DAY: i64 = 86_400_000;
 pub(crate) struct DayOfWeek;
 
 impl DayOfWeek {
-    pub(in crate::features) fn update<O: FeatureVector>(
+    pub(crate) fn update<O: FeatureVector>(
         &mut self,
         event: &Event,
         output_span: OutputSpan,
