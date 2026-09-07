@@ -130,6 +130,15 @@ mod tests {
                 ArrayFeatureVector::<5>::new_of_length(4),
             )
             .unwrap();
+        assert_eq!(pipeline.operations.len(), 3);
+        assert_eq!(
+            pipeline
+                .operations
+                .iter()
+                .filter(|op| matches!(op, Transformer::Lagged(_)))
+                .count(),
+            1
+        );
         assert!(pipeline.values().iter().all(|value| value.is_nan()));
         assert_eq!(
             pipeline.output_ids(),
@@ -181,23 +190,88 @@ mod tests {
     }
 
     #[test]
-    fn rejects_zero_lag_before_compiling_a_transformer() {
-        let error = PipelineSpec::new(
-            FeatureExtractorSpec::new([day_of_week("day")]).unwrap(),
-            [TransformerDefinition::lagged(
-                FeatureId::new("day"),
-                FeatureId::new("lagged"),
-                0,
-            )],
+    fn lagged_groups_keep_distinct_inputs_and_repeated_lags_separate() {
+        let raw_spec =
+            FeatureExtractorSpec::new([time_since_first_event("elapsed"), day_of_week("day")])
+                .unwrap();
+        let spec = PipelineSpec::new(
+            raw_spec,
+            [
+                TransformerDefinition::lagged(
+                    FeatureId::new("elapsed"),
+                    FeatureId::new("elapsed2"),
+                    2,
+                ),
+                TransformerDefinition::lagged(FeatureId::new("day"), FeatureId::new("day1"), 1),
+                TransformerDefinition::lagged(
+                    FeatureId::new("elapsed"),
+                    FeatureId::new("elapsed1"),
+                    1,
+                ),
+                TransformerDefinition::lagged(FeatureId::new("day"), FeatureId::new("day2"), 2),
+                TransformerDefinition::lagged(
+                    FeatureId::new("elapsed"),
+                    FeatureId::new("elapsed1_copy"),
+                    1,
+                ),
+            ],
         )
-        .unwrap_err();
-        assert!(matches!(
-            error,
-            FimlError::InvalidTransformationDefinition {
-                index: 0,
-                reason: InvalidTransformationDefinitionError::LagWindowZero,
+        .unwrap();
+        let mut pipeline = spec
+            .build(
+                ArrayFeatureVector::<2>::new(),
+                ArrayFeatureVector::<5>::new(),
+            )
+            .unwrap();
+        assert_eq!(pipeline.operations.len(), 2);
+        assert!(
+            pipeline
+                .operations
+                .iter()
+                .all(|op| matches!(op, Transformer::Lagged(_)))
+        );
+        let cases = [
+            (100, [f64::NAN; 5]),
+            (110, [f64::NAN, 4.0, 0.0, f64::NAN, 0.0]),
+            (120, [0.0, 4.0, 10.0, 4.0, 10.0]),
+            (130, [10.0, 4.0, 20.0, 4.0, 20.0]),
+        ];
+        for (timestamp, expected) in cases {
+            pipeline.handle_event(Event::time(timestamp)).unwrap();
+            for (actual, expected) in pipeline.values().iter().zip(expected) {
+                assert!((actual.is_nan() && expected.is_nan()) || *actual == expected);
             }
-        ));
+        }
+    }
+
+    #[test]
+    fn rejects_invalid_lags_before_compiling_a_transformer() {
+        for (lag_window, expected_reason) in [
+            (0, InvalidTransformationDefinitionError::LagWindowZero),
+            (
+                isize::MAX as usize / size_of::<f64>() + 1,
+                InvalidTransformationDefinitionError::LagWindowTooLarge,
+            ),
+            (
+                usize::MAX,
+                InvalidTransformationDefinitionError::LagWindowTooLarge,
+            ),
+        ] {
+            let error = PipelineSpec::new(
+                FeatureExtractorSpec::new([day_of_week("day")]).unwrap(),
+                [TransformerDefinition::lagged(
+                    FeatureId::new("day"),
+                    FeatureId::new("lagged"),
+                    lag_window,
+                )],
+            )
+            .unwrap_err();
+            assert!(matches!(
+                error,
+                FimlError::InvalidTransformationDefinition { index: 0, reason }
+                    if reason == expected_reason
+            ));
+        }
     }
 
     #[test]

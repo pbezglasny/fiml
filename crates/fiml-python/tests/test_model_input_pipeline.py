@@ -1,4 +1,5 @@
 import json
+import sys
 
 import fiml
 import numpy as np
@@ -8,6 +9,46 @@ import pytest
 
 def raw_spec():
     return fiml.FeatureExtractorSpec(checksum="raw-checksum").day_of_week()
+
+
+@pytest.mark.parametrize("restore", [False, True])
+def test_grouped_lags_preserve_json_layout_and_individual_warmup(restore):
+    raw = raw_spec()
+    raw_id = raw.feature_ids()[0]
+    spec = (
+        fiml.PipelineSpec(raw)
+        .lagged(raw_id, lag_window=2, output="lag2")
+        .identity(raw_id, output="now")
+        .lagged(raw_id, lag_window=1, output="lag1")
+        .lagged(raw_id, lag_window=1)
+    )
+    document = json.loads(spec.to_json())
+    assert document["model_input"] == {
+        "capacity": 4,
+        "length": 4,
+        "transformations": [
+            {"type": "lagged", "input": raw_id, "output": "lag2", "lag_window": 2},
+            {"type": "identity", "input": raw_id, "output": "now"},
+            {"type": "lagged", "input": raw_id, "output": "lag1", "lag_window": 1},
+            {"type": "lagged", "input": raw_id, "output": raw_id, "lag_window": 1},
+        ],
+    }
+    if restore:
+        spec = fiml.PipelineSpec.from_json(json.dumps(document))
+    assert json.loads(spec.to_json()) == document
+    assert spec.feature_ids() == ["lag2", "now", "lag1", raw_id]
+    pipeline = fiml.ModelInputPipeline(spec)
+    symbol = pipeline.symbol("ignored-for-time-events")
+    expected = [
+        [np.nan, 4.0, np.nan, np.nan],
+        [np.nan, 5.0, 4.0, 4.0],
+        [4.0, 6.0, 5.0, 5.0],
+        [5.0, 0.0, 6.0, 6.0],
+        [6.0, 1.0, 0.0, 0.0],
+    ]
+    for day, values in enumerate(expected):
+        pipeline.update(fiml.KIND_TIME, symbol, day * 86_400_000)
+        np.testing.assert_equal(pipeline.values(), values)
 
 
 def test_pipeline_spec_builds_ordered_transformations_and_round_trips():
@@ -76,6 +117,18 @@ def test_pipeline_spec_capacity_cloning_metadata_and_atomic_failures():
     ("operation", "message"),
     [
         (lambda spec, raw_id: spec.identity(raw_id, output="__reserved_0"), "reserved"),
+        (
+            lambda spec, raw_id: spec.lagged(raw_id, lag_window=0),
+            "lag window must be positive",
+        ),
+        (
+            lambda spec, raw_id: spec.lagged(raw_id, lag_window=sys.maxsize // 8 + 1),
+            "lag window exceeds",
+        ),
+        (
+            lambda spec, raw_id: spec.lagged(raw_id, lag_window=2 * sys.maxsize + 1),
+            "lag window exceeds",
+        ),
         (
             lambda spec, raw_id: spec.standard_scale(raw_id, mean=np.nan, scale=1.0),
             "mean must be finite",
