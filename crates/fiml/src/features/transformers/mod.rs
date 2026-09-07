@@ -3,7 +3,9 @@
 //! Compilation resolves each transformation to indexes and precomputed parameters
 //! so execution writes directly into caller-owned storage without allocation.
 
-use crate::{FeatureId, FeatureVector, InvalidTransformationDefinitionError};
+use std::collections::HashMap;
+
+use crate::{FeatureExtractor, FeatureId, FeatureVector, InvalidTransformationDefinitionError};
 
 mod identity;
 mod lagged;
@@ -20,6 +22,7 @@ pub enum TransformerDefinition {
     Identity { input: FeatureId, output: FeatureId },
     /// Emits the raw scalar from `lag_window` accepted events earlier.
     /// The window must be positive; output remains NaN until enough history exists.
+    /// Definitions for the same input share one runtime history buffer.
     Lagged {
         input: FeatureId,
         output: FeatureId,
@@ -76,8 +79,13 @@ impl TransformerDefinition {
     }
 
     pub(super) fn validate(&self) -> Result<(), InvalidTransformationDefinitionError> {
-        if matches!(self, Self::Lagged { lag_window: 0, .. }) {
-            return Err(InvalidTransformationDefinitionError::LagWindowZero);
+        if let Self::Lagged { lag_window, .. } = self {
+            if *lag_window == 0 {
+                return Err(InvalidTransformationDefinitionError::LagWindowZero);
+            }
+            if *lag_window > isize::MAX as usize / size_of::<f64>() {
+                return Err(InvalidTransformationDefinitionError::LagWindowTooLarge);
+            }
         }
         if let Self::StandardScale { mean, scale, .. } = self {
             if !mean.is_finite() {
@@ -95,21 +103,48 @@ impl TransformerDefinition {
         }
         Ok(())
     }
+}
 
-    /// Compiles a validated definition using indexes resolved by the pipeline.
-    pub(super) fn compile(&self, input_index: usize, output_index: usize) -> Transformer {
-        match self {
-            Self::Identity { .. } => {
-                Transformer::Identity(IdentityTransformer::new(input_index, output_index))
+/// Compiles validated scalar definitions, sharing history between lags of one input.
+pub(super) fn compile<V: FeatureVector>(
+    definitions: &[TransformerDefinition],
+    feature_extractor: &FeatureExtractor<V>,
+) -> Box<[Transformer]> {
+    let mut operations = Vec::with_capacity(definitions.len());
+    let mut lagged_outputs = HashMap::<usize, (Vec<usize>, Vec<usize>)>::new();
+    for (output_index, definition) in definitions.iter().enumerate() {
+        let input_index = feature_extractor
+            .feature_index(definition.input())
+            .expect("pipeline construction validated every raw input ID");
+        match definition {
+            TransformerDefinition::Identity { .. } => operations.push(Transformer::Identity(
+                IdentityTransformer::new(input_index, output_index),
+            )),
+            TransformerDefinition::Lagged { lag_window, .. } => {
+                let (windows, output_indices) = lagged_outputs.entry(input_index).or_default();
+                windows.push(*lag_window);
+                output_indices.push(output_index);
             }
-            Self::Lagged { lag_window, .. } => {
-                Transformer::Lagged(LaggedFeature::new(*lag_window, input_index, output_index))
+            TransformerDefinition::StandardScale { mean, scale, .. } => {
+                operations.push(Transformer::StandardScale(StandardScaleTransformer::new(
+                    input_index,
+                    output_index,
+                    *mean,
+                    *scale,
+                )));
             }
-            Self::StandardScale { mean, scale, .. } => Transformer::StandardScale(
-                StandardScaleTransformer::new(input_index, output_index, *mean, *scale),
-            ),
         }
     }
+    // Operations read only raw values and own distinct output cells, so groups
+    // can run after scalar operations without changing authored output order.
+    for (input_index, (windows, output_indices)) in lagged_outputs {
+        operations.push(Transformer::Lagged(LaggedFeature::new(
+            input_index,
+            windows,
+            output_indices.into_boxed_slice(),
+        )));
+    }
+    operations.into_boxed_slice()
 }
 
 /// Resolved scalar operation for allocation-free writes into model input.

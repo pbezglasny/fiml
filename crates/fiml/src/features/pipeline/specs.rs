@@ -151,24 +151,24 @@ impl PipelineSpec {
         }
 
         let feature_extractor = self.raw_feature_extractor_spec.build(raw_vector)?;
-        let mut operations = Vec::with_capacity(self.transformation_definitions.len());
-        let mut output_ids = Vec::with_capacity(self.transformation_definitions.len());
-        for (output_index, definition) in self.transformation_definitions.iter().enumerate() {
-            let input_index = feature_extractor
-                .feature_index(definition.input())
-                .expect("model-input construction validated every raw input ID");
-            operations.push(definition.compile(input_index, output_index));
-            output_ids.push(definition.output().clone());
-        }
+        let operations = crate::features::transformers::compile(
+            &self.transformation_definitions,
+            &feature_extractor,
+        );
+        let output_ids = self
+            .transformation_definitions
+            .iter()
+            .map(|definition| definition.output().clone())
+            .collect();
         for index in 0..model_vector.capacity() {
             model_vector.set_value_at(index, f64::NAN);
         }
 
         Ok(Pipeline {
             feature_extractor,
-            operations: operations.into_boxed_slice(),
+            operations,
             model_vector,
-            output_ids: output_ids.into_boxed_slice(),
+            output_ids,
         })
     }
 }

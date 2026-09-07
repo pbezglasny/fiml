@@ -55,9 +55,9 @@ fn count_allocations(operation: impl FnOnce()) -> usize {
     ALLOCATION_COUNT.with(Cell::get)
 }
 
-fn pipeline_with(
-    transformation: TransformerDefinition,
-) -> Pipeline<ArrayFeatureVector<1>, ArrayFeatureVector<1>> {
+fn pipeline_with<const N: usize>(
+    transformations: [TransformerDefinition; N],
+) -> Pipeline<ArrayFeatureVector<1>, ArrayFeatureVector<N>> {
     let raw_spec = FeatureExtractorSpec::new([FeatureDefinition::new(
         FeatureKey::DayOfWeek {
             symbol: Symbol::GLOBAL,
@@ -66,29 +66,30 @@ fn pipeline_with(
         FeatureId::new("day"),
     )])
     .unwrap();
-    PipelineSpec::new(raw_spec, [transformation])
+    PipelineSpec::new(raw_spec, transformations)
         .unwrap()
         .build(
             ArrayFeatureVector::<1>::new(),
-            ArrayFeatureVector::<1>::new(),
+            ArrayFeatureVector::<N>::new(),
         )
         .unwrap()
 }
 
 #[test]
 fn lagged_pipeline_warmup_and_steady_state_do_not_allocate() {
-    let mut pipeline = pipeline_with(TransformerDefinition::lagged(
-        FeatureId::new("day"),
-        FeatureId::new("lagged_day"),
-        3,
-    ));
+    let mut pipeline = pipeline_with([
+        TransformerDefinition::lagged(FeatureId::new("day"), FeatureId::new("lag3"), 3),
+        TransformerDefinition::lagged(FeatureId::new("day"), FeatureId::new("lag1"), 1),
+        TransformerDefinition::lagged(FeatureId::new("day"), FeatureId::new("lag3_copy"), 3),
+        TransformerDefinition::lagged(FeatureId::new("day"), FeatureId::new("lag2"), 2),
+    ]);
     let allocations = count_allocations(|| {
         for timestamp in 0..128 {
             black_box(pipeline.handle_event(Event::time(timestamp)).unwrap());
         }
     });
     assert_eq!(allocations, 0);
-    assert_eq!(pipeline.values(), &[4.0]);
+    assert_eq!(pipeline.values(), &[4.0; 4]);
 }
 
 #[test]
@@ -103,10 +104,10 @@ fn allocation_counter_detects_heap_allocation() {
 
 #[test]
 fn steady_state_identity_pipeline_events_do_not_allocate() {
-    let mut pipeline = pipeline_with(TransformerDefinition::identity(
+    let mut pipeline = pipeline_with([TransformerDefinition::identity(
         FeatureId::new("day"),
         FeatureId::new("model_day"),
-    ));
+    )]);
     pipeline.handle_event(Event::time(0)).unwrap();
 
     let allocations = count_allocations(|| {
@@ -133,12 +134,12 @@ fn steady_state_identity_pipeline_events_do_not_allocate() {
 
 #[test]
 fn steady_state_standard_scale_pipeline_events_do_not_allocate() {
-    let mut pipeline = pipeline_with(TransformerDefinition::standard_scale(
+    let mut pipeline = pipeline_with([TransformerDefinition::standard_scale(
         FeatureId::new("day"),
         FeatureId::new("scaled_day"),
         2.0,
         2.0,
-    ));
+    )]);
     pipeline.handle_event(Event::time(0)).unwrap();
 
     let allocations = count_allocations(|| {

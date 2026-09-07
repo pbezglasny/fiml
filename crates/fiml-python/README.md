@@ -216,13 +216,17 @@ for feature_id, mean, scale in zip(
 pipeline = fiml.ModelInputPipeline(model_spec, output_dtype="float64")
 ```
 
-`identity(input, *, output=None)` and
+`identity(input, *, output=None)`, `lagged(input, *, lag_window, output=None)`, and
 `standard_scale(input, *, mean, scale, output=None)` append one final scalar and
 return the spec for fluent use. Omitting `output` reuses the input ID. Omitting
 model capacity tracks the transformation count; an explicit capacity stays
 fixed and creates trailing `__reserved_<index>` cells. `feature_ids()` and
 `raw_feature_ids()` exclude reserved cells. Raw and model checksums are
 independent opaque metadata.
+
+`lagged` reads the raw value from `lag_window` accepted events earlier. The
+window must be positive; outputs remain `NaN` until enough history exists.
+Multiple lags of the same input share one history buffer.
 
 `ModelInputPipeline` mirrors the extractor's stateful `symbol`, `update`,
 `transform`, and `compute_features` event-replay APIs. `values()` and

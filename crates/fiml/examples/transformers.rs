@@ -31,18 +31,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 10.0,
                 2.0,
             ),
-            TransformerDefinition::lagged(raw_id, FeatureId::new("sma_lag_2"), 2),
+            // These two outputs share one history buffer for raw_sma.
+            TransformerDefinition::lagged(raw_id.clone(), FeatureId::new("sma_lag_2"), 2),
+            TransformerDefinition::lagged(raw_id, FeatureId::new("sma_lag_1"), 1),
         ],
     )?;
     // Raw and model storage are allocated once, before processing events.
     let mut pipeline = model_spec.build(
         ArrayFeatureVector::<1>::new(),
-        ArrayFeatureVector::<3>::new(),
+        ArrayFeatureVector::<4>::new(),
     )?;
 
     println!("model columns: {:?}", pipeline.output_ids());
     // Lag counts accepted events, including samples where the raw SMA is NaN.
-    // The first finite SMA appears on event 2; its lagged value on event 4.
+    // The first finite SMA appears on event 2; lag 1 on event 3 and lag 2 on event 4.
     for (timestamp, price) in [10.0, 12.0, 14.0, 16.0, 18.0, 20.0].into_iter().enumerate() {
         pipeline.handle_event(Event::price(btc, price, timestamp as i64))?;
         println!(
@@ -53,6 +55,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     assert_eq!(pipeline.raw_values(), &[19.0]);
-    assert_eq!(pipeline.values(), &[19.0, 4.5, 15.0]);
+    assert_eq!(pipeline.values(), &[19.0, 4.5, 15.0, 17.0]);
     Ok(())
 }

@@ -259,6 +259,10 @@ mod tests {
             ),]
         );
         assert_eq!(serde_json::to_value(&spec).unwrap(), document);
+        for window in [isize::MAX as usize / size_of::<f64>() + 1, usize::MAX] {
+            document["model_input"]["transformations"][0]["lag_window"] = json!(window);
+            assert!(error(document.clone()).contains("lag window exceeds"));
+        }
         for window in [json!(0), json!(-1), json!(1.5), Value::Null] {
             document["model_input"]["transformations"][0]["lag_window"] = window;
             assert!(serde_json::from_value::<PipelineSpec>(document.clone()).is_err());

@@ -24,6 +24,11 @@ scalar transformations into a `Pipeline`. Every transformation reads directly
 from the raw feature vector. Transformation chaining and general graphs are not
 supported.
 
+Lagged definitions for the same raw input compile into one transformer with one
+history buffer sized to the largest lag. Each output keeps its authored position
+and becomes available after its own positive lag window. Duplicate lag windows
+with different output IDs are supported; rejected events do not advance history.
+
 The canonical artifact has three ownership levels:
 
 ```json

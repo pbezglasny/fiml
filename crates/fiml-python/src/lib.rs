@@ -560,6 +560,24 @@ impl PipelineSpec {
         Ok(slf)
     }
 
+    /// Append a raw scalar from `lag_window` accepted events earlier.
+    /// The window must be positive; output remains NaN until enough history exists.
+    #[pyo3(signature = (input, *, lag_window, output=None))]
+    fn lagged<'py>(
+        mut slf: PyRefMut<'py, Self>,
+        input: &str,
+        lag_window: usize,
+        output: Option<&str>,
+    ) -> PyResult<PyRefMut<'py, Self>> {
+        let output = output.unwrap_or(input);
+        slf.add_transformation(TransformerDefinition::lagged(
+            FeatureId::new(input),
+            FeatureId::new(output),
+            lag_window,
+        ))?;
+        Ok(slf)
+    }
+
     /// Append a fitted `(input - mean) / scale` scalar transformation.
     #[pyo3(signature = (input, *, mean, scale, output=None))]
     fn standard_scale<'py>(
