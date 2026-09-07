@@ -13,7 +13,7 @@ import fiml
 
 
 raw_spec = (
-    fiml.FeatureVectorSpec(checksum="raw-features-v1")
+    fiml.FeatureExtractorSpec(checksum="raw-features-v1")
     .sma(
         "BTCUSDT",
         [2],
@@ -29,7 +29,7 @@ scaler = SimpleNamespace(
     mean_=np.array([3.0, 10.0]),
     scale_=np.array([2.0, 2.0]),
 )
-model_spec = fiml.ModelInputSpec(raw_spec, checksum="model-input-v1")
+model_spec = fiml.PipelineSpec(raw_spec, checksum="model-input-v1")
 for feature_id, mean, scale in zip(
     raw_spec.feature_ids(), scaler.mean_, scaler.scale_, strict=True
 ):

@@ -5,7 +5,7 @@ Date: 2026-07-29
 
 ## Context
 
-`FeatureVectorSpec` JSON is the parity artifact shared by Python training and Rust
+`FeatureExtractorSpec` JSON is the parity artifact shared by Python training and Rust
 serving. Its original shape was produced directly by Serde derives, exposing
 Rust details such as externally tagged PascalCase enum variants,
 `Duration { secs, nanos }`, and `null` symbols for global indicators.
@@ -53,7 +53,7 @@ Canonical order is:
 4. output cells in authored window order.
 
 Input need not be sorted; deserialization produces a canonically ordered
-runtime `FeatureVectorSpec`.
+runtime `FeatureExtractorSpec`.
 
 The expanded output count must equal `length`, and `capacity` must be at least
 that length. Trailing capacity is
@@ -68,7 +68,7 @@ compilation. A private `features/serde/serialization.rs` adapter owns the
 hierarchical wire model.
 
 Its interface is the existing `Serialize` and `Deserialize` implementation on
-`FeatureVectorSpec`. Python delegates to that same implementation. Grouping, sorting,
+`FeatureExtractorSpec`. Python delegates to that same implementation. Grouping, sorting,
 strict field handling, scalar formatting, version checks, and conversion remain
 private implementation details.
 
@@ -81,7 +81,7 @@ indicator identities, capacity, and generated feature-name uniqueness.
 - JSON no longer exposes Rust enum or `Duration` representation details.
 - Rust and Python cannot develop separate serialization behavior.
 - Canonical ordering is independent of builder call order and input JSON order.
-- `FeatureVectorSpec` indicator storage becomes private to preserve its ordering
+- `FeatureExtractorSpec` indicator storage becomes private to preserve its ordering
   invariant.
 - Existing development artifacts and documentation must be regenerated.
 - New top-level options require an intentional format-version decision.

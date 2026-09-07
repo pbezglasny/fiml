@@ -92,7 +92,7 @@ in a compiled feature-vector spec.
 
 ## Compilation
 
-The cold-path process that validates an ordered `FeatureVectorSpec`, generates
+The cold-path process that validates an ordered `FeatureExtractorSpec`, generates
 canonical names and output spans, constructs runtime indicator adapters, and
 moves them into fixed-capacity storage. Compilation may allocate temporary
 metadata; event dispatch may not.

@@ -1,14 +1,14 @@
 use ::serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-use super::{FeatureVectorSpec, serialization::deserialize_present_option};
-use crate::{FeatureId, ModelInputSpec, TransformationDefinition};
+use super::{FeatureExtractorSpec, serialization::deserialize_present_option};
+use crate::{FeatureId, PipelineSpec, TransformerDefinition};
 
 const FORMAT_VERSION: &str = "1.0";
 
 /// Private versioned storage representation for a complete model-input layout.
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct ModelInputSpecWire {
+struct PipelineSpecWire {
     version: String,
     #[serde(
         default,
@@ -16,7 +16,7 @@ struct ModelInputSpecWire {
         skip_serializing_if = "Option::is_none"
     )]
     checksum: Option<String>,
-    feature_extractor: FeatureVectorSpec,
+    feature_extractor: FeatureExtractorSpec,
     model_input: ModelInputWire,
 }
 
@@ -37,6 +37,11 @@ enum TransformationWire {
         input: String,
         output: String,
     },
+    Lagged {
+        input: String,
+        output: String,
+        lag_window: usize,
+    },
     StandardScale {
         input: String,
         output: String,
@@ -45,31 +50,31 @@ enum TransformationWire {
     },
 }
 
-impl Serialize for ModelInputSpec {
+impl Serialize for PipelineSpec {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
-        ModelInputSpecWire::from(self).serialize(serializer)
+        PipelineSpecWire::from(self).serialize(serializer)
     }
 }
 
-impl<'de> Deserialize<'de> for ModelInputSpec {
+impl<'de> Deserialize<'de> for PipelineSpec {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
     {
-        let wire = ModelInputSpecWire::deserialize(deserializer)?;
-        ModelInputSpec::try_from(wire).map_err(::serde::de::Error::custom)
+        let wire = PipelineSpecWire::deserialize(deserializer)?;
+        PipelineSpec::try_from(wire).map_err(::serde::de::Error::custom)
     }
 }
 
-impl From<&ModelInputSpec> for ModelInputSpecWire {
-    fn from(spec: &ModelInputSpec) -> Self {
+impl From<&PipelineSpec> for PipelineSpecWire {
+    fn from(spec: &PipelineSpec) -> Self {
         Self {
             version: FORMAT_VERSION.to_owned(),
             checksum: spec.checksum().map(str::to_owned),
-            feature_extractor: spec.raw_feature_vector_spec().clone(),
+            feature_extractor: spec.raw_feature_extractor_spec().clone(),
             model_input: ModelInputWire {
                 capacity: spec.feature_vector_capacity(),
                 length: spec.feature_vector_length(),
@@ -83,14 +88,23 @@ impl From<&ModelInputSpec> for ModelInputSpecWire {
     }
 }
 
-impl From<&TransformationDefinition> for TransformationWire {
-    fn from(definition: &TransformationDefinition) -> Self {
+impl From<&TransformerDefinition> for TransformationWire {
+    fn from(definition: &TransformerDefinition) -> Self {
         match definition {
-            TransformationDefinition::Identity { input, output } => Self::Identity {
+            TransformerDefinition::Identity { input, output } => Self::Identity {
                 input: input.as_str().to_owned(),
                 output: output.as_str().to_owned(),
             },
-            TransformationDefinition::StandardScale {
+            TransformerDefinition::Lagged {
+                input,
+                output,
+                lag_window,
+            } => Self::Lagged {
+                input: input.as_str().to_owned(),
+                output: output.as_str().to_owned(),
+                lag_window: *lag_window,
+            },
+            TransformerDefinition::StandardScale {
                 input,
                 output,
                 mean,
@@ -105,10 +119,10 @@ impl From<&TransformationDefinition> for TransformationWire {
     }
 }
 
-impl TryFrom<ModelInputSpecWire> for ModelInputSpec {
+impl TryFrom<PipelineSpecWire> for PipelineSpec {
     type Error = String;
 
-    fn try_from(wire: ModelInputSpecWire) -> Result<Self, Self::Error> {
+    fn try_from(wire: PipelineSpecWire) -> Result<Self, Self::Error> {
         if wire.version != FORMAT_VERSION {
             return Err(format!(
                 "unsupported model-input spec version {:?}; expected {FORMAT_VERSION:?}",
@@ -133,9 +147,9 @@ impl TryFrom<ModelInputSpecWire> for ModelInputSpec {
             .model_input
             .transformations
             .into_iter()
-            .map(TransformationDefinition::from)
+            .map(TransformerDefinition::from)
             .collect::<Vec<_>>();
-        ModelInputSpec::with_metadata(
+        PipelineSpec::with_metadata(
             wire.feature_extractor,
             transformations,
             wire.model_input.capacity,
@@ -145,12 +159,17 @@ impl TryFrom<ModelInputSpecWire> for ModelInputSpec {
     }
 }
 
-impl From<TransformationWire> for TransformationDefinition {
+impl From<TransformationWire> for TransformerDefinition {
     fn from(transformation: TransformationWire) -> Self {
         match transformation {
             TransformationWire::Identity { input, output } => {
                 Self::identity(FeatureId::new(input), FeatureId::new(output))
             }
+            TransformationWire::Lagged {
+                input,
+                output,
+                lag_window,
+            } => Self::lagged(FeatureId::new(input), FeatureId::new(output), lag_window),
             TransformationWire::StandardScale {
                 input,
                 output,
@@ -219,14 +238,41 @@ mod tests {
     }
 
     fn error(value: Value) -> String {
-        serde_json::from_value::<ModelInputSpec>(value)
+        serde_json::from_value::<PipelineSpec>(value)
             .unwrap_err()
             .to_string()
     }
 
     #[test]
+    fn lagged_transformations_round_trip_and_validate_the_window() {
+        let mut document = valid_model_spec();
+        document["model_input"]["transformations"][0] = json!({
+            "type": "lagged", "input": "raw_day", "output": "day", "lag_window": 2,
+        });
+        let spec: PipelineSpec = serde_json::from_value(document.clone()).unwrap();
+        assert_eq!(
+            spec.transformation_definitions(),
+            &[TransformerDefinition::lagged(
+                FeatureId::new("raw_day"),
+                FeatureId::new("day"),
+                2
+            ),]
+        );
+        assert_eq!(serde_json::to_value(&spec).unwrap(), document);
+        for window in [json!(0), json!(-1), json!(1.5), Value::Null] {
+            document["model_input"]["transformations"][0]["lag_window"] = window;
+            assert!(serde_json::from_value::<PipelineSpec>(document.clone()).is_err());
+        }
+        document["model_input"]["transformations"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("lag_window");
+        assert!(error(document).contains("lag_window"));
+    }
+
+    #[test]
     fn round_trip_writes_canonical_contract_and_preserves_transformation_order() {
-        let raw_spec = FeatureVectorSpec::with_metadata(
+        let raw_spec = FeatureExtractorSpec::with_metadata(
             [
                 time_since_first_event("raw_elapsed"),
                 day_of_week("raw_day"),
@@ -235,19 +281,16 @@ mod tests {
             Some("raw-checksum".to_owned()),
         )
         .unwrap();
-        let spec = ModelInputSpec::with_metadata(
+        let spec = PipelineSpec::with_metadata(
             raw_spec,
             [
-                TransformationDefinition::standard_scale(
+                TransformerDefinition::standard_scale(
                     FeatureId::new("raw_elapsed"),
                     FeatureId::new("scaled_elapsed"),
                     4.0,
                     2.0,
                 ),
-                TransformationDefinition::identity(
-                    FeatureId::new("raw_day"),
-                    FeatureId::new("day"),
-                ),
+                TransformerDefinition::identity(FeatureId::new("raw_day"), FeatureId::new("day")),
             ],
             4,
             Some("model-checksum".to_owned()),
@@ -303,7 +346,7 @@ mod tests {
             })
         );
 
-        let restored: ModelInputSpec = serde_json::from_value(value).unwrap();
+        let restored: PipelineSpec = serde_json::from_value(value).unwrap();
         assert_eq!(restored, spec);
     }
 
@@ -311,14 +354,14 @@ mod tests {
     fn documented_example_is_accepted_and_already_canonical() {
         let text = include_str!("../../../../../docs/example_of_store_definition.json");
         let documented: Value = serde_json::from_str(text).unwrap();
-        let spec: ModelInputSpec = serde_json::from_str(text).unwrap();
+        let spec: PipelineSpec = serde_json::from_str(text).unwrap();
 
         assert_eq!(serde_json::to_value(spec).unwrap(), documented);
     }
 
     #[test]
     fn absent_checksums_are_omitted_and_explicit_null_is_rejected() {
-        let spec: ModelInputSpec = serde_json::from_value(valid_model_spec()).unwrap();
+        let spec: PipelineSpec = serde_json::from_value(valid_model_spec()).unwrap();
         let value = serde_json::to_value(spec).unwrap();
 
         assert!(value.get("checksum").is_none());
@@ -364,8 +407,8 @@ mod tests {
             .unwrap()
             .remove("feature_extractor")
             .unwrap();
-        value["raw_feature_vector_spec"] = feature_extractor;
-        assert!(error(value).contains("unknown field `raw_feature_vector_spec`"));
+        value["raw_feature_extractor_spec"] = feature_extractor;
+        assert!(error(value).contains("unknown field `raw_feature_extractor_spec`"));
 
         for field in ["version", "feature_extractor", "model_input"] {
             let mut value = valid_model_spec();
@@ -464,7 +507,7 @@ mod tests {
             r#"{"version":"1.0","feature_extractor":{"version":"1.0","capacity":0,"length":0,"features":[]},"model_input":{"capacity":1,"length":1,"transformations":[{"type":"standard_scale","input":"raw_day","output":"day","mean":NaN,"scale":1.0}]}}"#,
             r#"{"version":"1.0","feature_extractor":{"version":"1.0","capacity":0,"length":0,"features":[]},"model_input":{"capacity":1,"length":1,"transformations":[{"type":"standard_scale","input":"raw_day","output":"day","mean":0.0,"scale":1e400}]}}"#,
         ] {
-            assert!(serde_json::from_str::<ModelInputSpec>(text).is_err());
+            assert!(serde_json::from_str::<PipelineSpec>(text).is_err());
         }
     }
 }

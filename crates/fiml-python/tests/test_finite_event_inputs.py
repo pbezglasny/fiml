@@ -4,7 +4,7 @@ import pytest
 
 
 def build_runtime(pipeline):
-    raw = fiml.FeatureVectorSpec(capacity=7)
+    raw = fiml.FeatureExtractorSpec(capacity=7)
     for source in ["price", "volume", "trade_price", "trade_volume"]:
         raw.sma("BTCUSDT", [2], source=source, warmup=fiml.WarmupPolicy.FIRST_VALUE)
     raw.sma_timed(
@@ -13,7 +13,7 @@ def build_runtime(pipeline):
     ).time_since_first_event_of_day()
     if not pipeline:
         return fiml.FeatureExtractor(raw)
-    model = fiml.ModelInputSpec(raw, capacity=7)
+    model = fiml.PipelineSpec(raw, capacity=7)
     for feature_id in raw.feature_ids():
         model.standard_scale(feature_id, mean=10.0, scale=2.0)
     return fiml.ModelInputPipeline(model)

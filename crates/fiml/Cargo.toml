@@ -41,11 +41,14 @@ harness = false
 name = "feature_extractor"
 
 [[example]]
+name = "transformers"
+
+[[example]]
 name = "binance_trades"
 
 [[example]]
 name = "historical_trade_replay"
 
 [[example]]
-name = "feature_vector_spec_from_json"
+name = "feature_extractor_spec_from_json"
 required-features = ["serde"]

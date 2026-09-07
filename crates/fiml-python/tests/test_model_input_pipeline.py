@@ -7,14 +7,14 @@ import pytest
 
 
 def raw_spec():
-    return fiml.FeatureVectorSpec(checksum="raw-checksum").day_of_week()
+    return fiml.FeatureExtractorSpec(checksum="raw-checksum").day_of_week()
 
 
-def test_model_input_spec_builds_ordered_transformations_and_round_trips():
+def test_pipeline_spec_builds_ordered_transformations_and_round_trips():
     raw = raw_spec()
     raw_id = raw.feature_ids()[0]
     spec = (
-        fiml.ModelInputSpec(raw, checksum="model-checksum")
+        fiml.PipelineSpec(raw, checksum="model-checksum")
         .standard_scale(raw_id, mean=2.0, scale=4.0, output="scaled_day")
         .identity(raw_id)
     )
@@ -24,13 +24,13 @@ def test_model_input_spec_builds_ordered_transformations_and_round_trips():
     assert spec.capacity == 2
     assert spec.active_feature_count == 2
     assert spec.checksum == "model-checksum"
-    assert fiml.ModelInputSpec.from_json(spec.to_json()).to_json() == spec.to_json()
+    assert fiml.PipelineSpec.from_json(spec.to_json()).to_json() == spec.to_json()
 
 
 def test_model_input_pipeline_exposes_raw_and_final_snapshots():
     raw = raw_spec()
     raw_id = raw.feature_ids()[0]
-    spec = fiml.ModelInputSpec(raw, capacity=3).standard_scale(
+    spec = fiml.PipelineSpec(raw, capacity=3).standard_scale(
         raw_id, mean=2.0, scale=2.0, output="scaled_day"
     )
     pipeline = fiml.ModelInputPipeline(spec)
@@ -48,10 +48,10 @@ def test_model_input_pipeline_exposes_raw_and_final_snapshots():
     np.testing.assert_equal(pipeline.values(), np.array([1.0, np.nan, np.nan]))
 
 
-def test_model_input_spec_capacity_cloning_metadata_and_atomic_failures():
-    raw = fiml.FeatureVectorSpec(capacity=3, checksum="raw").day_of_week()
+def test_pipeline_spec_capacity_cloning_metadata_and_atomic_failures():
+    raw = fiml.FeatureExtractorSpec(capacity=3, checksum="raw").day_of_week()
     raw_id = raw.feature_ids()[0]
-    dynamic = fiml.ModelInputSpec(raw, checksum="model").identity(raw_id)
+    dynamic = fiml.PipelineSpec(raw, checksum="model").identity(raw_id)
     raw.time_since_first_event_of_day()
 
     assert dynamic.capacity == 1
@@ -66,7 +66,7 @@ def test_model_input_spec_capacity_cloning_metadata_and_atomic_failures():
         dynamic.identity("missing")
     assert dynamic.to_json() == before
 
-    fixed = fiml.ModelInputSpec(raw, capacity=1).identity(raw.feature_ids()[0])
+    fixed = fiml.PipelineSpec(raw, capacity=1).identity(raw.feature_ids()[0])
     with pytest.raises(ValueError, match="capacity 1 is smaller"):
         fixed.identity(raw.feature_ids()[0], output="another")
     assert fixed.feature_ids() == [raw.feature_ids()[0]]
@@ -94,10 +94,10 @@ def test_model_input_spec_capacity_cloning_metadata_and_atomic_failures():
         ),
     ],
 )
-def test_model_input_spec_rejects_invalid_transformations_atomically(operation, message):
+def test_pipeline_spec_rejects_invalid_transformations_atomically(operation, message):
     raw = raw_spec()
     raw_id = raw.feature_ids()[0]
-    spec = fiml.ModelInputSpec(raw)
+    spec = fiml.PipelineSpec(raw)
 
     with pytest.raises(ValueError, match=message):
         operation(spec, raw_id)
@@ -106,10 +106,10 @@ def test_model_input_spec_rejects_invalid_transformations_atomically(operation, 
     assert spec.capacity == 0
 
 
-def test_model_input_spec_rejects_duplicate_outputs_and_strict_json_errors():
+def test_pipeline_spec_rejects_duplicate_outputs_and_strict_json_errors():
     raw = raw_spec()
     raw_id = raw.feature_ids()[0]
-    spec = fiml.ModelInputSpec(raw).identity(raw_id)
+    spec = fiml.PipelineSpec(raw).identity(raw_id)
 
     with pytest.raises(ValueError, match="duplicates an earlier output"):
         spec.identity(raw_id)
@@ -117,20 +117,20 @@ def test_model_input_spec_rejects_duplicate_outputs_and_strict_json_errors():
     document = json.loads(spec.to_json())
     document["version"] = "2.0"
     with pytest.raises(ValueError, match="unsupported model-input spec version"):
-        fiml.ModelInputSpec.from_json(json.dumps(document))
+        fiml.PipelineSpec.from_json(json.dumps(document))
     with pytest.raises(ValueError):
-        fiml.ModelInputSpec.from_json("not json")
+        fiml.PipelineSpec.from_json("not json")
 
 
 def trade_model_spec(*, raw_capacity=2, final_capacity=3):
-    raw = fiml.FeatureVectorSpec(capacity=raw_capacity).sma(
+    raw = fiml.FeatureExtractorSpec(capacity=raw_capacity).sma(
         "BTCUSDT",
         [2],
         source="trade_price",
         warmup=fiml.WarmupPolicy.FULL_WINDOW,
     )
     raw_id = raw.feature_ids()[0]
-    return fiml.ModelInputSpec(raw, capacity=final_capacity).standard_scale(
+    return fiml.PipelineSpec(raw, capacity=final_capacity).standard_scale(
         raw_id, mean=10.0, scale=2.0, output="scaled_price"
     )
 
@@ -261,6 +261,6 @@ def test_pipeline_dataframe_custom_mapping_empty_input_and_metadata_collision():
     fresh.output_dtype = "float32"
 
     raw = raw_spec()
-    collision = fiml.ModelInputSpec(raw).identity(raw.feature_ids()[0], output="symbol")
+    collision = fiml.PipelineSpec(raw).identity(raw.feature_ids()[0], output="symbol")
     with pytest.raises(ValueError, match="collides with a metadata column"):
         fiml.ModelInputPipeline(collision).compute_features(trade_frame())

@@ -42,7 +42,7 @@ and *feature-vector snapshot* are synonyms.
 
 ### Feature-vector spec
 
-The complete, versioned definition used to build an extractor. A `FeatureVectorSpec`
+The complete, versioned definition used to build an extractor. A `FeatureExtractorSpec`
 contains canonically ordered indicator definitions and is the parity artifact
 shared by Python training and Rust serving.
 
@@ -294,7 +294,7 @@ uniqueness.
 ### Serialization module
 
 The private Rust module that converts between the hierarchical JSON contract
-and flat runtime indicator definitions. Its public interface is `FeatureVectorSpec`
+and flat runtime indicator definitions. Its public interface is `FeatureExtractorSpec`
 serialization and deserialization.
 
 ### Structural validation

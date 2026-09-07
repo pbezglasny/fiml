@@ -20,7 +20,7 @@ def expected_array(values):
 
 def test_python_pipeline_matches_shared_model_input_fixture():
     pipeline = fiml.ModelInputPipeline.from_json(
-        (FIXTURE_ROOT / "model_input_spec.json").read_text()
+        (FIXTURE_ROOT / "pipeline_spec.json").read_text()
     )
     events = load_json("events.json")
     expected = load_json("expected.json")

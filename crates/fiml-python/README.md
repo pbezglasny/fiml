@@ -98,7 +98,7 @@ A minimal notebook session:
 import pandas as pd
 import fiml
 
-spec = (fiml.FeatureVectorSpec()
+spec = (fiml.FeatureExtractorSpec()
       .sma("BTCUSDT", [12, 24], source="trade_price")
       .ema("BTCUSDT", [12], source="trade_price")
       .obv_timed("BTCUSDT", aggregation="1ms", windows=["30s", "60s"])
@@ -147,17 +147,17 @@ the first event is processed and is then locked.
 
 ## Feature-vector specs
 
-`FeatureVectorSpec` is the versioned parity artifact shared by Python training and
+`FeatureExtractorSpec` is the versioned parity artifact shared by Python training and
 Rust serving. Author it fluently, serialize it once, and load that same JSON in
 either language:
 
 ```python
-spec = fiml.FeatureVectorSpec(capacity=128, checksum="model-v7").sma(
+spec = fiml.FeatureExtractorSpec(capacity=128, checksum="model-v7").sma(
     "BTCUSDT", [12, 24], source="trade_price"
 )
 json_text = spec.to_json()
 
-restored = fiml.FeatureVectorSpec.from_json(json_text)
+restored = fiml.FeatureExtractorSpec.from_json(json_text)
 extractor = fiml.FeatureExtractor.from_json(json_text, output_dtype="float64")
 ```
 
@@ -195,15 +195,15 @@ extractors and pipelines; dropping a runtime does not free interned names.
 ## Fitted model-input pipelines
 
 Keep raw indicator extraction separate from the fitted scalar transformations
-consumed by a model. `ModelInputSpec` clones its raw `FeatureVectorSpec`, keeps
+consumed by a model. `PipelineSpec` clones its raw `FeatureExtractorSpec`, keeps
 transformations in authored order, and serializes the canonical artifact read by
-the Rust `ModelInputSpec`:
+the Rust `PipelineSpec`:
 
 ```python
-raw_spec = fiml.FeatureVectorSpec(checksum="raw-v1").sma(
+raw_spec = fiml.FeatureExtractorSpec(checksum="raw-v1").sma(
     "BTCUSDT", [12, 24], source="trade_price"
 )
-model_spec = fiml.ModelInputSpec(raw_spec, checksum="model-v1")
+model_spec = fiml.PipelineSpec(raw_spec, checksum="model-v1")
 
 # Transfer fitted arrays explicitly in the raw spec's canonical order.
 for feature_id, mean, scale in zip(
@@ -289,7 +289,7 @@ To guarantee identical output between Python (batch) and Rust (live):
 
 1. **f64 calculation state on both sides.** The extractor calculates in `f64`;
    choose `output_dtype="float64"` when comparing exact Python/Rust output.
-2. **Same `FeatureVectorSpec` configuration** — same periods, aggregation/window durations,
+2. **Same `FeatureExtractorSpec` configuration** — same periods, aggregation/window durations,
    warm-up policies, symbol names, and feature order.
 3. **Replay the full event stream in the same order with the same millisecond
    timestamps.** Do not downsample or skip rows: timed indicators (`SmaTimed`,

@@ -2,7 +2,7 @@
 
 use std::{fs, path::PathBuf};
 
-use fiml::{Event, ModelInputSpec, Symbol, VecFeatureVector};
+use fiml::{Event, PipelineSpec, Symbol, VecFeatureVector};
 use serde::Deserialize;
 use serde_json::Value;
 
@@ -86,9 +86,9 @@ fn assert_values(actual: &[f64], expected: &[Option<f64>]) {
 
 #[test]
 fn rust_pipeline_matches_shared_model_input_fixture() {
-    let spec_json = read_fixture("model_input_spec.json");
+    let spec_json = read_fixture("pipeline_spec.json");
     let canonical_json: Value = serde_json::from_str(&spec_json).unwrap();
-    let spec: ModelInputSpec = serde_json::from_str(&spec_json).unwrap();
+    let spec: PipelineSpec = serde_json::from_str(&spec_json).unwrap();
     assert_eq!(serde_json::to_value(&spec).unwrap(), canonical_json);
 
     let events: Vec<FixtureEvent> = serde_json::from_str(&read_fixture("events.json")).unwrap();
@@ -96,7 +96,7 @@ fn rust_pipeline_matches_shared_model_input_fixture() {
     assert_eq!(events.len(), expected.snapshots.len());
 
     let raw_active_ids = spec
-        .raw_feature_vector_spec()
+        .raw_feature_extractor_spec()
         .definitions()
         .iter()
         .map(|definition| definition.id.as_str().to_owned())

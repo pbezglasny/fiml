@@ -5,20 +5,20 @@ use crate::{
 
 use crate::features::FeatureKey;
 
-/// Versioned configuration for one complete model-input feature vector.
+/// Versioned configuration for building a raw feature extractor.
 ///
-/// The spec owns canonically ordered scalar definitions plus the model width.
+/// The spec owns canonically ordered scalar definitions plus the output width.
 /// Definitions describe active outputs; any remaining capacity is reserved and
 /// is initialized to `NaN` when the spec is compiled.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FeatureVectorSpec {
+pub struct FeatureExtractorSpec {
     definitions: Vec<FeatureDefinition>,
     feature_vector_capacity: usize,
     checksum: Option<String>,
 }
 
-impl FeatureVectorSpec {
-    /// Creates a spec whose model width exactly matches its active output count.
+impl FeatureExtractorSpec {
+    /// Creates a spec whose output width exactly matches its active output count.
     pub fn new(
         definitions: impl IntoIterator<Item = FeatureDefinition>,
     ) -> Result<Self, FimlError> {
@@ -27,7 +27,7 @@ impl FeatureVectorSpec {
         Self::with_metadata(definitions, capacity, None)
     }
 
-    /// Creates a spec with an explicit model width, reserving trailing cells.
+    /// Creates a spec with an explicit output width, reserving trailing cells.
     pub fn with_capacity(
         definitions: impl IntoIterator<Item = FeatureDefinition>,
         feature_vector_capacity: usize,
@@ -35,7 +35,7 @@ impl FeatureVectorSpec {
         Self::with_metadata(definitions, feature_vector_capacity, None)
     }
 
-    /// Creates a spec with an explicit model width and opaque checksum metadata.
+    /// Creates a spec with an explicit output width and opaque checksum metadata.
     pub fn with_metadata(
         definitions: impl IntoIterator<Item = FeatureDefinition>,
         feature_vector_capacity: usize,
@@ -66,12 +66,12 @@ impl FeatureVectorSpec {
         })
     }
 
-    /// Returns active scalar definitions in canonical model-input order.
+    /// Returns active scalar definitions in canonical extractor-output order.
     pub fn definitions(&self) -> &[FeatureDefinition] {
         &self.definitions
     }
 
-    /// Returns the complete model-input width, including reserved cells.
+    /// Returns the complete extractor-output width, including reserved cells.
     pub fn feature_vector_capacity(&self) -> usize {
         self.feature_vector_capacity
     }
@@ -103,7 +103,7 @@ impl FeatureVectorSpec {
 
     /// Compiles this configuration into the supplied output storage.
     ///
-    /// Storage capacity must equal the configured model width and its active
+    /// Storage capacity must equal the configured output width and its active
     /// length must equal the number of definitions. Every cell is reset to
     /// `NaN`, including trailing reserved cells, during extractor construction.
     pub fn build<V>(&self, output_vector: V) -> Result<FeatureExtractor<V>, FimlError>
@@ -247,7 +247,7 @@ mod tests {
 
     #[test]
     fn build_initializes_active_and_reserved_cells_to_nan() {
-        let spec = FeatureVectorSpec::with_capacity([day_of_week("day")], 3).unwrap();
+        let spec = FeatureExtractorSpec::with_capacity([day_of_week("day")], 3).unwrap();
         let mut output = ArrayFeatureVector::<3>::new_of_length(1);
         output.set_value_at(0, 1.0);
         output.set_value_at(1, 2.0);
@@ -274,7 +274,7 @@ mod tests {
 
     #[test]
     fn build_rejects_capacity_and_active_length_mismatches() {
-        let spec = FeatureVectorSpec::with_capacity([day_of_week("day")], 3).unwrap();
+        let spec = FeatureExtractorSpec::with_capacity([day_of_week("day")], 3).unwrap();
         let capacity_error = match spec.build(ArrayFeatureVector::<2>::new_of_length(1)) {
             Err(error) => error,
             Ok(_) => panic!("capacity mismatch should fail"),
@@ -302,7 +302,7 @@ mod tests {
 
     #[test]
     fn reserved_feature_id_namespace_is_rejected() {
-        let error = FeatureVectorSpec::new([day_of_week("__reserved_0")]).unwrap_err();
+        let error = FeatureExtractorSpec::new([day_of_week("__reserved_0")]).unwrap_err();
         assert!(error.to_string().contains("reserved namespace"));
     }
 }

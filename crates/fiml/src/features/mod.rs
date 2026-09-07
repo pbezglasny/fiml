@@ -15,6 +15,7 @@ mod feature_key;
 mod feature_source;
 mod pipeline;
 mod serde;
+mod transformers;
 
 use crate::event::EventKind;
 
@@ -41,8 +42,9 @@ pub use feature_extractor_builder::FeatureExtractorBuilder;
 pub use feature_id::FeatureId;
 pub use feature_key::FeatureKey;
 pub use feature_source::{EventField, FeatureSource};
-pub use pipeline::{ModelInputSpec, Pipeline, TransformationDefinition};
-pub use serde::FeatureVectorSpec;
+pub use pipeline::{Pipeline, PipelineSpec};
+pub use serde::FeatureExtractorSpec;
+pub use transformers::TransformerDefinition;
 
 const RESERVED_ID_PREFIX: &str = "__reserved_";
 

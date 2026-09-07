@@ -7,8 +7,8 @@ from referencing import Registry, Resource
 
 
 DOCS = Path(__file__).parents[3] / "docs"
-MODEL_SCHEMA_PATH = DOCS / "model-input-spec.schema.json"
-FEATURE_SCHEMA_PATH = DOCS / "feature-vector-spec.schema.json"
+MODEL_SCHEMA_PATH = DOCS / "pipeline-spec.schema.json"
+FEATURE_SCHEMA_PATH = DOCS / "feature-extractor-spec.schema.json"
 MODEL_SCHEMA = json.loads(MODEL_SCHEMA_PATH.read_text())
 FEATURE_SCHEMA = json.loads(FEATURE_SCHEMA_PATH.read_text())
 MODEL_SCHEMA_WITH_ID = {"$id": MODEL_SCHEMA_PATH.as_uri(), **MODEL_SCHEMA}
@@ -34,6 +34,7 @@ def test_model_input_schema_is_valid_and_accepts_canonical_example():
     "transformation",
     [
         {"type": "identity", "input": "raw_price", "output": "price"},
+        {"type": "lagged", "input": "raw_price", "output": "price", "lag_window": 2},
         {
             "type": "standard_scale",
             "input": "raw_price",
@@ -59,6 +60,8 @@ def test_model_input_schema_accepts_strict_transformation_variants(transformatio
     "transformation",
     [
         {"type": "identity", "input": "raw_price"},
+        {"type": "lagged", "input": "raw_price", "output": "price", "lag_window": 0},
+        {"type": "lagged", "input": "raw_price", "output": "price"},
         {
             "type": "standard_scale",
             "input": "raw_price",

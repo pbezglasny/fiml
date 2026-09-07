@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "fiml ModelInputSpec 1.0",
+  "title": "fiml PipelineSpec 1.0",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -11,7 +11,7 @@
   "properties": {
     "version": { "const": "1.0" },
     "checksum": { "type": "string" },
-    "feature_extractor": { "$ref": "feature-vector-spec.schema.json" },
+    "feature_extractor": { "$ref": "feature-extractor-spec.schema.json" },
     "model_input": { "$ref": "#/$defs/model_input" }
   },
   "$defs": {
@@ -31,6 +31,7 @@
     "transformation": {
       "oneOf": [
         { "$ref": "#/$defs/identity" },
+        { "$ref": "#/$defs/lagged" },
         { "$ref": "#/$defs/standard_scale" }
       ]
     },
@@ -42,6 +43,17 @@
         "type": { "const": "identity" },
         "input": { "$ref": "#/$defs/feature_id" },
         "output": { "$ref": "#/$defs/output_feature_id" }
+      }
+    },
+    "lagged": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "input", "output", "lag_window"],
+      "properties": {
+        "type": { "const": "lagged" },
+        "input": { "$ref": "#/$defs/feature_id" },
+        "output": { "$ref": "#/$defs/output_feature_id" },
+        "lag_window": { "type": "integer", "minimum": 1 }
       }
     },
     "standard_scale": {

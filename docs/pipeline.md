@@ -19,7 +19,7 @@ pipeline.values();
 pipeline.output_ids();
 ```
 
-`ModelInputSpec` compiles one `FeatureVectorSpec` and an authored sequence of
+`PipelineSpec` compiles one `FeatureExtractorSpec` and an authored sequence of
 scalar transformations into a `Pipeline`. Every transformation reads directly
 from the raw feature vector. Transformation chaining and general graphs are not
 supported.
@@ -62,7 +62,7 @@ feature that observes any event is `any_event`.
 - `NaN` initialization and propagation through identity and standard scaling.
 - Rejected events leave raw and final snapshots unchanged.
 - Stable authored output ordering and separate raw/final ID layouts.
-- Strict, versioned `ModelInputSpec` JSON serialization behind the `serde`
+- Strict, versioned `PipelineSpec` JSON serialization behind the `serde`
   feature.
 - One canonical Rust serialization adapter shared by the Python bindings.
 - Python construction, JSON loading, event updates, array replay, and DataFrame

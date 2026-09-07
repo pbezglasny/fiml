@@ -40,7 +40,7 @@ not yet exposed as a feature derivation.
 | Core default features | Empty. |
 | `serde` | Enables Serde for `Symbol`, `WarmupPolicy`, and `EventKind`; feature definitions have no serialization module. |
 | `tracing` | Enables optional diagnostics in selected standalone indicators. |
-| Examples | Automatic discovery is disabled; `feature_extractor`, `binance_trades`, `historical_trade_replay`, and `feature_vector_spec_from_json` are explicit targets. |
+| Examples | Automatic discovery is disabled; `feature_extractor`, `binance_trades`, `historical_trade_replay`, and `feature_extractor_spec_from_json` are explicit targets. |
 | Benchmarks | Automatic discovery is disabled; `sma` and `ring_buffer` are explicit targets. |
 | Python dependency | `fiml-python` uses the core without optional features. |
 
@@ -228,7 +228,7 @@ updates, snapshots, policies, outcomes, errors, and query results are public.
 
 ## Serialization boundary
 
-Under the optional `serde` feature, public `FeatureVectorSpec` is the serialization
+Under the optional `serde` feature, public `FeatureExtractorSpec` is the serialization
 boundary. A private adapter converts its flat, canonically ordered scalar
 definitions to and from the strict grouped JSON contract. Wire-only structs
 remain private, and core does not depend on `serde_json` at runtime.
@@ -237,7 +237,7 @@ remain private, and core does not depend on `serde_json` at runtime.
 
 ```mermaid
 flowchart LR
-    PySpec["Python FeatureVectorSpec"] *-- RustSpec["Rust FeatureVectorSpec"]
+    PySpec["Python FeatureExtractorSpec"] *-- RustSpec["Rust FeatureExtractorSpec"]
     RustSpec *-- Definitions["Vec<FeatureDefinition>"]
     PyExtractor["Python FeatureExtractor"] *-- Core["FeatureExtractor<VecFeatureVector>"]
     PyExtractor *-- Handles["Vec<Symbol>"]
@@ -245,7 +245,7 @@ flowchart LR
     Core --> Numpy["NumPy float32/float64 snapshots"]
 ```
 
-The Python `FeatureVectorSpec` is a fluent convenience wrapper around the Rust spec.
+The Python `FeatureExtractorSpec` is a fluent convenience wrapper around the Rust spec.
 Rust owns canonical ordering, deterministic default IDs, JSON conversion, and
 capacity validation. Reserved trailing model cells receive deterministic
 `__reserved_<index>` Python column names and remain `NaN`.

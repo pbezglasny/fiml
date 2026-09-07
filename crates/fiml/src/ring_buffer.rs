@@ -170,7 +170,7 @@ pub struct HeapRingBuffer<T> {
 }
 
 impl<T> HeapRingBuffer<T> {
-    fn new(size: usize) -> Self {
+    pub fn new(size: usize) -> Self {
         assert!(size > 0, "Ring buffer size must be greater than 0");
         Self {
             data: VecDeque::with_capacity(size),

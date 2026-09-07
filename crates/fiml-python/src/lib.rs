@@ -11,10 +11,9 @@ use std::time::Duration;
 use fiml::order_book::OrderBookDelta;
 use fiml::{
     Event, EventField, EventKind, FeatureDefinition, FeatureExtractor as RustFeatureExtractor,
-    FeatureId, FeatureKey, FeatureSource, FeatureVector,
-    FeatureVectorSpec as CoreFeatureVectorSpec, FimlError, ModelInputSpec as CoreModelInputSpec,
-    Pipeline as RustPipeline, Symbol, TradeSide, TransformationDefinition, VecFeatureVector,
-    WarmupPolicy as CoreWarmupPolicy, symbols,
+    FeatureExtractorSpec as CoreFeatureExtractorSpec, FeatureId, FeatureKey, FeatureSource,
+    FeatureVector, FimlError, Pipeline as RustPipeline, PipelineSpec as CorePipelineSpec, Symbol,
+    TradeSide, TransformerDefinition, VecFeatureVector, WarmupPolicy as CoreWarmupPolicy, symbols,
 };
 use numpy::ndarray::Array2;
 use numpy::{Element, IntoPyArray, PyArray1, PyReadonlyArray1};
@@ -143,19 +142,20 @@ fn parse_tz(tz: &str) -> PyResult<i64> {
     Ok(sign * (hours * 3_600_000 + minutes * 60_000))
 }
 
-fn core_feature_ids(spec: &CoreFeatureVectorSpec) -> Vec<String> {
+fn core_feature_ids(spec: &CoreFeatureExtractorSpec) -> Vec<String> {
     spec.definitions()
         .iter()
         .map(|definition| definition.id.as_str().to_owned())
         .collect()
 }
 
-fn model_output_ids(spec: &CoreModelInputSpec) -> Vec<String> {
+fn model_output_ids(spec: &CorePipelineSpec) -> Vec<String> {
     spec.transformation_definitions()
         .iter()
         .map(|definition| match definition {
-            TransformationDefinition::Identity { output, .. }
-            | TransformationDefinition::StandardScale { output, .. } => output.as_str().to_owned(),
+            TransformerDefinition::Identity { output, .. }
+            | TransformerDefinition::Lagged { output, .. }
+            | TransformerDefinition::StandardScale { output, .. } => output.as_str().to_owned(),
         })
         .collect()
 }
@@ -165,12 +165,12 @@ fn model_output_ids(spec: &CoreModelInputSpec) -> Vec<String> {
 /// with the fluent builder methods, then construct a [`FeatureExtractor`] from
 /// it.
 #[pyclass]
-pub struct FeatureVectorSpec {
-    core: CoreFeatureVectorSpec,
+pub struct FeatureExtractorSpec {
+    core: CoreFeatureExtractorSpec,
     explicit_capacity: bool,
 }
 
-impl FeatureVectorSpec {
+impl FeatureExtractorSpec {
     fn add_group<I>(&mut self, definitions: I) -> PyResult<()>
     where
         I: IntoIterator<Item = FeatureDefinition>,
@@ -182,7 +182,7 @@ impl FeatureVectorSpec {
         } else {
             all_definitions.len()
         };
-        self.core = CoreFeatureVectorSpec::with_metadata(
+        self.core = CoreFeatureExtractorSpec::with_metadata(
             all_definitions,
             capacity,
             self.core.checksum().map(str::to_owned),
@@ -201,12 +201,12 @@ impl FeatureVectorSpec {
 }
 
 #[pymethods]
-impl FeatureVectorSpec {
+impl FeatureExtractorSpec {
     #[new]
     #[pyo3(signature = (*, capacity=None, checksum=None))]
     fn new(capacity: Option<usize>, checksum: Option<String>) -> PyResult<Self> {
         let explicit_capacity = capacity.is_some();
-        let core = CoreFeatureVectorSpec::with_metadata([], capacity.unwrap_or(0), checksum)
+        let core = CoreFeatureExtractorSpec::with_metadata([], capacity.unwrap_or(0), checksum)
             .map_err(|error| PyValueError::new_err(error.to_string()))?;
         Ok(Self {
             core,
@@ -479,13 +479,13 @@ impl FeatureVectorSpec {
 /// The raw spec is cloned at construction so later Python builder mutations do
 /// not change the model artifact. Transformations remain in authored order.
 #[pyclass]
-pub struct ModelInputSpec {
-    core: CoreModelInputSpec,
+pub struct PipelineSpec {
+    core: CorePipelineSpec,
     explicit_capacity: bool,
 }
 
-impl ModelInputSpec {
-    fn add_transformation(&mut self, definition: TransformationDefinition) -> PyResult<()> {
+impl PipelineSpec {
+    fn add_transformation(&mut self, definition: TransformerDefinition) -> PyResult<()> {
         let mut definitions = self.core.transformation_definitions().to_vec();
         definitions.push(definition);
         let capacity = if self.explicit_capacity {
@@ -493,8 +493,8 @@ impl ModelInputSpec {
         } else {
             definitions.len()
         };
-        let candidate = CoreModelInputSpec::with_metadata(
-            self.core.raw_feature_vector_spec().clone(),
+        let candidate = CorePipelineSpec::with_metadata(
+            self.core.raw_feature_extractor_spec().clone(),
             definitions,
             capacity,
             self.core.checksum().map(str::to_owned),
@@ -506,17 +506,17 @@ impl ModelInputSpec {
 }
 
 #[pymethods]
-impl ModelInputSpec {
+impl PipelineSpec {
     #[new]
-    #[pyo3(signature = (raw_feature_vector_spec, *, capacity=None, checksum=None))]
+    #[pyo3(signature = (raw_feature_extractor_spec, *, capacity=None, checksum=None))]
     fn new(
-        raw_feature_vector_spec: PyRef<'_, FeatureVectorSpec>,
+        raw_feature_extractor_spec: PyRef<'_, FeatureExtractorSpec>,
         capacity: Option<usize>,
         checksum: Option<String>,
     ) -> PyResult<Self> {
         let explicit_capacity = capacity.is_some();
-        let core = CoreModelInputSpec::with_metadata(
-            raw_feature_vector_spec.core.clone(),
+        let core = CorePipelineSpec::with_metadata(
+            raw_feature_extractor_spec.core.clone(),
             [],
             capacity.unwrap_or(0),
             checksum,
@@ -553,7 +553,7 @@ impl ModelInputSpec {
         output: Option<&str>,
     ) -> PyResult<PyRefMut<'py, Self>> {
         let output = output.unwrap_or(input);
-        slf.add_transformation(TransformationDefinition::identity(
+        slf.add_transformation(TransformerDefinition::identity(
             FeatureId::new(input),
             FeatureId::new(output),
         ))?;
@@ -570,7 +570,7 @@ impl ModelInputSpec {
         output: Option<&str>,
     ) -> PyResult<PyRefMut<'py, Self>> {
         let output = output.unwrap_or(input);
-        slf.add_transformation(TransformationDefinition::standard_scale(
+        slf.add_transformation(TransformerDefinition::standard_scale(
             FeatureId::new(input),
             FeatureId::new(output),
             mean,
@@ -586,7 +586,7 @@ impl ModelInputSpec {
 
     /// Active raw IDs in canonical extraction order.
     fn raw_feature_ids(&self) -> Vec<String> {
-        core_feature_ids(self.core.raw_feature_vector_spec())
+        core_feature_ids(self.core.raw_feature_extractor_spec())
     }
 
     /// Complete configured final width, including trailing reserved cells.
@@ -681,12 +681,12 @@ impl OutputBuffer {
 type CoreFeatureExtractor = RustFeatureExtractor<VecFeatureVector>;
 type CorePipeline = RustPipeline<VecFeatureVector, VecFeatureVector>;
 
-fn build_core(feature_vector_spec: &FeatureVectorSpec) -> PyResult<CoreFeatureExtractor> {
+fn build_core(feature_extractor_spec: &FeatureExtractorSpec) -> PyResult<CoreFeatureExtractor> {
     let output_vector = VecFeatureVector::new_of_length(
-        feature_vector_spec.core.feature_vector_capacity(),
-        feature_vector_spec.core.feature_vector_length(),
+        feature_extractor_spec.core.feature_vector_capacity(),
+        feature_extractor_spec.core.feature_vector_length(),
     );
-    feature_vector_spec
+    feature_extractor_spec
         .core
         .build(output_vector)
         .map_err(|error| PyValueError::new_err(error.to_string()))
@@ -1042,26 +1042,26 @@ fn column<'a, T: Element>(
 
 #[pymethods]
 impl FeatureExtractor {
-    /// Build an extractor directly from a [`FeatureVectorSpec`].
+    /// Build an extractor directly from a [`FeatureExtractorSpec`].
     #[new]
-    #[pyo3(signature = (feature_vector_spec, output_dtype="float64"))]
+    #[pyo3(signature = (feature_extractor_spec, output_dtype="float64"))]
     fn new(
-        feature_vector_spec: PyRef<'_, FeatureVectorSpec>,
+        feature_extractor_spec: PyRef<'_, FeatureExtractorSpec>,
         output_dtype: &str,
     ) -> PyResult<Self> {
         Ok(Self::from_core(
-            build_core(&feature_vector_spec)?,
+            build_core(&feature_extractor_spec)?,
             OutputDtype::parse(output_dtype)?,
         ))
     }
 
-    /// Build an extractor directly from versioned FeatureVectorSpec JSON.
+    /// Build an extractor directly from versioned FeatureExtractorSpec JSON.
     #[staticmethod]
     #[pyo3(signature = (json, output_dtype="float64"))]
     fn from_json(json: &str, output_dtype: &str) -> PyResult<Self> {
-        let feature_vector_spec = FeatureVectorSpec::from_json(json)?;
+        let feature_extractor_spec = FeatureExtractorSpec::from_json(json)?;
         Ok(Self::from_core(
-            build_core(&feature_vector_spec)?,
+            build_core(&feature_extractor_spec)?,
             OutputDtype::parse(output_dtype)?,
         ))
     }
@@ -1204,8 +1204,8 @@ pub struct ModelInputPipeline {
 }
 
 impl ModelInputPipeline {
-    fn from_spec(spec: &CoreModelInputSpec, output_dtype: OutputDtype) -> PyResult<Self> {
-        let raw_spec = spec.raw_feature_vector_spec();
+    fn from_spec(spec: &CorePipelineSpec, output_dtype: OutputDtype) -> PyResult<Self> {
+        let raw_spec = spec.raw_feature_extractor_spec();
         let raw_vector = VecFeatureVector::new_of_length(
             raw_spec.feature_vector_capacity(),
             raw_spec.feature_vector_length(),
@@ -1240,16 +1240,16 @@ impl ModelInputPipeline {
 impl ModelInputPipeline {
     /// Compile a validated model-input spec into an independent runtime.
     #[new]
-    #[pyo3(signature = (model_input_spec, output_dtype="float64"))]
-    fn new(model_input_spec: PyRef<'_, ModelInputSpec>, output_dtype: &str) -> PyResult<Self> {
-        Self::from_spec(&model_input_spec.core, OutputDtype::parse(output_dtype)?)
+    #[pyo3(signature = (pipeline_spec, output_dtype="float64"))]
+    fn new(pipeline_spec: PyRef<'_, PipelineSpec>, output_dtype: &str) -> PyResult<Self> {
+        Self::from_spec(&pipeline_spec.core, OutputDtype::parse(output_dtype)?)
     }
 
     /// Compile directly from strict canonical model-input JSON.
     #[staticmethod]
     #[pyo3(signature = (json, output_dtype="float64"))]
     fn from_json(json: &str, output_dtype: &str) -> PyResult<Self> {
-        let spec: CoreModelInputSpec =
+        let spec: CorePipelineSpec =
             serde_json::from_str(json).map_err(|error| PyValueError::new_err(error.to_string()))?;
         Self::from_spec(&spec, OutputDtype::parse(output_dtype)?)
     }
@@ -1371,8 +1371,8 @@ impl ModelInputPipeline {
 #[pymodule]
 fn _fiml(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyWarmupPolicy>()?;
-    m.add_class::<FeatureVectorSpec>()?;
-    m.add_class::<ModelInputSpec>()?;
+    m.add_class::<FeatureExtractorSpec>()?;
+    m.add_class::<PipelineSpec>()?;
     m.add_class::<FeatureExtractor>()?;
     m.add_class::<ModelInputPipeline>()?;
     m.add("KIND_PRICE", KIND_PRICE)?;
