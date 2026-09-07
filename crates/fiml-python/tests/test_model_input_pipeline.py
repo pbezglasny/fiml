@@ -122,7 +122,7 @@ def test_pipeline_spec_capacity_cloning_metadata_and_atomic_failures():
             "lag window must be positive",
         ),
         (
-            lambda spec, raw_id: spec.lagged(raw_id, lag_window=sys.maxsize // 8 + 1),
+            lambda spec, raw_id: spec.lagged(raw_id, lag_window=10_001),
             "lag window exceeds",
         ),
         (

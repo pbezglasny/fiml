@@ -561,7 +561,7 @@ impl PipelineSpec {
     }
 
     /// Append a raw scalar from `lag_window` accepted events earlier.
-    /// The window must be positive; output remains NaN until enough history exists.
+    /// The window must be in `1..=10_000`; output remains NaN until enough history exists.
     #[pyo3(signature = (input, *, lag_window, output=None))]
     fn lagged<'py>(
         mut slf: PyRefMut<'py, Self>,

@@ -249,7 +249,7 @@ mod tests {
         for (lag_window, expected_reason) in [
             (0, InvalidTransformationDefinitionError::LagWindowZero),
             (
-                isize::MAX as usize / size_of::<f64>() + 1,
+                10_001,
                 InvalidTransformationDefinitionError::LagWindowTooLarge,
             ),
             (

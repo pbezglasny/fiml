@@ -15,13 +15,15 @@ use identity::IdentityTransformer;
 use lagged::LaggedFeature;
 use standard_scale::StandardScaleTransformer;
 
+const WINDOW_MAX_SIZE: usize = 10_000;
+
 /// One named scalar transformation from the raw feature layout to model input.
 #[derive(Debug, Clone, PartialEq)]
 pub enum TransformerDefinition {
     /// Copies one raw scalar without changing its value.
     Identity { input: FeatureId, output: FeatureId },
     /// Emits the raw scalar from `lag_window` accepted events earlier.
-    /// The window must be positive; output remains NaN until enough history exists.
+    /// The window must be in `1..=10_000`; output remains NaN until enough history exists.
     /// Definitions for the same input share one runtime history buffer.
     Lagged {
         input: FeatureId,
@@ -62,7 +64,7 @@ impl TransformerDefinition {
         }
     }
 
-    pub(super) fn input(&self) -> &FeatureId {
+    pub(crate) fn input(&self) -> &FeatureId {
         match self {
             Self::Identity { input, .. }
             | Self::Lagged { input, .. }
@@ -70,7 +72,7 @@ impl TransformerDefinition {
         }
     }
 
-    pub(super) fn output(&self) -> &FeatureId {
+    pub(crate) fn output(&self) -> &FeatureId {
         match self {
             Self::Identity { output, .. }
             | Self::Lagged { output, .. }
@@ -78,12 +80,12 @@ impl TransformerDefinition {
         }
     }
 
-    pub(super) fn validate(&self) -> Result<(), InvalidTransformationDefinitionError> {
+    pub(crate) fn validate(&self) -> Result<(), InvalidTransformationDefinitionError> {
         if let Self::Lagged { lag_window, .. } = self {
             if *lag_window == 0 {
                 return Err(InvalidTransformationDefinitionError::LagWindowZero);
             }
-            if *lag_window > isize::MAX as usize / size_of::<f64>() {
+            if *lag_window > WINDOW_MAX_SIZE {
                 return Err(InvalidTransformationDefinitionError::LagWindowTooLarge);
             }
         }
@@ -106,7 +108,7 @@ impl TransformerDefinition {
 }
 
 /// Compiles validated scalar definitions, sharing history between lags of one input.
-pub(super) fn compile<V: FeatureVector>(
+pub(crate) fn compile<V: FeatureVector>(
     definitions: &[TransformerDefinition],
     feature_extractor: &FeatureExtractor<V>,
 ) -> Box<[Transformer]> {
@@ -148,14 +150,14 @@ pub(super) fn compile<V: FeatureVector>(
 }
 
 /// Resolved scalar operation for allocation-free writes into model input.
-pub(super) enum Transformer {
+pub(crate) enum Transformer {
     Identity(IdentityTransformer),
     Lagged(LaggedFeature),
     StandardScale(StandardScaleTransformer),
 }
 
 impl Transformer {
-    pub(super) fn apply<V: FeatureVector>(&mut self, raw_values: &[f64], model_vector: &mut V) {
+    pub(crate) fn apply<V: FeatureVector>(&mut self, raw_values: &[f64], model_vector: &mut V) {
         match self {
             Self::Identity(transformer) => transformer.apply(raw_values, model_vector),
             Self::Lagged(transformer) => transformer.apply(raw_values, model_vector),

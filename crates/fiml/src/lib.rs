@@ -549,7 +549,7 @@ impl Display for InvalidTransformationDefinitionError {
             Self::ScaleNotPositive => "standard-scaler scale must be positive",
             Self::InverseScaleNotFinite => "standard-scaler inverse scale must be finite",
             Self::LagWindowZero => "lag window must be positive",
-            Self::LagWindowTooLarge => "lag window exceeds the maximum f64 buffer capacity",
+            Self::LagWindowTooLarge => "lag window exceeds the maximum of 10000 values",
         })
     }
 }

@@ -35,6 +35,7 @@ def test_model_input_schema_is_valid_and_accepts_canonical_example():
     [
         {"type": "identity", "input": "raw_price", "output": "price"},
         {"type": "lagged", "input": "raw_price", "output": "price", "lag_window": 2},
+        {"type": "lagged", "input": "raw_price", "output": "price", "lag_window": 10_000},
         {
             "type": "standard_scale",
             "input": "raw_price",
@@ -61,6 +62,7 @@ def test_model_input_schema_accepts_strict_transformation_variants(transformatio
     [
         {"type": "identity", "input": "raw_price"},
         {"type": "lagged", "input": "raw_price", "output": "price", "lag_window": 0},
+        {"type": "lagged", "input": "raw_price", "output": "price", "lag_window": 10_001},
         {"type": "lagged", "input": "raw_price", "output": "price"},
         {
             "type": "standard_scale",
