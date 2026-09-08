@@ -70,7 +70,7 @@ A `ScopedIndicator` contains:
 - one or more ordered output definitions encoded by that specification.
 
 One definition represents one runtime indicator instance. Its outputs occupy
-one contiguous `OutputSpan`, represented by a start index and count. Output
+one contiguous `OutputRange`, represented by a start index and count. Output
 `i` writes to `span.start + i`; runtime adapters do not store arrays of
 arbitrary output indexes.
 
@@ -248,7 +248,7 @@ with boxed slices is deferred until dispatch benchmarks demonstrate that the
 simpler representation meets performance goals.
 
 Runtime adapters remain concrete (`SmaFeature`, `EmaFeature`,
-`ObvTimedFeature`, and so on). Small internal primitives such as `OutputSpan`
+`ObvTimedFeature`, and so on). Small internal primitives such as `OutputRange`
 and an inlined output-writing helper may be shared. A universal generic feature
 wrapper will not be introduced.
 
@@ -271,7 +271,7 @@ The feature layer is organized by responsibility:
 - `features/definition.rs` owns `FeatureExtractorSpec`, `ScopedIndicator`, `IndicatorSpec`,
   `ValueSource`, `TimeWindows`, and canonical-name definitions.
 - `features/builder.rs` owns fluent construction of definitions.
-- `features/compiler.rs` owns validation, output spans, routing metadata,
+- `features/compiler.rs` owns validation, output ranges, routing metadata,
   canonical names, and runtime construction.
 - `features/indicator_vector.rs` owns compiled storage and dispatch.
 - `features/builtin/` owns concrete runtime event-to-indicator adapters.
@@ -292,7 +292,7 @@ behavior and current warm-up documentation need a separate decision.
    multiple symbols/routes, and clock dispatch.
 2. Add characterization tests for existing numerical behavior.
 3. Introduce the grouped definition types, canonical naming, `ValueSource`,
-   `TimeWindows`, and `OutputSpan`.
+   `TimeWindows`, and `OutputRange`.
 4. Introduce the single compiler using temporary initialized storage.
 5. Migrate SMA and EMA, then timed SMA and OBV, then single-window trade count
    and global clock features.

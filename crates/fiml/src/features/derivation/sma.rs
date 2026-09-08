@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use crate::event::Event;
 use crate::features::MAX_OUTPUTS_PER_INDICATOR;
-use crate::features::compiler::OutputSpan;
+use crate::features::compiler::OutputRange;
 use crate::features::derivation::{FeatureDerivation, write_outputs};
 use crate::indicators::{SimpleMovingAverage, SimpleMovingAverageTimed};
 use crate::vectors::FeatureVector;
@@ -33,14 +33,14 @@ impl SmaFeature {
     pub(crate) fn update<O: FeatureVector>(
         &mut self,
         event: &Event,
-        output_span: OutputSpan,
+        output_range: OutputRange,
         output: &mut O,
     ) {
         if event.symbol() == self.symbol
             && let Some(value) = self.source.extract(event)
         {
             self.sma.update(value);
-            write_outputs(output_span, output, |index| self.sma.value_at(index));
+            write_outputs(output_range, output, |index| self.sma.value_at(index));
         }
     }
 }
@@ -67,7 +67,7 @@ impl SmaTimedFeature {
     pub(crate) fn update<O: FeatureVector>(
         &mut self,
         event: &Event,
-        output_span: OutputSpan,
+        output_range: OutputRange,
         output: &mut O,
     ) {
         if event.symbol() == self.symbol
@@ -78,7 +78,7 @@ impl SmaTimedFeature {
             return;
         }
 
-        write_outputs(output_span, output, |index| self.sma.value_at(index));
+        write_outputs(output_range, output, |index| self.sma.value_at(index));
     }
 }
 
@@ -142,10 +142,10 @@ mod tests {
                 _ => unreachable!(),
             };
         let mut output = ArrayFeatureVector::<2>::new();
-        let output_span = OutputSpan { start: 0, count: 2 };
+        let output_range = OutputRange { start: 0, count: 2 };
 
         for value in [1.0, 2.0, 3.0] {
-            feature.update(&Event::price(symbol, value, 0), output_span, &mut output);
+            feature.update(&Event::price(symbol, value, 0), output_range, &mut output);
         }
 
         assert!(approx_eq(output.values()[0], 2.5));
@@ -167,16 +167,16 @@ mod tests {
             _ => unreachable!(),
         };
         let mut output = ArrayFeatureVector::<1>::new();
-        let output_span = OutputSpan { start: 0, count: 1 };
+        let output_range = OutputRange { start: 0, count: 1 };
 
         feature.update(
             &Event::trade(symbol, 100.0, 4.0, 0, None),
-            output_span,
+            output_range,
             &mut output,
         );
         feature.update(
             &Event::trade(symbol, 101.0, 6.0, 1, None),
-            output_span,
+            output_range,
             &mut output,
         );
 

@@ -15,7 +15,7 @@ FeatureDefinition / FeatureKey
 
 Each `FeatureDefinition` describes one scalar output cell. During compilation,
 compatible definitions, such as moving averages with several windows, are
-grouped into one runtime derivation with a contiguous output span.
+grouped into one runtime derivation with a contiguous output range.
 
 `FeatureExtractorSpec` is the versioned configuration and serialization boundary.
 It owns canonically ordered scalar definitions, the complete model width, and
@@ -27,7 +27,7 @@ public API.
 
 - the caller-selected `V: FeatureVector` output storage;
 - statically dispatched `FeatureDerivation` values;
-- output spans and stable feature IDs;
+- output ranges and stable feature IDs;
 - the symbol/event router;
 - the latest accepted global event timestamp.
 

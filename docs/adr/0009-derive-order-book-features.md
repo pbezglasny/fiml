@@ -40,7 +40,7 @@ Implement the adapters in one private order-book derivation module and connect
 them to the existing book route and update hook. Reuse the six existing
 `OrderBook` calculations without changing their formulas. Convert their
 `Decimal` results using `ToPrimitive::to_f64` from the installed dependency and
-write directly into the assigned output span. Missing results or failed
+write directly into the assigned output range. Missing results or failed
 conversions produce `NaN`.
 
 All outputs start as `NaN`, including when the caller supplies a populated book.

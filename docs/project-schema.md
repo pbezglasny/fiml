@@ -103,7 +103,7 @@ flowchart LR
     Compiler --> Groups["FeatureGroup"]
     Groups --> Compilation["Compilation"]
     Compilation *-- Derivations["Box<[FeatureDerivation]> "]
-    Compilation *-- Spans["Box<[OutputSpan]>"]
+    Compilation *-- Ranges["Box<[OutputRange]>"]
     Compilation *-- Ids["Box<[FeatureId]>"]
     Compilation *-- Router["EventRouter"]
 ```
@@ -117,11 +117,11 @@ flowchart LR
 | `EventField` | Public | Extractable scalar event fields: price, volume, trade price, and trade volume. |
 | `FeatureExtractorBuilder<V>` | Public | Collects scalar definitions and owns the caller-selected output vector until `build`. |
 | `FeatureGroup` / `GroupKey` | Internal | Cold-path grouping state for definitions that can share calculation history. |
-| `OutputSpan` | Internal | Start/count of adjacent output cells written by one derivation. |
+| `OutputRange` | Internal | Start/count of adjacent output cells written by one derivation. |
 | `Compilation` | Internal | Validated derivations, spans, IDs, and routing state handed to the extractor. |
 
 The compiler rejects duplicate keys and IDs, validates windows and sources,
-groups compatible definitions, assigns contiguous output spans, and constructs
+groups compatible definitions, assigns contiguous output ranges, and constructs
 the router. Temporary maps are dropped before event processing.
 
 ### Key-to-runtime mapping
@@ -177,7 +177,7 @@ flowchart LR
     Compile --> Extractor["FeatureExtractor<V>"]
     Extractor *-- Vector["V: FeatureVector"]
     Extractor *-- Features["Box<[FeatureDerivation]> "]
-    Extractor *-- Spans["Box<[OutputSpan]>"]
+    Extractor *-- Ranges["Box<[OutputRange]>"]
     Extractor *-- Ids["Box<[FeatureId]>"]
     Extractor *-- Router["EventRouter"]
     Incoming["Event"] -->|handle_event| Extractor

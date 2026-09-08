@@ -1,9 +1,9 @@
-//! Writes existing order-book calculations directly into compiled output spans.
+//! Writes existing order-book calculations directly into compiled output ranges.
 
 use rust_decimal::prelude::ToPrimitive;
 
 use crate::features::MAX_OUTPUTS_PER_INDICATOR;
-use crate::features::compiler::OutputSpan;
+use crate::features::compiler::OutputRange;
 use crate::features::derivation::write_outputs;
 use crate::{FeatureVector, Symbol, order_book::OrderBook};
 
@@ -27,10 +27,10 @@ impl OrderBookFeature {
     pub(crate) fn update<O: FeatureVector>(
         &self,
         book: &OrderBook,
-        span: OutputSpan,
+        output_range: OutputRange,
         output: &mut O,
     ) {
-        write_outputs(span, output, |index| {
+        write_outputs(output_range, output, |index| {
             let value = match &self.indicator {
                 OrderBookIndicator::MidPrice => book.mid_price(),
                 OrderBookIndicator::Spread => book.spread(),

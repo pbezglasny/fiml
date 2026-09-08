@@ -1,5 +1,5 @@
 use crate::features::FeatureRoute;
-use crate::features::compiler::{Compilation, OutputSpan};
+use crate::features::compiler::{Compilation, OutputRange};
 use crate::features::derivation::FeatureDerivation;
 use crate::features::feature_extractor_builder::FeatureExtractorBuilder;
 use crate::order_book::{
@@ -302,7 +302,7 @@ where
     /// Each slice index is a runtime feature index. Its value is the contiguous
     /// range of feature-vector cells written by the feature at the same index
     /// in [`Self::features`].
-    output_spans: Box<[OutputSpan]>,
+    output_ranges: Box<[OutputRange]>,
     /// User-facing IDs in feature-vector index order.
     feature_ids: Box<[FeatureId]>,
     event_router: EventRouter,
@@ -333,7 +333,7 @@ where
         compilation: Compilation,
         configured_order_books: Vec<(Symbol, OrderBook)>,
     ) -> Result<Self> {
-        debug_assert_eq!(compilation.features.len(), compilation.output_spans.len());
+        debug_assert_eq!(compilation.features.len(), compilation.output_ranges.len());
 
         let order_books = OrderBookStorage::new(configured_order_books)?;
         for feature in &compilation.features {
@@ -352,7 +352,7 @@ where
         Ok(Self {
             feature_vector,
             features: compilation.features,
-            output_spans: compilation.output_spans,
+            output_ranges: compilation.output_ranges,
             feature_ids: compilation.feature_ids,
             event_router: compilation.event_router,
             order_books,
@@ -405,7 +405,7 @@ where
             .expect("the order book accepted an update and must still be configured");
         let features_updated = Self::update_order_book_subscribers(
             &mut self.features,
-            &self.output_spans,
+            &self.output_ranges,
             &mut self.feature_vector,
             subscribers,
             order_book,
@@ -419,7 +419,7 @@ where
         let any_features = self.event_router.any();
         Self::update_subscribers(
             &mut self.features,
-            &self.output_spans,
+            &self.output_ranges,
             &mut self.feature_vector,
             any_features,
             event,
@@ -433,7 +433,7 @@ where
         let subscribed_features = self.event_router.route(event.symbol(), event.kind());
         Self::update_subscribers(
             &mut self.features,
-            &self.output_spans,
+            &self.output_ranges,
             &mut self.feature_vector,
             subscribed_features,
             event,
@@ -538,7 +538,7 @@ where
 
     fn update_subscribers(
         features: &mut [FeatureDerivation],
-        output_spans: &[OutputSpan],
+        output_ranges: &[OutputRange],
         feature_vector: &mut V,
         subscribers: &[u16],
         event: &Event,
@@ -546,13 +546,13 @@ where
         for &feature_index in subscribers {
             let feature_index = usize::from(feature_index);
 
-            features[feature_index].update(event, output_spans[feature_index], feature_vector);
+            features[feature_index].update(event, output_ranges[feature_index], feature_vector);
         }
     }
 
     fn update_order_book_subscribers(
         features: &mut [FeatureDerivation],
-        output_spans: &[OutputSpan],
+        output_ranges: &[OutputRange],
         feature_vector: &mut V,
         subscribers: &[u16],
         order_book: &OrderBook,
@@ -566,7 +566,7 @@ where
                 features[feature_index].update_order_book(
                     order_book,
                     timestamp,
-                    output_spans[feature_index],
+                    output_ranges[feature_index],
                     feature_vector,
                 )
             })
@@ -1050,14 +1050,14 @@ mod tests {
     }
 
     #[test]
-    fn passes_the_matching_output_span_to_the_feature() {
+    fn passes_the_matching_output_range_to_the_feature() {
         let features = vec![crate::features::derivation::day_of_week::build()].into_boxed_slice();
-        let output_spans = vec![OutputSpan { start: 1, count: 1 }].into_boxed_slice();
+        let output_ranges = vec![OutputRange { start: 1, count: 1 }].into_boxed_slice();
 
         let mut vector = FeatureExtractor::<ArrayFeatureVector<2>> {
             feature_vector: ArrayFeatureVector::new(),
             features,
-            output_spans,
+            output_ranges,
             feature_ids: vec![FeatureId::new("day")].into_boxed_slice(),
             event_router: EventRouter {
                 symbol_to_index: Box::new([]),
