@@ -8,8 +8,8 @@ use crate::vectors::FeatureVector;
 const MILLIS_PER_DAY: i64 = 86_400_000;
 
 /// Day-of-week feature. Writes `0 = Sunday ..= 6 = Saturday` derived from the
-/// event timestamp to its output cell. An any-event clock feature: it refreshes
-/// from each event's timestamp regardless of kind, so it has a value on every row.
+/// event timestamp to its output cell. The router limits global AnyEvent updates
+/// to events at or beyond the maximum accepted timestamp.
 pub(crate) struct DayOfWeek;
 
 impl DayOfWeek {

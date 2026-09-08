@@ -134,8 +134,8 @@ feats = extractor.compute_features(
 )
 ```
 
-The input must already be globally ordered by signed-int64 epoch-millisecond
-timestamps. Symbols must be non-empty strings; prices and volumes must be finite
+The input must have nondecreasing signed-int64 epoch-millisecond timestamps
+within each symbol; symbols may interleave in any arrival order. Symbols must be non-empty strings; prices and volumes must be finite
 and positive. The optional side column uses `fiml.SIDE_AGGRESSOR_BUY` and
 `fiml.SIDE_AGGRESSOR_SELL`; omit it when the input does not classify trade
 aggressors. The complete frame is validated before the extractor changes.
@@ -273,7 +273,7 @@ needs:
 A row whose kind needs a column you did not pass raises `ValueError` naming
 that column; any column you do pass must match the length of `kind`. All rows
 are validated **before** the first dispatch, so a bad row never leaves the
-extractor half-stepped. Rows must be globally nondecreasing by timestamp and
+extractor half-stepped. Rows must be nondecreasing by timestamp within each symbol and
 are dispatched in array order. `update(...)` takes the same keyword payloads as
 scalars. `KIND_ORDERBOOK` dispatches today but no builtin feature subscribes to
 it yet, so it does not change output on its own.
@@ -314,7 +314,16 @@ To guarantee identical output between Python (batch) and Rust (live):
 
 See `examples/quickstart.py`.
 
-Timestamps must be globally nondecreasing across every `update`, `transform`,
+Timestamps must be nondecreasing per symbol across every `update`, `transform`,
 and `compute_features` call on an extractor. Equal timestamps are processed in
 caller-provided arrival order. `transform` and `compute_features` validate the
 entire batch before changing extractor state.
+
+Each symbol shares one ordering stream across all event kinds, including
+unsubscribed symbols. `KIND_TIME` belongs to `Symbol::GLOBAL`; its symbol handle
+is ignored. Timed SMA, OBV, and trade-count windows advance only on events for
+their configured symbol. Other kinds for that symbol advance expiration and
+warm-up without supplying a sample; other symbols and global Time ticks leave
+them unchanged. Global calendar/session features use the maximum accepted
+timestamp, so older events for another symbol cannot move their day backward.
+Pipeline transformations run in accepted-event arrival order.

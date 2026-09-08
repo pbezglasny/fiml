@@ -276,7 +276,7 @@ def test_failed_validation_is_atomic_and_does_not_lock_dtype():
     np.testing.assert_array_equal(result[count_name("BTCUSDT")], [1.0, 2.0, 3.0])
 
 
-def test_global_order_is_enforced_across_all_mutating_methods():
+def test_symbol_order_is_enforced_across_all_mutating_methods():
     extractor = fiml.FeatureExtractor(trade_counts("BTCUSDT"))
     btc = extractor.symbol("BTCUSDT")
     extractor.update(fiml.KIND_TRADE, btc, 200, price=10.0, volume=1.0)
@@ -356,9 +356,9 @@ def test_invalid_trade_fields_are_rejected(column, values, message):
 
 def test_backward_timestamp_reports_row_and_index():
     extractor = fiml.FeatureExtractor(trade_counts("BTCUSDT", "ETHUSDT"))
-    source = trades(ts=np.array([1_000, 999, 1_001], dtype=np.int64))
+    source = trades(ts=np.array([1_000, 900, 999], dtype=np.int64))
 
-    with pytest.raises(ValueError, match=r"row 1 \(index=20\).*timestamp"):
+    with pytest.raises(ValueError, match=r"row 2 \(index=30\).*timestamp"):
         extractor.compute_features(source)
 
 

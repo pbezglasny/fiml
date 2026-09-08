@@ -160,7 +160,7 @@ columns followed by one complete feature-vector snapshot per trade. Multi-symbol
 frames are supported; a row snapshots the complete extractor, so cells for
 other symbols retain their latest state.
 
-The caller supplies a globally timestamp-ordered frame. Equal timestamps retain
+The caller supplies a frame with nondecreasing timestamps per symbol. Equal timestamps retain
 row order. Symbols are non-empty strings, timestamps are signed-int64 epoch
 milliseconds, and price/volume are finite positive numbers. Validation is
 all-or-nothing. See the dated contract linked above for the complete rules.
@@ -225,20 +225,22 @@ re-implementation to keep in sync.
 
 Derived features fall into two categories.
 
-### 11a. Time-derived ("clock") features — must update every row ✅ (core change)
+### 11a. Time-derived ("clock") features — follow the maximum accepted timestamp ✅ (core change)
 
 Pure (or day-stateful) functions of the current timestamp: `day_of_week`,
 `time_of_day`, `time_since_first_event_of_day`, … Any event already carries a
-timestamp, so these can refresh on every row.
+timestamp. Global clock features refresh only at or beyond the maximum accepted
+timestamp; older cross-symbol arrivals retain the current values.
 
 - **Mechanism (A1):** an "any-event" feature group in core. In addition to the
-  per-kind groups, the extractor runs this group on **every** `dispatch`, using a new
+  per-kind groups, the extractor runs this group on accepted events at or beyond the maximum
+  accepted timestamp, using the
   `Event::timestamp()` accessor. `day_of_week` moves out of the `Time`-only group
   into it. Result: a value on every row, on any stream, with no synthetic events
   and no phantom rows in the per-event matrix.
 - **`time_since_first_event_of_day`:** a *stateful* clock feature. It records
   the first observed timestamp after a **day boundary**, and outputs
-  `current_ts − first_event_ts` on every row. The day boundary is defined by a
+  `max_accepted_ts − first_event_ts` on every row. The day boundary is defined by a
   timezone (default **UTC**), the feature's only config. It is **inferred from the
   stream** — no hard-coded exchange hours — so Python and Rust derive the same
   boundary from the same events.
@@ -296,7 +298,8 @@ This work is no longer binding-only. To deliver the full-dataframe guarantee:
 
 ## Resolved decisions
 
-- Time-derived features update on **any event** via an "any-event" core group
+- Global time-derived features update at or beyond the maximum accepted timestamp
+  via an "any-event" core group
   (A1), not synthetic `Time` events.
 - `time_since_first_event_of_day` records the first stream event after a day
   boundary; timezone is the only knob, default **UTC**, expressed as a
@@ -310,7 +313,7 @@ This work is no longer binding-only. To deliver the full-dataframe guarantee:
 - **Warmup** (was open Q2): every window indicator stores a `WarmupPolicy`.
   `FullWindow` is the builder default and keeps each output **NaN** until its
   complete sample or time window is ready; `FirstValue` explicitly enables
-  partial values. Timed readiness and expiry advance from global event time.
+  partial values. Timed readiness and expiry advance only from events for the configured symbol.
   Readiness is monotonic and distinct from current-value availability. A
   feature-vector `all_ready()` aggregation is possible future work.
 - **Helper return type**: `compute_features` requires and returns a pandas

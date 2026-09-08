@@ -282,7 +282,7 @@ mod tests {
     }
 
     #[test]
-    fn replay_rejects_rows_that_are_not_globally_timestamp_sorted() {
+    fn replay_rejects_rows_that_regress_within_a_symbol() {
         let input = format!(
             "{INPUT_HEADER}\n1700000001000,BTCUSDT,100,1,buy\n1700000000000,BTCUSDT,101,1,sell\n"
         );

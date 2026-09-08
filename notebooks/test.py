@@ -16,7 +16,7 @@ def _(mo):
     mo.md(r"""
     # Build feature-vector snapshots from trades
 
-    `fiml` accepts an already-loaded, globally ordered trade DataFrame. File loading stays in pandas.
+    `fiml` accepts an already-loaded trade DataFrame ordered by timestamp within each symbol. File loading stays in pandas.
     """)
     return
 

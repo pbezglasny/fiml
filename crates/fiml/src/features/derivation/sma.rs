@@ -70,9 +70,10 @@ impl SmaTimedFeature {
         output_range: OutputRange,
         output: &mut O,
     ) {
-        if event.symbol() == self.symbol
-            && let Some(value) = self.source.extract(event)
-        {
+        if event.symbol() != self.symbol {
+            return;
+        }
+        if let Some(value) = self.source.extract(event) {
             self.sma.update(value, event.timestamp());
         } else if !self.sma.observe(event.timestamp()) {
             return;

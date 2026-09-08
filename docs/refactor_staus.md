@@ -29,7 +29,8 @@ public API.
 - statically dispatched `FeatureDerivation` values;
 - output ranges and stable feature IDs;
 - the symbol/event router;
-- the latest accepted global event timestamp.
+- per-symbol ordering timestamps, the last accepted arrival timestamp, and a
+  maximum accepted timestamp for global calendar features.
 
 Event handling does not allocate. Routing uses precompiled arrays and flattened
 subscriber lists, and derivations write directly into the output vector.
@@ -84,9 +85,9 @@ The compiler currently supports:
 - time since the first event of the local day.
 
 Moving averages can consume price, volume, trade-price, or trade-volume event
-fields. Trade-based indicators subscribe to complete trade events. Timed and
-clock derivations receive every accepted event so their windows advance even
-when an event does not provide a matching sample.
+fields. Trade-based indicators subscribe to complete trade events. Timed derivations receive every accepted event for their symbol, including
+events without matching samples. Global calendar derivations refresh only at or
+beyond the maximum accepted timestamp.
 
 ## Verification
 

@@ -9,6 +9,8 @@ use crate::{Event, EventKind};
 pub enum FeatureSource {
     Field(EventField),
     Event(EventKind),
+    /// Every kind for the configured symbol. Global calendar features follow
+    /// the maximum accepted timestamp across all symbols.
     AnyEvent,
 }
 

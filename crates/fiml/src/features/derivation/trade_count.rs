@@ -28,9 +28,10 @@ impl TradeCountTimedFeature {
         output_range: OutputRange,
         output: &mut O,
     ) {
-        if let Event::Trade(trade) = event
-            && trade.symbol == self.symbol
-        {
+        if event.symbol() != self.symbol {
+            return;
+        }
+        if let Event::Trade(trade) = event {
             self.counter.update(trade.timestamp);
         } else if !self.counter.observe(event.timestamp()) {
             return;
