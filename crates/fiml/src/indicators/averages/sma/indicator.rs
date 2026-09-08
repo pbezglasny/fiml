@@ -202,6 +202,7 @@ struct SmaWindowTimed {
 ///Window cannot be less than the aggregation duration, and all windows must be multiples of the
 ///aggregation duration.
 ///Aggeregation can not be less than one millisecond.
+///All windows must be added before the first input value is recorded.
 pub struct SimpleMovingAverageTimed<R, const WINDOWS: usize>
 where
     R: RingBuffer<Item = (i64, f64)>,
@@ -299,6 +300,11 @@ where
         if self.window_count >= WINDOWS {
             return Err(FimlError::InvalidArgument(
                 InvalidArgumentError::WindowLimitReached { limit: WINDOWS },
+            ));
+        }
+        if !self.data.is_empty() {
+            return Err(FimlError::InvalidArgument(
+                InvalidArgumentError::WindowAddedAfterData,
             ));
         }
         if periods == 0 {
@@ -812,6 +818,47 @@ mod tests {
             sma.add_window_with_duration(Duration::from_millis(2_000))
                 .is_ok()
         );
+    }
+
+    #[test]
+    fn timed_add_window_rejects_after_data_and_preserves_history() {
+        let mut sma: SimpleMovingAverageTimed<HeapRingBuffer<(i64, f64)>, 3> =
+            SimpleMovingAverageTimed::new_heap(Duration::from_secs(1), 3, WarmupPolicy::FirstValue)
+                .unwrap();
+        sma.add_window_with_periods(2).unwrap();
+        sma.add_window_with_duration(Duration::from_secs(2))
+            .unwrap();
+        sma.update(100.0, 0);
+
+        for use_duration in [false, true] {
+            let result = if use_duration {
+                sma.add_window_with_duration(Duration::from_secs(2))
+            } else {
+                sma.add_window_with_periods(2)
+            };
+            assert!(matches!(
+                result,
+                Err(FimlError::InvalidArgument(
+                    InvalidArgumentError::WindowAddedAfterData
+                ))
+            ));
+            assert_eq!(sma.window_count, 2);
+            assert_eq!(sma.data.len(), 1);
+            assert_eq!(sma.data.peek_back(), Some(&(0, 100.0)));
+            assert_eq!(sma.value_at(0), Some(100.0));
+            assert_eq!(sma.value_at(1), Some(100.0));
+        }
+
+        for (timestamp, value, expected) in [
+            (1_000, 200.0, 150.0),
+            (1_500, 400.0, 200.0),
+            (2_000, 500.0, 400.0),
+        ] {
+            sma.update(value, timestamp);
+            assert_eq!(sma.value_at(0), Some(expected));
+            assert_eq!(sma.value_at(1), Some(expected));
+            assert_eq!(sma.value_at(2), None);
+        }
     }
 
     #[test]
