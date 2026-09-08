@@ -1,5 +1,5 @@
 use crate::event::Event;
-use crate::features::compiler::OutputSpan;
+use crate::features::compiler::OutputRange;
 use crate::features::derivation::FeatureDerivation;
 use crate::vectors::FeatureVector;
 
@@ -34,7 +34,7 @@ impl TimeSinceFirstEventOfDay {
     pub(crate) fn update<O: FeatureVector>(
         &mut self,
         event: &Event,
-        output_span: OutputSpan,
+        output_range: OutputRange,
         output: &mut O,
     ) {
         let timestamp = event.timestamp();
@@ -45,7 +45,7 @@ impl TimeSinceFirstEventOfDay {
             self.first_event_timestamp = timestamp;
         }
         let elapsed = timestamp.saturating_sub(self.first_event_timestamp).max(0);
-        output.set_value_at(output_span.start, elapsed as f64);
+        output.set_value_at(output_range.start, elapsed as f64);
     }
 }
 
@@ -67,17 +67,17 @@ mod tests {
         let aapl = symbols::intern("AAPL").unwrap();
         let mut fv: ArrayFeatureVector<1> = ArrayFeatureVector::new();
         let mut feat = TimeSinceFirstEventOfDay::new(0);
-        let output_span = OutputSpan { start: 0, count: 1 };
+        let output_range = OutputRange { start: 0, count: 1 };
 
         // First event of the day establishes the origin: elapsed is zero.
         let open = 1_609_459_200_000; // 2021-01-01 00:00:00 UTC
-        feat.update(&Event::price(aapl, 10.0, open), output_span, &mut fv);
+        feat.update(&Event::price(aapl, 10.0, open), output_range, &mut fv);
         assert!(approx_eq(fv.values()[0], 0.0));
 
         // Later same-day event: elapsed grows from the first event.
         feat.update(
             &Event::trade(aapl, 11.0, 1.0, open + 5_000, None),
-            output_span,
+            output_range,
             &mut fv,
         );
         assert!(approx_eq(fv.values()[0], 5_000.0));
@@ -88,23 +88,23 @@ mod tests {
         let aapl = symbols::intern("AAPL").unwrap();
         let mut fv: ArrayFeatureVector<1> = ArrayFeatureVector::new();
         let mut feat = TimeSinceFirstEventOfDay::new(0);
-        let output_span = OutputSpan { start: 0, count: 1 };
+        let output_range = OutputRange { start: 0, count: 1 };
 
         let open = 1_609_459_200_000; // 2021-01-01 00:00:00 UTC
         feat.update(
             &Event::price(aapl, 10.0, open + 3_600_000),
-            output_span,
+            output_range,
             &mut fv,
         );
         assert!(approx_eq(fv.values()[0], 0.0)); // first event of day 1
 
         // First event of the next day establishes a new origin.
         let next_day = open + MILLIS_PER_DAY + 2_000;
-        feat.update(&Event::price(aapl, 12.0, next_day), output_span, &mut fv);
+        feat.update(&Event::price(aapl, 12.0, next_day), output_range, &mut fv);
         assert!(approx_eq(fv.values()[0], 0.0));
         feat.update(
             &Event::price(aapl, 13.0, next_day + 1_000),
-            output_span,
+            output_range,
             &mut fv,
         );
         assert!(approx_eq(fv.values()[0], 1_000.0));

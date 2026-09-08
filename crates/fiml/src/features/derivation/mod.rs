@@ -1,7 +1,7 @@
 //! Adapts built-in event and order-book calculations to feature-vector outputs.
 
 use crate::event::Event;
-use crate::features::compiler::OutputSpan;
+use crate::features::compiler::OutputRange;
 use crate::order_book::OrderBook;
 use crate::vectors::FeatureVector;
 
@@ -26,7 +26,7 @@ use trade_count::TradeCountTimedFeature;
 /// [`FeatureExtractor`](crate::features::FeatureExtractor).
 ///
 /// Each variant consumes events, updates its calculation state, and writes its
-/// current values into an assigned output span. Dispatch is a match of direct
+/// current values into an assigned output range. Dispatch is a match of direct
 /// calls, with no `Box` or vtable.
 pub(crate) enum FeatureDerivation {
     Cvd(CvdFeature),
@@ -44,18 +44,18 @@ impl FeatureDerivation {
     pub(crate) fn update<O: FeatureVector>(
         &mut self,
         event: &Event,
-        output_span: OutputSpan,
+        output_range: OutputRange,
         output: &mut O,
     ) {
         match self {
-            Self::Cvd(cvd) => cvd.update(event, output_span, output),
-            Self::Sma(sma) => sma.update(event, output_span, output),
-            Self::Ema(ema) => ema.update(event, output_span, output),
-            Self::SmaTimed(sma) => sma.update(event, output_span, output),
-            Self::ObvTimed(obv) => obv.update(event, output_span, output),
-            Self::TradeCountTimed(count) => count.update(event, output_span, output),
-            Self::DayOfWeek(day_of_week) => day_of_week.update(event, output_span, output),
-            Self::TimeSinceFirstEventOfDay(clock) => clock.update(event, output_span, output),
+            Self::Cvd(cvd) => cvd.update(event, output_range, output),
+            Self::Sma(sma) => sma.update(event, output_range, output),
+            Self::Ema(ema) => ema.update(event, output_range, output),
+            Self::SmaTimed(sma) => sma.update(event, output_range, output),
+            Self::ObvTimed(obv) => obv.update(event, output_range, output),
+            Self::TradeCountTimed(count) => count.update(event, output_range, output),
+            Self::DayOfWeek(day_of_week) => day_of_week.update(event, output_range, output),
+            Self::TimeSinceFirstEventOfDay(clock) => clock.update(event, output_range, output),
             Self::OrderBook(_) => {}
         }
     }
@@ -63,17 +63,17 @@ impl FeatureDerivation {
     /// Updates a derivation from the visible state of one order book.
     ///
     /// Event-based derivations return `false`. Book derivations return `true`
-    /// after writing their output span, including when values are missing.
+    /// after writing their output range, including when values are missing.
     pub(crate) fn update_order_book<O: FeatureVector>(
         &mut self,
         order_book: &OrderBook,
         _timestamp: i64,
-        output_span: OutputSpan,
+        output_range: OutputRange,
         output: &mut O,
     ) -> bool {
         match self {
             Self::OrderBook(feature) => {
-                feature.update(order_book, output_span, output);
+                feature.update(order_book, output_range, output);
                 true
             }
             Self::Cvd(_)
@@ -90,15 +90,15 @@ impl FeatureDerivation {
 
 #[inline]
 pub(crate) fn write_outputs<O>(
-    span: OutputSpan,
+    output_range: OutputRange,
     output: &mut O,
     mut value_at: impl FnMut(usize) -> Option<f64>,
 ) where
     O: FeatureVector,
 {
-    for output_index in 0..span.count {
+    for output_index in 0..output_range.count {
         output.set_value_at(
-            span.start + output_index,
+            output_range.start + output_index,
             value_at(output_index).unwrap_or(f64::NAN),
         );
     }

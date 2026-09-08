@@ -1,6 +1,6 @@
 use crate::event::Event;
 use crate::features::MAX_OUTPUTS_PER_INDICATOR;
-use crate::features::compiler::OutputSpan;
+use crate::features::compiler::OutputRange;
 use crate::features::derivation::{FeatureDerivation, write_outputs};
 use crate::indicators::ExponentialMovingAverage;
 use crate::vectors::FeatureVector;
@@ -28,14 +28,14 @@ impl EmaFeature {
     pub(crate) fn update<O: FeatureVector>(
         &mut self,
         event: &Event,
-        output_span: OutputSpan,
+        output_range: OutputRange,
         output: &mut O,
     ) {
         if event.symbol() == self.symbol
             && let Some(value) = self.source.extract(event)
         {
             self.ema.update(value);
-            write_outputs(output_span, output, |index| self.ema.value_at(index));
+            write_outputs(output_range, output, |index| self.ema.value_at(index));
         }
     }
 }
@@ -72,13 +72,13 @@ mod tests {
         ema.add_window(3).unwrap();
 
         let mut feat = EmaFeature::new(aapl, EventField::Price, ema);
-        let output_span = OutputSpan { start: 0, count: 1 };
+        let output_range = OutputRange { start: 0, count: 1 };
         for v in [10.0, 20.0, 30.0] {
-            feat.update(&Event::price(aapl, v, 0), output_span, &mut fv);
+            feat.update(&Event::price(aapl, v, 0), output_range, &mut fv);
         }
-        feat.update(&Event::volume(aapl, 300.0, 0), output_span, &mut fv);
-        feat.update(&Event::price(googl, 300.0, 0), output_span, &mut fv);
-        feat.update(&Event::time(123), output_span, &mut fv);
+        feat.update(&Event::volume(aapl, 300.0, 0), output_range, &mut fv);
+        feat.update(&Event::price(googl, 300.0, 0), output_range, &mut fv);
+        feat.update(&Event::time(123), output_range, &mut fv);
 
         assert!(approx_eq(fv.values()[0], 22.5));
     }
@@ -93,13 +93,13 @@ mod tests {
         ema.add_window(3).unwrap();
 
         let mut feat = EmaFeature::new(aapl, EventField::Volume, ema);
-        let output_span = OutputSpan { start: 0, count: 1 };
-        feat.update(&Event::price(aapl, 1_000.0, 0), output_span, &mut fv);
+        let output_range = OutputRange { start: 0, count: 1 };
+        feat.update(&Event::price(aapl, 1_000.0, 0), output_range, &mut fv);
         for v in [100.0, 200.0, 300.0] {
-            feat.update(&Event::volume(aapl, v, 0), output_span, &mut fv);
+            feat.update(&Event::volume(aapl, v, 0), output_range, &mut fv);
         }
-        feat.update(&Event::volume(googl, 3_000.0, 0), output_span, &mut fv);
-        feat.update(&Event::time(123), output_span, &mut fv);
+        feat.update(&Event::volume(googl, 3_000.0, 0), output_range, &mut fv);
+        feat.update(&Event::time(123), output_range, &mut fv);
 
         assert!(approx_eq(fv.values()[0], 225.0));
     }
@@ -114,22 +114,22 @@ mod tests {
         ema.add_window(3).unwrap();
 
         let mut feat = EmaFeature::new(aapl, EventField::TradePrice, ema);
-        let output_span = OutputSpan { start: 0, count: 1 };
-        feat.update(&Event::price(aapl, 1_000.0, 0), output_span, &mut fv);
-        feat.update(&Event::volume(aapl, 1_000.0, 0), output_span, &mut fv);
+        let output_range = OutputRange { start: 0, count: 1 };
+        feat.update(&Event::price(aapl, 1_000.0, 0), output_range, &mut fv);
+        feat.update(&Event::volume(aapl, 1_000.0, 0), output_range, &mut fv);
         for price in [10.0, 20.0, 30.0] {
             feat.update(
                 &Event::trade(aapl, price, 100.0, 0, None),
-                output_span,
+                output_range,
                 &mut fv,
             );
         }
         feat.update(
             &Event::trade(googl, 300.0, 100.0, 0, None),
-            output_span,
+            output_range,
             &mut fv,
         );
-        feat.update(&Event::time(123), output_span, &mut fv);
+        feat.update(&Event::time(123), output_range, &mut fv);
 
         assert!(approx_eq(fv.values()[0], 22.5));
     }

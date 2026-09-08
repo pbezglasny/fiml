@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use crate::event::Event;
-use crate::features::compiler::OutputSpan;
+use crate::features::compiler::OutputRange;
 use crate::features::derivation::{FeatureDerivation, write_outputs};
 use crate::indicators::{CountBucket, TradeCountTimed};
 use crate::vectors::FeatureVector;
@@ -25,7 +25,7 @@ impl TradeCountTimedFeature {
     pub(crate) fn update<O: FeatureVector>(
         &mut self,
         event: &Event,
-        output_span: OutputSpan,
+        output_range: OutputRange,
         output: &mut O,
     ) {
         if let Event::Trade(trade) = event
@@ -36,7 +36,7 @@ impl TradeCountTimedFeature {
             return;
         }
 
-        write_outputs(output_span, output, |_| self.counter.window_value());
+        write_outputs(output_range, output, |_| self.counter.window_value());
     }
 }
 
@@ -77,24 +77,24 @@ mod tests {
         )
         .unwrap();
         let mut feat = TradeCountTimedFeature::new(aapl, counter);
-        let output_span = OutputSpan { start: 0, count: 1 };
+        let output_range = OutputRange { start: 0, count: 1 };
 
         feat.update(
             &Event::trade(aapl, 100.0, 1.0, 0, None),
-            output_span,
+            output_range,
             &mut fv,
         );
         feat.update(
             &Event::trade(aapl, 101.0, 1.0, 100, None),
-            output_span,
+            output_range,
             &mut fv,
         );
         feat.update(
             &Event::trade(googl, 50.0, 1.0, 200, None),
-            output_span,
+            output_range,
             &mut fv,
         ); // other symbol
-        feat.update(&Event::price(aapl, 102.0, 300), output_span, &mut fv); // other kind
+        feat.update(&Event::price(aapl, 102.0, 300), output_range, &mut fv); // other kind
 
         assert!(approx_eq(fv.values()[0], 2.0));
     }

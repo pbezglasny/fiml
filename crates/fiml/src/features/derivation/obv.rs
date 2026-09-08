@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use crate::event::Event;
 use crate::features::MAX_OUTPUTS_PER_INDICATOR;
-use crate::features::compiler::OutputSpan;
+use crate::features::compiler::OutputRange;
 use crate::features::derivation::{FeatureDerivation, write_outputs};
 use crate::indicators::{ObvBucket, OnBalanceVolumeTimed};
 use crate::vectors::FeatureVector;
@@ -26,7 +26,7 @@ impl ObvTimedFeature {
     pub(crate) fn update<O: FeatureVector>(
         &mut self,
         event: &Event,
-        output_span: OutputSpan,
+        output_range: OutputRange,
         output: &mut O,
     ) {
         if let Event::Trade(trade) = event
@@ -38,7 +38,7 @@ impl ObvTimedFeature {
             return;
         }
 
-        write_outputs(output_span, output, |index| self.obv.window_value(index));
+        write_outputs(output_range, output, |index| self.obv.window_value(index));
     }
 }
 
@@ -92,29 +92,29 @@ mod tests {
         obv.add_window_with_periods(2).unwrap();
 
         let mut feat = ObvTimedFeature::new(aapl, obv);
-        let output_span = OutputSpan { start: 0, count: 1 };
+        let output_range = OutputRange { start: 0, count: 1 };
         feat.update(
             &Event::trade(aapl, 100.0, 10.0, 0, None),
-            output_span,
+            output_range,
             &mut fv,
         );
         feat.update(
             &Event::trade(aapl, 101.0, 7.0, 1_000, None),
-            output_span,
+            output_range,
             &mut fv,
         );
         feat.update(
             &Event::trade(aapl, 99.0, 2.0, 2_000, None),
-            output_span,
+            output_range,
             &mut fv,
         );
-        feat.update(&Event::price(aapl, 200.0, 3_000), output_span, &mut fv);
+        feat.update(&Event::price(aapl, 200.0, 3_000), output_range, &mut fv);
         feat.update(
             &Event::trade(googl, 110.0, 99.0, 3_000, None),
-            output_span,
+            output_range,
             &mut fv,
         );
-        feat.update(&Event::time(3_000), output_span, &mut fv);
+        feat.update(&Event::time(3_000), output_range, &mut fv);
 
         assert!(approx_eq(fv.values()[0], -2.0));
     }

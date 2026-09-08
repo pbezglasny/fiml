@@ -1,6 +1,6 @@
 use crate::event::Event;
 use crate::features::MAX_OUTPUTS_PER_INDICATOR;
-use crate::features::compiler::OutputSpan;
+use crate::features::compiler::OutputRange;
 use crate::features::derivation::{FeatureDerivation, write_outputs};
 use crate::indicators::CumulativeVolumeDelta;
 use crate::vectors::FeatureVector;
@@ -22,7 +22,7 @@ impl CvdFeature {
     pub(crate) fn update<O: FeatureVector>(
         &mut self,
         event: &Event,
-        output_span: OutputSpan,
+        output_range: OutputRange,
         output: &mut O,
     ) {
         if let Event::Trade(trade) = event
@@ -30,7 +30,7 @@ impl CvdFeature {
             && let Some(side) = trade.side
         {
             self.cvd.update_inner(trade.volume, side);
-            write_outputs(output_span, output, |index| self.cvd.value_at(index));
+            write_outputs(output_range, output, |index| self.cvd.value_at(index));
         }
     }
 }
@@ -66,31 +66,31 @@ mod tests {
             _ => unreachable!(),
         };
         let mut output = ArrayFeatureVector::<2>::new();
-        let output_span = OutputSpan { start: 0, count: 2 };
+        let output_range = OutputRange { start: 0, count: 2 };
 
         feature.update(
             &Event::trade(aapl, 100.0, 10.0, 0, Some(TradeSide::AgressorBuy)),
-            output_span,
+            output_range,
             &mut output,
         );
         feature.update(
             &Event::trade(aapl, 99.0, 3.0, 1, Some(TradeSide::AgressorSell)),
-            output_span,
+            output_range,
             &mut output,
         );
         feature.update(
             &Event::trade(aapl, 101.0, 50.0, 2, None),
-            output_span,
+            output_range,
             &mut output,
         );
         feature.update(
             &Event::trade(googl, 200.0, 80.0, 3, Some(TradeSide::AgressorBuy)),
-            output_span,
+            output_range,
             &mut output,
         );
         feature.update(
             &Event::trade(aapl, 102.0, 2.0, 4, Some(TradeSide::AgressorBuy)),
-            output_span,
+            output_range,
             &mut output,
         );
 

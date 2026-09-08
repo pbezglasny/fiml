@@ -17,7 +17,7 @@ use crate::{
 /// per cell. `start` is the first output-vector index and `count` is the number
 /// of grouped scalar outputs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct OutputSpan {
+pub(crate) struct OutputRange {
     /// Index of the first output cell assigned to the derivation.
     pub(crate) start: usize,
     /// Number of consecutive output cells assigned to the derivation.
@@ -28,13 +28,13 @@ pub(crate) struct OutputSpan {
 ///
 /// This is the handoff between cold-path compilation and
 /// [`FeatureExtractor`](crate::FeatureExtractor). All temporary grouping maps
-/// have already been discarded. Entries in `features` and `output_spans`
+/// have already been discarded. Entries in `features` and `output_ranges`
 /// correspond one-to-one, while `feature_ids` follows output-vector order.
 pub(crate) struct Compilation {
     /// Stateful derivations indexed by the event router.
     pub(crate) features: Box<[FeatureDerivation]>,
-    /// Output-vector span belonging to each derivation at the same index.
-    pub(crate) output_spans: Box<[OutputSpan]>,
+    /// Output-vector range belonging to each derivation at the same index.
+    pub(crate) output_ranges: Box<[OutputRange]>,
     /// Stable feature IDs ordered by their final output-vector indices.
     pub(crate) feature_ids: Box<[FeatureId]>,
     /// Precomputed symbol and event-kind routes into `features`.
@@ -178,7 +178,7 @@ enum GroupOutput {
 /// Definitions that can be executed by one shared runtime derivation.
 ///
 /// A group preserves definition order for its windows and feature IDs. During
-/// final compilation it becomes one [`FeatureDerivation`], one [`OutputSpan`],
+/// final compilation it becomes one [`FeatureDerivation`], one [`OutputRange`],
 /// and one event-router entry.
 struct FeatureGroup {
     /// Calculation and subscription identity shared by every grouped output.
@@ -317,12 +317,12 @@ pub(crate) fn compile(
     }
 
     let mut features = Vec::with_capacity(groups.len());
-    let mut output_spans = Vec::with_capacity(groups.len());
+    let mut output_ranges = Vec::with_capacity(groups.len());
     let mut compiled_ids = Vec::with_capacity(output_count);
     let mut routes = Vec::with_capacity(groups.len());
 
     for group in groups {
-        let output_span = OutputSpan {
+        let output_range = OutputRange {
             start: compiled_ids.len(),
             count: group.feature_ids.len(),
         };
@@ -342,7 +342,7 @@ pub(crate) fn compile(
         routes.push((group.key.symbol(), group.key.route()));
         compiled_ids.extend(group.feature_ids);
         features.push(feature);
-        output_spans.push(output_span);
+        output_ranges.push(output_range);
     }
 
     debug_assert_eq!(compiled_ids.len(), output_count);
@@ -350,7 +350,7 @@ pub(crate) fn compile(
 
     Ok(Compilation {
         features: features.into_boxed_slice(),
-        output_spans: output_spans.into_boxed_slice(),
+        output_ranges: output_ranges.into_boxed_slice(),
         feature_ids: compiled_ids.into_boxed_slice(),
         event_router,
     })
@@ -870,10 +870,10 @@ mod tests {
 
         assert_eq!(compilation.features.len(), 2);
         assert_eq!(
-            compilation.output_spans.as_ref(),
+            compilation.output_ranges.as_ref(),
             [
-                OutputSpan { start: 0, count: 2 },
-                OutputSpan { start: 2, count: 1 },
+                OutputRange { start: 0, count: 2 },
+                OutputRange { start: 2, count: 1 },
             ]
         );
         assert_eq!(compilation.feature_ids[0], FeatureId::from(&sma_one));
