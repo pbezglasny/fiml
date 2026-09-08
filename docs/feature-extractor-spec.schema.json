@@ -24,15 +24,47 @@
       "type": "object", "additionalProperties": false,
       "required": ["kind", "source"],
       "properties": {
-        "kind": { "enum": ["sma", "ema", "cvd", "sma_timed", "obv_timed", "trade_count_timed", "day_of_week", "time_since_first_event_of_day"] },
+        "kind": { "enum": ["sma", "ema", "cvd", "sma_timed", "obv_timed", "trade_count_timed", "day_of_week", "time_since_first_event_of_day", "order_book_mid_price", "order_book_spread", "order_book_spread_bps", "order_book_weighted_mid_price", "order_book_microprice", "order_book_imbalance"] },
         "source": { "$ref": "#/$defs/source" },
         "warmup_policy": { "enum": ["first_value", "full_window"] },
         "options": { "$ref": "#/$defs/options" },
         "outputs": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/output" } }
-      }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "kind": { "pattern": "^order_book_" } } },
+          "then": {
+            "properties": {
+              "source": { "const": { "type": "order_book" } },
+              "warmup_policy": false,
+              "options": { "maxProperties": 0 },
+              "outputs": { "maxItems": 16, "items": { "not": { "required": ["window"] } } }
+            },
+            "if": { "properties": { "kind": { "const": "order_book_imbalance" } } },
+            "then": {
+              "required": ["outputs"],
+              "properties": { "outputs": { "items": { "required": ["n_levels"] } } }
+            },
+            "else": {
+              "properties": { "outputs": { "maxItems": 1, "items": { "not": { "required": ["n_levels"] } } } }
+            }
+          },
+          "else": {
+            "properties": {
+              "source": { "not": { "properties": { "type": { "const": "order_book" } } } },
+              "outputs": { "items": { "not": { "required": ["n_levels"] } } }
+            }
+          }
+        }
+      ]
     },
     "source": {
       "oneOf": [
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["type"],
+          "properties": { "type": { "const": "order_book" } }
+        },
         {
           "type": "object", "additionalProperties": false,
           "required": ["type", "event", "field"],
@@ -94,6 +126,7 @@
     "output": {
       "type": "object", "additionalProperties": false,
       "properties": {
+        "n_levels": { "type": "integer", "minimum": 1 },
         "window": { "oneOf": [{ "type": "integer", "minimum": 1 }, { "$ref": "#/$defs/duration" }] },
         "id": { "type": "string", "not": { "pattern": "^__reserved_" } }
       }

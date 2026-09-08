@@ -396,14 +396,126 @@ fn book_ids_and_spec_grouping_are_stable() {
             .collect::<Vec<_>>(),
         [0, 2, 4, 5, 6, 1, 3, 7].map(|i| definitions[i].id.clone())
     );
-    #[cfg(feature = "serde")]
-    for definition in definitions {
-        let spec = FeatureExtractorSpec::new([definition]).unwrap();
+}
+
+#[cfg(feature = "serde")]
+#[test]
+fn book_definitions_round_trip_with_grouped_depths_and_custom_ids() {
+    let symbol = Symbol::new("book-json").unwrap();
+    let mut definitions = keys(symbol).map(FeatureDefinition::with_default_id);
+    definitions[1].id = FeatureId::new("imbalance_two");
+    let spec = FeatureExtractorSpec::new(definitions).unwrap();
+    let json = serde_json::to_value(&spec).unwrap();
+    let indicators = json["features"][0]["indicators"].as_array().unwrap();
+    assert_eq!(indicators.len(), 6);
+    for indicator in indicators {
+        assert_eq!(
+            indicator["source"],
+            serde_json::json!({"type": "order_book"})
+        );
+        assert!(indicator.get("warmup_policy").is_none());
+        assert!(indicator.get("options").is_none());
+    }
+    assert!(indicators[0].get("outputs").is_none());
+    assert_eq!(
+        indicators[5]["outputs"],
+        serde_json::json!([
+            {"n_levels": 2, "id": "imbalance_two"}, {"n_levels": 1}, {"n_levels": 100},
+        ])
+    );
+    let restored: FeatureExtractorSpec = serde_json::from_value(json).unwrap();
+    assert_eq!(restored, spec);
+    let mut builder = FeatureExtractor::builder(ArrayFeatureVector::<8>::new())
+        .add_order_book(symbol, OrderBook::new(UpdatePolicy::Contiguous, 1));
+    for definition in restored.definitions() {
+        builder = builder.add_feature(definition.clone());
+    }
+    let mut extractor = builder.build().unwrap();
+    extractor
+        .handle_event(Event::order_book_snapshot(symbol, 0, snapshot(0)))
+        .unwrap();
+    assert_values(
+        extractor.feature_vector().values(),
+        &[
+            101.0,
+            2.0,
+            20_000.0 / 101.0,
+            101.2,
+            100.8,
+            1.0 / 3.0,
+            -0.2,
+            1.0 / 3.0,
+        ],
+    );
+}
+
+#[cfg(feature = "serde")]
+#[test]
+fn book_json_rejects_inapplicable_parameters_and_invalid_depths() {
+    use serde_json::json;
+
+    let base = json!({
+        "kind": "order_book_imbalance", "source": {"type": "order_book"},
+        "outputs": [{"n_levels": 1}],
+    });
+    for invalid in [
+        json!({"outputs": []}),
+        json!({"outputs": [{}]}),
+        json!({"outputs": [{"n_levels": 0}]}),
+        json!({"outputs": [{"n_levels": -1}]}),
+        json!({"outputs": [{"n_levels": 1.5}]}),
+        json!({"outputs": [{"n_levels": "1"}]}),
+        json!({"outputs": [{"n_levels": null}]}),
+        json!({"outputs": [{"n_levels": 1, "window": 1}]}),
+        json!({"outputs": (1..=17).map(|n| json!({"n_levels": n})).collect::<Vec<_>>()}),
+        json!({"kind": "order_book_mid_price"}),
+        json!({"kind": "order_book_mid_price", "outputs": [{}, {}]}),
+        json!({"source": {"type": "order_book", "event": "order_book_delta"}}),
+        json!({"source": {"type": "order_book", "field": "price"}}),
+        json!({"source": {"type": "event", "event": "order_book_snapshot"}}),
+        json!({"source": {"type": "field", "event": "trade", "field": "price"}}),
+        json!({"kind": "day_of_week"}),
+        json!({"warmup_policy": "full_window"}),
+        json!({"options": {"aggregation": "1s"}}),
+        json!({"options": {"n_levels": 1}}),
+    ] {
+        let mut indicator = base.clone();
+        indicator
+            .as_object_mut()
+            .unwrap()
+            .extend(invalid.as_object().unwrap().clone());
+        let length = indicator["outputs"].as_array().map_or(1, Vec::len);
+        let document = json!({"version": "1.0", "capacity": length, "length": length,
+            "features": [{"symbol": "btcusd", "indicators": [indicator]}]});
         assert!(
-            serde_json::to_string(&spec)
-                .unwrap_err()
-                .to_string()
-                .contains("serialization of order-book features is not supported")
+            serde_json::from_value::<FeatureExtractorSpec>(document.clone()).is_err(),
+            "accepted {document}"
         );
     }
+
+    // An event indicator cannot silently accept the new output parameter.
+    let document = json!({"version": "1.0", "capacity": 1, "length": 1,
+    "features": [{"symbol": "btcusd", "indicators": [{
+        "kind": "sma", "source": {"type": "field", "event": "trade", "field": "price"},
+        "warmup_policy": "full_window", "outputs": [{"window": 5, "n_levels": 1}]
+    }]}]});
+    assert!(serde_json::from_value::<FeatureExtractorSpec>(document).is_err());
+
+    let symbol = Symbol::new("book-json-invalid").unwrap();
+    for depths in [vec![0], (1..=17).collect()] {
+        let spec = FeatureExtractorSpec::new(depths.into_iter().map(|n_levels| {
+            FeatureDefinition::with_default_id(FeatureKey::OrderBookImbalance { symbol, n_levels })
+        }))
+        .unwrap();
+        assert!(serde_json::to_value(spec).is_err());
+    }
+    let mut global = json!({"version": "1.0", "capacity": 1, "length": 1,
+        "features": [{"symbol": "__global__", "indicators": [base]}]});
+    assert!(serde_json::from_value::<FeatureExtractorSpec>(global.clone()).is_err());
+    global["features"][0]["symbol"] = json!("btcusd");
+    global["features"][0]["indicators"][0]
+        .as_object_mut()
+        .unwrap()
+        .remove("outputs");
+    assert!(serde_json::from_value::<FeatureExtractorSpec>(global).is_err());
 }

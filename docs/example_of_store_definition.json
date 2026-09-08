@@ -3,8 +3,8 @@
   "checksum": "opaque model metadata",
   "feature_extractor": {
     "version": "1.0",
-    "capacity": 4,
-    "length": 2,
+    "capacity": 8,
+    "length": 5,
     "checksum": "opaque raw-feature metadata",
     "features": [
       {
@@ -40,14 +40,41 @@
                 "id": "raw_sma"
               }
             ]
+          },
+          {
+            "kind": "order_book_mid_price",
+            "source": {
+              "type": "order_book"
+            },
+            "outputs": [
+              {
+                "id": "raw_mid_price"
+              }
+            ]
+          },
+          {
+            "kind": "order_book_imbalance",
+            "source": {
+              "type": "order_book"
+            },
+            "outputs": [
+              {
+                "n_levels": 1,
+                "id": "raw_imbalance_1"
+              },
+              {
+                "n_levels": 5,
+                "id": "raw_imbalance_5"
+              }
+            ]
           }
         ]
       }
     ]
   },
   "model_input": {
-    "capacity": 4,
-    "length": 2,
+    "capacity": 8,
+    "length": 5,
     "transformations": [
       {
         "type": "identity",
@@ -60,6 +87,21 @@
         "output": "scaled_sma",
         "mean": 4.0,
         "scale": 2.0
+      },
+      {
+        "type": "identity",
+        "input": "raw_mid_price",
+        "output": "mid_price"
+      },
+      {
+        "type": "identity",
+        "input": "raw_imbalance_1",
+        "output": "imbalance_1"
+      },
+      {
+        "type": "identity",
+        "input": "raw_imbalance_5",
+        "output": "imbalance_5"
       }
     ]
   }

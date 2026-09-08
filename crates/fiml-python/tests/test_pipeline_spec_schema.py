@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 
 import pytest
+import fiml
 from jsonschema import Draft202012Validator
 from referencing import Registry, Resource
 
@@ -28,6 +29,8 @@ def canonical_example():
 def test_model_input_schema_is_valid_and_accepts_canonical_example():
     Draft202012Validator.check_schema(MODEL_SCHEMA)
     assert not list(VALIDATOR.iter_errors(canonical_example()))
+    spec = fiml.PipelineSpec.from_json(json.dumps(canonical_example()))
+    assert json.loads(spec.to_json()) == canonical_example()
 
 
 @pytest.mark.parametrize(
