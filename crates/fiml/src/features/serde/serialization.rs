@@ -280,6 +280,14 @@ fn serialize_definition(
     let default_id = FeatureId::from_feature_key(&definition.key);
     let id = (definition.id != default_id).then(|| definition.id.as_str().to_owned());
     let (identity, kind, source, warmup_policy, options, window) = match definition.key {
+        FeatureKey::OrderBookMidPrice { .. }
+        | FeatureKey::OrderBookSpread { .. }
+        | FeatureKey::OrderBookSpreadBps { .. }
+        | FeatureKey::OrderBookWeightedMidPrice { .. }
+        | FeatureKey::OrderBookMicroprice { .. }
+        | FeatureKey::OrderBookImbalance { .. } => {
+            return Err("serialization of order-book features is not supported".to_owned());
+        }
         FeatureKey::Sma {
             source,
             window,
@@ -653,6 +661,12 @@ fn require_empty_options(kind: &str, options: &OptionsWire) -> Result<(), String
 fn symbol_of(key: &FeatureKey) -> Symbol {
     match key {
         FeatureKey::Sma { symbol, .. }
+        | FeatureKey::OrderBookMidPrice { symbol, .. }
+        | FeatureKey::OrderBookSpread { symbol, .. }
+        | FeatureKey::OrderBookSpreadBps { symbol, .. }
+        | FeatureKey::OrderBookWeightedMidPrice { symbol, .. }
+        | FeatureKey::OrderBookMicroprice { symbol, .. }
+        | FeatureKey::OrderBookImbalance { symbol, .. }
         | FeatureKey::Ema { symbol, .. }
         | FeatureKey::Cvd { symbol, .. }
         | FeatureKey::SmaTimed { symbol, .. }

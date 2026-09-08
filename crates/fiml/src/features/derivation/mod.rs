@@ -1,3 +1,5 @@
+//! Adapts built-in event and order-book calculations to feature-vector outputs.
+
 use crate::event::Event;
 use crate::features::compiler::OutputSpan;
 use crate::order_book::OrderBook;
@@ -7,6 +9,7 @@ pub(crate) mod cvd;
 pub(crate) mod day_of_week;
 pub(crate) mod ema;
 pub(crate) mod obv;
+pub(crate) mod order_book;
 pub(crate) mod sma;
 pub(crate) mod time_since_first_event_of_day;
 pub(crate) mod trade_count;
@@ -34,6 +37,7 @@ pub(crate) enum FeatureDerivation {
     TradeCountTimed(TradeCountTimedFeature),
     DayOfWeek(DayOfWeek),
     TimeSinceFirstEventOfDay(TimeSinceFirstEventOfDay),
+    OrderBook(order_book::OrderBookFeature),
 }
 
 impl FeatureDerivation {
@@ -52,23 +56,26 @@ impl FeatureDerivation {
             Self::TradeCountTimed(count) => count.update(event, output_span, output),
             Self::DayOfWeek(day_of_week) => day_of_week.update(event, output_span, output),
             Self::TimeSinceFirstEventOfDay(clock) => clock.update(event, output_span, output),
+            Self::OrderBook(_) => {}
         }
     }
 
     /// Updates a derivation from the visible state of one order book.
     ///
-    /// Event-based derivations return `false`. Concrete order-book variants
-    /// add their direct-dispatch arm here and return `true` after writing their
-    /// output span.
+    /// Event-based derivations return `false`. Book derivations return `true`
+    /// after writing their output span, including when values are missing.
     pub(crate) fn update_order_book<O: FeatureVector>(
         &mut self,
         order_book: &OrderBook,
-        timestamp: i64,
+        _timestamp: i64,
         output_span: OutputSpan,
         output: &mut O,
     ) -> bool {
-        let _ = (order_book, timestamp, output_span, output);
         match self {
+            Self::OrderBook(feature) => {
+                feature.update(order_book, output_span, output);
+                true
+            }
             Self::Cvd(_)
             | Self::Sma(_)
             | Self::Ema(_)

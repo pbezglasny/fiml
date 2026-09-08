@@ -186,6 +186,12 @@ pub enum IntegerTarget {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum IndicatorKind {
+    OrderBookMidPrice,
+    OrderBookSpread,
+    OrderBookSpreadBps,
+    OrderBookWeightedMidPrice,
+    OrderBookMicroprice,
+    OrderBookImbalance,
     Sma,
     Ema,
     Cvd,
@@ -200,6 +206,7 @@ pub enum IndicatorKind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum InvalidIndicatorDefinitionError {
+    OrderBookDepthZero,
     CompatibleGroupOutputLimitExceeded {
         limit: usize,
     },
@@ -471,6 +478,12 @@ impl Display for IntegerTarget {
 impl Display for IndicatorKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
+            Self::OrderBookMidPrice => "order-book mid-price",
+            Self::OrderBookSpread => "order-book spread",
+            Self::OrderBookSpreadBps => "order-book spread in basis points",
+            Self::OrderBookWeightedMidPrice => "order-book weighted mid-price",
+            Self::OrderBookMicroprice => "order-book microprice",
+            Self::OrderBookImbalance => "order-book imbalance",
             Self::Sma => "SMA",
             Self::Ema => "EMA",
             Self::Cvd => "CVD",
@@ -486,6 +499,7 @@ impl Display for IndicatorKind {
 impl Display for InvalidIndicatorDefinitionError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::OrderBookDepthZero => f.write_str("order-book depth must be positive"),
             Self::CompatibleGroupOutputLimitExceeded { limit } => {
                 write!(f, "compatible feature group exceeds {limit} outputs")
             }

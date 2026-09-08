@@ -37,6 +37,25 @@ impl From<&FeatureKey> for FeatureId {
 
 fn write_feature_key(id: &mut String, key: &FeatureKey) -> fmt::Result {
     match key {
+        FeatureKey::OrderBookMidPrice { symbol } => {
+            write_prefix(id, "order_book_mid_price", *symbol, "order_book")
+        }
+        FeatureKey::OrderBookSpread { symbol } => {
+            write_prefix(id, "order_book_spread", *symbol, "order_book")
+        }
+        FeatureKey::OrderBookSpreadBps { symbol } => {
+            write_prefix(id, "order_book_spread_bps", *symbol, "order_book")
+        }
+        FeatureKey::OrderBookWeightedMidPrice { symbol } => {
+            write_prefix(id, "order_book_weighted_mid_price", *symbol, "order_book")
+        }
+        FeatureKey::OrderBookMicroprice { symbol } => {
+            write_prefix(id, "order_book_microprice", *symbol, "order_book")
+        }
+        FeatureKey::OrderBookImbalance { symbol, n_levels } => {
+            write_prefix(id, "order_book_imbalance", *symbol, "order_book")?;
+            write!(id, ":n_levels={n_levels}")
+        }
         FeatureKey::Sma {
             symbol,
             source,
@@ -101,14 +120,19 @@ fn write_feature_key(id: &mut String, key: &FeatureKey) -> fmt::Result {
             *warmup_policy,
         ),
         FeatureKey::DayOfWeek { symbol, source } => {
-            write_prefix(id, "day_of_week", *symbol, *source)
+            write_prefix(id, "day_of_week", *symbol, source.canonical_name())
         }
         FeatureKey::TimeSinceFirstEventOfDay {
             symbol,
             source,
             utc_offset_millis,
         } => {
-            write_prefix(id, "time_since_first_event_of_day", *symbol, *source)?;
+            write_prefix(
+                id,
+                "time_since_first_event_of_day",
+                *symbol,
+                source.canonical_name(),
+            )?;
             write!(id, ":utc_offset_ms={utc_offset_millis}")
         }
     }
@@ -122,7 +146,7 @@ fn write_sample_window(
     window: usize,
     warmup_policy: WarmupPolicy,
 ) -> fmt::Result {
-    write_prefix(id, kind, symbol, source)?;
+    write_prefix(id, kind, symbol, source.canonical_name())?;
     write!(
         id,
         ":window={window}:warmup={}",
@@ -139,7 +163,7 @@ fn write_timed_window(
     window_ns: u128,
     warmup_policy: WarmupPolicy,
 ) -> fmt::Result {
-    write_prefix(id, kind, symbol, source)?;
+    write_prefix(id, kind, symbol, source.canonical_name())?;
     write!(
         id,
         ":aggregation_ns={aggregation_ns}:window_ns={window_ns}:warmup={}",
@@ -147,14 +171,14 @@ fn write_timed_window(
     )
 }
 
-fn write_prefix(id: &mut String, kind: &str, symbol: Symbol, source: FeatureSource) -> fmt::Result {
+fn write_prefix(id: &mut String, kind: &str, symbol: Symbol, source: &str) -> fmt::Result {
     let symbol_name = symbol.resolve_as_string();
     write!(
         id,
         "{kind}:symbol={}:{}:source={}",
         symbol_name.len(),
         symbol_name,
-        source.canonical_name()
+        source
     )
 }
 
