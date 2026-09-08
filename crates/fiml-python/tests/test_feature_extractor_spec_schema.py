@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 
 import pytest
+import fiml
 from jsonschema import Draft202012Validator
 
 
@@ -80,3 +81,53 @@ def test_schema_still_accepts_whole_event_sources(event):
 
 def test_schema_still_accepts_any_event_source():
     assert_valid_source({"type": "any_event"})
+
+
+@pytest.mark.parametrize("kind", [
+    "order_book_mid_price", "order_book_spread", "order_book_spread_bps",
+    "order_book_weighted_mid_price", "order_book_microprice", "order_book_imbalance",
+])
+def test_order_book_definitions_validate_and_round_trip(kind):
+    document = document_with_source({"type": "order_book"})
+    document["features"][0]["symbol"] = "btcusdt"
+    indicator = {"kind": kind, "source": {"type": "order_book"}}
+    if kind == "order_book_imbalance":
+        indicator["outputs"] = [{"n_levels": 5, "id": "depth_five"}, {"n_levels": 1}]
+        document["capacity"] = document["length"] = 2
+    document["features"][0]["indicators"] = [indicator]
+    assert not list(VALIDATOR.iter_errors(document))
+    spec = fiml.FeatureExtractorSpec.from_json(json.dumps(document))
+    assert json.loads(spec.to_json()) == document
+    assert spec.indicator_count() == 1
+
+
+@pytest.mark.parametrize("changes", [
+    {"outputs": []},
+    {"outputs": [{}]},
+    {"outputs": [{"n_levels": 0}]},
+    {"outputs": [{"n_levels": -1}]},
+    {"outputs": [{"n_levels": 1.5}]},
+    {"outputs": [{"n_levels": "1"}]},
+    {"outputs": [{"n_levels": None}]},
+    {"outputs": [{"n_levels": 1, "window": 1}]},
+    {"outputs": [{"n_levels": n} for n in range(1, 18)]},
+    {"kind": "order_book_mid_price"},
+    {"kind": "order_book_mid_price", "outputs": [{}, {}]},
+    {"source": {"type": "order_book", "event": "order_book_delta"}},
+    {"source": {"type": "order_book", "field": "price"}},
+    {"source": {"type": "event", "event": "order_book_snapshot"}},
+    {"kind": "sma"},
+    {"warmup_policy": "full_window"},
+    {"options": {"aggregation": "1s"}},
+])
+def test_schema_and_reader_reject_invalid_order_book_parameters(changes):
+    document = document_with_source({"type": "order_book"})
+    indicator = {
+        "kind": "order_book_imbalance", "source": {"type": "order_book"},
+        "outputs": [{"n_levels": 1}], **changes,
+    }
+    document["capacity"] = document["length"] = len(indicator["outputs"])
+    document["features"][0]["indicators"] = [indicator]
+    assert list(VALIDATOR.iter_errors(document))
+    with pytest.raises(ValueError):
+        fiml.FeatureExtractorSpec.from_json(json.dumps(document))

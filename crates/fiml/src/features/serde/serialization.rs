@@ -117,9 +117,15 @@ impl OptionsWire {
     }
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Default, Clone)]
 #[serde(deny_unknown_fields)]
 struct OutputWire {
+    #[serde(
+        default,
+        deserialize_with = "deserialize_present_option",
+        skip_serializing_if = "Option::is_none"
+    )]
+    n_levels: Option<usize>,
     #[serde(
         default,
         deserialize_with = "deserialize_present_option",
@@ -136,7 +142,7 @@ struct OutputWire {
 
 impl OutputWire {
     fn is_empty(&self) -> bool {
-        self.window.is_none() && self.id.is_none()
+        self.window.is_none() && self.n_levels.is_none() && self.id.is_none()
     }
 }
 
@@ -157,6 +163,7 @@ where
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum IndicatorIdentity {
+    OrderBook(&'static str),
     Sma(FeatureSource, WarmupPolicy),
     Ema(FeatureSource, WarmupPolicy),
     Cvd(FeatureSource, WarmupPolicy),
@@ -218,18 +225,17 @@ impl TryFrom<&FeatureExtractorSpec> for FeatureExtractorSpecWire {
                     identity,
                     IndicatorIdentity::DayOfWeek(_)
                         | IndicatorIdentity::TimeSinceFirstEventOfDay(_, _)
-                ) {
+                ) || matches!(identity, IndicatorIdentity::OrderBook(kind) if kind != "order_book_imbalance")
+                {
                     return Err(format!(
                         "indicator {} has more than one scalar output",
                         current.wire.kind
                     ));
                 }
-                let outputs = current.wire.outputs.get_or_insert_with(|| {
-                    vec![OutputWire {
-                        window: None,
-                        id: None,
-                    }]
-                });
+                let outputs = current
+                    .wire
+                    .outputs
+                    .get_or_insert_with(|| vec![OutputWire::default()]);
                 outputs.push(output);
             } else {
                 indicators.push(IndicatorAccumulator {
@@ -262,6 +268,13 @@ fn finish_group(
     let indicators = indicators
         .into_iter()
         .map(|accumulator| {
+            if accumulator.wire.kind == "order_book_imbalance"
+                && accumulator.wire.outputs.as_ref().is_some_and(|outputs| {
+                    outputs.len() > crate::features::MAX_OUTPUTS_PER_INDICATOR
+                })
+            {
+                return Err("order_book_imbalance exceeds 16 outputs".to_owned());
+            }
             if accumulator.wire.outputs.as_ref().is_some_and(Vec::is_empty) {
                 return Err("indicator outputs must not be empty".to_owned());
             }
@@ -286,7 +299,7 @@ fn serialize_definition(
         | FeatureKey::OrderBookWeightedMidPrice { .. }
         | FeatureKey::OrderBookMicroprice { .. }
         | FeatureKey::OrderBookImbalance { .. } => {
-            return Err("serialization of order-book features is not supported".to_owned());
+            return serialize_order_book_definition(definition.key, id);
         }
         FeatureKey::Sma {
             source,
@@ -413,7 +426,11 @@ fn serialize_definition(
             options,
             outputs: None,
         },
-        OutputWire { window, id },
+        OutputWire {
+            window,
+            id,
+            n_levels: None,
+        },
     ))
 }
 
@@ -473,19 +490,23 @@ fn deserialize_indicator(
     indicator: IndicatorWire,
     definitions: &mut Vec<FeatureDefinition>,
 ) -> Result<(), String> {
-    let source = deserialize_source(indicator.source.clone())?;
-    validate_scope_and_source(symbol, &indicator.kind, source)?;
     let options = indicator.options.clone().unwrap_or_default();
     let outputs = match indicator.outputs.clone() {
         Some(outputs) if outputs.is_empty() => {
             return Err(format!("{} outputs must not be empty", indicator.kind));
         }
         Some(outputs) => outputs,
-        None => vec![OutputWire {
-            window: None,
-            id: None,
-        }],
+        None => vec![OutputWire::default()],
     };
+
+    if indicator.source.source_type == "order_book" {
+        return deserialize_order_book_indicator(symbol, &indicator, outputs, definitions);
+    }
+    let source = deserialize_source(indicator.source.clone())?;
+    validate_scope_and_source(symbol, &indicator.kind, source)?;
+    if outputs.iter().any(|output| output.n_levels.is_some()) {
+        return Err(format!("{} output does not allow n_levels", indicator.kind));
+    }
 
     match indicator.kind.as_str() {
         "sma" | "ema" | "cvd" => {
@@ -614,6 +635,103 @@ fn deserialize_indicator(
     Ok(())
 }
 
+fn serialize_order_book_definition(
+    key: FeatureKey,
+    id: Option<String>,
+) -> Result<(IndicatorIdentity, IndicatorWire, OutputWire), String> {
+    let (kind, n_levels) = match key {
+        FeatureKey::OrderBookMidPrice { .. } => ("order_book_mid_price", None),
+        FeatureKey::OrderBookSpread { .. } => ("order_book_spread", None),
+        FeatureKey::OrderBookSpreadBps { .. } => ("order_book_spread_bps", None),
+        FeatureKey::OrderBookWeightedMidPrice { .. } => ("order_book_weighted_mid_price", None),
+        FeatureKey::OrderBookMicroprice { .. } => ("order_book_microprice", None),
+        FeatureKey::OrderBookImbalance { n_levels, .. } => {
+            if n_levels == 0 {
+                return Err("order_book_imbalance requires positive n_levels".to_owned());
+            }
+            ("order_book_imbalance", Some(n_levels))
+        }
+        _ => unreachable!("only book definitions use this serializer"),
+    };
+    if symbol_of(&key) == Symbol::GLOBAL {
+        return Err(format!("{kind} requires a symbol-specific scope"));
+    }
+    Ok((
+        IndicatorIdentity::OrderBook(kind),
+        IndicatorWire {
+            kind: kind.to_owned(),
+            source: SourceWire {
+                source_type: "order_book".to_owned(),
+                event: None,
+                field: None,
+            },
+            warmup_policy: None,
+            options: None,
+            outputs: None,
+        },
+        OutputWire {
+            n_levels,
+            window: None,
+            id,
+        },
+    ))
+}
+
+fn deserialize_order_book_indicator(
+    symbol: Symbol,
+    indicator: &IndicatorWire,
+    outputs: Vec<OutputWire>,
+    definitions: &mut Vec<FeatureDefinition>,
+) -> Result<(), String> {
+    if symbol == Symbol::GLOBAL
+        || indicator.source.event.is_some()
+        || indicator.source.field.is_some()
+    {
+        return Err(
+            "order_book source requires a symbol-specific scope and no event or field".to_owned(),
+        );
+    }
+    reject_warmup(indicator)?;
+    require_empty_options(
+        &indicator.kind,
+        &indicator.options.clone().unwrap_or_default(),
+    )?;
+    let key = match indicator.kind.as_str() {
+        "order_book_mid_price" => FeatureKey::OrderBookMidPrice { symbol },
+        "order_book_spread" => FeatureKey::OrderBookSpread { symbol },
+        "order_book_spread_bps" => FeatureKey::OrderBookSpreadBps { symbol },
+        "order_book_weighted_mid_price" => FeatureKey::OrderBookWeightedMidPrice { symbol },
+        "order_book_microprice" => FeatureKey::OrderBookMicroprice { symbol },
+        "order_book_imbalance" => {
+            if outputs.len() > crate::features::MAX_OUTPUTS_PER_INDICATOR {
+                return Err("order_book_imbalance exceeds 16 outputs".to_owned());
+            }
+            for output in outputs {
+                if output.window.is_some() {
+                    return Err("order_book_imbalance output does not allow window".to_owned());
+                }
+                let n_levels = output
+                    .n_levels
+                    .filter(|&depth| depth > 0)
+                    .ok_or("order_book_imbalance requires positive n_levels")?;
+                definitions.push(definition_from_output(
+                    FeatureKey::OrderBookImbalance { symbol, n_levels },
+                    output.id,
+                ));
+            }
+            return Ok(());
+        }
+        _ => {
+            return Err(format!(
+                "invalid indicator kind {:?} for order_book source",
+                indicator.kind
+            ));
+        }
+    };
+    definitions.push(scalar_definition(key, outputs, &indicator.kind)?);
+    Ok(())
+}
+
 fn scalar_definition(
     key: FeatureKey,
     mut outputs: Vec<OutputWire>,
@@ -623,8 +741,8 @@ fn scalar_definition(
         return Err(format!("{kind} requires exactly one output"));
     }
     let output = outputs.pop().expect("length checked");
-    if output.window.is_some() {
-        return Err(format!("{kind} output does not allow window"));
+    if output.window.is_some() || output.n_levels.is_some() {
+        return Err(format!("{kind} output does not allow window or n_levels"));
     }
     Ok(definition_from_output(key, output.id))
 }

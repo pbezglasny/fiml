@@ -88,9 +88,31 @@ missing-book error.
 - Exercise applied snapshots and deltas, buffering, stale updates, sequence-gap
   rejection, and resynchronization with actual feature subscribers. Check
   initial `NaN` values and unchanged outputs for unrelated events.
-- Check explicit serialization rejection for new keys and regression coverage
-  for existing spec behavior.
+- Check serialization round trips for new keys and regression coverage for
+  existing spec behavior, as specified in the follow-up below.
 - Reuse the existing allocation counter with preconstructed updates to existing
   levels to verify that feature derivation adds no allocation.
 - Run formatting, workspace tests with all features, strict Clippy, and existing
   Python/notebook CI checks when implementing the runtime changes.
+
+## Follow-up: serialize feature definitions
+
+On 2026-09-08, JSON support was added to document order-book features in
+`docs/example_of_store_definition.json`. This supersedes the serialization
+deferral above. Book configuration and Python event ingestion remain deferred;
+deserialized Rust definitions can be passed to the existing builder alongside
+`add_order_book`. Spec-based extractor construction still rejects missing books.
+
+The existing version `1.0` format gains six kinds matching the snake-case feature
+key names, from `order_book_mid_price` through `order_book_imbalance`. Their source
+is exactly `{"type": "order_book"}` and their symbol scope must be non-global.
+They have no warm-up policy or calculation options. Scalar indicators have one
+output with an optional custom ID; default scalar outputs may be omitted.
+Imbalance requires one to sixteen outputs, each with a positive integer
+`n_levels` and optional ID. Depth order is preserved. `window`, event/field source
+parameters, and `n_levels` on other indicators are rejected. Book state and its
+update policy are not serialized.
+
+Both serialization and deserialization support these definitions. The JSON
+schema, canonical pipeline example, and Rust/Python round-trip tests cover the
+extension; existing feature representations and IDs remain unchanged.
