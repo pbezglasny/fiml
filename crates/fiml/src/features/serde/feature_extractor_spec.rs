@@ -130,24 +130,54 @@ impl FeatureExtractorSpec {
 
 fn canonical_sort_key(key: &FeatureKey) -> (bool, String, u8, u8, u8, u128, u128, i64) {
     let (symbol, kind, source, warmup, aggregation, scalar_identity, utc_offset) = match key {
+        FeatureKey::OrderBookMidPrice { symbol, .. } => (*symbol, 8, 32, 0, 0, 0, 0),
+        FeatureKey::OrderBookSpread { symbol, .. } => (*symbol, 9, 32, 0, 0, 0, 0),
+        FeatureKey::OrderBookSpreadBps { symbol, .. } => (*symbol, 10, 32, 0, 0, 0, 0),
+        FeatureKey::OrderBookWeightedMidPrice { symbol, .. } => (*symbol, 11, 32, 0, 0, 0, 0),
+        FeatureKey::OrderBookMicroprice { symbol, .. } => (*symbol, 12, 32, 0, 0, 0, 0),
+        FeatureKey::OrderBookImbalance { symbol, .. } => (*symbol, 13, 32, 0, 0, 0, 0),
         FeatureKey::Sma {
             symbol,
             source,
             warmup_policy,
             ..
-        } => (*symbol, 4, *source, warmup_rank(*warmup_policy), 0, 0, 0),
+        } => (
+            *symbol,
+            4,
+            source_rank(*source),
+            warmup_rank(*warmup_policy),
+            0,
+            0,
+            0,
+        ),
         FeatureKey::Ema {
             symbol,
             source,
             warmup_policy,
             ..
-        } => (*symbol, 2, *source, warmup_rank(*warmup_policy), 0, 0, 0),
+        } => (
+            *symbol,
+            2,
+            source_rank(*source),
+            warmup_rank(*warmup_policy),
+            0,
+            0,
+            0,
+        ),
         FeatureKey::Cvd {
             symbol,
             source,
             warmup_policy,
             ..
-        } => (*symbol, 0, *source, warmup_rank(*warmup_policy), 0, 0, 0),
+        } => (
+            *symbol,
+            0,
+            source_rank(*source),
+            warmup_rank(*warmup_policy),
+            0,
+            0,
+            0,
+        ),
         FeatureKey::SmaTimed {
             symbol,
             source,
@@ -157,7 +187,7 @@ fn canonical_sort_key(key: &FeatureKey) -> (bool, String, u8, u8, u8, u128, u128
         } => (
             *symbol,
             5,
-            *source,
+            source_rank(*source),
             warmup_rank(*warmup_policy),
             aggregation.as_nanos(),
             0,
@@ -172,7 +202,7 @@ fn canonical_sort_key(key: &FeatureKey) -> (bool, String, u8, u8, u8, u128, u128
         } => (
             *symbol,
             3,
-            *source,
+            source_rank(*source),
             warmup_rank(*warmup_policy),
             aggregation.as_nanos(),
             0,
@@ -187,24 +217,32 @@ fn canonical_sort_key(key: &FeatureKey) -> (bool, String, u8, u8, u8, u128, u128
         } => (
             *symbol,
             7,
-            *source,
+            source_rank(*source),
             warmup_rank(*warmup_policy),
             aggregation.as_nanos(),
             window.as_nanos(),
             0,
         ),
-        FeatureKey::DayOfWeek { symbol, source } => (*symbol, 1, *source, 0, 0, 0, 0),
+        FeatureKey::DayOfWeek { symbol, source } => (*symbol, 1, source_rank(*source), 0, 0, 0, 0),
         FeatureKey::TimeSinceFirstEventOfDay {
             symbol,
             source,
             utc_offset_millis,
-        } => (*symbol, 6, *source, 0, 0, 0, *utc_offset_millis),
+        } => (
+            *symbol,
+            6,
+            source_rank(*source),
+            0,
+            0,
+            0,
+            *utc_offset_millis,
+        ),
     };
     (
         symbol != crate::Symbol::GLOBAL,
         symbol.resolve_as_string(),
         kind,
-        source_rank(source),
+        source,
         warmup,
         aggregation,
         scalar_identity,

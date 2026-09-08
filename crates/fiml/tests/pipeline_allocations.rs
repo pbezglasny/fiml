@@ -103,6 +103,73 @@ fn allocation_counter_detects_heap_allocation() {
 }
 
 #[test]
+fn order_book_derivation_with_grouped_depths_does_not_allocate() {
+    use fiml::FeatureExtractor;
+    use fiml::order_book::{
+        OrderBook, OrderBookDelta, OrderBookLevel, OrderBookLevelUpdate, OrderBookSnapshot, Side,
+        UpdatePolicy,
+    };
+    use rust_decimal::{Decimal, dec};
+
+    let symbol = Symbol::new("book-allocations").unwrap();
+    let mut builder = FeatureExtractor::builder(ArrayFeatureVector::<7>::new())
+        .add_order_book(symbol, OrderBook::new(UpdatePolicy::Contiguous, 128));
+    for key in [
+        FeatureKey::OrderBookMidPrice { symbol },
+        FeatureKey::OrderBookSpread { symbol },
+        FeatureKey::OrderBookSpreadBps { symbol },
+        FeatureKey::OrderBookWeightedMidPrice { symbol },
+        FeatureKey::OrderBookMicroprice { symbol },
+        FeatureKey::OrderBookImbalance {
+            symbol,
+            n_levels: 1,
+        },
+        FeatureKey::OrderBookImbalance {
+            symbol,
+            n_levels: 10,
+        },
+    ] {
+        builder = builder.add_feature(FeatureDefinition::with_default_id(key));
+    }
+    let mut extractor = builder.build().unwrap();
+    extractor
+        .handle_event(Event::order_book_snapshot(
+            symbol,
+            0,
+            OrderBookSnapshot::new(
+                0,
+                vec![OrderBookLevel::new(dec!(100), dec!(2))],
+                vec![OrderBookLevel::new(dec!(102), dec!(3))],
+            ),
+        ))
+        .unwrap();
+    // Event construction and BTreeMap node allocation belong to book storage.
+    let events: [_; 128] = std::array::from_fn(|index| {
+        Event::order_book_delta(
+            symbol,
+            index as i64 + 1,
+            OrderBookDelta::new(
+                index as u64 + 1,
+                vec![OrderBookLevelUpdate::new(
+                    Side::Bid,
+                    dec!(100),
+                    Decimal::from(index + 1),
+                )],
+            ),
+        )
+    });
+    let allocations = count_allocations(|| {
+        for event in events {
+            assert_eq!(
+                black_box(extractor.handle_event(event).unwrap()).features_updated,
+                6
+            );
+        }
+    });
+    assert_eq!(allocations, 0);
+}
+
+#[test]
 fn steady_state_identity_pipeline_events_do_not_allocate() {
     let mut pipeline = pipeline_with([TransformerDefinition::identity(
         FeatureId::new("day"),

@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
+use crate::features::derivation::order_book::{OrderBookFeature, OrderBookIndicator};
 use crate::features::derivation::{self, FeatureDerivation};
 use crate::features::feature_extractor::EventRouter;
 use crate::features::{FeatureRoute, FeatureSource, MAX_OUTPUTS_PER_INDICATOR};
@@ -47,6 +48,24 @@ pub(crate) struct Compilation {
 /// state or event subscription remain part of the key.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 enum GroupKey {
+    OrderBookMidPrice {
+        symbol: Symbol,
+    },
+    OrderBookSpread {
+        symbol: Symbol,
+    },
+    OrderBookSpreadBps {
+        symbol: Symbol,
+    },
+    OrderBookWeightedMidPrice {
+        symbol: Symbol,
+    },
+    OrderBookMicroprice {
+        symbol: Symbol,
+    },
+    OrderBookImbalance {
+        symbol: Symbol,
+    },
     Sma {
         symbol: Symbol,
         source: EventField,
@@ -96,6 +115,12 @@ impl GroupKey {
     fn symbol(&self) -> Symbol {
         match self {
             Self::Sma { symbol, .. }
+            | Self::OrderBookMidPrice { symbol, .. }
+            | Self::OrderBookSpread { symbol, .. }
+            | Self::OrderBookSpreadBps { symbol, .. }
+            | Self::OrderBookWeightedMidPrice { symbol, .. }
+            | Self::OrderBookMicroprice { symbol, .. }
+            | Self::OrderBookImbalance { symbol, .. }
             | Self::Ema { symbol, .. }
             | Self::Cvd { symbol, .. }
             | Self::SmaTimed { symbol, .. }
@@ -108,6 +133,12 @@ impl GroupKey {
 
     fn route(&self) -> FeatureRoute {
         match self {
+            Self::OrderBookMidPrice { .. }
+            | Self::OrderBookSpread { .. }
+            | Self::OrderBookSpreadBps { .. }
+            | Self::OrderBookWeightedMidPrice { .. }
+            | Self::OrderBookMicroprice { .. }
+            | Self::OrderBookImbalance { .. } => FeatureRoute::OrderBook,
             Self::Sma { source, .. } | Self::Ema { source, .. } => {
                 FeatureRoute::Kind(source.event_kind())
             }
@@ -127,6 +158,7 @@ impl GroupKey {
 /// the corresponding [`FeatureGroup::feature_ids`]. Scalar derivations own
 /// exactly one feature ID and need no output parameter collection.
 enum GroupOutputs {
+    BookDepths(Vec<usize>),
     SampleWindows(Vec<usize>),
     TimedPeriods(Vec<usize>),
     Scalar,
@@ -137,6 +169,7 @@ enum GroupOutputs {
 /// This temporary value is appended to [`GroupOutputs`] when the definition is
 /// assigned to its compatible [`FeatureGroup`].
 enum GroupOutput {
+    BookDepth(usize),
     SampleWindow(usize),
     TimedPeriod(usize),
     Scalar,
@@ -166,6 +199,7 @@ impl FeatureGroup {
         definition_index: usize,
     ) -> Self {
         let outputs = match output {
+            GroupOutput::BookDepth(depth) => GroupOutputs::BookDepths(vec![depth]),
             GroupOutput::SampleWindow(window) => GroupOutputs::SampleWindows(vec![window]),
             GroupOutput::TimedPeriod(period) => GroupOutputs::TimedPeriods(vec![period]),
             GroupOutput::Scalar => GroupOutputs::Scalar,
@@ -196,6 +230,9 @@ impl FeatureGroup {
         }
 
         match (&mut self.outputs, output) {
+            (GroupOutputs::BookDepths(depths), GroupOutput::BookDepth(depth)) => {
+                depths.push(depth);
+            }
             (GroupOutputs::SampleWindows(windows), GroupOutput::SampleWindow(window)) => {
                 windows.push(window);
             }
@@ -321,6 +358,36 @@ pub(crate) fn compile(
 
 fn group_key(index: usize, key: &FeatureKey) -> Result<(GroupKey, GroupOutput)> {
     match *key {
+        FeatureKey::OrderBookMidPrice { symbol } => {
+            Ok((GroupKey::OrderBookMidPrice { symbol }, GroupOutput::Scalar))
+        }
+        FeatureKey::OrderBookSpread { symbol } => {
+            Ok((GroupKey::OrderBookSpread { symbol }, GroupOutput::Scalar))
+        }
+        FeatureKey::OrderBookSpreadBps { symbol } => {
+            Ok((GroupKey::OrderBookSpreadBps { symbol }, GroupOutput::Scalar))
+        }
+        FeatureKey::OrderBookWeightedMidPrice { symbol } => Ok((
+            GroupKey::OrderBookWeightedMidPrice { symbol },
+            GroupOutput::Scalar,
+        )),
+        FeatureKey::OrderBookMicroprice { symbol } => Ok((
+            GroupKey::OrderBookMicroprice { symbol },
+            GroupOutput::Scalar,
+        )),
+        FeatureKey::OrderBookImbalance { symbol, n_levels } => {
+            if n_levels == 0 {
+                return invalid_definition(
+                    index,
+                    key,
+                    InvalidIndicatorDefinitionError::OrderBookDepthZero,
+                );
+            }
+            Ok((
+                GroupKey::OrderBookImbalance { symbol },
+                GroupOutput::BookDepth(n_levels),
+            ))
+        }
         FeatureKey::Sma {
             symbol,
             source,
@@ -446,6 +513,44 @@ fn group_key(index: usize, key: &FeatureKey) -> Result<(GroupKey, GroupOutput)> 
 
 fn build_group(group: &FeatureGroup) -> Result<FeatureDerivation> {
     match (&group.key, &group.outputs) {
+        (GroupKey::OrderBookMidPrice { symbol }, GroupOutputs::Scalar) => {
+            Ok(FeatureDerivation::OrderBook(OrderBookFeature {
+                symbol: *symbol,
+                indicator: OrderBookIndicator::MidPrice,
+            }))
+        }
+        (GroupKey::OrderBookSpread { symbol }, GroupOutputs::Scalar) => {
+            Ok(FeatureDerivation::OrderBook(OrderBookFeature {
+                symbol: *symbol,
+                indicator: OrderBookIndicator::Spread,
+            }))
+        }
+        (GroupKey::OrderBookSpreadBps { symbol }, GroupOutputs::Scalar) => {
+            Ok(FeatureDerivation::OrderBook(OrderBookFeature {
+                symbol: *symbol,
+                indicator: OrderBookIndicator::SpreadBps,
+            }))
+        }
+        (GroupKey::OrderBookWeightedMidPrice { symbol }, GroupOutputs::Scalar) => {
+            Ok(FeatureDerivation::OrderBook(OrderBookFeature {
+                symbol: *symbol,
+                indicator: OrderBookIndicator::WeightedMidPrice,
+            }))
+        }
+        (GroupKey::OrderBookMicroprice { symbol }, GroupOutputs::Scalar) => {
+            Ok(FeatureDerivation::OrderBook(OrderBookFeature {
+                symbol: *symbol,
+                indicator: OrderBookIndicator::Microprice,
+            }))
+        }
+        (GroupKey::OrderBookImbalance { symbol }, GroupOutputs::BookDepths(depths)) => {
+            let mut grouped_depths = [0; MAX_OUTPUTS_PER_INDICATOR];
+            grouped_depths[..depths.len()].copy_from_slice(depths);
+            Ok(FeatureDerivation::OrderBook(OrderBookFeature {
+                symbol: *symbol,
+                indicator: OrderBookIndicator::Imbalance(grouped_depths),
+            }))
+        }
         (
             GroupKey::Sma {
                 symbol,
@@ -667,6 +772,12 @@ fn route_for_source(source: FeatureSource) -> FeatureRoute {
 
 fn group_kind(key: &GroupKey) -> IndicatorKind {
     match key {
+        GroupKey::OrderBookMidPrice { .. } => IndicatorKind::OrderBookMidPrice,
+        GroupKey::OrderBookSpread { .. } => IndicatorKind::OrderBookSpread,
+        GroupKey::OrderBookSpreadBps { .. } => IndicatorKind::OrderBookSpreadBps,
+        GroupKey::OrderBookWeightedMidPrice { .. } => IndicatorKind::OrderBookWeightedMidPrice,
+        GroupKey::OrderBookMicroprice { .. } => IndicatorKind::OrderBookMicroprice,
+        GroupKey::OrderBookImbalance { .. } => IndicatorKind::OrderBookImbalance,
         GroupKey::Sma { .. } => IndicatorKind::Sma,
         GroupKey::Ema { .. } => IndicatorKind::Ema,
         GroupKey::Cvd { .. } => IndicatorKind::Cvd,
@@ -680,6 +791,12 @@ fn group_kind(key: &GroupKey) -> IndicatorKind {
 
 fn group_kind_from_feature_key(key: &FeatureKey) -> IndicatorKind {
     match key {
+        FeatureKey::OrderBookMidPrice { .. } => IndicatorKind::OrderBookMidPrice,
+        FeatureKey::OrderBookSpread { .. } => IndicatorKind::OrderBookSpread,
+        FeatureKey::OrderBookSpreadBps { .. } => IndicatorKind::OrderBookSpreadBps,
+        FeatureKey::OrderBookWeightedMidPrice { .. } => IndicatorKind::OrderBookWeightedMidPrice,
+        FeatureKey::OrderBookMicroprice { .. } => IndicatorKind::OrderBookMicroprice,
+        FeatureKey::OrderBookImbalance { .. } => IndicatorKind::OrderBookImbalance,
         FeatureKey::Sma { .. } => IndicatorKind::Sma,
         FeatureKey::Ema { .. } => IndicatorKind::Ema,
         FeatureKey::Cvd { .. } => IndicatorKind::Cvd,

@@ -336,6 +336,15 @@ where
         debug_assert_eq!(compilation.features.len(), compilation.output_spans.len());
 
         let order_books = OrderBookStorage::new(configured_order_books)?;
+        for feature in &compilation.features {
+            if let FeatureDerivation::OrderBook(feature) = feature
+                && order_books.get(feature.symbol).is_none()
+            {
+                return Err(FimlError::OrderBookNotConfigured {
+                    symbol: feature.symbol,
+                });
+            }
+        }
         for index in 0..feature_vector.capacity() {
             feature_vector.set_value_at(index, f64::NAN);
         }

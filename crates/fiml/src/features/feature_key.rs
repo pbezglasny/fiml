@@ -11,6 +11,19 @@ use super::feature_source::FeatureSource;
 /// runtime indicator.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum FeatureKey {
+    /// Midpoint of the best bid and ask in a configured order book.
+    OrderBookMidPrice { symbol: Symbol },
+    /// Absolute spread between the best bid and ask.
+    OrderBookSpread { symbol: Symbol },
+    /// Absolute spread divided by mid-price, in basis points.
+    OrderBookSpreadBps { symbol: Symbol },
+    /// Best bid and ask prices weighted by their own sizes.
+    OrderBookWeightedMidPrice { symbol: Symbol },
+    /// Best bid and ask prices weighted by the opposite side's size.
+    OrderBookMicroprice { symbol: Symbol },
+    /// Bid-minus-ask size divided by total size over up to `n_levels` per side.
+    /// Depth must be positive; available levels are used if the book is shorter.
+    OrderBookImbalance { symbol: Symbol, n_levels: usize },
     Sma {
         symbol: Symbol,
         source: FeatureSource,
