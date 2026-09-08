@@ -1,5 +1,10 @@
 # ADR 0001: Make trades the high-level Python DataFrame boundary
 
+> Ordering update (2026-09-08): ordering and timed-window advancement are now
+> per symbol across all event kinds. Global Time ticks affect only GLOBAL;
+> global calendar features follow the maximum accepted timestamp. This
+> supersedes the global-ordering/expiration language below.
+
 Status: accepted  
 Date: 2026-07-14
 

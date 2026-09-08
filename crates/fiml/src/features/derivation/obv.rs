@@ -29,9 +29,10 @@ impl ObvTimedFeature {
         output_range: OutputRange,
         output: &mut O,
     ) {
-        if let Event::Trade(trade) = event
-            && trade.symbol == self.symbol
-        {
+        if event.symbol() != self.symbol {
+            return;
+        }
+        if let Event::Trade(trade) = event {
             self.obv
                 .update_inner(trade.price, trade.volume, trade.timestamp);
         } else if !self.obv.observe(event.timestamp()) {

@@ -433,7 +433,7 @@ where
     /// Advance the indicator to `now` without recording a new input value.
     ///
     /// This expires old buckets and may complete full-window warm-up when an
-    /// unrelated event advances global event time. Returns `true` when the
+    /// non-matching event advances the configured symbol’s event time. Returns `true` when the
     /// timestamp was newly observed, or `false` when it was already processed.
     pub(crate) fn observe(&mut self, now: i64) -> bool {
         if self.last_observed_timestamp == Some(now) {

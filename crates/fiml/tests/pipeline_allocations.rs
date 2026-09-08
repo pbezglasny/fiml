@@ -83,7 +83,18 @@ fn lagged_pipeline_warmup_and_steady_state_do_not_allocate() {
         TransformerDefinition::lagged(FeatureId::new("day"), FeatureId::new("lag3_copy"), 3),
         TransformerDefinition::lagged(FeatureId::new("day"), FeatureId::new("lag2"), 2),
     ]);
+    // Intern after construction, outside the measured event path.
+    let btc = Symbol::new("allocation-first-btc").unwrap();
+    let eth = Symbol::new("allocation-first-eth").unwrap();
     let allocations = count_allocations(|| {
+        for event in [
+            Event::price(btc, 1.0, 100),
+            Event::trade(eth, 1.0, 1.0, -100, None),
+            Event::volume(btc, 1.0, 101),
+            Event::price(eth, 1.0, -99),
+        ] {
+            black_box(pipeline.handle_event(event).unwrap());
+        }
         for timestamp in 0..128 {
             black_box(pipeline.handle_event(Event::time(timestamp)).unwrap());
         }

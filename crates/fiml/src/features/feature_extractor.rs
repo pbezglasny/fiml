@@ -5,6 +5,7 @@ use crate::features::feature_extractor_builder::FeatureExtractorBuilder;
 use crate::order_book::{
     OrderBook, OrderBookUpdate, OrderBookUpdateOutcome, OrderBookUpdateRef, PreparedOrderBookUpdate,
 };
+use crate::symbols::MAX_SYMBOL_NUMBER;
 use crate::{
     EVENT_KIND_COUNT, Event, EventKind, FeatureId, FeatureVector, FimlError, InvalidArgumentError,
     LimitTarget, Result, Symbol,
@@ -73,7 +74,7 @@ pub(crate) struct EventRouter {
     /// stored contiguously.
     subscribers: Box<[u16]>,
     /// Range in [`Self::subscribers`] containing the runtime feature indices
-    /// invoked for any accepted event, including timed features.
+    /// invoked for accepted events at or beyond the maximum accepted timestamp.
     any_event_subscribers: SubscriberRange,
 }
 
@@ -82,7 +83,9 @@ impl EventRouter {
         let max_symbol_index = routes
             .iter()
             .filter_map(|(symbol, route)| match route {
-                FeatureRoute::Kind(_) | FeatureRoute::OrderBook => Some(symbol.index()),
+                FeatureRoute::Kind(_) | FeatureRoute::SymbolAny | FeatureRoute::OrderBook => {
+                    Some(symbol.index())
+                }
                 FeatureRoute::Any => None,
             })
             .max();
@@ -101,7 +104,9 @@ impl EventRouter {
 
             match route {
                 FeatureRoute::Any => any_event_subscribers.push(feature_index),
-                route @ (FeatureRoute::Kind(_) | FeatureRoute::OrderBook) => {
+                route @ (FeatureRoute::Kind(_)
+                | FeatureRoute::SymbolAny
+                | FeatureRoute::OrderBook) => {
                     let symbol_index = symbol.index();
                     let router_index = match symbol_to_index[symbol_index] {
                         Some(router_index) => usize::from(router_index),
@@ -122,6 +127,11 @@ impl EventRouter {
                         }
                     };
                     match route {
+                        FeatureRoute::SymbolAny => {
+                            for group in &mut grouped_subscribers[router_index].event_subscribers {
+                                group.push(feature_index);
+                            }
+                        }
                         FeatureRoute::Kind(event_kind) => grouped_subscribers[router_index]
                             .event_subscribers[event_kind as usize]
                             .push(feature_index),
@@ -192,7 +202,7 @@ impl EventRouter {
         symbol_router.event_subscribers[event_kind as usize].as_slice(&self.subscribers)
     }
 
-    /// Returns runtime feature indices invoked for any accepted event.
+    /// Returns global subscribers; the extractor gates them by maximum timestamp.
     #[inline]
     fn any(&self) -> &[u16] {
         self.any_event_subscribers.as_slice(&self.subscribers)
@@ -308,6 +318,9 @@ where
     event_router: EventRouter,
     order_books: OrderBookStorage,
     last_timestamp: Option<i64>,
+    /// Last accepted timestamp for every possible interned symbol, including future symbols.
+    symbol_timestamps: Box<[Option<i64>]>,
+    max_timestamp: Option<i64>,
 }
 
 #[derive(Clone, Copy)]
@@ -357,6 +370,8 @@ where
             event_router: compilation.event_router,
             order_books,
             last_timestamp: None,
+            symbol_timestamps: vec![None; usize::from(MAX_SYMBOL_NUMBER)].into_boxed_slice(),
+            max_timestamp: None,
         })
     }
 
@@ -416,6 +431,14 @@ where
     }
 
     fn update_any_features(&mut self, event: &Event) -> UpdateResult {
+        if self
+            .max_timestamp
+            .is_some_and(|timestamp| event.timestamp() < timestamp)
+        {
+            return UpdateResult {
+                features_updated: 0,
+            };
+        }
         let any_features = self.event_router.any();
         Self::update_subscribers(
             &mut self.features,
@@ -445,14 +468,15 @@ where
     }
 
     /// Applies an event after checking timestamp order and numeric finiteness.
+    /// Timestamps must be nondecreasing per symbol across all event kinds.
+    /// Time events belong to [`Symbol::GLOBAL`] and do not advance other symbols.
     ///
     /// NaN and infinity are rejected even for unsubscribed symbols, leaving all
     /// feature values, timed state, and the timestamp watermark unchanged.
     /// Finite zero and negative payloads are accepted.
     #[must_use = "event errors must be handled before using updated feature values"]
     pub fn handle_event(&mut self, event: Event) -> Result<UpdateResult> {
-        // TODO: use separate counters for each symbol
-        if let Some(previous_timestamp) = self.last_timestamp
+        if let Some(previous_timestamp) = self.last_timestamp_for_symbol(event.symbol())
             && previous_timestamp > event.timestamp()
         {
             return Err(FimlError::TimestampOutOfOrder {
@@ -505,15 +529,25 @@ where
                 }
             };
         self.last_timestamp = Some(timestamp);
+        self.symbol_timestamps[symbol.index()] = Some(timestamp);
+        self.max_timestamp = Some(
+            self.max_timestamp
+                .map_or(timestamp, |previous| previous.max(timestamp)),
+        );
         let total_updated = any_features_result
             .combine_with(event_features_result)
             .combine_with(order_book_features_result);
         Ok(total_updated)
     }
 
-    /// Return timestamp of last seen event
+    /// Returns the timestamp of the last accepted event; it may decrease across symbols.
     pub fn last_timestamp(&self) -> Option<i64> {
         self.last_timestamp
+    }
+
+    /// Returns the last accepted timestamp for a symbol, across all event kinds.
+    pub fn last_timestamp_for_symbol(&self, symbol: Symbol) -> Option<i64> {
+        self.symbol_timestamps[symbol.index()]
     }
 
     /// Return feature vector
@@ -631,6 +665,8 @@ mod tests {
                         ))
                     ));
                     assert_eq!(extractor.last_timestamp(), Some(0));
+                    assert_eq!(extractor.last_timestamp_for_symbol(symbol), Some(0));
+                    assert_eq!(extractor.last_timestamp_for_symbol(unsubscribed), None);
                     assert_eq!(
                         extractor.feature_vector().values(),
                         reference.feature_vector().values()
@@ -932,6 +968,8 @@ mod tests {
         ));
         assert_eq!(extractor.feature_vector().values(), [4.0, 4.0]);
         assert_eq!(extractor.last_timestamp(), Some(1));
+        assert_eq!(extractor.last_timestamp_for_symbol(symbol), Some(1));
+        assert_eq!(extractor.max_timestamp, Some(1));
         assert!(extractor.handle_event(Event::time(2)).is_ok());
     }
 
@@ -972,6 +1010,8 @@ mod tests {
         ));
         assert_eq!(extractor.feature_vector().values(), [4.0]);
         assert_eq!(extractor.last_timestamp(), Some(0));
+        assert_eq!(extractor.last_timestamp_for_symbol(symbol), Some(0));
+        assert_eq!(extractor.max_timestamp, Some(0));
 
         extractor
             .handle_event(Event::order_book_snapshot(
@@ -1067,6 +1107,8 @@ mod tests {
             },
             order_books: OrderBookStorage::new(Vec::new()).unwrap(),
             last_timestamp: None,
+            symbol_timestamps: vec![None; usize::from(MAX_SYMBOL_NUMBER)].into_boxed_slice(),
+            max_timestamp: None,
         };
 
         let result = vector.handle_event(Event::time(1_609_459_200_000)).unwrap();

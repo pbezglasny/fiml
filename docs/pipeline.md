@@ -2,7 +2,7 @@
 
 Status: in progress
 
-Last updated: 2026-09-05
+Last updated: 2026-09-08
 
 The pipeline runtime, model-input serialization, and Python interface are
 implemented. The remaining work is verification and interface hardening rather
@@ -17,6 +17,8 @@ pipeline.handle_event(event)?;
 pipeline.raw_values();
 pipeline.values();
 pipeline.output_ids();
+pipeline.last_timestamp();
+pipeline.last_timestamp_for_symbol(symbol);
 ```
 
 `PipelineSpec` compiles one `FeatureExtractorSpec` and an authored sequence of
@@ -28,6 +30,15 @@ Lagged definitions for the same raw input compile into one transformer with one
 history buffer sized to the largest lag. Each output keeps its authored position
 and becomes available after its own positive lag window. Duplicate lag windows
 with different output IDs are supported; rejected events do not advance history.
+
+Timestamps are nondecreasing per symbol across all event kinds. Symbols may
+interleave with older timestamps; transformations and lag histories still follow
+accepted-event arrival order. `last_timestamp()` reports the last accepted arrival,
+while `last_timestamp_for_symbol(Symbol)` reports that symbol's ordering watermark.
+Timed windows advance only on their symbol's events. Global calendar features
+follow the maximum accepted timestamp, and global Time ticks do not advance other
+symbols' windows. Python `update`, `transform`, and `compute_features` share these
+rules; batches validate timestamp ordering before replaying any rows.
 
 The canonical artifact has three ownership levels:
 

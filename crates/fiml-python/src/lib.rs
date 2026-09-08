@@ -6,7 +6,7 @@
 //! feature-vector spec and events in the same order to get identical output. Indicator
 //! state is always `f64`; Python arrays can be returned as `float32` or `float64`.
 
-use std::time::Duration;
+use std::{collections::HashMap, time::Duration};
 
 use fiml::order_book::OrderBookDelta;
 use fiml::{
@@ -449,7 +449,7 @@ impl FeatureExtractorSpec {
     }
 
     /// Day-of-week clock feature (`0 = Sunday ..= 6 = Saturday`). Refreshes
-    /// from any event's timestamp, so it has a value on every row.
+    /// at or beyond the maximum accepted timestamp, retaining its value on older rows.
     fn day_of_week(mut slf: PyRefMut<'_, Self>) -> PyResult<PyRefMut<'_, Self>> {
         slf.add_group([definition(FeatureKey::DayOfWeek {
             symbol: Symbol::GLOBAL,
@@ -724,6 +724,7 @@ fn complete_names(active_ids: &[String], capacity: usize) -> Vec<String> {
 trait EventRuntime {
     fn handle_event(&mut self, event: Event) -> fiml::Result<()>;
     fn last_timestamp(&self) -> Option<i64>;
+    fn last_timestamp_for_symbol(&self, symbol: Symbol) -> Option<i64>;
     fn values(&self) -> &[f64];
 }
 
@@ -734,6 +735,10 @@ impl EventRuntime for CoreFeatureExtractor {
 
     fn last_timestamp(&self) -> Option<i64> {
         RustFeatureExtractor::last_timestamp(self)
+    }
+
+    fn last_timestamp_for_symbol(&self, symbol: Symbol) -> Option<i64> {
+        RustFeatureExtractor::last_timestamp_for_symbol(self, symbol)
     }
 
     fn values(&self) -> &[f64] {
@@ -748,6 +753,10 @@ impl EventRuntime for CorePipeline {
 
     fn last_timestamp(&self) -> Option<i64> {
         RustPipeline::last_timestamp(self)
+    }
+
+    fn last_timestamp_for_symbol(&self, symbol: Symbol) -> Option<i64> {
+        RustPipeline::last_timestamp_for_symbol(self, symbol)
     }
 
     fn values(&self) -> &[f64] {
@@ -949,9 +958,12 @@ where
             events.push(event);
         }
 
-        let mut previous_timestamp = self.inner.last_timestamp();
+        let mut symbol_timestamps = HashMap::new();
         for (row, event) in events.iter().enumerate() {
-            if let Some(previous_timestamp) = previous_timestamp
+            let previous_timestamp = symbol_timestamps
+                .entry(event.symbol())
+                .or_insert_with(|| self.inner.last_timestamp_for_symbol(event.symbol()));
+            if let Some(previous_timestamp) = *previous_timestamp
                 && previous_timestamp > event.timestamp()
             {
                 let error = FimlError::TimestampOutOfOrder {
@@ -962,7 +974,7 @@ where
                 };
                 return Err(PyValueError::new_err(format!("row {row}: {error}")));
             }
-            previous_timestamp = Some(event.timestamp());
+            *previous_timestamp = Some(event.timestamp());
         }
 
         let n_features = self.feature_names.len();

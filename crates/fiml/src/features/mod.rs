@@ -26,6 +26,8 @@ pub const MAX_OUTPUTS_PER_INDICATOR: usize = 16;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum FeatureRoute {
     Kind(EventKind),
+    /// Every event kind for the configured symbol.
+    SymbolAny,
     OrderBook,
     Any,
 }

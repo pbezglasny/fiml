@@ -59,7 +59,7 @@ def _(Path, pd):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    The CSV is newest-first, while the extractor requires globally nondecreasing timestamps. Sort by trade time and trade ID, convert timestamps to epoch milliseconds, and convert the maker flag to a compact `uint8` side column.
+    The CSV is newest-first, while the extractor requires nondecreasing timestamps within each symbol. Sort by trade time and trade ID, convert timestamps to epoch milliseconds, and convert the maker flag to a compact `uint8` side column.
     """)
     return
 

@@ -9,8 +9,8 @@ const MILLIS_PER_DAY: i64 = 86_400_000;
 
 /// Time elapsed since the first observed event of the local day, in milliseconds.
 ///
-/// An any-event clock feature: it refreshes from each event's timestamp
-/// regardless of kind. The day boundary uses a fixed UTC offset
+/// The router limits global AnyEvent updates to events at or beyond the
+/// maximum accepted timestamp. The day boundary uses a fixed UTC offset
 /// (`utc_offset_millis`, `0` = UTC).
 pub(crate) struct TimeSinceFirstEventOfDay {
     /// Timezone offset applied before computing the day boundary, in milliseconds.

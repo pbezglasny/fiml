@@ -144,9 +144,11 @@ impl GroupKey {
             }
             Self::Cvd { source, .. }
             | Self::DayOfWeek { source, .. }
-            | Self::TimeSinceFirstEventOfDay { source, .. } => route_for_source(*source),
+            | Self::TimeSinceFirstEventOfDay { source, .. } => {
+                route_for_source(*source, self.symbol())
+            }
             Self::SmaTimed { .. } | Self::ObvTimed { .. } | Self::TradeCountTimed { .. } => {
-                FeatureRoute::Any
+                FeatureRoute::SymbolAny
             }
         }
     }
@@ -762,11 +764,12 @@ fn validate_utc_offset(index: usize, key: &FeatureKey, utc_offset_millis: i64) -
     Ok(())
 }
 
-fn route_for_source(source: FeatureSource) -> FeatureRoute {
+fn route_for_source(source: FeatureSource, symbol: Symbol) -> FeatureRoute {
     match source {
         FeatureSource::Field(field) => FeatureRoute::Kind(field.event_kind()),
         FeatureSource::Event(event_kind) => FeatureRoute::Kind(event_kind),
-        FeatureSource::AnyEvent => FeatureRoute::Any,
+        FeatureSource::AnyEvent if symbol == Symbol::GLOBAL => FeatureRoute::Any,
+        FeatureSource::AnyEvent => FeatureRoute::SymbolAny,
     }
 }
 

@@ -2,7 +2,7 @@
 
 ## Trade DataFrame
 
-An already-loaded pandas DataFrame in global event order. Four selected columns
+An already-loaded pandas DataFrame in arrival order, with nondecreasing timestamps per symbol. Four selected columns
 carry the trade symbol, epoch-millisecond timestamp, price, and volume. File
 formats and persistence are outside the `fiml` boundary.
 
@@ -23,11 +23,13 @@ The symbol and timestamp copied from a Trade DataFrame into the DataFrame that
 envelops feature-vector snapshots. Metadata identifies a snapshot but is not
 part of `feature_names()` or `n_features()`.
 
-## Global timestamp watermark
+## Per-symbol timestamp watermark
 
-The timestamp of the last event successfully dispatched by a Python extractor.
-Every later event accepted through `update`, `transform`, or `compute_features`
-must have an equal or greater timestamp.
+The timestamp of the last accepted event for one symbol, across all event kinds.
+Every later event for that symbol must have an equal or greater timestamp.
+Rust `last_timestamp()` reports the last arrival and can decrease across symbols;
+`last_timestamp_for_symbol(Symbol)` reports the ordering watermark. Global
+calendar features follow a separate maximum accepted timestamp.
 
 ## Calculation dtype
 
@@ -109,7 +111,8 @@ feature-vector cells.
 
 A feature derived from any event timestamp rather than a symbol-specific
 market payload. Day of week and time since the first event of the local day are
-global clock features.
+global clock features. They refresh only at or beyond the maximum accepted
+timestamp.
 
 ## Time since first event of day
 
@@ -128,7 +131,7 @@ allocation.
 The configured rule that determines when a window indicator's output becomes
 ready. `FirstValue` becomes ready after its first matching input.
 `FullWindow` becomes ready after a sample window receives its configured number
-of matching inputs, or after global event time covers a timed window's full
+of matching inputs, or after that symbol's event time covers a timed window's full
 duration. One policy applies to every output of a grouped indicator, while each
 output becomes ready according to its own window.
 

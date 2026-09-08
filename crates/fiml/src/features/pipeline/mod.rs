@@ -9,7 +9,7 @@ mod specs;
 pub use specs::PipelineSpec;
 
 use super::transformers::Transformer;
-use crate::{Event, FeatureExtractor, FeatureId, FeatureVector, Result, UpdateResult};
+use crate::{Event, FeatureExtractor, FeatureId, FeatureVector, Result, Symbol, UpdateResult};
 
 /// Allocation-free event runtime for raw extraction and final model input.
 pub struct Pipeline<RawV, ModelV>
@@ -57,9 +57,14 @@ where
         &self.output_ids
     }
 
-    /// Returns the timestamp of the last accepted event.
+    /// Returns the timestamp of the last accepted event; it may decrease across symbols.
     pub fn last_timestamp(&self) -> Option<i64> {
         self.feature_extractor.last_timestamp()
+    }
+
+    /// Returns the last accepted timestamp for a symbol, across all event kinds.
+    pub fn last_timestamp_for_symbol(&self, symbol: Symbol) -> Option<i64> {
+        self.feature_extractor.last_timestamp_for_symbol(symbol)
     }
 }
 

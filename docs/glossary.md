@@ -111,15 +111,17 @@ its kind-specific payload.
 
 The routing tag of an event (`EventKind`): `Price`, `Volume`, `Trade`,
 `OrderBook`, or `Time`. Indicators subscribe to one event kind, except global
-clock indicators, which observe any event.
+clock indicators, which observe any event at or beyond the maximum accepted
+timestamp. Timed indicators observe every event kind for their symbol.
 
 ### Event-time watermark
 
-The timestamp of the latest dispatched event, exposed as `last_timestamp` in
-the Rust runtime. Timestamps are signed 64-bit epoch milliseconds and must be
-globally nondecreasing. Timed indicators use this global time to advance
-readiness and expire buckets, including when an event has another kind or
-symbol.
+The last accepted timestamp for a symbol, exposed by
+`last_timestamp_for_symbol(Symbol)` on Rust extractors and pipelines. Signed
+64-bit epoch milliseconds must be nondecreasing within each symbol across all
+event kinds. Timed windows advance only on that symbol’s events. `Event::Time`
+belongs to `Symbol::GLOBAL` and does not advance other symbols. `last_timestamp()`
+reports the last accepted arrival and can decrease across symbols.
 
 ### Global scope
 

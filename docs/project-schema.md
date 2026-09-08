@@ -131,11 +131,11 @@ the router. Temporary maps are dropped before event processing.
 | `Sma` | `SmaFeature` | `SimpleMovingAverage<HeapRingBuffer<f64>, 16>` | Event kind selected by `EventField` and the configured symbol. |
 | `Ema` | `EmaFeature` | `ExponentialMovingAverage<16>` | Event kind selected by `EventField` and the configured symbol. |
 | `Cvd` | `CvdFeature` | `CumulativeVolumeDelta<HeapRingBuffer<f64>, 16>` | Trade events for the configured symbol. |
-| `SmaTimed` | `SmaTimedFeature` | `SimpleMovingAverageTimed<HeapRingBuffer<(i64, f64)>, 16>` | Any event, so time advances even without a matching scalar sample. |
-| `ObvTimed` | `ObvTimedFeature` | `OnBalanceVolumeTimed<HeapRingBuffer<ObvBucket>, 16>` | Any event. |
-| `TradeCountTimed` | `TradeCountTimedFeature` | `TradeCountTimed<HeapRingBuffer<CountBucket>>` | Any event. |
-| `DayOfWeek` | `DayOfWeek` | Clock state in the derivation. | Any event. |
-| `TimeSinceFirstEventOfDay` | `TimeSinceFirstEventOfDay` | Clock state in the derivation. | Any event. |
+| `SmaTimed` | `SmaTimedFeature` | `SimpleMovingAverageTimed<HeapRingBuffer<(i64, f64)>, 16>` | Every event for the configured symbol, including kinds without matching samples. |
+| `ObvTimed` | `ObvTimedFeature` | `OnBalanceVolumeTimed<HeapRingBuffer<ObvBucket>, 16>` | Every event for the configured symbol. |
+| `TradeCountTimed` | `TradeCountTimedFeature` | `TradeCountTimed<HeapRingBuffer<CountBucket>>` | Every event for the configured symbol. |
+| `DayOfWeek` | `DayOfWeek` | Clock state in the derivation. | Global AnyEvent: at or beyond the maximum accepted timestamp; explicit symbol/event routes remain scoped. |
+| `TimeSinceFirstEventOfDay` | `TimeSinceFirstEventOfDay` | Clock state in the derivation. | Global AnyEvent: at or beyond the maximum accepted timestamp; explicit symbol/event routes remain scoped. |
 
 `MAX_OUTPUTS_PER_INDICATOR` is currently 16. It bounds the adjacent scalar
 outputs that can share one runtime derivation.
