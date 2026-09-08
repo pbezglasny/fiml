@@ -136,7 +136,7 @@ def _compute_features(
         )
         if too_large is not None:
             raise _row_error(df, too_large, time, "must fit signed int64")
-    timestamps = time_series.to_numpy(dtype=np.int64, copy=False)
+    timestamps = np.ascontiguousarray(time_series.to_numpy(dtype=np.int64, copy=False))
 
     numeric = {}
     for name in (price, volume):
@@ -149,7 +149,7 @@ def _compute_features(
         invalid = _first_invalid(~np.isfinite(values) | (values <= 0.0))
         if invalid is not None:
             raise _row_error(df, invalid, name, "must be finite and greater than zero")
-        numeric[name] = values
+        numeric[name] = np.ascontiguousarray(values)
 
     sides = None
     if side is not None:
@@ -174,7 +174,7 @@ def _compute_features(
                 side,
                 "must be SIDE_AGGRESSOR_BUY or SIDE_AGGRESSOR_SELL",
             )
-        sides = side_values.astype(np.uint8, copy=False)
+        sides = np.ascontiguousarray(side_values, dtype=np.uint8)
 
     n_rows = len(df)
     handles = np.empty(n_rows, dtype=np.int64)
