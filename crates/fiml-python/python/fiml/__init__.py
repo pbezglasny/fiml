@@ -257,27 +257,173 @@ class FeatureExtractor(_FeatureExtractor):
         )
 
 
-class ModelInputPipeline(_ModelInputPipeline):
-    """A stateful raw-feature and fitted-transformation runtime."""
+class ModelInputPipeline:
+    """Fit supported sklearn stages in Python and replay frozen parameters in Rust.
 
-    def __new__(cls, pipeline_spec, output_dtype="float64"):
-        return _ModelInputPipeline.__new__(
-            cls, pipeline_spec, _normalize_output_dtype(output_dtype)
-        )
+    ``fit`` starts from cold event state and leaves the fitted runtime cold.
+    ``transform`` advances event state; use ``reset`` before replaying a stream.
+    """
+
+    def __init__(self, pipeline_spec, output_dtype="float64"):
+        self._base_spec = pipeline_spec.copy()
+        self._spec = pipeline_spec.copy()
+        self._inner = _ModelInputPipeline(self._spec, _normalize_output_dtype(output_dtype))
+        self._symbols = []
+        self._templates = []
+        self._recipe_locked = False
+        self._inference_only = bool(pipeline_spec.stage_count)
 
     @classmethod
     def from_json(cls, json, output_dtype="float64"):
         """Construct directly from a versioned PipelineSpec artifact."""
-        return cls(PipelineSpec.from_json(json), output_dtype=output_dtype)
+        pipeline = cls(PipelineSpec.from_json(json), output_dtype=output_dtype)
+        pipeline._inference_only = True
+        return pipeline
+
+    @property
+    def _runtime(self):
+        if self._spec is None:
+            raise ValueError("pipeline is not fitted; call fit before inference or export")
+        return self._inner
+
+    def _new_runtime(self, spec, output_dtype=None):
+        runtime = _ModelInputPipeline(spec, output_dtype or self.output_dtype)
+        for name in self._symbols:
+            runtime.symbol(name)
+        return runtime
+
+    def add_transformation(self, estimator, *, name):
+        """Append an unfitted StandardScaler/PCA before fitting or replaying events."""
+        if self._inference_only or self._recipe_locked or self._inner._has_events:
+            raise ValueError("cannot change an established recipe; create a new pipeline")
+        if not isinstance(name, str) or not name or name.startswith("__reserved_"):
+            raise ValueError("stage name must be a nonempty, nonreserved string")
+        if any(previous == name for previous, _ in self._templates):
+            raise ValueError(f"duplicate stage name {name!r}")
+        from ._sklearn import clone_transformer
+
+        template = clone_transformer(estimator)
+        self._templates.append((name, template))
+        self._spec = None
+        return self
+
+    def fit(
+        self, kind, symbol, timestamp, *, price=None, volume=None, side=None,
+        bid=None, ask=None, fit_mask=None,
+    ):
+        """Fit on selected event snapshots; replay all events to preserve history.
+
+        fit_mask is a boolean vector selecting training rows (e.g. excluding
+        warm-up). Selected rows must be finite. Failed refits preserve live state.
+        """
+        if self._inference_only:
+            raise ValueError("this pipeline is inference-only; create a Python training recipe")
+        candidate = self._base_spec.copy()
+        replay = self._new_runtime(candidate, "float64")
+        matrix = replay.transform(
+            kind, symbol, timestamp, price=price, volume=volume, side=side, bid=bid, ask=ask,
+        )[:, :candidate.active_feature_count]
+        if fit_mask is None:
+            fit_mask = np.ones(len(matrix), dtype=bool)
+        else:
+            fit_mask = np.asarray(fit_mask)
+            if fit_mask.dtype != np.bool_ or fit_mask.shape != (len(matrix),):
+                raise ValueError("fit_mask must be a boolean vector with one entry per event")
+        rows = np.flatnonzero(fit_mask)
+        if not rows.size or not matrix.shape[1]:
+            raise ValueError("fit requires nonempty training rows and active features")
+        matrix = np.ascontiguousarray(matrix[fit_mask], dtype=np.float64)
+
+        def validate_matrix():
+            invalid = np.argwhere(~np.isfinite(matrix))
+            if invalid.size:
+                row, column = invalid[0]
+                raise ValueError(
+                    f"row {rows[row]}: feature {candidate.feature_ids()[column]!r} "
+                    "must be finite for fitting; exclude warm-up with fit_mask"
+                )
+
+        validate_matrix()
+        if self._templates:
+            from ._sklearn import fit_stage
+
+            for name, template in self._templates:
+                matrix = fit_stage(template, name, matrix, candidate)
+                validate_matrix()
+        runtime = self._new_runtime(candidate)
+        self._spec = candidate
+        self._inner = runtime
+        self._recipe_locked = True
+        return self
+
+    def fit_transform(self, *args, fit_mask=None, **kwargs):
+        """Fit from cold state, then return one Rust-computed row per event."""
+        self.fit(*args, fit_mask=fit_mask, **kwargs)
+        return self.transform(*args, **kwargs)
+
+    def reset(self):
+        """Clear event state, retaining fitted parameters and symbol handles."""
+        self._recipe_locked |= self._runtime._has_events
+        self._inner = self._new_runtime(self._spec)
+        return self
+
+    def to_spec(self):
+        """Return an independent fitted spec snapshot."""
+        self._runtime
+        return self._spec.copy()
+
+    def to_json(self):
+        """Serialize fitted numeric state using Rust's canonical adapter."""
+        return self.to_spec().to_json()
 
     @property
     def output_dtype(self):
-        return _ModelInputPipeline.output_dtype.__get__(self, type(self))
+        return self._inner.output_dtype
 
     @output_dtype.setter
     def output_dtype(self, value):
-        _ModelInputPipeline.output_dtype.__set__(
-            self, _normalize_output_dtype(value)
+        self._inner.output_dtype = _normalize_output_dtype(value)
+
+    def symbol(self, name):
+        handle = self._inner.symbol(name)
+        if handle == len(self._symbols):
+            self._symbols.append(name)
+        return handle
+
+    def feature_names(self):
+        return self._runtime.feature_names()
+
+    def raw_feature_names(self):
+        return self._inner.raw_feature_names()
+
+    def n_features(self):
+        return self._runtime.n_features()
+
+    def active_feature_count(self):
+        return self._runtime.active_feature_count()
+
+    def values(self):
+        return self._runtime.values()
+
+    def raw_values(self):
+        return self._runtime.raw_values()
+
+    def update(self, *args, **kwargs):
+        return self._runtime.update(*args, **kwargs)
+
+    def update_order_book(self, event):
+        return self._runtime.update_order_book(event)
+
+    def transform_order_book(self, events):
+        return self._runtime.transform_order_book(events)
+
+    def transform(
+        self, kind, symbol, timestamp, *, price=None, volume=None, side=None,
+        bid=None, ask=None,
+    ):
+        """Replay event columns with frozen parameters, advancing event state."""
+        return self._runtime.transform(
+            kind, symbol, timestamp, price=price, volume=volume, side=side, bid=bid, ask=ask,
         )
 
     def compute_features(
@@ -291,6 +437,7 @@ class ModelInputPipeline(_ModelInputPipeline):
         side=None,
     ):
         """Compute one final model-input snapshot after every trade row."""
+        self._runtime
         return _compute_features(
             self,
             df,

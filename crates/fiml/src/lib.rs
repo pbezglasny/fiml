@@ -17,8 +17,8 @@ pub use event::{
 };
 pub use features::{
     EventField, FeatureDefinition, FeatureExtractor, FeatureExtractorBuilder, FeatureExtractorSpec,
-    FeatureId, FeatureKey, FeatureSource, MAX_OUTPUTS_PER_INDICATOR, Pipeline, PipelineSpec,
-    TransformerDefinition, UpdateResult,
+    FeatureId, FeatureKey, FeatureSource, FittedStage, MAX_OUTPUTS_PER_INDICATOR, Pipeline,
+    PipelineSpec, TransformerDefinition, UpdateResult,
 };
 pub use indicators::{CumulativeVolumeDelta, ObvBucket, OnBalanceVolumeTimed};
 pub use ring_buffer::{
@@ -48,6 +48,11 @@ pub enum FimlError {
     InvalidTransformationDefinition {
         index: usize,
         reason: InvalidTransformationDefinitionError,
+    },
+    /// Cold-path stage validation includes layout and numeric diagnostics.
+    InvalidPipelineStage {
+        index: usize,
+        reason: String,
     },
     OutputCountMismatch {
         expected: usize,
@@ -287,6 +292,9 @@ pub enum DefinitionDurationField {
 impl Display for FimlError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            FimlError::InvalidPipelineStage { index, reason } => {
+                write!(f, "invalid pipeline stage {index}: {reason}")
+            }
             FimlError::InvalidArgument(reason) => write!(f, "invalid argument: {reason}"),
             FimlError::InvalidPriceRange {
                 from_price,

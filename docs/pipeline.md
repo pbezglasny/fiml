@@ -2,11 +2,11 @@
 
 Status: in progress
 
-Last updated: 2026-09-08
+Last updated: 2026-09-09
 
 The pipeline runtime, model-input serialization, and Python interface are
-implemented. The remaining work is verification and interface hardening rather
-than additional transformation types.
+implemented, including Python-fitted sklearn scaling/PCA stages and Rust online
+inference. Remaining interface-hardening items are listed below.
 
 ## Current interface
 
@@ -22,9 +22,17 @@ pipeline.last_timestamp_for_symbol(symbol);
 ```
 
 `PipelineSpec` compiles one `FeatureExtractorSpec` and an authored sequence of
-scalar transformations into a `Pipeline`. Every transformation reads directly
-from the raw feature vector. Transformation chaining and general graphs are not
-supported.
+scalar transformations into a base vector. Each scalar reads the raw feature
+vector. Optional fitted vector stages then consume the preceding active layout
+in sequence. `FittedStage::StandardScale` preserves its width and IDs;
+`FittedStage::Pca` projects to named components and supports whitening.
+General transformation graphs are not supported.
+
+Python `ModelInputPipeline.add_transformation`, `fit`, and `fit_transform`
+train supported sklearn objects and freeze numeric parameters. `transform`
+continues to replay events through Rust. `reset()` clears event state while
+retaining parameters and symbol handles. See [the transformer design](pipeline_transformer.md)
+and [the runnable example](../crates/fiml-python/examples/sklearn_pipeline.py).
 
 Lagged definitions for the same raw input compile into one transformer with one
 history buffer sized to the largest lag. Each output keeps its authored position
@@ -44,7 +52,7 @@ The canonical artifact has three ownership levels:
 
 ```json
 {
-  "version": "1.0",
+  "version": "2.0",
   "checksum": "optional model metadata",
   "feature_extractor": {
     "version": "1.0",
@@ -55,13 +63,17 @@ The canonical artifact has three ownership levels:
   "model_input": {
     "capacity": 2,
     "length": 2,
-    "transformations": []
+    "transformations": [],
+    "stages": []
   }
 }
 ```
 
 `feature_extractor` owns the raw-vector layout. `model_input` owns the final
-vector layout and ordered transformations. The strict source spelling for a
+vector layout, scalar base transformations, and fitted vector stages. Writers
+emit `2.0`; readers accept strict `1.0` artifacts without stages too.
+The envelope above illustrates ownership; populated feature/transform arrays
+must agree with the declared lengths. The strict source spelling for a
 feature that observes any event is `any_event`.
 
 ## Completed
@@ -84,6 +96,10 @@ feature that observes any event is `any_event`.
 - Python construction, JSON loading, event updates, array replay, and DataFrame
   replay for model-input pipelines.
 - Replacement of the stale legacy pipeline.
+- Python fitting/export of StandardScaler and PCA (scikit-learn 1.9.x), with
+  warm-up row selection and atomic refitting.
+- Sequential Rust stages, shared sklearn parity fixture, exact float JSON
+  round-trips, and zero-allocation stage execution.
 
 ## Open issues
 
@@ -95,7 +111,7 @@ Priority: high
 
 The manually authored fixture lives in
 [`tests/fixtures/model_input_parity`](../tests/fixtures/model_input_parity). Its
-strict `1.0` model-input artifact, two `BTCUSDT` trades, time event, and literal
+strict `2.0` model-input artifact, two `BTCUSDT` trades, time event, and literal
 expected snapshots are consumed independently by the Rust contract test in
 [`crates/fiml/tests/model_input_parity.rs`](../crates/fiml/tests/model_input_parity.rs)
 and the Python contract test in
@@ -191,17 +207,16 @@ Completion criteria:
 
 ## Verification status
 
-The current tree passes:
+Verification for fitted stages:
 
-- 176 Rust tests across all workspace targets and features;
-- 74 Python tests;
-- the maintained notebook;
+- `make test` (Rust tests, Python tests, and the maintained notebook);
+- real sklearn training/export and independent Rust fixture replay;
+- exact fitted JSON reloads and zero-allocation stage execution;
 - `cargo fmt --all -- --check`;
 - `cargo clippy --workspace --all-targets --all-features -- -D warnings`.
 
 ## Deferred work
 
-Do not add transformation chaining, a general transformation graph, runtime
-state serialization, or speculative transformation variants. Add another
-transformation only when a concrete model-training requirement cannot be
-expressed by `Identity` or `StandardScale`.
+Do not add general transformation graphs, runtime state serialization, or
+speculative transformer exporters. Add another exporter only for a concrete
+training requirement, with a defined Rust inference operation and parity test.

@@ -24,6 +24,7 @@ def test_grouped_lags_preserve_json_layout_and_individual_warmup(restore):
     )
     document = json.loads(spec.to_json())
     assert document["model_input"] == {
+        "stages": [],
         "capacity": 4,
         "length": 4,
         "transformations": [
@@ -168,7 +169,7 @@ def test_pipeline_spec_rejects_duplicate_outputs_and_strict_json_errors():
         spec.identity(raw_id)
 
     document = json.loads(spec.to_json())
-    document["version"] = "2.0"
+    document["version"] = "3.0"
     with pytest.raises(ValueError, match="unsupported model-input spec version"):
         fiml.PipelineSpec.from_json(json.dumps(document))
     with pytest.raises(ValueError):

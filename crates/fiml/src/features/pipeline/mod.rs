@@ -1,12 +1,15 @@
-//! Compiles raw feature extraction and scalar transformations into model input.
+//! Compiles raw extraction, scalar transformations, and fitted vector stages into model input.
 //!
 //! The spec types validate named layouts on the cold path. [`Pipeline`] keeps
 //! resolved indexes and preallocated transformer state, and writes one caller-owned
 //! model vector directly on the event-processing hot path.
 
 mod specs;
+mod stages;
 
 pub use specs::PipelineSpec;
+pub use stages::FittedStage;
+use stages::StageRuntime;
 
 use super::transformers::Transformer;
 use crate::{Event, FeatureExtractor, FeatureId, FeatureVector, Result, Symbol, UpdateResult};
@@ -19,6 +22,7 @@ where
 {
     feature_extractor: FeatureExtractor<RawV>,
     operations: Box<[Transformer]>,
+    stages: Option<StageRuntime>,
     model_vector: ModelV,
     output_ids: Box<[FeatureId]>,
 }
@@ -36,8 +40,16 @@ where
     pub fn handle_event(&mut self, event: Event) -> Result<UpdateResult> {
         let update_result = self.feature_extractor.handle_event(event)?;
         let raw_values = self.feature_extractor.feature_vector().values();
-        for operation in &mut self.operations {
-            operation.apply(raw_values, &mut self.model_vector);
+        if let Some(stages) = &mut self.stages {
+            stages.prepare_input();
+            for operation in &mut self.operations {
+                operation.apply(raw_values, &mut stages.input);
+            }
+            stages.apply(&mut self.model_vector);
+        } else {
+            for operation in &mut self.operations {
+                operation.apply(raw_values, &mut self.model_vector);
+            }
         }
         Ok(update_result)
     }

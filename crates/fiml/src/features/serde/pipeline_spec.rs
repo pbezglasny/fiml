@@ -1,9 +1,9 @@
 use ::serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use super::{FeatureExtractorSpec, serialization::deserialize_present_option};
-use crate::{FeatureId, PipelineSpec, TransformerDefinition};
+use crate::{FeatureId, FittedStage, PipelineSpec, TransformerDefinition};
 
-const FORMAT_VERSION: &str = "1.0";
+const FORMAT_VERSION: &str = "2.0";
 
 /// Private versioned storage representation for a complete model-input layout.
 #[derive(Serialize, Deserialize)]
@@ -27,6 +27,84 @@ struct ModelInputWire {
     capacity: usize,
     length: usize,
     transformations: Vec<TransformationWire>,
+    #[serde(
+        default,
+        deserialize_with = "deserialize_present_option",
+        skip_serializing_if = "Option::is_none"
+    )]
+    stages: Option<Vec<StageWire>>,
+}
+
+/// Strict numeric storage for fitted stages, independent of compiled runtime state.
+#[derive(Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+enum StageWire {
+    StandardScale {
+        outputs: Vec<String>,
+        mean: Vec<f64>,
+        scale: Vec<f64>,
+    },
+    Pca {
+        outputs: Vec<String>,
+        mean: Vec<f64>,
+        components: Vec<Vec<f64>>,
+        output_scale: Vec<f64>,
+    },
+}
+
+impl From<&FittedStage> for StageWire {
+    fn from(stage: &FittedStage) -> Self {
+        let outputs = stage
+            .outputs()
+            .iter()
+            .map(|id| id.as_str().to_owned())
+            .collect();
+        match stage {
+            FittedStage::StandardScale { mean, scale, .. } => Self::StandardScale {
+                outputs,
+                mean: mean.clone(),
+                scale: scale.clone(),
+            },
+            FittedStage::Pca {
+                mean,
+                components,
+                output_scale,
+                ..
+            } => Self::Pca {
+                outputs,
+                mean: mean.clone(),
+                components: components.clone(),
+                output_scale: output_scale.clone(),
+            },
+        }
+    }
+}
+
+impl From<StageWire> for FittedStage {
+    fn from(stage: StageWire) -> Self {
+        match stage {
+            StageWire::StandardScale {
+                outputs,
+                mean,
+                scale,
+            } => Self::StandardScale {
+                outputs: outputs.into_iter().map(FeatureId::new).collect(),
+                mean,
+                scale,
+            },
+            StageWire::Pca {
+                outputs,
+                mean,
+                components,
+                output_scale,
+            } => Self::Pca {
+                outputs: outputs.into_iter().map(FeatureId::new).collect(),
+                mean,
+                components,
+                output_scale,
+            },
+        }
+    }
 }
 
 /// Private ID-based representation of the supported scalar transformations.
@@ -78,6 +156,7 @@ impl From<&PipelineSpec> for PipelineSpecWire {
             model_input: ModelInputWire {
                 capacity: spec.feature_vector_capacity(),
                 length: spec.feature_vector_length(),
+                stages: Some(spec.stages().iter().map(StageWire::from).collect()),
                 transformations: spec
                     .transformation_definitions()
                     .iter()
@@ -123,17 +202,32 @@ impl TryFrom<PipelineSpecWire> for PipelineSpec {
     type Error = String;
 
     fn try_from(wire: PipelineSpecWire) -> Result<Self, Self::Error> {
-        if wire.version != FORMAT_VERSION {
+        if wire.version != FORMAT_VERSION && wire.version != "1.0" {
             return Err(format!(
-                "unsupported model-input spec version {:?}; expected {FORMAT_VERSION:?}",
+                "unsupported model-input spec version {:?}; expected 1.0 or {FORMAT_VERSION}",
                 wire.version
             ));
         }
-        if wire.model_input.length != wire.model_input.transformations.len() {
+        let stages = match (wire.version.as_str(), wire.model_input.stages) {
+            ("1.0", None) => Vec::new(),
+            ("1.0", Some(_)) => {
+                return Err("model_input.stages is not allowed in version 1.0".into());
+            }
+            (_, Some(stages)) => stages
+                .into_iter()
+                .map(FittedStage::from)
+                .collect::<Vec<_>>(),
+            (_, None) => return Err("missing field model_input.stages in version 2.0".into()),
+        };
+        let length = stages
+            .last()
+            .map_or(wire.model_input.transformations.len(), |stage| {
+                stage.outputs().len()
+            });
+        if wire.model_input.length != length {
             return Err(format!(
-                "model_input.length {} does not match transformation count {}",
-                wire.model_input.length,
-                wire.model_input.transformations.len()
+                "model_input.length {} does not match transformation count or final stage width {}",
+                wire.model_input.length, length
             ));
         }
         if wire.model_input.capacity < wire.model_input.length {
@@ -149,9 +243,10 @@ impl TryFrom<PipelineSpecWire> for PipelineSpec {
             .into_iter()
             .map(TransformerDefinition::from)
             .collect::<Vec<_>>();
-        PipelineSpec::with_metadata(
+        PipelineSpec::with_stages(
             wire.feature_extractor,
             transformations,
+            stages,
             wire.model_input.capacity,
             wire.checksum,
         )
@@ -211,7 +306,7 @@ mod tests {
 
     fn valid_model_spec() -> Value {
         json!({
-            "version": "1.0",
+            "version": "2.0",
             "feature_extractor": {
                 "version": "1.0",
                 "capacity": 1,
@@ -226,6 +321,7 @@ mod tests {
                 }]
             },
             "model_input": {
+                "stages": [],
                 "capacity": 1,
                 "length": 1,
                 "transformations": [{
@@ -307,7 +403,7 @@ mod tests {
         assert_eq!(
             value,
             json!({
-                "version": "1.0",
+                "version": "2.0",
                 "checksum": "model-checksum",
                 "feature_extractor": {
                     "version": "1.0",
@@ -332,6 +428,7 @@ mod tests {
                     }]
                 },
                 "model_input": {
+                    "stages": [],
                     "capacity": 4,
                     "length": 2,
                     "transformations": [
@@ -385,7 +482,7 @@ mod tests {
     #[test]
     fn rejects_unsupported_versions_and_dimension_mismatches() {
         let mut value = valid_model_spec();
-        value["version"] = json!("2.0");
+        value["version"] = json!("3.0");
         assert!(error(value).contains("unsupported model-input spec version"));
 
         let mut value = valid_model_spec();

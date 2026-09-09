@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "fiml PipelineSpec 1.0",
+  "title": "fiml PipelineSpec 2.0 (with 1.0 read compatibility)",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -9,11 +9,16 @@
     "model_input"
   ],
   "properties": {
-    "version": { "const": "1.0" },
+    "version": { "enum": ["1.0", "2.0"] },
     "checksum": { "type": "string" },
     "feature_extractor": { "$ref": "feature-extractor-spec.schema.json" },
     "model_input": { "$ref": "#/$defs/model_input" }
   },
+  "allOf": [{
+    "if": { "properties": { "version": { "const": "2.0" } } },
+    "then": { "properties": { "model_input": { "required": ["stages"] } } },
+    "else": { "properties": { "model_input": { "not": { "required": ["stages"] } } } }
+  }],
   "$defs": {
     "model_input": {
       "type": "object",
@@ -22,6 +27,7 @@
       "properties": {
         "capacity": { "type": "integer", "minimum": 0 },
         "length": { "type": "integer", "minimum": 0 },
+        "stages": { "type": "array", "items": { "$ref": "#/$defs/stage" } },
         "transformations": {
           "type": "array",
           "items": { "$ref": "#/$defs/transformation" }
@@ -68,6 +74,37 @@
         "scale": { "type": "number", "exclusiveMinimum": 0 }
       }
     },
+    "stage": {
+      "oneOf": [
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["type", "outputs", "mean", "scale"],
+          "properties": {
+            "type": { "const": "standard_scale" },
+            "outputs": { "$ref": "#/$defs/stage_outputs" },
+            "mean": { "$ref": "#/$defs/numeric_vector" },
+            "scale": { "$ref": "#/$defs/positive_vector" }
+          }
+        },
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["type", "outputs", "mean", "components", "output_scale"],
+          "properties": {
+            "type": { "const": "pca" },
+            "outputs": { "$ref": "#/$defs/stage_outputs" },
+            "mean": { "$ref": "#/$defs/numeric_vector" },
+            "components": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/numeric_vector" } },
+            "output_scale": { "$ref": "#/$defs/positive_vector" }
+          }
+        }
+      ]
+    },
+    "stage_outputs": {
+      "type": "array", "minItems": 1, "uniqueItems": true,
+      "items": { "$ref": "#/$defs/output_feature_id" }
+    },
+    "numeric_vector": { "type": "array", "minItems": 1, "items": { "type": "number" } },
+    "positive_vector": { "type": "array", "minItems": 1, "items": { "type": "number", "exclusiveMinimum": 0 } },
     "feature_id": { "type": "string" },
     "output_feature_id": {
       "type": "string",

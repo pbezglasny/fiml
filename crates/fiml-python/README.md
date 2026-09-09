@@ -236,9 +236,66 @@ pipeline DataFrame contains copied symbol/time metadata followed by final model
 columns only. Final and raw calculations stay in `float64`, while returned
 arrays use `output_dtype`, which locks after the first accepted event.
 
-See `examples/model_input_pipeline.py` for a focused runnable example. Each
-independent dataset needs its own pipeline instance because indicator state is
-intentionally cumulative and no reset/clone API is provided.
+See `examples/model_input_pipeline.py` for a focused runnable example. Indicator
+state is cumulative; call `pipeline.reset()` before replaying an independent
+stream. Reset retains fitted parameters and registered symbol handles.
+
+### Fitting sklearn stages
+
+Install `fiml[sklearn]` (currently scikit-learn `>=1.9,<1.10`) for training.
+Append supported `StandardScaler` and `PCA` instances before fitting or replaying:
+
+```python
+from sklearn.preprocessing import StandardScaler
+from sklearn.decomposition import PCA
+
+base_spec = fiml.PipelineSpec(raw_spec)
+for feature_id in raw_spec.feature_ids():
+    base_spec.identity(feature_id)
+
+pipeline = (fiml.ModelInputPipeline(base_spec)
+            .add_transformation(StandardScaler(), name="scale")
+            .add_transformation(PCA(n_components=2, whiten=True), name="pca"))
+pipeline.fit(kind, symbol, timestamp, price=prices, volume=volumes, fit_mask=ready)
+X_train = pipeline.transform(kind, symbol, timestamp, price=prices, volume=volumes)
+artifact = pipeline.to_json()
+```
+
+Register the event symbols with this pipeline before constructing the `symbol`
+array. `fit` takes the same event columns as `transform` and returns `self`.
+`fit_mask` is an optional boolean vector selecting training snapshots, for example
+after indicator warm-up; every event is still replayed to preserve history.
+Selected active features must be finite. Fit only the chronological training
+partition. Reserved cells are excluded from fitting and stay NaN in output.
+
+Each stage consumes the preceding complete active vector; the base spec can
+include lagged features. Scaling preserves names; PCA generates `pca__pc0`, etc.
+Capacity defaults to the fitted final width, while an explicitly authored
+capacity remains fixed. PCA emits all NaNs until every stage input is finite.
+`fit_transform` fits and replays, returning every event row; keep labels aligned
+and select usable rows when training the predictor.
+
+Successful `fit` leaves cold event state. Failed refits preserve the previous
+artifact and runtime. `transform` never fits or resets. Use `to_spec()` for an
+independent fitted spec snapshot. `from_json` restores an inference-only pipeline
+without sklearn; it starts cold and requires the historical warm-up prefix.
+DataFrame and order-book replay still work for inference; fitting currently
+accepts the columnar event API only. Arbitrary estimators/subclasses, `copy=False`,
+and sklearn `GridSearchCV` integration are unsupported.
+
+JSON writers emit pipeline version `2.0` with numeric `model_input.stages`;
+readers also accept strict scalar-only `1.0`. The nested extractor stays at `1.0`.
+Rust consumers should enable `serde_json`'s `float_roundtrip` feature to preserve
+every fitted `f64` on load, as the Python bindings do. No sklearn or matrix-library
+dependency is needed in Rust.
+
+Run [examples/sklearn_pipeline.py](examples/sklearn_pipeline.py) for a complete
+training/export example that checks Rust output against sklearn. See
+[the implementation design](../../docs/pipeline_transformer.md) for the wire
+contract and numerical limits. Whitening nearly zero-variance components can
+amplify sklearn/Rust rounding differences substantially; retain fewer components
+or disable whitening when needed. Train the predictor on FIML's returned matrix
+so deployed inference uses the same arithmetic.
 
 ## Low-level event API
 

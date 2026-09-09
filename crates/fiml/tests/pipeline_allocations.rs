@@ -114,6 +114,57 @@ fn allocation_counter_detects_heap_allocation() {
 }
 
 #[test]
+fn fitted_stages_do_not_allocate_during_warmup_or_steady_state() {
+    use fiml::FittedStage;
+    let raw = FeatureExtractorSpec::new([FeatureDefinition::new(
+        FeatureKey::DayOfWeek {
+            symbol: Symbol::GLOBAL,
+            source: FeatureSource::AnyEvent,
+        },
+        FeatureId::new("day"),
+    )])
+    .unwrap();
+    let spec = PipelineSpec::with_stages(
+        raw,
+        [
+            TransformerDefinition::identity(FeatureId::new("day"), FeatureId::new("day")),
+            TransformerDefinition::lagged(FeatureId::new("day"), FeatureId::new("lag"), 2),
+        ],
+        [
+            FittedStage::StandardScale {
+                outputs: vec![FeatureId::new("day"), FeatureId::new("lag")],
+                mean: vec![0.0, 0.0],
+                scale: vec![2.0, 2.0],
+            },
+            FittedStage::Pca {
+                outputs: vec![FeatureId::new("pc")],
+                mean: vec![1.0, 1.0],
+                components: vec![vec![0.6, 0.8]],
+                output_scale: vec![2.0],
+            },
+        ],
+        1,
+        None,
+    )
+    .unwrap();
+    let mut pipeline = spec
+        .build(
+            ArrayFeatureVector::<1>::new(),
+            ArrayFeatureVector::<1>::new(),
+        )
+        .unwrap();
+    assert_eq!(
+        count_allocations(|| {
+            for timestamp in 0..128 {
+                black_box(pipeline.handle_event(Event::time(timestamp)).unwrap());
+            }
+        }),
+        0
+    );
+    assert!((pipeline.values()[0] - 0.7).abs() < 1e-14);
+}
+
+#[test]
 fn configured_book_derivation_and_transformation_do_not_allocate() {
     use fiml::order_book::{
         OrderBookConfig, OrderBookDelta, OrderBookLevel, OrderBookLevelUpdate, OrderBookSnapshot,

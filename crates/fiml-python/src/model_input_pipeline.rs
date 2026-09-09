@@ -49,6 +49,12 @@ impl ModelInputPipeline {
 
 #[pymethods]
 impl ModelInputPipeline {
+    /// Whether accepted events have advanced this runtime, for Python recipe locking.
+    #[getter]
+    fn _has_events(&self) -> bool {
+        self.driver.inner.last_timestamp().is_some()
+    }
+
     /// Applies a validated snapshot/delta, preserving core synchronization semantics.
     fn update_order_book(&mut self, event: PyRef<'_, OrderBookEvent>) -> PyResult<()> {
         self.driver.update_order_book(&event)
