@@ -37,6 +37,156 @@ impl From<&FeatureKey> for FeatureId {
 
 fn write_feature_key(id: &mut String, key: &FeatureKey) -> fmt::Result {
     match key {
+        FeatureKey::OrderBookBestBidPrice { symbol } => {
+            write_prefix(id, "order_book_best_bid_price", *symbol, "order_book")
+        }
+        FeatureKey::OrderBookBestBidSize { symbol } => {
+            write_prefix(id, "order_book_best_bid_size", *symbol, "order_book")
+        }
+        FeatureKey::OrderBookBestAskPrice { symbol } => {
+            write_prefix(id, "order_book_best_ask_price", *symbol, "order_book")
+        }
+        FeatureKey::OrderBookBestAskSize { symbol } => {
+            write_prefix(id, "order_book_best_ask_size", *symbol, "order_book")
+        }
+        FeatureKey::OrderBookLevelSize {
+            symbol,
+            side,
+            price,
+        } => {
+            write_prefix(id, "order_book_level_size", *symbol, "order_book")?;
+            write!(
+                id,
+                ":side={}:price={}",
+                match side {
+                    crate::order_book::Side::Bid => "bid",
+                    crate::order_book::Side::Ask => "ask",
+                },
+                price.normalize()
+            )
+        }
+        FeatureKey::OrderBookNthPrice {
+            symbol,
+            side,
+            n_levels,
+        } => {
+            write_prefix(id, "order_book_nth_price", *symbol, "order_book")?;
+            write!(
+                id,
+                ":side={}:n_levels={}",
+                match side {
+                    crate::order_book::Side::Bid => "bid",
+                    crate::order_book::Side::Ask => "ask",
+                },
+                n_levels
+            )
+        }
+        FeatureKey::OrderBookNthSize {
+            symbol,
+            side,
+            n_levels,
+        } => {
+            write_prefix(id, "order_book_nth_size", *symbol, "order_book")?;
+            write!(
+                id,
+                ":side={}:n_levels={}",
+                match side {
+                    crate::order_book::Side::Bid => "bid",
+                    crate::order_book::Side::Ask => "ask",
+                },
+                n_levels
+            )
+        }
+        FeatureKey::OrderBookDepthUntilPrice {
+            symbol,
+            side,
+            price,
+        } => {
+            write_prefix(id, "order_book_depth_until_price", *symbol, "order_book")?;
+            write!(
+                id,
+                ":side={}:price={}",
+                match side {
+                    crate::order_book::Side::Bid => "bid",
+                    crate::order_book::Side::Ask => "ask",
+                },
+                price.normalize()
+            )
+        }
+        FeatureKey::OrderBookDepthUntilSizePriceFrom { symbol, side, size } => {
+            write_prefix(
+                id,
+                "order_book_depth_until_size_price_from",
+                *symbol,
+                "order_book",
+            )?;
+            write!(
+                id,
+                ":side={}:size={}",
+                match side {
+                    crate::order_book::Side::Bid => "bid",
+                    crate::order_book::Side::Ask => "ask",
+                },
+                size.normalize()
+            )
+        }
+        FeatureKey::OrderBookDepthUntilSizePriceTo { symbol, side, size } => {
+            write_prefix(
+                id,
+                "order_book_depth_until_size_price_to",
+                *symbol,
+                "order_book",
+            )?;
+            write!(
+                id,
+                ":side={}:size={}",
+                match side {
+                    crate::order_book::Side::Bid => "bid",
+                    crate::order_book::Side::Ask => "ask",
+                },
+                size.normalize()
+            )
+        }
+        FeatureKey::OrderBookDepthUntilSizeTotalSize { symbol, side, size } => {
+            write_prefix(
+                id,
+                "order_book_depth_until_size_total_size",
+                *symbol,
+                "order_book",
+            )?;
+            write!(
+                id,
+                ":side={}:size={}",
+                match side {
+                    crate::order_book::Side::Bid => "bid",
+                    crate::order_book::Side::Ask => "ask",
+                },
+                size.normalize()
+            )
+        }
+        FeatureKey::OrderBookVolumeBetweenPrices {
+            symbol,
+            side,
+            from_price,
+            to_price,
+        } => {
+            write_prefix(
+                id,
+                "order_book_volume_between_prices",
+                *symbol,
+                "order_book",
+            )?;
+            write!(
+                id,
+                ":side={}:from_price={}:to_price={}",
+                match side {
+                    crate::order_book::Side::Bid => "bid",
+                    crate::order_book::Side::Ask => "ask",
+                },
+                from_price.normalize(),
+                to_price.normalize()
+            )
+        }
         FeatureKey::OrderBookMidPrice { symbol } => {
             write_prefix(id, "order_book_mid_price", *symbol, "order_book")
         }

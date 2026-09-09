@@ -23,6 +23,9 @@ where
         }
     }
 
+    /// Adds a scalar output definition, including quote, level, and depth queries.
+    /// Query parameters are validated at build time; book queries also require
+    /// [`Self::add_order_book`] for their symbol.
     pub fn add_feature(mut self, feature_definition: FeatureDefinition) -> Self {
         self.definitions.push(feature_definition);
         self

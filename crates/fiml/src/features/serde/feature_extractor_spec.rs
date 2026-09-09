@@ -1,3 +1,4 @@
+use crate::order_book::{OrderBook, OrderBookConfig};
 use crate::{
     FeatureDefinition, FeatureExtractor, FeatureSource, FeatureVector, FimlError,
     InvalidArgumentError,
@@ -13,6 +14,7 @@ use crate::features::FeatureKey;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FeatureExtractorSpec {
     definitions: Vec<FeatureDefinition>,
+    order_books: Vec<OrderBookConfig>,
     feature_vector_capacity: usize,
     checksum: Option<String>,
 }
@@ -61,9 +63,39 @@ impl FeatureExtractorSpec {
         definitions.sort_by_cached_key(|definition| canonical_sort_key(&definition.key));
         Ok(Self {
             definitions,
+            order_books: Vec::new(),
             feature_vector_capacity,
             checksum,
         })
+    }
+
+    /// Replaces book construction parameters, rejecting duplicate/global symbols.
+    /// Required-book validation occurs at build time, after all definitions exist.
+    pub fn with_order_books(
+        mut self,
+        configs: impl IntoIterator<Item = OrderBookConfig>,
+    ) -> Result<Self, FimlError> {
+        let mut configs: Vec<_> = configs.into_iter().collect();
+        configs.sort_by_cached_key(|config| config.symbol.resolve_as_string());
+        for (index, config) in configs.iter().enumerate() {
+            if config.symbol == crate::Symbol::GLOBAL {
+                return Err(FimlError::InvalidArgument(
+                    InvalidArgumentError::GlobalOrderBookSymbol,
+                ));
+            }
+            if index > 0 && configs[index - 1].symbol == config.symbol {
+                return Err(FimlError::DuplicateOrderBook {
+                    symbol: config.symbol,
+                });
+            }
+        }
+        self.order_books = configs;
+        Ok(self)
+    }
+
+    /// Returns book construction parameters in canonical symbol order.
+    pub fn order_books(&self) -> &[OrderBookConfig] {
+        &self.order_books
     }
 
     /// Returns active scalar definitions in canonical extractor-output order.
@@ -124,12 +156,38 @@ impl FeatureExtractorSpec {
         }
         let compilation =
             crate::features::compiler::compile(self.definitions.clone(), output_vector.len())?;
-        FeatureExtractor::new(output_vector, compilation, Vec::new())
+        let books = self
+            .order_books
+            .iter()
+            .map(|config| {
+                (
+                    config.symbol,
+                    OrderBook::new(config.update_policy, config.buffer_size),
+                )
+            })
+            .collect();
+        FeatureExtractor::new(output_vector, compilation, books)
     }
 }
 
-fn canonical_sort_key(key: &FeatureKey) -> (bool, String, u8, u8, u8, u128, u128, i64) {
+fn canonical_sort_key(key: &FeatureKey) -> (bool, String, u8, u8, u8, u128, u128, i64, String) {
     let (symbol, kind, source, warmup, aggregation, scalar_identity, utc_offset) = match key {
+        FeatureKey::OrderBookBestBidPrice { symbol, .. } => (*symbol, 14, 32, 0, 0, 0, 0),
+        FeatureKey::OrderBookBestBidSize { symbol, .. } => (*symbol, 15, 32, 0, 0, 0, 0),
+        FeatureKey::OrderBookBestAskPrice { symbol, .. } => (*symbol, 16, 32, 0, 0, 0, 0),
+        FeatureKey::OrderBookBestAskSize { symbol, .. } => (*symbol, 17, 32, 0, 0, 0, 0),
+        FeatureKey::OrderBookLevelSize { symbol, .. } => (*symbol, 18, 32, 0, 0, 0, 0),
+        FeatureKey::OrderBookNthPrice { symbol, .. } => (*symbol, 19, 32, 0, 0, 0, 0),
+        FeatureKey::OrderBookNthSize { symbol, .. } => (*symbol, 20, 32, 0, 0, 0, 0),
+        FeatureKey::OrderBookDepthUntilPrice { symbol, .. } => (*symbol, 21, 32, 0, 0, 0, 0),
+        FeatureKey::OrderBookDepthUntilSizePriceFrom { symbol, .. } => {
+            (*symbol, 22, 32, 0, 0, 0, 0)
+        }
+        FeatureKey::OrderBookDepthUntilSizePriceTo { symbol, .. } => (*symbol, 23, 32, 0, 0, 0, 0),
+        FeatureKey::OrderBookDepthUntilSizeTotalSize { symbol, .. } => {
+            (*symbol, 24, 32, 0, 0, 0, 0)
+        }
+        FeatureKey::OrderBookVolumeBetweenPrices { symbol, .. } => (*symbol, 25, 32, 0, 0, 0, 0),
         FeatureKey::OrderBookMidPrice { symbol, .. } => (*symbol, 8, 32, 0, 0, 0, 0),
         FeatureKey::OrderBookSpread { symbol, .. } => (*symbol, 9, 32, 0, 0, 0, 0),
         FeatureKey::OrderBookSpreadBps { symbol, .. } => (*symbol, 10, 32, 0, 0, 0, 0),
@@ -247,6 +305,12 @@ fn canonical_sort_key(key: &FeatureKey) -> (bool, String, u8, u8, u8, u128, u128
         aggregation,
         scalar_identity,
         utc_offset,
+        // Parameterized book queries compile as separate scalar derivations.
+        if (18..=25).contains(&kind) {
+            crate::FeatureId::from(key).as_str().to_owned()
+        } else {
+            String::new()
+        },
     )
 }
 

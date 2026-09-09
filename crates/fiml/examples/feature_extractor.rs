@@ -14,7 +14,7 @@ use fiml::{
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let btc = symbols::intern("BTCUSDT")?;
     let source = FeatureSource::Field(EventField::Price);
-    let mut extractor = FeatureExtractor::builder(ArrayFeatureVector::<5>::new())
+    let mut extractor = FeatureExtractor::builder(ArrayFeatureVector::<7>::new())
         .add_order_book(btc, OrderBook::new(UpdatePolicy::Contiguous, 8))
         .add_feature(FeatureDefinition::with_default_id(FeatureKey::Ema {
             symbol: btc,
@@ -41,6 +41,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             FeatureKey::OrderBookImbalance {
                 symbol: btc,
                 n_levels: 5,
+            },
+        ))
+        .add_feature(FeatureDefinition::with_default_id(
+            FeatureKey::OrderBookBestAskSize { symbol: btc },
+        ))
+        .add_feature(FeatureDefinition::with_default_id(
+            FeatureKey::OrderBookDepthUntilSizePriceTo {
+                symbol: btc,
+                side: Side::Bid,
+                size: dec!(4),
             },
         ))
         .build()?;

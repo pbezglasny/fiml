@@ -1,6 +1,10 @@
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
+use rust_decimal::Decimal;
+
+use crate::order_book::Side;
+
 use crate::features::derivation::order_book::{OrderBookFeature, OrderBookIndicator};
 use crate::features::derivation::{self, FeatureDerivation};
 use crate::features::feature_extractor::EventRouter;
@@ -48,6 +52,60 @@ pub(crate) struct Compilation {
 /// state or event subscription remain part of the key.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 enum GroupKey {
+    OrderBookLevelSize {
+        symbol: Symbol,
+        side: Side,
+        price: Decimal,
+    },
+    OrderBookNthPrice {
+        symbol: Symbol,
+        side: Side,
+        n_levels: usize,
+    },
+    OrderBookNthSize {
+        symbol: Symbol,
+        side: Side,
+        n_levels: usize,
+    },
+    OrderBookDepthUntilPrice {
+        symbol: Symbol,
+        side: Side,
+        price: Decimal,
+    },
+    OrderBookDepthUntilSizePriceFrom {
+        symbol: Symbol,
+        side: Side,
+        size: Decimal,
+    },
+    OrderBookDepthUntilSizePriceTo {
+        symbol: Symbol,
+        side: Side,
+        size: Decimal,
+    },
+    OrderBookDepthUntilSizeTotalSize {
+        symbol: Symbol,
+        side: Side,
+        size: Decimal,
+    },
+    OrderBookVolumeBetweenPrices {
+        symbol: Symbol,
+        side: Side,
+        from_price: Decimal,
+        to_price: Decimal,
+    },
+
+    OrderBookBestBidPrice {
+        symbol: Symbol,
+    },
+    OrderBookBestBidSize {
+        symbol: Symbol,
+    },
+    OrderBookBestAskPrice {
+        symbol: Symbol,
+    },
+    OrderBookBestAskSize {
+        symbol: Symbol,
+    },
     OrderBookMidPrice {
         symbol: Symbol,
     },
@@ -115,6 +173,18 @@ impl GroupKey {
     fn symbol(&self) -> Symbol {
         match self {
             Self::Sma { symbol, .. }
+            | Self::OrderBookBestBidPrice { symbol, .. }
+            | Self::OrderBookBestBidSize { symbol, .. }
+            | Self::OrderBookBestAskPrice { symbol, .. }
+            | Self::OrderBookBestAskSize { symbol, .. }
+            | Self::OrderBookLevelSize { symbol, .. }
+            | Self::OrderBookNthPrice { symbol, .. }
+            | Self::OrderBookNthSize { symbol, .. }
+            | Self::OrderBookDepthUntilPrice { symbol, .. }
+            | Self::OrderBookDepthUntilSizePriceFrom { symbol, .. }
+            | Self::OrderBookDepthUntilSizePriceTo { symbol, .. }
+            | Self::OrderBookDepthUntilSizeTotalSize { symbol, .. }
+            | Self::OrderBookVolumeBetweenPrices { symbol, .. }
             | Self::OrderBookMidPrice { symbol, .. }
             | Self::OrderBookSpread { symbol, .. }
             | Self::OrderBookSpreadBps { symbol, .. }
@@ -133,7 +203,19 @@ impl GroupKey {
 
     fn route(&self) -> FeatureRoute {
         match self {
-            Self::OrderBookMidPrice { .. }
+            Self::OrderBookBestBidPrice { .. }
+            | Self::OrderBookBestBidSize { .. }
+            | Self::OrderBookBestAskPrice { .. }
+            | Self::OrderBookBestAskSize { .. }
+            | Self::OrderBookLevelSize { .. }
+            | Self::OrderBookNthPrice { .. }
+            | Self::OrderBookNthSize { .. }
+            | Self::OrderBookDepthUntilPrice { .. }
+            | Self::OrderBookDepthUntilSizePriceFrom { .. }
+            | Self::OrderBookDepthUntilSizePriceTo { .. }
+            | Self::OrderBookDepthUntilSizeTotalSize { .. }
+            | Self::OrderBookVolumeBetweenPrices { .. }
+            | Self::OrderBookMidPrice { .. }
             | Self::OrderBookSpread { .. }
             | Self::OrderBookSpreadBps { .. }
             | Self::OrderBookWeightedMidPrice { .. }
@@ -358,8 +440,190 @@ pub(crate) fn compile(
     })
 }
 
+/// Reuses compiler validation when reading or writing a serialized definition.
+#[cfg(feature = "serde")]
+pub(crate) fn validate_key(key: &FeatureKey) -> Result<()> {
+    group_key(0, key).map(|_| ())
+}
+
 fn group_key(index: usize, key: &FeatureKey) -> Result<(GroupKey, GroupOutput)> {
     match *key {
+        FeatureKey::OrderBookBestBidPrice { symbol } => Ok((
+            GroupKey::OrderBookBestBidPrice { symbol },
+            GroupOutput::Scalar,
+        )),
+        FeatureKey::OrderBookBestBidSize { symbol } => Ok((
+            GroupKey::OrderBookBestBidSize { symbol },
+            GroupOutput::Scalar,
+        )),
+        FeatureKey::OrderBookBestAskPrice { symbol } => Ok((
+            GroupKey::OrderBookBestAskPrice { symbol },
+            GroupOutput::Scalar,
+        )),
+        FeatureKey::OrderBookBestAskSize { symbol } => Ok((
+            GroupKey::OrderBookBestAskSize { symbol },
+            GroupOutput::Scalar,
+        )),
+        FeatureKey::OrderBookLevelSize {
+            symbol,
+            side,
+            price,
+        } => {
+            if price < Decimal::ZERO {
+                return invalid_definition(
+                    index,
+                    key,
+                    InvalidIndicatorDefinitionError::OrderBookPriceNegative,
+                );
+            }
+            Ok((
+                GroupKey::OrderBookLevelSize {
+                    symbol,
+                    side,
+                    price,
+                },
+                GroupOutput::Scalar,
+            ))
+        }
+        FeatureKey::OrderBookNthPrice {
+            symbol,
+            side,
+            n_levels,
+        } => {
+            if n_levels == 0 {
+                return invalid_definition(
+                    index,
+                    key,
+                    InvalidIndicatorDefinitionError::OrderBookDepthZero,
+                );
+            }
+            Ok((
+                GroupKey::OrderBookNthPrice {
+                    symbol,
+                    side,
+                    n_levels,
+                },
+                GroupOutput::Scalar,
+            ))
+        }
+        FeatureKey::OrderBookNthSize {
+            symbol,
+            side,
+            n_levels,
+        } => {
+            if n_levels == 0 {
+                return invalid_definition(
+                    index,
+                    key,
+                    InvalidIndicatorDefinitionError::OrderBookDepthZero,
+                );
+            }
+            Ok((
+                GroupKey::OrderBookNthSize {
+                    symbol,
+                    side,
+                    n_levels,
+                },
+                GroupOutput::Scalar,
+            ))
+        }
+        FeatureKey::OrderBookDepthUntilPrice {
+            symbol,
+            side,
+            price,
+        } => {
+            if price < Decimal::ZERO {
+                return invalid_definition(
+                    index,
+                    key,
+                    InvalidIndicatorDefinitionError::OrderBookPriceNegative,
+                );
+            }
+            Ok((
+                GroupKey::OrderBookDepthUntilPrice {
+                    symbol,
+                    side,
+                    price,
+                },
+                GroupOutput::Scalar,
+            ))
+        }
+        FeatureKey::OrderBookDepthUntilSizePriceFrom { symbol, side, size } => {
+            if size <= Decimal::ZERO {
+                return invalid_definition(
+                    index,
+                    key,
+                    InvalidIndicatorDefinitionError::OrderBookSizeNotPositive,
+                );
+            }
+            Ok((
+                GroupKey::OrderBookDepthUntilSizePriceFrom { symbol, side, size },
+                GroupOutput::Scalar,
+            ))
+        }
+        FeatureKey::OrderBookDepthUntilSizePriceTo { symbol, side, size } => {
+            if size <= Decimal::ZERO {
+                return invalid_definition(
+                    index,
+                    key,
+                    InvalidIndicatorDefinitionError::OrderBookSizeNotPositive,
+                );
+            }
+            Ok((
+                GroupKey::OrderBookDepthUntilSizePriceTo { symbol, side, size },
+                GroupOutput::Scalar,
+            ))
+        }
+        FeatureKey::OrderBookDepthUntilSizeTotalSize { symbol, side, size } => {
+            if size <= Decimal::ZERO {
+                return invalid_definition(
+                    index,
+                    key,
+                    InvalidIndicatorDefinitionError::OrderBookSizeNotPositive,
+                );
+            }
+            Ok((
+                GroupKey::OrderBookDepthUntilSizeTotalSize { symbol, side, size },
+                GroupOutput::Scalar,
+            ))
+        }
+        FeatureKey::OrderBookVolumeBetweenPrices {
+            symbol,
+            side,
+            from_price,
+            to_price,
+        } => {
+            if from_price < Decimal::ZERO {
+                return invalid_definition(
+                    index,
+                    key,
+                    InvalidIndicatorDefinitionError::OrderBookPriceNegative,
+                );
+            }
+            if to_price < Decimal::ZERO {
+                return invalid_definition(
+                    index,
+                    key,
+                    InvalidIndicatorDefinitionError::OrderBookPriceNegative,
+                );
+            }
+            if from_price >= to_price {
+                return invalid_definition(
+                    index,
+                    key,
+                    InvalidIndicatorDefinitionError::OrderBookPriceRangeInvalid,
+                );
+            }
+            Ok((
+                GroupKey::OrderBookVolumeBetweenPrices {
+                    symbol,
+                    side,
+                    from_price,
+                    to_price,
+                },
+                GroupOutput::Scalar,
+            ))
+        }
         FeatureKey::OrderBookMidPrice { symbol } => {
             Ok((GroupKey::OrderBookMidPrice { symbol }, GroupOutput::Scalar))
         }
@@ -515,6 +779,131 @@ fn group_key(index: usize, key: &FeatureKey) -> Result<(GroupKey, GroupOutput)> 
 
 fn build_group(group: &FeatureGroup) -> Result<FeatureDerivation> {
     match (&group.key, &group.outputs) {
+        (GroupKey::OrderBookBestBidPrice { symbol }, GroupOutputs::Scalar) => {
+            Ok(FeatureDerivation::OrderBook(OrderBookFeature {
+                symbol: *symbol,
+                indicator: OrderBookIndicator::BestBidPrice,
+            }))
+        }
+        (GroupKey::OrderBookBestBidSize { symbol }, GroupOutputs::Scalar) => {
+            Ok(FeatureDerivation::OrderBook(OrderBookFeature {
+                symbol: *symbol,
+                indicator: OrderBookIndicator::BestBidSize,
+            }))
+        }
+        (GroupKey::OrderBookBestAskPrice { symbol }, GroupOutputs::Scalar) => {
+            Ok(FeatureDerivation::OrderBook(OrderBookFeature {
+                symbol: *symbol,
+                indicator: OrderBookIndicator::BestAskPrice,
+            }))
+        }
+        (GroupKey::OrderBookBestAskSize { symbol }, GroupOutputs::Scalar) => {
+            Ok(FeatureDerivation::OrderBook(OrderBookFeature {
+                symbol: *symbol,
+                indicator: OrderBookIndicator::BestAskSize,
+            }))
+        }
+        (
+            GroupKey::OrderBookLevelSize {
+                symbol,
+                side,
+                price,
+            },
+            GroupOutputs::Scalar,
+        ) => Ok(FeatureDerivation::OrderBook(OrderBookFeature {
+            symbol: *symbol,
+            indicator: OrderBookIndicator::LevelSize {
+                side: *side,
+                price: *price,
+            },
+        })),
+        (
+            GroupKey::OrderBookNthPrice {
+                symbol,
+                side,
+                n_levels,
+            },
+            GroupOutputs::Scalar,
+        ) => Ok(FeatureDerivation::OrderBook(OrderBookFeature {
+            symbol: *symbol,
+            indicator: OrderBookIndicator::NthPrice {
+                side: *side,
+                n_levels: *n_levels,
+            },
+        })),
+        (
+            GroupKey::OrderBookNthSize {
+                symbol,
+                side,
+                n_levels,
+            },
+            GroupOutputs::Scalar,
+        ) => Ok(FeatureDerivation::OrderBook(OrderBookFeature {
+            symbol: *symbol,
+            indicator: OrderBookIndicator::NthSize {
+                side: *side,
+                n_levels: *n_levels,
+            },
+        })),
+        (
+            GroupKey::OrderBookDepthUntilPrice {
+                symbol,
+                side,
+                price,
+            },
+            GroupOutputs::Scalar,
+        ) => Ok(FeatureDerivation::OrderBook(OrderBookFeature {
+            symbol: *symbol,
+            indicator: OrderBookIndicator::DepthUntilPrice {
+                side: *side,
+                price: *price,
+            },
+        })),
+        (
+            GroupKey::OrderBookDepthUntilSizePriceFrom { symbol, side, size },
+            GroupOutputs::Scalar,
+        ) => Ok(FeatureDerivation::OrderBook(OrderBookFeature {
+            symbol: *symbol,
+            indicator: OrderBookIndicator::DepthUntilSizePriceFrom {
+                side: *side,
+                size: *size,
+            },
+        })),
+        (GroupKey::OrderBookDepthUntilSizePriceTo { symbol, side, size }, GroupOutputs::Scalar) => {
+            Ok(FeatureDerivation::OrderBook(OrderBookFeature {
+                symbol: *symbol,
+                indicator: OrderBookIndicator::DepthUntilSizePriceTo {
+                    side: *side,
+                    size: *size,
+                },
+            }))
+        }
+        (
+            GroupKey::OrderBookDepthUntilSizeTotalSize { symbol, side, size },
+            GroupOutputs::Scalar,
+        ) => Ok(FeatureDerivation::OrderBook(OrderBookFeature {
+            symbol: *symbol,
+            indicator: OrderBookIndicator::DepthUntilSizeTotalSize {
+                side: *side,
+                size: *size,
+            },
+        })),
+        (
+            GroupKey::OrderBookVolumeBetweenPrices {
+                symbol,
+                side,
+                from_price,
+                to_price,
+            },
+            GroupOutputs::Scalar,
+        ) => Ok(FeatureDerivation::OrderBook(OrderBookFeature {
+            symbol: *symbol,
+            indicator: OrderBookIndicator::VolumeBetweenPrices {
+                side: *side,
+                from_price: *from_price,
+                to_price: *to_price,
+            },
+        })),
         (GroupKey::OrderBookMidPrice { symbol }, GroupOutputs::Scalar) => {
             Ok(FeatureDerivation::OrderBook(OrderBookFeature {
                 symbol: *symbol,
@@ -775,6 +1164,26 @@ fn route_for_source(source: FeatureSource, symbol: Symbol) -> FeatureRoute {
 
 fn group_kind(key: &GroupKey) -> IndicatorKind {
     match key {
+        GroupKey::OrderBookBestBidPrice { .. } => IndicatorKind::OrderBookBestBidPrice,
+        GroupKey::OrderBookBestBidSize { .. } => IndicatorKind::OrderBookBestBidSize,
+        GroupKey::OrderBookBestAskPrice { .. } => IndicatorKind::OrderBookBestAskPrice,
+        GroupKey::OrderBookBestAskSize { .. } => IndicatorKind::OrderBookBestAskSize,
+        GroupKey::OrderBookLevelSize { .. } => IndicatorKind::OrderBookLevelSize,
+        GroupKey::OrderBookNthPrice { .. } => IndicatorKind::OrderBookNthPrice,
+        GroupKey::OrderBookNthSize { .. } => IndicatorKind::OrderBookNthSize,
+        GroupKey::OrderBookDepthUntilPrice { .. } => IndicatorKind::OrderBookDepthUntilPrice,
+        GroupKey::OrderBookDepthUntilSizePriceFrom { .. } => {
+            IndicatorKind::OrderBookDepthUntilSizePriceFrom
+        }
+        GroupKey::OrderBookDepthUntilSizePriceTo { .. } => {
+            IndicatorKind::OrderBookDepthUntilSizePriceTo
+        }
+        GroupKey::OrderBookDepthUntilSizeTotalSize { .. } => {
+            IndicatorKind::OrderBookDepthUntilSizeTotalSize
+        }
+        GroupKey::OrderBookVolumeBetweenPrices { .. } => {
+            IndicatorKind::OrderBookVolumeBetweenPrices
+        }
         GroupKey::OrderBookMidPrice { .. } => IndicatorKind::OrderBookMidPrice,
         GroupKey::OrderBookSpread { .. } => IndicatorKind::OrderBookSpread,
         GroupKey::OrderBookSpreadBps { .. } => IndicatorKind::OrderBookSpreadBps,
@@ -794,6 +1203,26 @@ fn group_kind(key: &GroupKey) -> IndicatorKind {
 
 fn group_kind_from_feature_key(key: &FeatureKey) -> IndicatorKind {
     match key {
+        FeatureKey::OrderBookBestBidPrice { .. } => IndicatorKind::OrderBookBestBidPrice,
+        FeatureKey::OrderBookBestBidSize { .. } => IndicatorKind::OrderBookBestBidSize,
+        FeatureKey::OrderBookBestAskPrice { .. } => IndicatorKind::OrderBookBestAskPrice,
+        FeatureKey::OrderBookBestAskSize { .. } => IndicatorKind::OrderBookBestAskSize,
+        FeatureKey::OrderBookLevelSize { .. } => IndicatorKind::OrderBookLevelSize,
+        FeatureKey::OrderBookNthPrice { .. } => IndicatorKind::OrderBookNthPrice,
+        FeatureKey::OrderBookNthSize { .. } => IndicatorKind::OrderBookNthSize,
+        FeatureKey::OrderBookDepthUntilPrice { .. } => IndicatorKind::OrderBookDepthUntilPrice,
+        FeatureKey::OrderBookDepthUntilSizePriceFrom { .. } => {
+            IndicatorKind::OrderBookDepthUntilSizePriceFrom
+        }
+        FeatureKey::OrderBookDepthUntilSizePriceTo { .. } => {
+            IndicatorKind::OrderBookDepthUntilSizePriceTo
+        }
+        FeatureKey::OrderBookDepthUntilSizeTotalSize { .. } => {
+            IndicatorKind::OrderBookDepthUntilSizeTotalSize
+        }
+        FeatureKey::OrderBookVolumeBetweenPrices { .. } => {
+            IndicatorKind::OrderBookVolumeBetweenPrices
+        }
         FeatureKey::OrderBookMidPrice { .. } => IndicatorKind::OrderBookMidPrice,
         FeatureKey::OrderBookSpread { .. } => IndicatorKind::OrderBookSpread,
         FeatureKey::OrderBookSpreadBps { .. } => IndicatorKind::OrderBookSpreadBps,

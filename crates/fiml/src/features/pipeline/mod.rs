@@ -42,6 +42,14 @@ where
         Ok(update_result)
     }
 
+    /// Returns visible book state for inspection and ingestion validation.
+    pub fn order_book_of_symbol(
+        &self,
+        symbol: crate::Symbol,
+    ) -> Option<&crate::order_book::OrderBook> {
+        self.feature_extractor.order_book_of_symbol(symbol)
+    }
+
     /// Returns the raw extractor vector, including reserved cells.
     pub fn raw_values(&self) -> &[f64] {
         self.feature_extractor.feature_vector().values()

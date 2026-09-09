@@ -8,7 +8,8 @@
 
 use std::{collections::HashMap, time::Duration};
 
-use fiml::order_book::OrderBookDelta;
+use fiml::order_book::{OrderBookConfig, UpdatePolicy};
+mod order_book;
 use fiml::{
     Event, EventField, EventKind, FeatureDefinition, FeatureExtractor as RustFeatureExtractor,
     FeatureExtractorSpec as CoreFeatureExtractorSpec, FeatureId, FeatureKey, FeatureSource,
@@ -17,14 +18,13 @@ use fiml::{
 };
 use numpy::ndarray::Array2;
 use numpy::{Element, IntoPyArray, PyArray1, PyReadonlyArray1};
+use order_book::OrderBookEvent;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 
 /// Event-kind codes for the columnar `transform`/`update` API. They mirror the
 /// extractor's event kinds. Each kind reads only the payload columns it needs
-/// (see [`FeatureExtractor::build_event`]); `OrderBook` dispatches fine even
-/// though no builtin feature subscribes to it yet (the dispatch is a no-op
-/// until one does).
+/// Book payloads use `OrderBookEvent` and the dedicated book replay methods.
 const KIND_PRICE: u8 = 0;
 const KIND_VOLUME: u8 = 1;
 const KIND_TRADE: u8 = 2;
@@ -187,6 +187,7 @@ impl FeatureExtractorSpec {
             capacity,
             self.core.checksum().map(str::to_owned),
         )
+        .and_then(|core| core.with_order_books(self.core.order_books().iter().copied()))
         .map_err(|error| PyValueError::new_err(error.to_string()))?;
         Ok(())
     }
@@ -444,6 +445,305 @@ impl FeatureExtractorSpec {
             aggregation,
             window,
             warmup_policy: warmup.into(),
+        })])?;
+        Ok(slf)
+    }
+
+    /// Configures a fresh book; parameters are preserved in the saved artifact.
+    #[pyo3(signature = (symbol, *, update_policy, buffer_size))]
+    fn configure_order_book<'py>(
+        mut slf: PyRefMut<'py, Self>,
+        symbol: &str,
+        update_policy: &str,
+        buffer_size: usize,
+    ) -> PyResult<PyRefMut<'py, Self>> {
+        let policy = match update_policy {
+            "monotonic" => UpdatePolicy::Monotonic,
+            "contiguous" => UpdatePolicy::Contiguous,
+            _ => {
+                return Err(PyValueError::new_err(
+                    "update_policy must be monotonic or contiguous",
+                ));
+            }
+        };
+        let mut configs = slf.core.order_books().to_vec();
+        configs.push(OrderBookConfig::new(
+            intern_symbol(symbol)?,
+            policy,
+            buffer_size,
+        ));
+        slf.core = slf
+            .core
+            .clone()
+            .with_order_books(configs)
+            .map_err(|error| PyValueError::new_err(error.to_string()))?;
+        Ok(slf)
+    }
+
+    /// Adds the order_book_mid_price scalar output for a configured book.
+    fn order_book_mid_price<'py>(
+        mut slf: PyRefMut<'py, Self>,
+        symbol: &str,
+    ) -> PyResult<PyRefMut<'py, Self>> {
+        slf.add_group([definition(FeatureKey::OrderBookMidPrice {
+            symbol: intern_symbol(symbol)?,
+        })])?;
+        Ok(slf)
+    }
+
+    /// Adds the order_book_spread scalar output for a configured book.
+    fn order_book_spread<'py>(
+        mut slf: PyRefMut<'py, Self>,
+        symbol: &str,
+    ) -> PyResult<PyRefMut<'py, Self>> {
+        slf.add_group([definition(FeatureKey::OrderBookSpread {
+            symbol: intern_symbol(symbol)?,
+        })])?;
+        Ok(slf)
+    }
+
+    /// Adds the order_book_spread_bps scalar output for a configured book.
+    fn order_book_spread_bps<'py>(
+        mut slf: PyRefMut<'py, Self>,
+        symbol: &str,
+    ) -> PyResult<PyRefMut<'py, Self>> {
+        slf.add_group([definition(FeatureKey::OrderBookSpreadBps {
+            symbol: intern_symbol(symbol)?,
+        })])?;
+        Ok(slf)
+    }
+
+    /// Adds the order_book_weighted_mid_price scalar output for a configured book.
+    fn order_book_weighted_mid_price<'py>(
+        mut slf: PyRefMut<'py, Self>,
+        symbol: &str,
+    ) -> PyResult<PyRefMut<'py, Self>> {
+        slf.add_group([definition(FeatureKey::OrderBookWeightedMidPrice {
+            symbol: intern_symbol(symbol)?,
+        })])?;
+        Ok(slf)
+    }
+
+    /// Adds the order_book_microprice scalar output for a configured book.
+    fn order_book_microprice<'py>(
+        mut slf: PyRefMut<'py, Self>,
+        symbol: &str,
+    ) -> PyResult<PyRefMut<'py, Self>> {
+        slf.add_group([definition(FeatureKey::OrderBookMicroprice {
+            symbol: intern_symbol(symbol)?,
+        })])?;
+        Ok(slf)
+    }
+
+    /// Adds the order_book_best_bid_price scalar output for a configured book.
+    fn order_book_best_bid_price<'py>(
+        mut slf: PyRefMut<'py, Self>,
+        symbol: &str,
+    ) -> PyResult<PyRefMut<'py, Self>> {
+        slf.add_group([definition(FeatureKey::OrderBookBestBidPrice {
+            symbol: intern_symbol(symbol)?,
+        })])?;
+        Ok(slf)
+    }
+
+    /// Adds the order_book_best_bid_size scalar output for a configured book.
+    fn order_book_best_bid_size<'py>(
+        mut slf: PyRefMut<'py, Self>,
+        symbol: &str,
+    ) -> PyResult<PyRefMut<'py, Self>> {
+        slf.add_group([definition(FeatureKey::OrderBookBestBidSize {
+            symbol: intern_symbol(symbol)?,
+        })])?;
+        Ok(slf)
+    }
+
+    /// Adds the order_book_best_ask_price scalar output for a configured book.
+    fn order_book_best_ask_price<'py>(
+        mut slf: PyRefMut<'py, Self>,
+        symbol: &str,
+    ) -> PyResult<PyRefMut<'py, Self>> {
+        slf.add_group([definition(FeatureKey::OrderBookBestAskPrice {
+            symbol: intern_symbol(symbol)?,
+        })])?;
+        Ok(slf)
+    }
+
+    /// Adds the order_book_best_ask_size scalar output for a configured book.
+    fn order_book_best_ask_size<'py>(
+        mut slf: PyRefMut<'py, Self>,
+        symbol: &str,
+    ) -> PyResult<PyRefMut<'py, Self>> {
+        slf.add_group([definition(FeatureKey::OrderBookBestAskSize {
+            symbol: intern_symbol(symbol)?,
+        })])?;
+        Ok(slf)
+    }
+
+    /// Adds grouped imbalance depths in the supplied order.
+    fn order_book_imbalance<'py>(
+        mut slf: PyRefMut<'py, Self>,
+        symbol: &str,
+        n_levels: Vec<usize>,
+    ) -> PyResult<PyRefMut<'py, Self>> {
+        if n_levels.is_empty() || n_levels.len() > 16 || n_levels.contains(&0) {
+            return Err(PyValueError::new_err(
+                "imbalance requires one to sixteen positive depths",
+            ));
+        }
+        let symbol = intern_symbol(symbol)?;
+        slf.add_group(
+            n_levels
+                .into_iter()
+                .map(|n_levels| definition(FeatureKey::OrderBookImbalance { symbol, n_levels })),
+        )?;
+        Ok(slf)
+    }
+
+    /// Adds an exact book query; side is bid or ask and prices/sizes are strings.
+    fn order_book_level_size<'py>(
+        mut slf: PyRefMut<'py, Self>,
+        symbol: &str,
+        side: &str,
+        price: &str,
+    ) -> PyResult<PyRefMut<'py, Self>> {
+        let price = order_book::decimal(price)?;
+        slf.add_group([definition(FeatureKey::OrderBookLevelSize {
+            symbol: intern_symbol(symbol)?,
+            side: order_book::side(side)?,
+            price,
+        })])?;
+        Ok(slf)
+    }
+
+    /// Adds an exact book query; side is bid or ask and prices/sizes are strings.
+    fn order_book_nth_price<'py>(
+        mut slf: PyRefMut<'py, Self>,
+        symbol: &str,
+        side: &str,
+        n_levels: usize,
+    ) -> PyResult<PyRefMut<'py, Self>> {
+        if n_levels == 0 {
+            return Err(PyValueError::new_err("n_levels must be positive"));
+        }
+        slf.add_group([definition(FeatureKey::OrderBookNthPrice {
+            symbol: intern_symbol(symbol)?,
+            side: order_book::side(side)?,
+            n_levels,
+        })])?;
+        Ok(slf)
+    }
+
+    /// Adds an exact book query; side is bid or ask and prices/sizes are strings.
+    fn order_book_nth_size<'py>(
+        mut slf: PyRefMut<'py, Self>,
+        symbol: &str,
+        side: &str,
+        n_levels: usize,
+    ) -> PyResult<PyRefMut<'py, Self>> {
+        if n_levels == 0 {
+            return Err(PyValueError::new_err("n_levels must be positive"));
+        }
+        slf.add_group([definition(FeatureKey::OrderBookNthSize {
+            symbol: intern_symbol(symbol)?,
+            side: order_book::side(side)?,
+            n_levels,
+        })])?;
+        Ok(slf)
+    }
+
+    /// Adds an exact book query; side is bid or ask and prices/sizes are strings.
+    fn order_book_depth_until_price<'py>(
+        mut slf: PyRefMut<'py, Self>,
+        symbol: &str,
+        side: &str,
+        price: &str,
+    ) -> PyResult<PyRefMut<'py, Self>> {
+        let price = order_book::decimal(price)?;
+        slf.add_group([definition(FeatureKey::OrderBookDepthUntilPrice {
+            symbol: intern_symbol(symbol)?,
+            side: order_book::side(side)?,
+            price,
+        })])?;
+        Ok(slf)
+    }
+
+    /// Adds an exact book query; side is bid or ask and prices/sizes are strings.
+    fn order_book_depth_until_size_price_from<'py>(
+        mut slf: PyRefMut<'py, Self>,
+        symbol: &str,
+        side: &str,
+        size: &str,
+    ) -> PyResult<PyRefMut<'py, Self>> {
+        let size = order_book::decimal(size)?;
+        if size.is_zero() {
+            return Err(PyValueError::new_err("target size must be positive"));
+        }
+        slf.add_group([definition(FeatureKey::OrderBookDepthUntilSizePriceFrom {
+            symbol: intern_symbol(symbol)?,
+            side: order_book::side(side)?,
+            size,
+        })])?;
+        Ok(slf)
+    }
+
+    /// Adds an exact book query; side is bid or ask and prices/sizes are strings.
+    fn order_book_depth_until_size_price_to<'py>(
+        mut slf: PyRefMut<'py, Self>,
+        symbol: &str,
+        side: &str,
+        size: &str,
+    ) -> PyResult<PyRefMut<'py, Self>> {
+        let size = order_book::decimal(size)?;
+        if size.is_zero() {
+            return Err(PyValueError::new_err("target size must be positive"));
+        }
+        slf.add_group([definition(FeatureKey::OrderBookDepthUntilSizePriceTo {
+            symbol: intern_symbol(symbol)?,
+            side: order_book::side(side)?,
+            size,
+        })])?;
+        Ok(slf)
+    }
+
+    /// Adds an exact book query; side is bid or ask and prices/sizes are strings.
+    fn order_book_depth_until_size_total_size<'py>(
+        mut slf: PyRefMut<'py, Self>,
+        symbol: &str,
+        side: &str,
+        size: &str,
+    ) -> PyResult<PyRefMut<'py, Self>> {
+        let size = order_book::decimal(size)?;
+        if size.is_zero() {
+            return Err(PyValueError::new_err("target size must be positive"));
+        }
+        slf.add_group([definition(FeatureKey::OrderBookDepthUntilSizeTotalSize {
+            symbol: intern_symbol(symbol)?,
+            side: order_book::side(side)?,
+            size,
+        })])?;
+        Ok(slf)
+    }
+
+    /// Adds an exact book query; side is bid or ask and prices/sizes are strings.
+    fn order_book_volume_between_prices<'py>(
+        mut slf: PyRefMut<'py, Self>,
+        symbol: &str,
+        side: &str,
+        from_price: &str,
+        to_price: &str,
+    ) -> PyResult<PyRefMut<'py, Self>> {
+        let from_price = order_book::decimal(from_price)?;
+        let to_price = order_book::decimal(to_price)?;
+        if from_price >= to_price {
+            return Err(PyValueError::new_err(
+                "from_price must be less than to_price",
+            ));
+        }
+        slf.add_group([definition(FeatureKey::OrderBookVolumeBetweenPrices {
+            symbol: intern_symbol(symbol)?,
+            side: order_book::side(side)?,
+            from_price,
+            to_price,
         })])?;
         Ok(slf)
     }
@@ -722,6 +1022,7 @@ fn complete_names(active_ids: &[String], capacity: usize) -> Vec<String> {
 /// validation, replay, and output buffering while retaining their concrete
 /// Rust runtime types.
 trait EventRuntime {
+    fn has_order_book(&self, symbol: Symbol) -> bool;
     fn handle_event(&mut self, event: Event) -> fiml::Result<()>;
     fn last_timestamp(&self) -> Option<i64>;
     fn last_timestamp_for_symbol(&self, symbol: Symbol) -> Option<i64>;
@@ -729,6 +1030,9 @@ trait EventRuntime {
 }
 
 impl EventRuntime for CoreFeatureExtractor {
+    fn has_order_book(&self, symbol: Symbol) -> bool {
+        self.order_book_of_symbol(symbol).is_some()
+    }
     fn handle_event(&mut self, event: Event) -> fiml::Result<()> {
         RustFeatureExtractor::handle_event(self, event).map(|_| ())
     }
@@ -747,6 +1051,9 @@ impl EventRuntime for CoreFeatureExtractor {
 }
 
 impl EventRuntime for CorePipeline {
+    fn has_order_book(&self, symbol: Symbol) -> bool {
+        self.order_book_of_symbol(symbol).is_some()
+    }
     fn handle_event(&mut self, event: Event) -> fiml::Result<()> {
         RustPipeline::handle_event(self, event).map(|_| ())
     }
@@ -850,8 +1157,8 @@ where
         price: Option<f64>,
         volume: Option<f64>,
         side: Option<u8>,
-        bid: Option<f64>,
-        ask: Option<f64>,
+        _bid: Option<f64>,
+        _ask: Option<f64>,
     ) -> PyResult<Event> {
         let event = match kind {
             KIND_PRICE => {
@@ -870,13 +1177,9 @@ where
                 side.map(parse_trade_side).transpose()?,
             ),
             KIND_ORDERBOOK => {
-                let _ = require("bid", bid)?;
-                let _ = require("ask", ask)?;
-                Event::order_book_delta(
-                    self.symbol_at(symbol)?,
-                    timestamp,
-                    OrderBookDelta::new(0, Vec::new()),
-                )
+                return Err(PyValueError::new_err(
+                    "KIND_ORDERBOOK no longer accepts bid/ask scalars; use OrderBookEvent with update_order_book or transform_order_book",
+                ));
             }
             KIND_TIME => Event::time(timestamp),
             other => {
@@ -959,6 +1262,43 @@ where
         }
 
         let mut symbol_timestamps = HashMap::new();
+        self.replay_events(py, events)
+    }
+
+    fn validate_order_book(&self, symbol: Symbol) -> PyResult<()> {
+        if !self.inner.has_order_book(symbol) {
+            return Err(PyValueError::new_err(
+                FimlError::OrderBookNotConfigured { symbol }.to_string(),
+            ));
+        }
+        Ok(())
+    }
+
+    fn update_order_book(&mut self, event: &OrderBookEvent) -> PyResult<()> {
+        self.validate_order_book(event.symbol)?;
+        self.inner
+            .handle_event(event.event())
+            .map_err(|error| PyValueError::new_err(error.to_string()))
+    }
+
+    fn transform_order_book(
+        &mut self,
+        py: Python<'_>,
+        events: Vec<PyRef<'_, OrderBookEvent>>,
+    ) -> PyResult<Py<PyAny>> {
+        let mut prepared = Vec::with_capacity(events.len());
+        for (row, event) in events.iter().enumerate() {
+            self.validate_order_book(event.symbol).map_err(|error| {
+                PyValueError::new_err(format!("row {row}: {}", error.value(py)))
+            })?;
+            prepared.push(event.event());
+        }
+        self.replay_events(py, prepared)
+    }
+
+    fn replay_events(&mut self, py: Python<'_>, events: Vec<Event>) -> PyResult<Py<PyAny>> {
+        let n_rows = events.len();
+        let mut previous_timestamp = self.inner.last_timestamp();
         for (row, event) in events.iter().enumerate() {
             let previous_timestamp = symbol_timestamps
                 .entry(event.symbol())
@@ -1072,6 +1412,22 @@ fn column<'a, T: Element>(
 
 #[pymethods]
 impl FeatureExtractor {
+    /// Applies a validated snapshot/delta, preserving core synchronization semantics.
+    fn update_order_book(&mut self, event: PyRef<'_, OrderBookEvent>) -> PyResult<()> {
+        self.driver.update_order_book(&event)
+    }
+
+    /// Prevalidates symbols/timestamps, then replays book events sequentially.
+    /// A state-dependent error reports row N; prior rows remain applied and later
+    /// rows are skipped. The rejected row retains core resynchronization effects.
+    fn transform_order_book(
+        &mut self,
+        py: Python<'_>,
+        events: Vec<PyRef<'_, OrderBookEvent>>,
+    ) -> PyResult<Py<PyAny>> {
+        self.driver.transform_order_book(py, events)
+    }
+
     /// Build an extractor directly from a [`FeatureExtractorSpec`].
     #[new]
     #[pyo3(signature = (feature_extractor_spec, output_dtype="float64"))]
@@ -1146,7 +1502,7 @@ impl FeatureExtractor {
     /// Pass only the payload values the event kind needs (see
     /// [`transform`](Self::transform) for the per-kind columns): e.g.
     /// `update(KIND_PRICE, sym, ts, price=...)` or
-    /// `update(KIND_ORDERBOOK, sym, ts, bid=..., ask=...)`.
+    /// `update_order_book(OrderBookEvent.snapshot(...))`.
     #[pyo3(signature = (
         kind,
         symbol,
@@ -1183,7 +1539,7 @@ impl FeatureExtractor {
     /// - `KIND_PRICE` -> `price`
     /// - `KIND_VOLUME` -> `volume`
     /// - `KIND_TRADE` -> `price`, `volume`, and optional `side`
-    /// - `KIND_ORDERBOOK` -> `bid` and `ask`
+    /// - `KIND_ORDERBOOK` -> rejected; use `transform_order_book`
     /// - `KIND_TIME` -> none
     ///
     /// Required price and volume values must be finite; zero and negative values
@@ -1268,6 +1624,22 @@ impl ModelInputPipeline {
 
 #[pymethods]
 impl ModelInputPipeline {
+    /// Applies a validated snapshot/delta, preserving core synchronization semantics.
+    fn update_order_book(&mut self, event: PyRef<'_, OrderBookEvent>) -> PyResult<()> {
+        self.driver.update_order_book(&event)
+    }
+
+    /// Prevalidates symbols/timestamps, then replays book events sequentially.
+    /// A state-dependent error reports row N; prior rows remain applied and later
+    /// rows are skipped. The rejected row retains core resynchronization effects.
+    fn transform_order_book(
+        &mut self,
+        py: Python<'_>,
+        events: Vec<PyRef<'_, OrderBookEvent>>,
+    ) -> PyResult<Py<PyAny>> {
+        self.driver.transform_order_book(py, events)
+    }
+
     /// Compile a validated model-input spec into an independent runtime.
     #[new]
     #[pyo3(signature = (pipeline_spec, output_dtype="float64"))]
@@ -1400,6 +1772,7 @@ impl ModelInputPipeline {
 
 #[pymodule]
 fn _fiml(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add_class::<OrderBookEvent>()?;
     m.add_class::<PyWarmupPolicy>()?;
     m.add_class::<FeatureExtractorSpec>()?;
     m.add_class::<PipelineSpec>()?;

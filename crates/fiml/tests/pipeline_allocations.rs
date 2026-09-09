@@ -114,18 +114,60 @@ fn allocation_counter_detects_heap_allocation() {
 }
 
 #[test]
-fn order_book_derivation_with_grouped_depths_does_not_allocate() {
-    use fiml::FeatureExtractor;
+fn configured_book_derivation_and_transformation_do_not_allocate() {
     use fiml::order_book::{
-        OrderBook, OrderBookDelta, OrderBookLevel, OrderBookLevelUpdate, OrderBookSnapshot, Side,
-        UpdatePolicy,
+        OrderBookConfig, OrderBookDelta, OrderBookLevel, OrderBookLevelUpdate, OrderBookSnapshot,
+        Side, UpdatePolicy,
     };
     use rust_decimal::{Decimal, dec};
 
     let symbol = Symbol::new("book-allocations").unwrap();
-    let mut builder = FeatureExtractor::builder(ArrayFeatureVector::<7>::new())
-        .add_order_book(symbol, OrderBook::new(UpdatePolicy::Contiguous, 128));
-    for key in [
+    let definitions = [
+        FeatureKey::OrderBookBestBidPrice { symbol },
+        FeatureKey::OrderBookBestBidSize { symbol },
+        FeatureKey::OrderBookBestAskPrice { symbol },
+        FeatureKey::OrderBookBestAskSize { symbol },
+        FeatureKey::OrderBookLevelSize {
+            symbol,
+            side: Side::Bid,
+            price: dec!(100),
+        },
+        FeatureKey::OrderBookNthPrice {
+            symbol,
+            side: Side::Bid,
+            n_levels: 1,
+        },
+        FeatureKey::OrderBookNthSize {
+            symbol,
+            side: Side::Bid,
+            n_levels: 1,
+        },
+        FeatureKey::OrderBookDepthUntilPrice {
+            symbol,
+            side: Side::Bid,
+            price: dec!(100),
+        },
+        FeatureKey::OrderBookDepthUntilSizePriceFrom {
+            symbol,
+            side: Side::Bid,
+            size: dec!(1),
+        },
+        FeatureKey::OrderBookDepthUntilSizePriceTo {
+            symbol,
+            side: Side::Bid,
+            size: dec!(1),
+        },
+        FeatureKey::OrderBookDepthUntilSizeTotalSize {
+            symbol,
+            side: Side::Bid,
+            size: dec!(1),
+        },
+        FeatureKey::OrderBookVolumeBetweenPrices {
+            symbol,
+            side: Side::Bid,
+            from_price: dec!(99),
+            to_price: dec!(103),
+        },
         FeatureKey::OrderBookMidPrice { symbol },
         FeatureKey::OrderBookSpread { symbol },
         FeatureKey::OrderBookSpreadBps { symbol },
@@ -139,10 +181,32 @@ fn order_book_derivation_with_grouped_depths_does_not_allocate() {
             symbol,
             n_levels: 10,
         },
-    ] {
-        builder = builder.add_feature(FeatureDefinition::with_default_id(key));
-    }
-    let mut extractor = builder.build().unwrap();
+    ]
+    .map(FeatureDefinition::with_default_id);
+    let input = definitions[0].id.clone();
+    let spec = FeatureExtractorSpec::new(definitions)
+        .unwrap()
+        .with_order_books([OrderBookConfig::new(symbol, UpdatePolicy::Contiguous, 128)])
+        .unwrap();
+    let model = PipelineSpec::new(
+        spec,
+        [
+            TransformerDefinition::standard_scale(
+                input.clone(),
+                FeatureId::new("scaled_quote"),
+                100.0,
+                2.0,
+            ),
+            TransformerDefinition::lagged(input, FeatureId::new("previous_quote"), 1),
+        ],
+    )
+    .unwrap();
+    let mut extractor = model
+        .build(
+            ArrayFeatureVector::<19>::new(),
+            ArrayFeatureVector::<2>::new(),
+        )
+        .unwrap();
     extractor
         .handle_event(Event::order_book_snapshot(
             symbol,
@@ -173,7 +237,7 @@ fn order_book_derivation_with_grouped_depths_does_not_allocate() {
         for event in events {
             assert_eq!(
                 black_box(extractor.handle_event(event).unwrap()).features_updated,
-                6
+                18
             );
         }
     });

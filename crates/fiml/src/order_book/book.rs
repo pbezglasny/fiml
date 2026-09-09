@@ -12,13 +12,17 @@ use crate::{
 };
 
 use super::book_side::BookSide;
+/// Whole-level price range and cumulative size needed to reach a target quantity.
+/// The final level is included in full, so `total_size` may exceed the target.
 pub struct DepthUntilSizeResult {
     pub price_from: Decimal,
     pub price_to: Decimal,
     pub total_size: Decimal,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(rename_all = "snake_case"))]
 pub enum UpdatePolicy {
     /// Update IDs must increase, but gaps are allowed and do not desynchronize the book.
     Monotonic,

@@ -9,9 +9,19 @@
     "capacity": { "type": "integer", "minimum": 0 },
     "length": { "type": "integer", "minimum": 0 },
     "checksum": { "type": "string" },
-    "features": { "type": "array", "items": { "$ref": "#/$defs/group" } }
+    "features": { "type": "array", "items": { "$ref": "#/$defs/group" } },
+    "order_books": { "type": "array", "items": { "$ref": "#/$defs/orderBookConfig" } }
   },
   "$defs": {
+    "orderBookConfig": {
+      "type": "object", "additionalProperties": false,
+      "required": ["symbol", "update_policy", "buffer_size"],
+      "properties": {
+        "symbol": { "type": "string", "minLength": 1, "not": { "const": "__global__" } },
+        "update_policy": { "enum": ["monotonic", "contiguous"] },
+        "buffer_size": { "type": "integer", "minimum": 0 }
+      }
+    },
     "group": {
       "type": "object", "additionalProperties": false,
       "required": ["symbol", "indicators"],
@@ -24,7 +34,7 @@
       "type": "object", "additionalProperties": false,
       "required": ["kind", "source"],
       "properties": {
-        "kind": { "enum": ["sma", "ema", "cvd", "sma_timed", "obv_timed", "trade_count_timed", "day_of_week", "time_since_first_event_of_day", "order_book_mid_price", "order_book_spread", "order_book_spread_bps", "order_book_weighted_mid_price", "order_book_microprice", "order_book_imbalance"] },
+        "kind": { "enum": ["sma", "ema", "cvd", "sma_timed", "obv_timed", "trade_count_timed", "day_of_week", "time_since_first_event_of_day", "order_book_mid_price", "order_book_spread", "order_book_spread_bps", "order_book_weighted_mid_price", "order_book_microprice", "order_book_imbalance", "order_book_best_bid_price", "order_book_best_bid_size", "order_book_best_ask_price", "order_book_best_ask_size", "order_book_level_size", "order_book_nth_price", "order_book_nth_size", "order_book_depth_until_price", "order_book_depth_until_size_price_from", "order_book_depth_until_size_price_to", "order_book_depth_until_size_total_size", "order_book_volume_between_prices"] },
         "source": { "$ref": "#/$defs/source" },
         "warmup_policy": { "enum": ["first_value", "full_window"] },
         "options": { "$ref": "#/$defs/options" },
@@ -37,9 +47,27 @@
             "properties": {
               "source": { "const": { "type": "order_book" } },
               "warmup_policy": false,
-              "options": { "maxProperties": 0 },
               "outputs": { "maxItems": 16, "items": { "not": { "required": ["window"] } } }
             },
+            "allOf": [
+              {
+                "if": {"properties": {"kind": {"enum": ["order_book_level_size", "order_book_nth_price", "order_book_nth_size", "order_book_depth_until_price", "order_book_depth_until_size_price_from", "order_book_depth_until_size_price_to", "order_book_depth_until_size_total_size", "order_book_volume_between_prices"]}}},
+                "then": {
+                  "required": ["options"],
+                  "oneOf": [
+                    {"properties": {"kind": {"const": "order_book_level_size"}, "options": {"type": "object", "additionalProperties": false, "required": ["side", "price"], "properties": {"side": {"enum": ["bid", "ask"]}, "price": {"type": "string", "pattern": "^\\+?(?:[0-9]+(?:\\.[0-9]*)?|\\.[0-9]+)$"}}}}},
+                    {"properties": {"kind": {"const": "order_book_nth_price"}, "options": {"type": "object", "additionalProperties": false, "required": ["side", "n_levels"], "properties": {"side": {"enum": ["bid", "ask"]}, "n_levels": {"type": "integer", "minimum": 1}}}}},
+                    {"properties": {"kind": {"const": "order_book_nth_size"}, "options": {"type": "object", "additionalProperties": false, "required": ["side", "n_levels"], "properties": {"side": {"enum": ["bid", "ask"]}, "n_levels": {"type": "integer", "minimum": 1}}}}},
+                    {"properties": {"kind": {"const": "order_book_depth_until_price"}, "options": {"type": "object", "additionalProperties": false, "required": ["side", "price"], "properties": {"side": {"enum": ["bid", "ask"]}, "price": {"type": "string", "pattern": "^\\+?(?:[0-9]+(?:\\.[0-9]*)?|\\.[0-9]+)$"}}}}},
+                    {"properties": {"kind": {"const": "order_book_depth_until_size_price_from"}, "options": {"type": "object", "additionalProperties": false, "required": ["side", "size"], "properties": {"side": {"enum": ["bid", "ask"]}, "size": {"type": "string", "pattern": "^\\+?(?=.*[1-9])(?:[0-9]+(?:\\.[0-9]*)?|\\.[0-9]+)$"}}}}},
+                    {"properties": {"kind": {"const": "order_book_depth_until_size_price_to"}, "options": {"type": "object", "additionalProperties": false, "required": ["side", "size"], "properties": {"side": {"enum": ["bid", "ask"]}, "size": {"type": "string", "pattern": "^\\+?(?=.*[1-9])(?:[0-9]+(?:\\.[0-9]*)?|\\.[0-9]+)$"}}}}},
+                    {"properties": {"kind": {"const": "order_book_depth_until_size_total_size"}, "options": {"type": "object", "additionalProperties": false, "required": ["side", "size"], "properties": {"side": {"enum": ["bid", "ask"]}, "size": {"type": "string", "pattern": "^\\+?(?=.*[1-9])(?:[0-9]+(?:\\.[0-9]*)?|\\.[0-9]+)$"}}}}},
+                    {"properties": {"kind": {"const": "order_book_volume_between_prices"}, "options": {"type": "object", "additionalProperties": false, "required": ["side", "from_price", "to_price"], "properties": {"side": {"enum": ["bid", "ask"]}, "from_price": {"type": "string", "pattern": "^\\+?(?:[0-9]+(?:\\.[0-9]*)?|\\.[0-9]+)$"}, "to_price": {"type": "string", "pattern": "^\\+?(?:[0-9]+(?:\\.[0-9]*)?|\\.[0-9]+)$"}}}}}
+                  ]
+                },
+                "else": {"properties": {"options": {"maxProperties": 0}}}
+              }
+            ],
             "if": { "properties": { "kind": { "const": "order_book_imbalance" } } },
             "then": {
               "required": ["outputs"],
@@ -52,6 +80,7 @@
           "else": {
             "properties": {
               "source": { "not": { "properties": { "type": { "const": "order_book" } } } },
+              "options": { "properties": {"side": false, "price": false, "size": false, "from_price": false, "to_price": false, "n_levels": false} },
               "outputs": { "items": { "not": { "required": ["n_levels"] } } }
             }
           }
@@ -119,6 +148,13 @@
     "options": {
       "type": "object", "additionalProperties": false,
       "properties": {
+        "side": {"enum": ["bid", "ask"]},
+        "price": {"type": "string"},
+        "size": {"type": "string"},
+        "from_price": {"type": "string"},
+        "to_price": {"type": "string"},
+        "n_levels": {"type": "integer", "minimum": 1},
+
         "aggregation": { "$ref": "#/$defs/duration" },
         "utc_offset": { "type": "string", "pattern": "^[+-][0-9]{2}:[0-9]{2}$" }
       }

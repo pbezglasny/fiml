@@ -519,3 +519,324 @@ fn book_json_rejects_inapplicable_parameters_and_invalid_depths() {
         .remove("outputs");
     assert!(serde_json::from_value::<FeatureExtractorSpec>(global).is_err());
 }
+
+fn remaining_keys(symbol: Symbol) -> Vec<FeatureKey> {
+    let mut keys = vec![
+        FeatureKey::OrderBookBestBidPrice { symbol },
+        FeatureKey::OrderBookBestBidSize { symbol },
+        FeatureKey::OrderBookBestAskPrice { symbol },
+        FeatureKey::OrderBookBestAskSize { symbol },
+    ];
+    for (side, price) in [(Side::Bid, dec!(99)), (Side::Ask, dec!(103))] {
+        keys.extend([
+            FeatureKey::OrderBookLevelSize {
+                symbol,
+                side,
+                price,
+            },
+            FeatureKey::OrderBookNthPrice {
+                symbol,
+                side,
+                n_levels: 2,
+            },
+            FeatureKey::OrderBookNthSize {
+                symbol,
+                side,
+                n_levels: 2,
+            },
+            FeatureKey::OrderBookDepthUntilPrice {
+                symbol,
+                side,
+                price,
+            },
+            FeatureKey::OrderBookDepthUntilSizePriceFrom {
+                symbol,
+                side,
+                size: dec!(4),
+            },
+            FeatureKey::OrderBookDepthUntilSizePriceTo {
+                symbol,
+                side,
+                size: dec!(4),
+            },
+            FeatureKey::OrderBookDepthUntilSizeTotalSize {
+                symbol,
+                side,
+                size: dec!(4),
+            },
+            FeatureKey::OrderBookVolumeBetweenPrices {
+                symbol,
+                side,
+                from_price: dec!(99),
+                to_price: dec!(103),
+            },
+        ]);
+    }
+    keys
+}
+
+#[test]
+fn derives_remaining_queries_on_both_sides_and_clears_missing_values() {
+    let symbol = Symbol::new("remaining-book-queries").unwrap();
+    let mut builder = FeatureExtractor::builder(ArrayFeatureVector::<20>::new())
+        .add_order_book(symbol, OrderBook::new(UpdatePolicy::Contiguous, 8));
+    for key in remaining_keys(symbol) {
+        builder = builder.add_feature(FeatureDefinition::with_default_id(key));
+    }
+    let mut extractor = builder.build().unwrap();
+    assert!(
+        extractor
+            .feature_vector()
+            .values()
+            .iter()
+            .all(|v| v.is_nan())
+    );
+    assert_eq!(
+        extractor
+            .handle_event(Event::order_book_snapshot(symbol, 1, snapshot(1)))
+            .unwrap()
+            .features_updated,
+        20
+    );
+    assert_values(
+        extractor.feature_vector().values(),
+        &[
+            100.0, 2.0, 102.0, 3.0, 6.0, 99.0, 6.0, 8.0, 100.0, 99.0, 8.0, 8.0, 1.0, 103.0, 1.0,
+            4.0, 102.0, 103.0, 4.0, 3.0,
+        ],
+    );
+    extractor
+        .handle_event(delta(symbol, 2, 2, dec!(4)))
+        .unwrap();
+    let expected = [
+        100.0, 4.0, 102.0, 3.0, 6.0, 99.0, 6.0, 10.0, 100.0, 100.0, 4.0, 10.0, 1.0, 103.0, 1.0,
+        4.0, 102.0, 103.0, 4.0, 3.0,
+    ];
+    assert_values(extractor.feature_vector().values(), &expected);
+    for event in [Event::price(symbol, 10.0, 3), delta(symbol, 4, 2, dec!(10))] {
+        assert_eq!(extractor.handle_event(event).unwrap().features_updated, 0);
+        assert_values(extractor.feature_vector().values(), &expected);
+    }
+    assert!(
+        extractor
+            .handle_event(delta(symbol, 5, 4, dec!(12)))
+            .is_err()
+    );
+    assert_values(extractor.feature_vector().values(), &expected);
+    // Snapshot resynchronization also replays the buffered update before deriving.
+    extractor
+        .handle_event(Event::order_book_snapshot(symbol, 6, snapshot(3)))
+        .unwrap();
+    assert_eq!(extractor.feature_vector().values()[1], 12.0);
+    assert_eq!(extractor.feature_vector().values()[10], 12.0);
+
+    let nan = f64::NAN;
+    extractor
+        .handle_event(Event::order_book_snapshot(
+            symbol,
+            7,
+            OrderBookSnapshot::new(5, vec![OrderBookLevel::new(dec!(100), dec!(2))], vec![]),
+        ))
+        .unwrap();
+    assert_values(
+        extractor.feature_vector().values(),
+        &[
+            100.0, 2.0, nan, nan, nan, nan, nan, 2.0, nan, nan, nan, 2.0, nan, nan, nan, 0.0, nan,
+            nan, nan, 0.0,
+        ],
+    );
+    extractor
+        .handle_event(Event::order_book_delta(
+            symbol,
+            8,
+            OrderBookDelta::new(
+                6,
+                vec![OrderBookLevelUpdate::new(
+                    Side::Bid,
+                    dec!(100),
+                    Decimal::ZERO,
+                )],
+            ),
+        ))
+        .unwrap();
+    assert_values(
+        extractor.feature_vector().values(),
+        &[
+            nan, nan, nan, nan, nan, nan, nan, 0.0, nan, nan, nan, 0.0, nan, nan, nan, 0.0, nan,
+            nan, nan, 0.0,
+        ],
+    );
+}
+
+#[test]
+fn remaining_queries_validate_parameters_and_preserve_identity() {
+    let symbol = Symbol::new("book-query-validation").unwrap();
+    let side = Side::Bid;
+    for key in remaining_keys(symbol) {
+        assert!(matches!(
+            FeatureExtractor::builder(ArrayFeatureVector::<1>::new())
+                .add_feature(FeatureDefinition::with_default_id(key))
+                .build(),
+            Err(FimlError::OrderBookNotConfigured { .. })
+        ));
+    }
+    for key in [
+        FeatureKey::OrderBookNthPrice {
+            symbol,
+            side,
+            n_levels: 0,
+        },
+        FeatureKey::OrderBookNthSize {
+            symbol,
+            side,
+            n_levels: 0,
+        },
+        FeatureKey::OrderBookLevelSize {
+            symbol,
+            side,
+            price: dec!(-1),
+        },
+        FeatureKey::OrderBookDepthUntilPrice {
+            symbol,
+            side,
+            price: dec!(-1),
+        },
+        FeatureKey::OrderBookDepthUntilSizePriceFrom {
+            symbol,
+            side,
+            size: dec!(0),
+        },
+        FeatureKey::OrderBookDepthUntilSizePriceTo {
+            symbol,
+            side,
+            size: dec!(-1),
+        },
+        FeatureKey::OrderBookDepthUntilSizeTotalSize {
+            symbol,
+            side,
+            size: dec!(0),
+        },
+        FeatureKey::OrderBookVolumeBetweenPrices {
+            symbol,
+            side,
+            from_price: dec!(1),
+            to_price: dec!(1),
+        },
+        FeatureKey::OrderBookVolumeBetweenPrices {
+            symbol,
+            side,
+            from_price: dec!(2),
+            to_price: dec!(1),
+        },
+        FeatureKey::OrderBookVolumeBetweenPrices {
+            symbol,
+            side,
+            from_price: dec!(-1),
+            to_price: dec!(1),
+        },
+    ] {
+        assert!(matches!(
+            FeatureExtractor::builder(ArrayFeatureVector::<1>::new())
+                .add_feature(FeatureDefinition::with_default_id(key))
+                .build(),
+            Err(FimlError::InvalidIndicatorDefinition { .. })
+        ));
+        #[cfg(feature = "serde")]
+        assert!(
+            serde_json::to_string(
+                &FeatureExtractorSpec::new([FeatureDefinition::with_default_id(key)]).unwrap()
+            )
+            .is_err()
+        );
+    }
+    let key = FeatureKey::OrderBookLevelSize {
+        symbol,
+        side,
+        price: dec!(100.00),
+    };
+    let equivalent = FeatureKey::OrderBookLevelSize {
+        symbol,
+        side,
+        price: dec!(100),
+    };
+    assert_eq!(key, equivalent);
+    assert_eq!(FeatureId::from(&key), FeatureId::from(&equivalent));
+    assert_eq!(
+        FeatureId::from(&key).as_str(),
+        "order_book_level_size:symbol=21:book-query-validation:source=order_book:side=bid:price=100"
+    );
+    assert!(matches!(
+        FeatureExtractor::builder(ArrayFeatureVector::<2>::new())
+            .add_feature(FeatureDefinition::new(key, FeatureId::new("one")))
+            .add_feature(FeatureDefinition::new(equivalent, FeatureId::new("two")))
+            .build(),
+        Err(FimlError::InvalidIndicatorDefinition {
+            reason: InvalidIndicatorDefinitionError::DuplicateFeatureKey,
+            ..
+        })
+    ));
+}
+
+#[cfg(feature = "serde")]
+#[test]
+fn remaining_queries_round_trip_and_reject_invalid_wire_parameters() {
+    let symbol = Symbol::new("book-query-wire").unwrap();
+    let mut definitions: Vec<_> = remaining_keys(symbol)
+        .into_iter()
+        .map(FeatureDefinition::with_default_id)
+        .collect();
+    definitions.push(FeatureDefinition::new(
+        FeatureKey::OrderBookLevelSize {
+            symbol,
+            side: Side::Ask,
+            price: dec!(100.12345678901234567890123456),
+        },
+        FeatureId::new("precise-level"),
+    ));
+    let spec = FeatureExtractorSpec::new(definitions).unwrap();
+    assert_eq!(spec.indicator_count(), 21);
+    let json = serde_json::to_value(&spec).unwrap();
+    assert_eq!(
+        serde_json::from_value::<FeatureExtractorSpec>(json.clone()).unwrap(),
+        spec
+    );
+    let mut builder = FeatureExtractor::builder(ArrayFeatureVector::<21>::new())
+        .add_order_book(symbol, OrderBook::new(UpdatePolicy::Contiguous, 8));
+    for definition in spec.definitions() {
+        builder = builder.add_feature(definition.clone());
+    }
+    let extractor = builder.build().unwrap();
+    assert_eq!(
+        extractor.feature_ids(),
+        spec.definitions()
+            .iter()
+            .map(|d| d.id.clone())
+            .collect::<Vec<_>>()
+    );
+
+    let base = serde_json::json!({"version":"1.0", "capacity":1, "length":1, "features":[{
+        "symbol":"book-query-wire", "indicators":[{"kind":"order_book_level_size", "source":{"type":"order_book"}, "options":{"side":"bid", "price":"100"}}]
+    }]});
+    for options in [
+        serde_json::json!({"side":"wrong", "price":"100"}),
+        serde_json::json!({"side":"bid", "price":100}),
+        serde_json::json!({"side":"bid", "price":"-1"}),
+        serde_json::json!({"side":"bid", "price":"0.12345678901234567890123456789"}),
+        serde_json::json!({"side":"bid"}),
+        serde_json::json!({"side":"bid", "price":"100", "size":"2"}),
+        serde_json::json!({"side":"bid", "price":"100", "aggregation":"1s"}),
+    ] {
+        let mut invalid = base.clone();
+        invalid["features"][0]["indicators"][0]["options"] = options;
+        assert!(serde_json::from_value::<FeatureExtractorSpec>(invalid).is_err());
+    }
+    for kind in [
+        "order_book_mid_price",
+        "sma_timed",
+        "time_since_first_event_of_day",
+    ] {
+        let mut invalid = base.clone();
+        invalid["features"][0]["indicators"][0]["kind"] = kind.into();
+        assert!(serde_json::from_value::<FeatureExtractorSpec>(invalid).is_err());
+    }
+}

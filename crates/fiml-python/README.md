@@ -267,7 +267,7 @@ needs:
 | price | `KIND_PRICE` | `price` |
 | volume | `KIND_VOLUME` | `volume` |
 | trade | `KIND_TRADE` | `price`, `volume`, optional `side` |
-| order book | `KIND_ORDERBOOK` | `bid`, `ask` |
+| order book | `OrderBookEvent` | snapshot levels or delta changes; separate methods below |
 | time | `KIND_TIME` | — |
 
 A row whose kind needs a column you did not pass raises `ValueError` naming
@@ -275,8 +275,8 @@ that column; any column you do pass must match the length of `kind`. All rows
 are validated **before** the first dispatch, so a bad row never leaves the
 extractor half-stepped. Rows must be nondecreasing by timestamp within each symbol and
 are dispatched in array order. `update(...)` takes the same keyword payloads as
-scalars. `KIND_ORDERBOOK` dispatches today but no builtin feature subscribes to
-it yet, so it does not change output on its own.
+scalars. The obsolete `KIND_ORDERBOOK` placeholder raises a migration error;
+use `OrderBookEvent` for real snapshots and deltas.
 
 For both extractors and pipelines, required price and volume payloads must be
 finite, even for unsubscribed symbols. NaN and ±infinity raise `ValueError`
@@ -286,6 +286,74 @@ in the error, leaving the whole batch unapplied. A rejected first input does
 not lock `output_dtype`. Unused payload columns are ignored. These low-level
 APIs accept finite zero and negative values; DataFrame `compute_features`
 continues to require strictly positive values.
+
+## Order-book configuration and replay
+
+Book features use the same raw extractor and model-input pipeline as trade
+features. Configure every required symbol before constructing a runtime:
+
+```python
+raw = (fiml.FeatureExtractorSpec()
+       .configure_order_book("BTCUSDT", update_policy="contiguous", buffer_size=8)
+       .order_book_mid_price("BTCUSDT")
+       .order_book_imbalance("BTCUSDT", [5, 1])
+       .order_book_best_bid_size("BTCUSDT"))
+extractor = fiml.FeatureExtractor.from_json(raw.to_json())
+rows = extractor.transform_order_book([
+    fiml.OrderBookEvent.snapshot("BTCUSDT", 1, 1,
+        [("98", "2"), ("97", "6")], [("102", "2"), ("103", "6")]),
+    fiml.OrderBookEvent.delta("BTCUSDT", 2, 2, [("bid", "98", "6")]),
+])
+```
+
+`configure_order_book(symbol, *, update_policy, buffer_size)` serializes only
+construction parameters. Policies are `contiguous` (consecutive IDs) and
+`monotonic` (increasing IDs, gaps allowed). Duplicate/global symbols are rejected;
+missing books fail runtime construction. Rebuilding from JSON starts fresh with
+`NaN` outputs. Buffer capacity bounds retained deltas; zero capacity retains the
+core's behavior and raises a capacity error when a delta needs retention.
+
+Builders are `order_book_mid_price`, `order_book_spread`, `order_book_spread_bps`,
+`order_book_weighted_mid_price`, `order_book_microprice`, and
+`order_book_imbalance(symbol, n_levels)`. Imbalance accepts a list of one to
+sixteen positive depths in output order. Quote builders are
+`order_book_best_bid_price`, `order_book_best_bid_size`,
+`order_book_best_ask_price`, and `order_book_best_ask_size`.
+
+The remaining query builders take `(symbol, side, ...)`, with side `bid` or `ask`:
+
+| Builder suffix after `order_book_` | Additional parameters |
+| --- | --- |
+| `level_size`, `depth_until_price` | `price` |
+| `nth_price`, `nth_size` | positive integer `n_levels` |
+| `depth_until_size_price_from`, `depth_until_size_price_to`, `depth_until_size_total_size` | positive `size` |
+| `volume_between_prices` | `from_price`, `to_price`, with increasing bounds |
+
+Prices and sizes in queries and events are **decimal strings**, never floats.
+Out-of-range precision and negative values raise errors without rounding.
+Snapshots accept `(price, size)` pairs; deltas accept `(side, price, size)` triples.
+Both lists and tuples are accepted. Zero size deletes a level. Event symbols are
+names, independent of numeric `symbol()` handles. Timestamps are signed int64
+milliseconds and update IDs are unsigned uint64.
+
+Both runtimes expose `update_order_book(event)` and
+`transform_order_book(events)`. The batch method returns one raw or model row
+per accepted event, using the configured output dtype. Constructors validate
+payloads; batch processing validates all configured symbols and timestamp order
+before any event applies. These errors leave the entire batch unapplied.
+Sequence gaps, stale snapshots, and history-capacity errors depend on book state:
+the batch stops with `row N:` context, keeps earlier accepted rows, and performs
+the rejected row's core synchronization transition. Later rows do not apply.
+Inspect `values()` (and pipeline `raw_values()`) and send a snapshot to
+resynchronize; do not blindly replay the accepted prefix. Rejected rows preserve
+raw/model outputs and the timestamp watermark. Buffered and stale delta events
+leave book outputs unchanged; accepted events still advance pipeline lag history.
+
+Python payload/output conversion and book storage may allocate. Rust book feature
+derivation and model transformations allocate no memory during dispatch.
+See `examples/order_book_replay.py` for a runnable serialized pipeline example;
+`tests/fixtures/order_book_replay.json` is replayed by both Rust and Python tests
+with exact float64 expectations, including errors and missing values.
 
 ## Determinism rules (read these)
 
