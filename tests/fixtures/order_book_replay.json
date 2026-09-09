@@ -1,6 +1,6 @@
 {
   "pipeline": {
-    "version": "1.0",
+    "version": "2.0",
     "feature_extractor": {
       "version": "1.0",
       "capacity": 21,
@@ -278,6 +278,7 @@
       ]
     },
     "model_input": {
+      "stages": [],
       "capacity": 5,
       "length": 4,
       "transformations": [

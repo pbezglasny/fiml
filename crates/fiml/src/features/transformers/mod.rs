@@ -90,21 +90,29 @@ impl TransformerDefinition {
             }
         }
         if let Self::StandardScale { mean, scale, .. } = self {
-            if !mean.is_finite() {
-                return Err(InvalidTransformationDefinitionError::MeanNotFinite);
-            }
-            if !scale.is_finite() {
-                return Err(InvalidTransformationDefinitionError::ScaleNotFinite);
-            }
-            if *scale <= 0.0 {
-                return Err(InvalidTransformationDefinitionError::ScaleNotPositive);
-            }
-            if !(1.0 / *scale).is_finite() {
-                return Err(InvalidTransformationDefinitionError::InverseScaleNotFinite);
-            }
+            validate_standard_scale(*mean, *scale)?;
         }
         Ok(())
     }
+}
+
+pub(crate) fn validate_standard_scale(
+    mean: f64,
+    scale: f64,
+) -> Result<(), InvalidTransformationDefinitionError> {
+    if !mean.is_finite() {
+        return Err(InvalidTransformationDefinitionError::MeanNotFinite);
+    }
+    if !scale.is_finite() {
+        return Err(InvalidTransformationDefinitionError::ScaleNotFinite);
+    }
+    if scale <= 0.0 {
+        return Err(InvalidTransformationDefinitionError::ScaleNotPositive);
+    }
+    if !(1.0 / scale).is_finite() {
+        return Err(InvalidTransformationDefinitionError::InverseScaleNotFinite);
+    }
+    Ok(())
 }
 
 /// Compiles validated scalar definitions, sharing history between lags of one input.

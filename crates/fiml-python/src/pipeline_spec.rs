@@ -1,8 +1,8 @@
 //! Defines model transformations and the Python-facing pipeline specification.
 
 use fiml::{
-    FeatureExtractorSpec as CoreFeatureExtractorSpec, FeatureId, PipelineSpec as CorePipelineSpec,
-    TransformerDefinition,
+    FeatureExtractorSpec as CoreFeatureExtractorSpec, FeatureId, FittedStage,
+    PipelineSpec as CorePipelineSpec, TransformerDefinition,
 };
 use pyo3::{exceptions::PyValueError, prelude::*};
 
@@ -16,13 +16,9 @@ pub(crate) fn core_feature_ids(spec: &CoreFeatureExtractorSpec) -> Vec<String> {
 }
 
 pub(crate) fn model_output_ids(spec: &CorePipelineSpec) -> Vec<String> {
-    spec.transformation_definitions()
+    spec.output_ids()
         .iter()
-        .map(|definition| match definition {
-            TransformerDefinition::Identity { output, .. }
-            | TransformerDefinition::Lagged { output, .. }
-            | TransformerDefinition::StandardScale { output, .. } => output.as_str().to_owned(),
-        })
+        .map(|id| id.as_str().to_owned())
         .collect()
 }
 
@@ -31,6 +27,7 @@ pub(crate) fn model_output_ids(spec: &CorePipelineSpec) -> Vec<String> {
 /// The raw spec is cloned at construction so later Python builder mutations do
 /// not change the model artifact. Transformations remain in authored order.
 #[pyclass]
+#[derive(Clone)]
 pub struct PipelineSpec {
     pub(crate) core: CorePipelineSpec,
     explicit_capacity: bool,
@@ -38,6 +35,11 @@ pub struct PipelineSpec {
 
 impl PipelineSpec {
     fn add_transformation(&mut self, definition: TransformerDefinition) -> PyResult<()> {
+        if !self.core.stages().is_empty() {
+            return Err(PyValueError::new_err(
+                "cannot append scalar transformations after fitted stages",
+            ));
+        }
         let mut definitions = self.core.transformation_definitions().to_vec();
         definitions.push(definition);
         let capacity = if self.explicit_capacity {
@@ -55,10 +57,72 @@ impl PipelineSpec {
         self.core = candidate;
         Ok(())
     }
+
+    fn add_stage(&mut self, stage: FittedStage) -> PyResult<()> {
+        let capacity = if self.explicit_capacity {
+            self.core.feature_vector_capacity()
+        } else {
+            stage.outputs().len()
+        };
+        let stages = self.core.stages().iter().cloned().chain([stage]);
+        let candidate = CorePipelineSpec::with_stages(
+            self.core.raw_feature_extractor_spec().clone(),
+            self.core.transformation_definitions().to_vec(),
+            stages,
+            capacity,
+            self.core.checksum().map(str::to_owned),
+        )
+        .map_err(|error| PyValueError::new_err(error.to_string()))?;
+        self.core = candidate;
+        Ok(())
+    }
 }
 
 #[pymethods]
 impl PipelineSpec {
+    /// Number of already fitted vector stages.
+    #[getter]
+    fn stage_count(&self) -> usize {
+        self.core.stages().len()
+    }
+
+    /// Independent snapshot retaining whether final capacity was explicitly authored.
+    fn copy(&self) -> Self {
+        self.clone()
+    }
+
+    /// Append a fitted vector scaler, preserving the current active IDs.
+    fn scale_stage<'py>(
+        mut slf: PyRefMut<'py, Self>,
+        mean: Vec<f64>,
+        scale: Vec<f64>,
+    ) -> PyResult<PyRefMut<'py, Self>> {
+        let outputs = slf.core.output_ids();
+        slf.add_stage(FittedStage::StandardScale {
+            outputs,
+            mean,
+            scale,
+        })?;
+        Ok(slf)
+    }
+
+    /// Append fitted PCA state; component rows follow output order.
+    fn pca_stage<'py>(
+        mut slf: PyRefMut<'py, Self>,
+        outputs: Vec<String>,
+        mean: Vec<f64>,
+        components: Vec<Vec<f64>>,
+        output_scale: Vec<f64>,
+    ) -> PyResult<PyRefMut<'py, Self>> {
+        slf.add_stage(FittedStage::Pca {
+            outputs: outputs.into_iter().map(FeatureId::new).collect(),
+            mean,
+            components,
+            output_scale,
+        })?;
+        Ok(slf)
+    }
+
     #[new]
     #[pyo3(signature = (raw_feature_extractor_spec, *, capacity=None, checksum=None))]
     fn new(

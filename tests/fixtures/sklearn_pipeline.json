@@ -1,0 +1,197 @@
+{
+  "pipeline": {
+    "version": "2.0",
+    "feature_extractor": {
+      "version": "1.0",
+      "capacity": 3,
+      "length": 3,
+      "features": [
+        {
+          "symbol": "btcusdt",
+          "indicators": [
+            {
+              "kind": "sma",
+              "source": {
+                "type": "field",
+                "event": "trade",
+                "field": "price"
+              },
+              "warmup_policy": "full_window",
+              "outputs": [
+                {
+                  "window": 1
+                },
+                {
+                  "window": 3
+                },
+                {
+                  "window": 5
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "model_input": {
+      "capacity": 2,
+      "length": 2,
+      "transformations": [
+        {
+          "type": "identity",
+          "input": "sma:symbol=7:btcusdt:source=field.trade_price:window=1:warmup=full_window",
+          "output": "sma:symbol=7:btcusdt:source=field.trade_price:window=1:warmup=full_window"
+        },
+        {
+          "type": "identity",
+          "input": "sma:symbol=7:btcusdt:source=field.trade_price:window=3:warmup=full_window",
+          "output": "sma:symbol=7:btcusdt:source=field.trade_price:window=3:warmup=full_window"
+        },
+        {
+          "type": "identity",
+          "input": "sma:symbol=7:btcusdt:source=field.trade_price:window=5:warmup=full_window",
+          "output": "sma:symbol=7:btcusdt:source=field.trade_price:window=5:warmup=full_window"
+        },
+        {
+          "type": "lagged",
+          "input": "sma:symbol=7:btcusdt:source=field.trade_price:window=1:warmup=full_window",
+          "output": "lag2",
+          "lag_window": 2
+        }
+      ],
+      "stages": [
+        {
+          "type": "standard_scale",
+          "outputs": [
+            "sma:symbol=7:btcusdt:source=field.trade_price:window=1:warmup=full_window",
+            "sma:symbol=7:btcusdt:source=field.trade_price:window=3:warmup=full_window",
+            "sma:symbol=7:btcusdt:source=field.trade_price:window=5:warmup=full_window",
+            "lag2"
+          ],
+          "mean": [
+            18.875,
+            17.708333333333336,
+            16.55,
+            16.625
+          ],
+          "scale": [
+            3.585997071945263,
+            2.796016511634603,
+            2.727178028658929,
+            3.5685256059050494
+          ]
+        },
+        {
+          "type": "pca",
+          "outputs": [
+            "pca__pc0",
+            "pca__pc1"
+          ],
+          "mean": [
+            -2.7755575615628914e-17,
+            -7.771561172376096e-16,
+            -2.7755575615628914e-16,
+            0.0
+          ],
+          "components": [
+            [
+              0.4947535171794026,
+              0.5062083309488264,
+              0.49503557318585245,
+              0.5038966800815108
+            ],
+            [
+              -0.6023235333081286,
+              0.34792555373998785,
+              0.6184172836399029,
+              -0.3656695688369192
+            ]
+          ],
+          "output_scale": [
+            2.090033159768736,
+            0.4328398603358663
+          ]
+        }
+      ]
+    }
+  },
+  "symbol": "BTCUSDT",
+  "timestamp": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11
+  ],
+  "price": [
+    10.0,
+    12.0,
+    11.0,
+    15.0,
+    13.0,
+    18.0,
+    16.0,
+    20.0,
+    17.0,
+    23.0,
+    19.0,
+    25.0
+  ],
+  "expected": [
+    [
+      null,
+      null
+    ],
+    [
+      null,
+      null
+    ],
+    [
+      null,
+      null
+    ],
+    [
+      null,
+      null
+    ],
+    [
+      -1.5535070681692706,
+      -0.021027999520717322
+    ],
+    [
+      -0.6121169552694935,
+      -1.3992323580311208
+    ],
+    [
+      -0.7809103723340317,
+      0.36529972214600304
+    ],
+    [
+      0.17939883196404208,
+      -0.7568126190289465
+    ],
+    [
+      -0.14789610506622058,
+      0.9945590234666803
+    ],
+    [
+      0.8942464410093012,
+      -0.5621433987739122
+    ],
+    [
+      0.41600753338355023,
+      1.709245099338474
+    ],
+    [
+      1.6047776944821228,
+      -0.32988746959646015
+    ]
+  ]
+}

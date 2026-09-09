@@ -16,7 +16,8 @@ dynamic = ["version"]
 
 [project.optional-dependencies]
 pandas = ["pandas>=2.0"]
-test = ["pandas>=2.0", "pytest>=8.0", "jsonschema>=4.0"]
+sklearn = ["scikit-learn>=1.9,<1.10"]
+test = ["pandas>=2.0", "pytest>=8.0", "jsonschema>=4.0", "scikit-learn>=1.9,<1.10"]
 
 [tool.maturin]
 # Mixed layout: the compiled module is `fiml._fiml`, re-exported by the pure

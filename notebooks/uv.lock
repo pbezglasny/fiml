@@ -152,8 +152,10 @@ requires-dist = [
     { name = "pandas", marker = "extra == 'pandas'", specifier = ">=2.0" },
     { name = "pandas", marker = "extra == 'test'", specifier = ">=2.0" },
     { name = "pytest", marker = "extra == 'test'", specifier = ">=8.0" },
+    { name = "scikit-learn", marker = "extra == 'sklearn'", specifier = ">=1.9,<1.10" },
+    { name = "scikit-learn", marker = "extra == 'test'", specifier = ">=1.9,<1.10" },
 ]
-provides-extras = ["pandas", "test"]
+provides-extras = ["pandas", "sklearn", "test"]
 
 [[package]]
 name = "h11"

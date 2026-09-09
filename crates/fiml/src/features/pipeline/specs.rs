@@ -1,4 +1,4 @@
-use super::Pipeline;
+use super::{FittedStage, Pipeline, StageRuntime};
 use crate::{
     FeatureExtractorSpec, FeatureVector, FimlError, InvalidArgumentError,
     InvalidTransformationDefinitionError, Result, TransformerDefinition,
@@ -6,12 +6,14 @@ use crate::{
 
 /// Validated configuration for raw extraction and the final model-input layout.
 ///
-/// Transformations remain in authored order, which is also final vector order.
-/// Raw and final IDs occupy separate layouts and may therefore use the same name.
+/// Scalar transformations define the base order; each fitted stage consumes that
+/// layout or the preceding stage. The last stage owns the final vector layout.
+/// Layouts have separate ID namespaces and may therefore reuse names.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PipelineSpec {
     raw_feature_extractor_spec: FeatureExtractorSpec,
     transformation_definitions: Vec<TransformerDefinition>,
+    stages: Vec<FittedStage>,
     feature_vector_capacity: usize,
     checksum: Option<String>,
 }
@@ -53,12 +55,36 @@ impl PipelineSpec {
         feature_vector_capacity: usize,
         checksum: Option<String>,
     ) -> Result<Self> {
+        Self::with_stages(
+            raw_feature_extractor_spec,
+            transformation_definitions,
+            [],
+            feature_vector_capacity,
+            checksum,
+        )
+    }
+
+    /// Validates a base scalar layout followed by fitted vector stages.
+    /// Capacity describes the final output, independently of intermediate widths.
+    pub fn with_stages(
+        raw_feature_extractor_spec: FeatureExtractorSpec,
+        transformation_definitions: impl IntoIterator<Item = TransformerDefinition>,
+        stages: impl IntoIterator<Item = FittedStage>,
+        feature_vector_capacity: usize,
+        checksum: Option<String>,
+    ) -> Result<Self> {
         let transformation_definitions = transformation_definitions.into_iter().collect::<Vec<_>>();
-        if feature_vector_capacity < transformation_definitions.len() {
+        let stages = stages.into_iter().collect::<Vec<_>>();
+        let final_length = stages
+            .last()
+            .map_or(transformation_definitions.len(), |stage| {
+                stage.outputs().len()
+            });
+        if feature_vector_capacity < final_length {
             return Err(FimlError::InvalidArgument(
                 InvalidArgumentError::FeatureVectorCapacityTooSmall {
                     capacity: feature_vector_capacity,
-                    active_length: transformation_definitions.len(),
+                    active_length: final_length,
                 },
             ));
         }
@@ -94,9 +120,24 @@ impl PipelineSpec {
                 .map_err(|reason| FimlError::InvalidTransformationDefinition { index, reason })?;
         }
 
+        if !stages.is_empty() {
+            let base_ids = transformation_definitions
+                .iter()
+                .map(|definition| definition.output().clone())
+                .collect::<Vec<_>>();
+            let mut inputs = base_ids.as_slice();
+            for (index, stage) in stages.iter().enumerate() {
+                stage
+                    .validate(inputs)
+                    .map_err(|reason| FimlError::InvalidPipelineStage { index, reason })?;
+                inputs = stage.outputs();
+            }
+        }
+
         Ok(Self {
             raw_feature_extractor_spec,
             transformation_definitions,
+            stages,
             feature_vector_capacity,
             checksum,
         })
@@ -107,7 +148,7 @@ impl PipelineSpec {
         &self.raw_feature_extractor_spec
     }
 
-    /// Returns scalar transformations in final model-vector order.
+    /// Returns scalar transformations in base-vector order.
     pub fn transformation_definitions(&self) -> &[TransformerDefinition] {
         &self.transformation_definitions
     }
@@ -119,7 +160,28 @@ impl PipelineSpec {
 
     /// Returns the number of active final outputs.
     pub fn feature_vector_length(&self) -> usize {
-        self.transformation_definitions.len()
+        self.stages
+            .last()
+            .map_or(self.transformation_definitions.len(), |stage| {
+                stage.outputs().len()
+            })
+    }
+
+    /// Fitted vector stages in execution order.
+    pub fn stages(&self) -> &[FittedStage] {
+        &self.stages
+    }
+
+    /// Final active IDs, resolved on the cold configuration path.
+    pub fn output_ids(&self) -> Vec<crate::FeatureId> {
+        match self.stages.last() {
+            Some(stage) => stage.outputs().to_vec(),
+            None => self
+                .transformation_definitions
+                .iter()
+                .map(|definition| definition.output().clone())
+                .collect(),
+        }
     }
 
     /// Returns opaque checksum metadata without interpreting or verifying it.
@@ -143,9 +205,9 @@ impl PipelineSpec {
                 actual: model_vector.capacity(),
             });
         }
-        if model_vector.len() != self.transformation_definitions.len() {
+        if model_vector.len() != self.feature_vector_length() {
             return Err(FimlError::ModelVectorLengthMismatch {
-                expected: self.transformation_definitions.len(),
+                expected: self.feature_vector_length(),
                 actual: model_vector.len(),
             });
         }
@@ -155,11 +217,7 @@ impl PipelineSpec {
             &self.transformation_definitions,
             &feature_extractor,
         );
-        let output_ids = self
-            .transformation_definitions
-            .iter()
-            .map(|definition| definition.output().clone())
-            .collect();
+        let output_ids = self.output_ids().into_boxed_slice();
         for index in 0..model_vector.capacity() {
             model_vector.set_value_at(index, f64::NAN);
         }
@@ -167,6 +225,7 @@ impl PipelineSpec {
         Ok(Pipeline {
             feature_extractor,
             operations,
+            stages: StageRuntime::new(self.transformation_definitions.len(), &self.stages),
             model_vector,
             output_ids,
         })

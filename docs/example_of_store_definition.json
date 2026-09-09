@@ -1,5 +1,5 @@
 {
-  "version": "1.0",
+  "version": "2.0",
   "checksum": "opaque model metadata",
   "feature_extractor": {
     "version": "1.0",
@@ -73,6 +73,7 @@
     ]
   },
   "model_input": {
+    "stages": [],
     "capacity": 8,
     "length": 5,
     "transformations": [

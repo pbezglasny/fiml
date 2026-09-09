@@ -1,5 +1,5 @@
 {
-  "version": "1.0",
+  "version": "2.0",
   "feature_extractor": {
     "version": "1.0",
     "capacity": 5,
@@ -58,6 +58,7 @@
     ]
   },
   "model_input": {
+    "stages": [],
     "capacity": 5,
     "length": 3,
     "transformations": [

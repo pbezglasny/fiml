@@ -82,3 +82,24 @@ validation path for input IDs, output IDs, and fitted numeric parameters.
 - `FeatureExtractorSpec` remains independently serializable.
 - Model-input and raw-spec format versions may evolve independently.
 - Python bindings and runtime-state persistence remain outside this decision.
+
+## Amendment: fitted vector stages (2026-09-09, issue #93)
+
+Writers now emit pipeline version `2.0`, requiring `model_input.stages` (possibly
+empty). Strict `1.0` artifacts remain readable and must not contain stages. The
+nested extractor remains at `1.0`. The original example above describes the
+legacy format; [the canonical example](../example_of_store_definition.json)
+uses the current format.
+
+Scalar transformations define the base layout. Each fitted stage consumes the
+complete preceding active layout. Scaler stages store effective means/scales;
+PCA stages store component rows, means, output IDs, and effective whitening
+divisors. Final length derives from the last stage, independently of base or
+scratch width. See [the fitted-stage contract](../pipeline_transformer.md).
+
+`PipelineSpec::with_stages` is the shared semantic validator;
+`with_metadata` delegates with no stages. Python training retains sklearn
+templates separately and publishes a spec only after successful fitting and
+compilation. Export/load still excludes event state and training data.
+The serde_json consumers maintained here enable `float_roundtrip` to retain
+fitted `f64` values exactly. Other Rust consumers should enable it too.

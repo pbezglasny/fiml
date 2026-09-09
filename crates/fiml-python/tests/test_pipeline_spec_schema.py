@@ -90,3 +90,23 @@ def test_schema_accepts_configured_book_replay_pipeline():
     spec = fiml.PipelineSpec.from_json(json.dumps(document))
     assert json.loads(spec.to_json()) == document
     assert fiml.ModelInputPipeline(spec).n_features() == 5
+
+
+def test_schema_accepts_fitted_stages_and_versioned_migration():
+    document = json.loads((DOCS.parent / "tests/fixtures/sklearn_pipeline.json").read_text())["pipeline"]
+    assert not list(VALIDATOR.iter_errors(document))
+    assert json.loads(fiml.PipelineSpec.from_json(json.dumps(document)).to_json()) == document
+    document["version"] = "1.0"
+    assert list(VALIDATOR.iter_errors(document))
+    with pytest.raises(ValueError, match="not allowed"):
+        fiml.PipelineSpec.from_json(json.dumps(document))
+    document = canonical_example()
+    document["version"] = "1.0"
+    del document["model_input"]["stages"]
+    assert not list(VALIDATOR.iter_errors(document))
+    upgraded = json.loads(fiml.PipelineSpec.from_json(json.dumps(document)).to_json())
+    assert upgraded == canonical_example()
+    document["version"] = "2.0"
+    assert list(VALIDATOR.iter_errors(document))
+    with pytest.raises(ValueError, match="missing field.*stages"):
+        fiml.PipelineSpec.from_json(json.dumps(document))

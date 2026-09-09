@@ -38,7 +38,7 @@ jobs:
       - name: Install build and test tools
         run: >-
           python -m pip install "maturin>=1.5,<2.0" "pandas>=2.0"
-          "pytest>=8.0" "jsonschema>=4.0" "uv>=0.8.0"
+          "pytest>=8.0" "jsonschema>=4.0" "uv>=0.8.0" "scikit-learn>=1.9,<1.10"
       - name: Build wheel
         working-directory: crates/fiml-python
         run: maturin build --release --out dist
