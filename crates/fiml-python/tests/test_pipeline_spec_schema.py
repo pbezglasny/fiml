@@ -82,3 +82,11 @@ def test_model_input_schema_rejects_malformed_transformations(transformation):
     document["model_input"]["transformations"] = [transformation]
 
     assert list(VALIDATOR.iter_errors(document))
+
+
+def test_schema_accepts_configured_book_replay_pipeline():
+    document = json.loads((DOCS.parent / "tests/fixtures/order_book_replay.json").read_text())["pipeline"]
+    assert not list(VALIDATOR.iter_errors(document))
+    spec = fiml.PipelineSpec.from_json(json.dumps(document))
+    assert json.loads(spec.to_json()) == document
+    assert fiml.ModelInputPipeline(spec).n_features() == 5

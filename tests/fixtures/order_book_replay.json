@@ -1,0 +1,968 @@
+{
+  "pipeline": {
+    "version": "1.0",
+    "feature_extractor": {
+      "version": "1.0",
+      "capacity": 21,
+      "length": 20,
+      "features": [
+        {
+          "symbol": "btcusdt",
+          "indicators": [
+            {
+              "kind": "order_book_mid_price",
+              "source": {
+                "type": "order_book"
+              },
+              "outputs": [
+                {
+                  "id": "mid"
+                }
+              ]
+            },
+            {
+              "kind": "order_book_spread",
+              "source": {
+                "type": "order_book"
+              },
+              "outputs": [
+                {
+                  "id": "spread"
+                }
+              ]
+            },
+            {
+              "kind": "order_book_spread_bps",
+              "source": {
+                "type": "order_book"
+              },
+              "outputs": [
+                {
+                  "id": "spread_bps"
+                }
+              ]
+            },
+            {
+              "kind": "order_book_weighted_mid_price",
+              "source": {
+                "type": "order_book"
+              },
+              "outputs": [
+                {
+                  "id": "weighted"
+                }
+              ]
+            },
+            {
+              "kind": "order_book_microprice",
+              "source": {
+                "type": "order_book"
+              },
+              "outputs": [
+                {
+                  "id": "micro"
+                }
+              ]
+            },
+            {
+              "kind": "order_book_imbalance",
+              "source": {
+                "type": "order_book"
+              },
+              "outputs": [
+                {
+                  "n_levels": 2,
+                  "id": "imbalance_2"
+                },
+                {
+                  "n_levels": 1,
+                  "id": "imbalance_1"
+                }
+              ]
+            },
+            {
+              "kind": "order_book_best_bid_price",
+              "source": {
+                "type": "order_book"
+              },
+              "outputs": [
+                {
+                  "id": "best_bid"
+                }
+              ]
+            },
+            {
+              "kind": "order_book_best_bid_size",
+              "source": {
+                "type": "order_book"
+              },
+              "outputs": [
+                {
+                  "id": "bid_size"
+                }
+              ]
+            },
+            {
+              "kind": "order_book_best_ask_price",
+              "source": {
+                "type": "order_book"
+              },
+              "outputs": [
+                {
+                  "id": "best_ask"
+                }
+              ]
+            },
+            {
+              "kind": "order_book_best_ask_size",
+              "source": {
+                "type": "order_book"
+              },
+              "outputs": [
+                {
+                  "id": "ask_size"
+                }
+              ]
+            },
+            {
+              "kind": "order_book_level_size",
+              "source": {
+                "type": "order_book"
+              },
+              "options": {
+                "side": "bid",
+                "price": "97"
+              },
+              "outputs": [
+                {
+                  "id": "level_size"
+                }
+              ]
+            },
+            {
+              "kind": "order_book_nth_price",
+              "source": {
+                "type": "order_book"
+              },
+              "options": {
+                "side": "bid",
+                "n_levels": 2
+              },
+              "outputs": [
+                {
+                  "id": "nth_price"
+                }
+              ]
+            },
+            {
+              "kind": "order_book_nth_size",
+              "source": {
+                "type": "order_book"
+              },
+              "options": {
+                "side": "bid",
+                "n_levels": 2
+              },
+              "outputs": [
+                {
+                  "id": "nth_size"
+                }
+              ]
+            },
+            {
+              "kind": "order_book_depth_until_price",
+              "source": {
+                "type": "order_book"
+              },
+              "options": {
+                "side": "bid",
+                "price": "97"
+              },
+              "outputs": [
+                {
+                  "id": "depth_price"
+                }
+              ]
+            },
+            {
+              "kind": "order_book_depth_until_size_price_from",
+              "source": {
+                "type": "order_book"
+              },
+              "options": {
+                "side": "bid",
+                "size": "4"
+              },
+              "outputs": [
+                {
+                  "id": "fill_from"
+                }
+              ]
+            },
+            {
+              "kind": "order_book_depth_until_size_price_to",
+              "source": {
+                "type": "order_book"
+              },
+              "options": {
+                "side": "bid",
+                "size": "4"
+              },
+              "outputs": [
+                {
+                  "id": "fill_to"
+                }
+              ]
+            },
+            {
+              "kind": "order_book_depth_until_size_total_size",
+              "source": {
+                "type": "order_book"
+              },
+              "options": {
+                "side": "bid",
+                "size": "4"
+              },
+              "outputs": [
+                {
+                  "id": "fill_size"
+                }
+              ]
+            },
+            {
+              "kind": "order_book_volume_between_prices",
+              "source": {
+                "type": "order_book"
+              },
+              "options": {
+                "side": "bid",
+                "from_price": "97",
+                "to_price": "103"
+              },
+              "outputs": [
+                {
+                  "id": "range_volume"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "symbol": "ethusdt",
+          "indicators": [
+            {
+              "kind": "order_book_mid_price",
+              "source": {
+                "type": "order_book"
+              },
+              "outputs": [
+                {
+                  "id": "eth_mid"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "order_books": [
+        {
+          "symbol": "btcusdt",
+          "update_policy": "contiguous",
+          "buffer_size": 8
+        },
+        {
+          "symbol": "ethusdt",
+          "update_policy": "monotonic",
+          "buffer_size": 8
+        }
+      ]
+    },
+    "model_input": {
+      "capacity": 5,
+      "length": 4,
+      "transformations": [
+        {
+          "type": "standard_scale",
+          "input": "mid",
+          "output": "scaled_mid",
+          "mean": 100.0,
+          "scale": 2.0
+        },
+        {
+          "type": "identity",
+          "input": "imbalance_2",
+          "output": "imbalance"
+        },
+        {
+          "type": "lagged",
+          "input": "bid_size",
+          "output": "lag_bid_size",
+          "lag_window": 1
+        },
+        {
+          "type": "identity",
+          "input": "eth_mid",
+          "output": "other_mid"
+        }
+      ]
+    }
+  },
+  "raw_names": [
+    "mid",
+    "spread",
+    "spread_bps",
+    "weighted",
+    "micro",
+    "imbalance_2",
+    "imbalance_1",
+    "best_bid",
+    "bid_size",
+    "best_ask",
+    "ask_size",
+    "level_size",
+    "nth_price",
+    "nth_size",
+    "depth_price",
+    "fill_from",
+    "fill_to",
+    "fill_size",
+    "range_volume",
+    "eth_mid",
+    "__reserved_20"
+  ],
+  "model_names": [
+    "scaled_mid",
+    "imbalance",
+    "lag_bid_size",
+    "other_mid",
+    "__reserved_4"
+  ],
+  "steps": [
+    {
+      "event": {
+        "kind": "delta",
+        "symbol": "btcusdt",
+        "timestamp": 0,
+        "update_id": 2,
+        "changes": [
+          [
+            "bid",
+            "98",
+            "6"
+          ]
+        ]
+      },
+      "error": null,
+      "raw": [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "model": [
+        null,
+        null,
+        null,
+        null,
+        null
+      ]
+    },
+    {
+      "event": {
+        "kind": "snapshot",
+        "symbol": "btcusdt",
+        "timestamp": 1,
+        "update_id": 1,
+        "bids": [
+          [
+            "98",
+            "2"
+          ],
+          [
+            "97",
+            "6"
+          ]
+        ],
+        "asks": [
+          [
+            "102",
+            "2"
+          ],
+          [
+            "103",
+            "6"
+          ]
+        ]
+      },
+      "error": null,
+      "raw": [
+        100,
+        4,
+        400,
+        99,
+        101,
+        0.2,
+        0.5,
+        98,
+        6,
+        102,
+        2,
+        6,
+        97,
+        6,
+        12,
+        98,
+        98,
+        6,
+        12,
+        null,
+        null
+      ],
+      "model": [
+        0.0,
+        0.2,
+        null,
+        null,
+        null
+      ]
+    },
+    {
+      "event": {
+        "kind": "delta",
+        "symbol": "btcusdt",
+        "timestamp": 2,
+        "update_id": 2,
+        "changes": [
+          [
+            "bid",
+            "98",
+            "2"
+          ]
+        ]
+      },
+      "error": null,
+      "raw": [
+        100,
+        4,
+        400,
+        99,
+        101,
+        0.2,
+        0.5,
+        98,
+        6,
+        102,
+        2,
+        6,
+        97,
+        6,
+        12,
+        98,
+        98,
+        6,
+        12,
+        null,
+        null
+      ],
+      "model": [
+        0.0,
+        0.2,
+        6,
+        null,
+        null
+      ]
+    },
+    {
+      "event": {
+        "kind": "snapshot",
+        "symbol": "ethusdt",
+        "timestamp": 3,
+        "update_id": 10,
+        "bids": [
+          [
+            "199",
+            "1"
+          ]
+        ],
+        "asks": [
+          [
+            "201",
+            "1"
+          ]
+        ]
+      },
+      "error": null,
+      "raw": [
+        100,
+        4,
+        400,
+        99,
+        101,
+        0.2,
+        0.5,
+        98,
+        6,
+        102,
+        2,
+        6,
+        97,
+        6,
+        12,
+        98,
+        98,
+        6,
+        12,
+        200,
+        null
+      ],
+      "model": [
+        0.0,
+        0.2,
+        6,
+        200,
+        null
+      ]
+    },
+    {
+      "event": {
+        "kind": "time",
+        "timestamp": 4
+      },
+      "error": null,
+      "raw": [
+        100,
+        4,
+        400,
+        99,
+        101,
+        0.2,
+        0.5,
+        98,
+        6,
+        102,
+        2,
+        6,
+        97,
+        6,
+        12,
+        98,
+        98,
+        6,
+        12,
+        200,
+        null
+      ],
+      "model": [
+        0.0,
+        0.2,
+        6,
+        200,
+        null
+      ]
+    },
+    {
+      "event": {
+        "kind": "delta",
+        "symbol": "btcusdt",
+        "timestamp": 5,
+        "update_id": 4,
+        "changes": [
+          [
+            "bid",
+            "98",
+            "18"
+          ]
+        ]
+      },
+      "error": "expected update ID 3, received 4",
+      "raw": [
+        100,
+        4,
+        400,
+        99,
+        101,
+        0.2,
+        0.5,
+        98,
+        6,
+        102,
+        2,
+        6,
+        97,
+        6,
+        12,
+        98,
+        98,
+        6,
+        12,
+        200,
+        null
+      ],
+      "model": [
+        0.0,
+        0.2,
+        6,
+        200,
+        null
+      ]
+    },
+    {
+      "event": {
+        "kind": "delta",
+        "symbol": "btcusdt",
+        "timestamp": 6,
+        "update_id": 5,
+        "changes": [
+          [
+            "bid",
+            "98",
+            "2"
+          ]
+        ]
+      },
+      "error": null,
+      "raw": [
+        100,
+        4,
+        400,
+        99,
+        101,
+        0.2,
+        0.5,
+        98,
+        6,
+        102,
+        2,
+        6,
+        97,
+        6,
+        12,
+        98,
+        98,
+        6,
+        12,
+        200,
+        null
+      ],
+      "model": [
+        0.0,
+        0.2,
+        6,
+        200,
+        null
+      ]
+    },
+    {
+      "event": {
+        "kind": "snapshot",
+        "symbol": "btcusdt",
+        "timestamp": 7,
+        "update_id": 3,
+        "bids": [
+          [
+            "98",
+            "2"
+          ],
+          [
+            "97",
+            "6"
+          ]
+        ],
+        "asks": [
+          [
+            "102",
+            "2"
+          ],
+          [
+            "103",
+            "6"
+          ]
+        ]
+      },
+      "error": null,
+      "raw": [
+        100,
+        4,
+        400,
+        100,
+        100,
+        0,
+        0,
+        98,
+        2,
+        102,
+        2,
+        6,
+        97,
+        6,
+        8,
+        98,
+        97,
+        8,
+        8,
+        200,
+        null
+      ],
+      "model": [
+        0.0,
+        0,
+        6,
+        200,
+        null
+      ]
+    },
+    {
+      "event": {
+        "kind": "snapshot",
+        "symbol": "btcusdt",
+        "timestamp": 8,
+        "update_id": 6,
+        "bids": [
+          [
+            "98",
+            "2"
+          ]
+        ],
+        "asks": []
+      },
+      "error": null,
+      "raw": [
+        null,
+        null,
+        null,
+        null,
+        null,
+        1,
+        1,
+        98,
+        2,
+        null,
+        null,
+        null,
+        null,
+        null,
+        2,
+        null,
+        null,
+        null,
+        2,
+        200,
+        null
+      ],
+      "model": [
+        null,
+        1,
+        2,
+        200,
+        null
+      ]
+    },
+    {
+      "event": {
+        "kind": "delta",
+        "symbol": "btcusdt",
+        "timestamp": 9,
+        "update_id": 7,
+        "changes": [
+          [
+            "bid",
+            "98",
+            "0"
+          ]
+        ]
+      },
+      "error": null,
+      "raw": [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        0,
+        null,
+        null,
+        null,
+        0,
+        200,
+        null
+      ],
+      "model": [
+        null,
+        null,
+        2,
+        200,
+        null
+      ]
+    },
+    {
+      "event": {
+        "kind": "snapshot",
+        "symbol": "btcusdt",
+        "timestamp": 10,
+        "update_id": 6,
+        "bids": [
+          [
+            "98",
+            "2"
+          ],
+          [
+            "97",
+            "6"
+          ]
+        ],
+        "asks": [
+          [
+            "102",
+            "2"
+          ],
+          [
+            "103",
+            "6"
+          ]
+        ]
+      },
+      "error": "snapshot 6 is not newer",
+      "raw": [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        0,
+        null,
+        null,
+        null,
+        0,
+        200,
+        null
+      ],
+      "model": [
+        null,
+        null,
+        2,
+        200,
+        null
+      ]
+    },
+    {
+      "event": {
+        "kind": "price",
+        "symbol": "btcusdt",
+        "timestamp": 11,
+        "price": 1000
+      },
+      "error": null,
+      "raw": [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        0,
+        null,
+        null,
+        null,
+        0,
+        200,
+        null
+      ],
+      "model": [
+        null,
+        null,
+        null,
+        200,
+        null
+      ]
+    },
+    {
+      "event": {
+        "kind": "delta",
+        "symbol": "ethusdt",
+        "timestamp": 12,
+        "update_id": 100,
+        "changes": [
+          [
+            "bid",
+            "199",
+            "0"
+          ]
+        ]
+      },
+      "error": null,
+      "raw": [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        0,
+        null,
+        null,
+        null,
+        0,
+        null,
+        null
+      ],
+      "model": [
+        null,
+        null,
+        null,
+        null,
+        null
+      ]
+    }
+  ]
+}

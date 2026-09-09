@@ -89,6 +89,7 @@ pub enum FimlError {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum InvalidArgumentError {
+    GlobalOrderBookSymbol,
     NonFiniteEventValue {
         field: EventField,
     },
@@ -186,6 +187,18 @@ pub enum IntegerTarget {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum IndicatorKind {
+    OrderBookBestBidPrice,
+    OrderBookBestBidSize,
+    OrderBookBestAskPrice,
+    OrderBookBestAskSize,
+    OrderBookLevelSize,
+    OrderBookNthPrice,
+    OrderBookNthSize,
+    OrderBookDepthUntilPrice,
+    OrderBookDepthUntilSizePriceFrom,
+    OrderBookDepthUntilSizePriceTo,
+    OrderBookDepthUntilSizeTotalSize,
+    OrderBookVolumeBetweenPrices,
     OrderBookMidPrice,
     OrderBookSpread,
     OrderBookSpreadBps,
@@ -206,6 +219,9 @@ pub enum IndicatorKind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum InvalidIndicatorDefinitionError {
+    OrderBookPriceNegative,
+    OrderBookSizeNotPositive,
+    OrderBookPriceRangeInvalid,
     OrderBookDepthZero,
     CompatibleGroupOutputLimitExceeded {
         limit: usize,
@@ -347,6 +363,7 @@ impl Error for FimlError {}
 impl Display for InvalidArgumentError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::GlobalOrderBookSymbol => f.write_str("order books require a non-global symbol"),
             Self::NonFiniteEventValue { field } => {
                 let name = match field {
                     EventField::Price => "price",
@@ -478,6 +495,18 @@ impl Display for IntegerTarget {
 impl Display for IndicatorKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
+            Self::OrderBookBestBidPrice => "order-book best bid price",
+            Self::OrderBookBestBidSize => "order-book best bid size",
+            Self::OrderBookBestAskPrice => "order-book best ask price",
+            Self::OrderBookBestAskSize => "order-book best ask size",
+            Self::OrderBookLevelSize => "order book level size",
+            Self::OrderBookNthPrice => "order book nth price",
+            Self::OrderBookNthSize => "order book nth size",
+            Self::OrderBookDepthUntilPrice => "order book depth until price",
+            Self::OrderBookDepthUntilSizePriceFrom => "order book depth until size price from",
+            Self::OrderBookDepthUntilSizePriceTo => "order book depth until size price to",
+            Self::OrderBookDepthUntilSizeTotalSize => "order book depth until size total size",
+            Self::OrderBookVolumeBetweenPrices => "order book volume between prices",
             Self::OrderBookMidPrice => "order-book mid-price",
             Self::OrderBookSpread => "order-book spread",
             Self::OrderBookSpreadBps => "order-book spread in basis points",
@@ -499,6 +528,15 @@ impl Display for IndicatorKind {
 impl Display for InvalidIndicatorDefinitionError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::OrderBookPriceNegative => {
+                f.write_str("order-book query prices must be nonnegative")
+            }
+            Self::OrderBookSizeNotPositive => {
+                f.write_str("order-book target size must be positive")
+            }
+            Self::OrderBookPriceRangeInvalid => {
+                f.write_str("order-book query requires from_price < to_price")
+            }
             Self::OrderBookDepthZero => f.write_str("order-book depth must be positive"),
             Self::CompatibleGroupOutputLimitExceeded { limit } => {
                 write!(f, "compatible feature group exceeds {limit} outputs")

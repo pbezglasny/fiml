@@ -86,6 +86,8 @@ def test_schema_still_accepts_any_event_source():
 @pytest.mark.parametrize("kind", [
     "order_book_mid_price", "order_book_spread", "order_book_spread_bps",
     "order_book_weighted_mid_price", "order_book_microprice", "order_book_imbalance",
+    "order_book_best_bid_price", "order_book_best_bid_size",
+    "order_book_best_ask_price", "order_book_best_ask_size",
 ])
 def test_order_book_definitions_validate_and_round_trip(kind):
     document = document_with_source({"type": "order_book"})
@@ -131,3 +133,73 @@ def test_schema_and_reader_reject_invalid_order_book_parameters(changes):
     assert list(VALIDATOR.iter_errors(document))
     with pytest.raises(ValueError):
         fiml.FeatureExtractorSpec.from_json(json.dumps(document))
+
+
+@pytest.mark.parametrize("kind, parameters", [
+    ("level_size", {"price": "100.12345678901234567890123456"}),
+    ("nth_price", {"n_levels": 2}),
+    ("nth_size", {"n_levels": 2}),
+    ("depth_until_price", {"price": "100"}),
+    ("depth_until_size_price_from", {"size": "4"}),
+    ("depth_until_size_price_to", {"size": "4"}),
+    ("depth_until_size_total_size", {"size": "4"}),
+    ("volume_between_prices", {"from_price": "99", "to_price": "103"}),
+])
+@pytest.mark.parametrize("side", ["bid", "ask"])
+def test_order_book_query_schema_and_round_trip(kind, parameters, side):
+    document = document_with_source({"type": "order_book"})
+    document["features"][0]["symbol"] = "btcusdt"
+    indicator = {
+        "kind": f"order_book_{kind}", "source": {"type": "order_book"},
+        "options": {"side": side, **parameters}, "outputs": [{"id": "book_query"}],
+    }
+    document["features"][0]["indicators"] = [indicator]
+    assert not list(VALIDATOR.iter_errors(document))
+    spec = fiml.FeatureExtractorSpec.from_json(json.dumps(document))
+    assert json.loads(spec.to_json()) == document
+    assert spec.indicator_count() == 1
+    for invalid in [
+        {**indicator, "options": parameters},
+        {**indicator, "options": {"side": "wrong", **parameters}},
+        {**indicator, "options": {"side": side, **parameters, "aggregation": "1s"}},
+        {**indicator, "outputs": [{"n_levels": 1}]},
+        {**indicator, "outputs": [{}, {}]},
+    ]:
+        document["features"][0]["indicators"] = [invalid]
+        assert list(VALIDATOR.iter_errors(document))
+        with pytest.raises(ValueError):
+            fiml.FeatureExtractorSpec.from_json(json.dumps(document))
+
+
+def test_order_book_configuration_schema_and_canonical_round_trip():
+    document = document_with_source({"type": "any_event"})
+    document["features"] = []
+    document["capacity"] = document["length"] = 0
+    document["order_books"] = [
+        {"symbol": "eth", "update_policy": "monotonic", "buffer_size": 0},
+        {"symbol": "btc", "update_policy": "contiguous", "buffer_size": 8},
+    ]
+    assert not list(VALIDATOR.iter_errors(document))
+    spec = fiml.FeatureExtractorSpec.from_json(json.dumps(document))
+    expected = dict(document, order_books=list(reversed(document["order_books"])))
+    assert json.loads(spec.to_json()) == expected
+    assert fiml.FeatureExtractor(spec).values().size == 0
+    for config in [
+        {"symbol": "btc", "update_policy": "bad", "buffer_size": 1},
+        {"symbol": "btc", "update_policy": "monotonic", "buffer_size": -1},
+        {"symbol": "btc", "update_policy": "monotonic", "buffer_size": 1.5},
+        {"symbol": "btc", "update_policy": "monotonic", "buffer_size": None},
+        {"symbol": "btc", "buffer_size": 1},
+        {"symbol": "", "update_policy": "monotonic", "buffer_size": 1},
+        {"symbol": "__global__", "update_policy": "monotonic", "buffer_size": 1},
+        {"symbol": "btc", "update_policy": "monotonic", "buffer_size": 1, "bids": []},
+    ]:
+        invalid = dict(document, order_books=[config])
+        assert list(VALIDATOR.iter_errors(invalid))
+        with pytest.raises(ValueError):
+            fiml.FeatureExtractorSpec.from_json(json.dumps(invalid))
+    with pytest.raises(ValueError):
+        fiml.FeatureExtractorSpec.from_json(json.dumps(dict(document, order_books=None)))
+    duplicate = [dict(document["order_books"][0], symbol=s) for s in ["btc", "BTC"]]
+    with pytest.raises(ValueError, match="more than one order book"):
+        fiml.FeatureExtractorSpec.from_json(json.dumps(dict(document, order_books=duplicate)))

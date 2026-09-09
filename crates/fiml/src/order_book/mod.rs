@@ -1,3 +1,5 @@
+//! Maintains synchronized bid/ask levels and exposes quote and depth queries.
+
 mod book;
 mod book_side;
 
@@ -6,7 +8,7 @@ use rust_decimal::Decimal;
 
 pub type OrderBookUpdateId = u64;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Side {
     Bid,
     Ask,
@@ -108,6 +110,30 @@ impl OrderBookUpdate {
         match self {
             Self::Delta(delta) => OrderBookUpdateRef::Delta(delta),
             Self::Snapshot(snapshot) => OrderBookUpdateRef::Snapshot(snapshot),
+        }
+    }
+}
+
+/// Serializable construction parameters for a fresh per-symbol order book.
+/// Live levels and synchronization history are intentionally excluded.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OrderBookConfig {
+    pub symbol: crate::Symbol,
+    pub update_policy: UpdatePolicy,
+    pub buffer_size: usize,
+}
+
+impl OrderBookConfig {
+    /// Selects synchronization policy and delta-history capacity for a symbol.
+    pub const fn new(
+        symbol: crate::Symbol,
+        update_policy: UpdatePolicy,
+        buffer_size: usize,
+    ) -> Self {
+        Self {
+            symbol,
+            update_policy,
+            buffer_size,
         }
     }
 }

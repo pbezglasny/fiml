@@ -8,6 +8,7 @@ import numpy as np
 
 from ._fiml import (
     FeatureExtractorSpec,
+    OrderBookEvent,
     KIND_ORDERBOOK,
     KIND_PRICE,
     KIND_TIME,
@@ -24,6 +25,7 @@ from ._fiml import ModelInputPipeline as _ModelInputPipeline
 __all__ = [
     "FeatureExtractor",
     "FeatureExtractorSpec",
+    "OrderBookEvent",
     "ModelInputPipeline",
     "PipelineSpec",
     "WarmupPolicy",
