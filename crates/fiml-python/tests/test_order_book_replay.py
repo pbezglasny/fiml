@@ -120,6 +120,35 @@ def test_book_batches_prevalidate_then_preserve_sequence_error_prefix(model):
 
 
 @pytest.mark.parametrize("model", [False, True])
+def test_book_batches_validate_timestamps_per_symbol(model):
+    spec = fiml.FeatureExtractorSpec()
+    for symbol in ["btcusdt", "ethusdt"]:
+        spec.configure_order_book(symbol, update_policy="contiguous", buffer_size=8)
+        spec.order_book_best_bid_size(symbol)
+    if model:
+        pipeline_spec = fiml.PipelineSpec(spec)
+        for feature_id in spec.feature_ids():
+            pipeline_spec.identity(feature_id)
+        instance = fiml.ModelInputPipeline(pipeline_spec)
+    else:
+        instance = fiml.FeatureExtractor(spec)
+
+    rows = instance.transform_order_book([
+        snapshot(100, 1), snapshot(-100, 1, symbol="ethusdt"),
+        delta(101, 2, "4"), delta(-99, 2, "6", "ethusdt"),
+    ])
+    np.testing.assert_equal(rows, [[2, np.nan], [2, 2], [4, 2], [4, 6]])
+    with pytest.raises(ValueError, match="row 1.*previous timestamp 101"):
+        instance.transform_order_book([
+            delta(-98, 3, "8", "ethusdt"), delta(100, 3, "10"),
+        ])
+    np.testing.assert_equal(instance.values(), [4, 6])
+    # The valid prefix was not applied when another symbol failed prevalidation.
+    instance.update_order_book(delta(-99, 3, "8", "ethusdt"))
+    np.testing.assert_equal(instance.values(), [4, 8])
+
+
+@pytest.mark.parametrize("model", [False, True])
 def test_capacity_error_requires_snapshot_and_does_not_change_values(model):
     instance = runtime(model, buffer_size=1)
     instance.update_order_book(snapshot())
