@@ -1261,7 +1261,6 @@ where
             events.push(event);
         }
 
-        let mut symbol_timestamps = HashMap::new();
         self.replay_events(py, events)
     }
 
@@ -1298,7 +1297,7 @@ where
 
     fn replay_events(&mut self, py: Python<'_>, events: Vec<Event>) -> PyResult<Py<PyAny>> {
         let n_rows = events.len();
-        let mut previous_timestamp = self.inner.last_timestamp();
+        let mut symbol_timestamps = HashMap::new();
         for (row, event) in events.iter().enumerate() {
             let previous_timestamp = symbol_timestamps
                 .entry(event.symbol())
