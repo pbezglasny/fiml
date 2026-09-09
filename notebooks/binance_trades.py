@@ -28,32 +28,13 @@ def _(mo):
 
 @app.cell
 def _():
-    from pathlib import Path
-
     import numpy as np
     import pandas as pd
 
     import fiml
+    from binance_trade_data import load_binance_trades
 
-    return Path, fiml, np, pd
-
-
-@app.cell
-def _(Path, pd):
-    data_path = Path("price_data_binance_trades.csv")
-    raw_trades = pd.read_csv(
-        data_path,
-        dtype={
-            "symbol": "string",
-            "trade_id": "int64",
-            "price": "float64",
-            "quantity": "float64",
-            "buyer_market_maker": "boolean",
-        },
-        parse_dates=["time", "trade_time"],
-    )
-    raw_trades.head()
-    return (raw_trades,)
+    return fiml, load_binance_trades, np, pd
 
 
 @app.cell(hide_code=True)
@@ -65,25 +46,8 @@ def _(mo):
 
 
 @app.cell
-def _(fiml, np, raw_trades):
-    trades = (
-        raw_trades.rename(columns={"quantity": "volume"})
-        .sort_values(["trade_time", "trade_id"], kind="stable")
-        .reset_index(drop=True)
-    )
-    trades["ts"] = (trades["trade_time"].astype("int64") // 1_000_000).astype("int64")
-
-    buyer_is_maker = trades["buyer_market_maker"].to_numpy(dtype=bool)
-    trades["side"] = np.where(
-        buyer_is_maker,
-        fiml.SIDE_AGGRESSOR_SELL,
-        fiml.SIDE_AGGRESSOR_BUY,
-    ).astype(np.uint8)
-
-    assert trades["ts"].is_monotonic_increasing
-    assert (trades.loc[trades["buyer_market_maker"], "side"] == fiml.SIDE_AGGRESSOR_SELL).all()
-    assert (trades.loc[~trades["buyer_market_maker"], "side"] == fiml.SIDE_AGGRESSOR_BUY).all()
-
+def _(load_binance_trades):
+    trades = load_binance_trades()
     trades[["trade_time", "symbol", "trade_id", "price", "volume", "buyer_market_maker", "side"]].head(10)
     return (trades,)
 
