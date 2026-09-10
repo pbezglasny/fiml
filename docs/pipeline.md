@@ -84,67 +84,7 @@ The envelope above illustrates ownership; populated feature/transform arrays
 must agree with the declared lengths. The strict source spelling for a
 feature that observes any event is `any_event`.
 
-## Completed
-
-- `Identity` and per-feature `StandardScale` transformation definitions.
-- Cold-path validation of raw input IDs, duplicate and reserved output IDs,
-  vector dimensions, and fitted scaler parameters.
-- Compilation of stable IDs into numeric indexes and contiguous scalar
-  operations.
-- Direct writes into caller-owned model-vector storage after each accepted
-  event.
-- Regression coverage proving accepted steady-state identity and
-  standard-scale events perform zero heap allocations.
-- `NaN` initialization and propagation through identity and standard scaling.
-- Rejected events leave raw and final snapshots unchanged.
-- Stable authored output ordering and separate raw/final ID layouts.
-- Strict, versioned `PipelineSpec` JSON serialization behind the `serde`
-  feature.
-- One canonical Rust serialization adapter shared by the Python bindings.
-- Python construction, JSON loading, event updates, array replay, and DataFrame
-  replay for model-input pipelines.
-- Replacement of the stale legacy pipeline.
-- Python fitting/export of StandardScaler and PCA (scikit-learn 1.9.x), with
-  warm-up row selection and atomic refitting.
-- Sequential Rust stages, shared sklearn parity fixture, exact float JSON
-  round-trips, and zero-allocation stage execution.
-
 ## Open issues
-
-### P1: Shared Rust/Python runtime parity fixture
-
-Status: complete
-
-Priority: high
-
-The manually authored fixture lives in
-[`tests/fixtures/model_input_parity`](../tests/fixtures/model_input_parity). Its
-strict `2.0` model-input artifact, two `BTCUSDT` trades, time event, and literal
-expected snapshots are consumed independently by the Rust contract test in
-[`crates/fiml/tests/model_input_parity.rs`](../crates/fiml/tests/model_input_parity.rs)
-and the Python contract test in
-[`crates/fiml-python/tests/test_model_input_parity.py`](../crates/fiml-python/tests/test_model_input_parity.py).
-
-Both runtimes verify active raw and model ordering, vector capacity and length,
-reserved cells, warm-up `NaN` propagation, any-event clock updates, full-window
-trade-price SMA state, standard scaling, and preservation of the SMA across a
-time event. Rust also verifies that deserializing and reserializing the artifact
-produces the same canonical JSON value. Test sensitivity was checked by changing
-one expected day literal from `4` to `5`: both contract tests failed on the same
-value mismatch before the literal was restored.
-
-### P2: Allocation regression verification
-
-Status: complete
-
-Priority: high
-
-The isolated integration test in
-[`crates/fiml/tests/pipeline_allocations.rs`](../crates/fiml/tests/pipeline_allocations.rs)
-uses a thread-local allocation counter around repeated accepted
-`Pipeline::handle_event` calls. It covers identity and standard-scale operations
-independently and includes a sensitivity check proving that the counter detects
-a real heap allocation.
 
 ### P3: Transformation validation diagnostics
 
