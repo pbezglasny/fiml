@@ -15,6 +15,7 @@ from ._fiml import (
     KIND_TRADE,
     KIND_VOLUME,
     PipelineSpec,
+    ScalarStage,
     SIDE_AGGRESSOR_BUY,
     SIDE_AGGRESSOR_SELL,
     WarmupPolicy,
@@ -28,6 +29,7 @@ __all__ = [
     "OrderBookEvent",
     "ModelInputPipeline",
     "PipelineSpec",
+    "ScalarStage",
     "WarmupPolicy",
     "KIND_PRICE",
     "KIND_VOLUME",
@@ -293,16 +295,19 @@ class ModelInputPipeline:
         return runtime
 
     def add_transformation(self, estimator, *, name):
-        """Append an unfitted StandardScaler/PCA before fitting or replaying events."""
+        """Append a StandardScaler, PCA, or ScalarStage consuming the previous output."""
         if self._inference_only or self._recipe_locked or self._inner._has_events:
             raise ValueError("cannot change an established recipe; create a new pipeline")
         if not isinstance(name, str) or not name or name.startswith("__reserved_"):
             raise ValueError("stage name must be a nonempty, nonreserved string")
         if any(previous == name for previous, _ in self._templates):
             raise ValueError(f"duplicate stage name {name!r}")
-        from ._sklearn import clone_transformer
+        if type(estimator) is ScalarStage:
+            template = estimator.copy()
+        else:
+            from ._sklearn import clone_transformer
 
-        template = clone_transformer(estimator)
+            template = clone_transformer(estimator)
         self._templates.append((name, template))
         self._spec = None
         return self
@@ -318,11 +323,15 @@ class ModelInputPipeline:
         """
         if self._inference_only:
             raise ValueError("this pipeline is inference-only; create a Python training recipe")
-        candidate = self._base_spec.copy()
-        replay = self._new_runtime(candidate, "float64")
-        matrix = replay.transform(
-            kind, symbol, timestamp, price=price, volume=volume, side=side, bid=bid, ask=ask,
-        )[:, :candidate.active_feature_count]
+        candidate = self._base_spec._fit_candidate()
+
+        def replay_candidate():
+            replay = self._new_runtime(candidate, "float64")
+            return replay.transform(
+                kind, symbol, timestamp, price=price, volume=volume, side=side, bid=bid, ask=ask,
+            )[:, :candidate.active_feature_count]
+
+        matrix = replay_candidate()
         if fit_mask is None:
             fit_mask = np.ones(len(matrix), dtype=bool)
         else:
@@ -332,10 +341,9 @@ class ModelInputPipeline:
         rows = np.flatnonzero(fit_mask)
         if not rows.size or not matrix.shape[1]:
             raise ValueError("fit requires nonempty training rows and active features")
-        matrix = np.ascontiguousarray(matrix[fit_mask], dtype=np.float64)
 
         def validate_matrix():
-            invalid = np.argwhere(~np.isfinite(matrix))
+            invalid = np.argwhere(~np.isfinite(matrix[fit_mask]))
             if invalid.size:
                 row, column = invalid[0]
                 raise ValueError(
@@ -343,13 +351,19 @@ class ModelInputPipeline:
                     "must be finite for fitting; exclude warm-up with fit_mask"
                 )
 
-        validate_matrix()
-        if self._templates:
-            from ._sklearn import fit_stage
+        for name, template in self._templates:
+            if type(template) is ScalarStage:
+                candidate.scalar_stage(template)
+            else:
+                from ._sklearn import fit_stage
 
-            for name, template in self._templates:
-                matrix = fit_stage(template, name, matrix, candidate)
                 validate_matrix()
+                fit_stage(template, name, np.ascontiguousarray(matrix[fit_mask]), candidate)
+            # ponytail: O(stages * events) prefix replays; stream stages if fitting cost matters.
+            # Replay excluded rows too: downstream lags count accepted events, not training rows.
+            matrix = replay_candidate()
+        validate_matrix()
+        candidate._finalize_fit(self._base_spec)
         runtime = self._new_runtime(candidate)
         self._spec = candidate
         self._inner = runtime

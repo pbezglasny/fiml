@@ -81,6 +81,162 @@ fn stages_chain_after_lags_preserve_layout_warmup_and_rejection() {
 }
 
 #[test]
+fn scalar_stages_chain_after_pca_and_share_lags_without_leaking_scratch() {
+    let (raw, definitions) = base();
+    let mut sequence = stages();
+    sequence.push(FittedStage::Scalar {
+        transformations: vec![
+            TransformerDefinition::lagged(FeatureId::new("pc0"), FeatureId::new("lag2"), 2),
+            TransformerDefinition::identity(FeatureId::new("pc0"), FeatureId::new("now")),
+            TransformerDefinition::lagged(FeatureId::new("pc0"), FeatureId::new("lag1"), 1),
+            TransformerDefinition::lagged(FeatureId::new("pc0"), FeatureId::new("lag1_copy"), 1),
+        ],
+    });
+    sequence.push(FittedStage::Scalar {
+        transformations: vec![
+            TransformerDefinition::standard_scale(
+                FeatureId::new("lag1"),
+                FeatureId::new("scaled"),
+                1.0,
+                2.0,
+            ),
+            TransformerDefinition::identity(FeatureId::new("lag2"), FeatureId::new("lag2")),
+            TransformerDefinition::identity(FeatureId::new("lag1_copy"), FeatureId::new("copy")),
+        ],
+    });
+    let spec =
+        PipelineSpec::with_stages(raw.clone(), definitions.clone(), sequence, 4, None).unwrap();
+    let mut pipeline = spec
+        .build(
+            ArrayFeatureVector::<1>::new(),
+            ArrayFeatureVector::<4>::new_of_length(3),
+        )
+        .unwrap();
+    let mut prefix = PipelineSpec::with_stages(raw, definitions, stages(), 1, None)
+        .unwrap()
+        .build(
+            ArrayFeatureVector::<1>::new(),
+            ArrayFeatureVector::<1>::new(),
+        )
+        .unwrap();
+    let mut history = Vec::new();
+    for timestamp in 0..8 {
+        let event = Event::time(timestamp * 2);
+        prefix.handle_event(Event::time(timestamp * 2)).unwrap();
+        pipeline.handle_event(event).unwrap();
+        let lag = |window| {
+            history
+                .len()
+                .checked_sub(window)
+                .map_or(f64::NAN, |index| history[index])
+        };
+        for (actual, expected) in
+            pipeline
+                .values()
+                .iter()
+                .zip([(lag(1) - 1.0) / 2.0, lag(2), lag(1), f64::NAN])
+        {
+            assert!((actual.is_nan() && expected.is_nan()) || *actual == expected);
+        }
+        history.push(prefix.values()[0]);
+        let before = pipeline
+            .values()
+            .iter()
+            .map(|v| v.to_bits())
+            .collect::<Vec<_>>();
+        assert!(
+            pipeline
+                .handle_event(Event::time(timestamp * 2 - 1))
+                .is_err()
+        );
+        assert_eq!(
+            before,
+            pipeline
+                .values()
+                .iter()
+                .map(|v| v.to_bits())
+                .collect::<Vec<_>>()
+        );
+    }
+    assert_eq!(
+        pipeline.output_ids(),
+        &[
+            FeatureId::new("scaled"),
+            FeatureId::new("lag2"),
+            FeatureId::new("copy")
+        ]
+    );
+    #[cfg(feature = "serde")]
+    {
+        let document = serde_json::to_value(&spec).unwrap();
+        assert_eq!(document["version"], "2.1");
+        assert_eq!(
+            serde_json::from_value::<PipelineSpec>(document.clone()).unwrap(),
+            spec
+        );
+        let mut old_version = document;
+        old_version["version"] = "2.0".into();
+        assert!(
+            serde_json::from_value::<PipelineSpec>(old_version)
+                .unwrap_err()
+                .to_string()
+                .contains("scalar stages require version 2.1")
+        );
+    }
+}
+
+#[test]
+fn scalar_stages_reject_inputs_outside_the_preceding_layout() {
+    for definitions in [
+        vec![],
+        vec![TransformerDefinition::identity(
+            FeatureId::new("elapsed"),
+            FeatureId::new("out"),
+        )],
+        vec![TransformerDefinition::identity(
+            FeatureId::new("future"),
+            FeatureId::new("future"),
+        )],
+        vec![
+            TransformerDefinition::identity(FeatureId::new("now"), FeatureId::new("first")),
+            TransformerDefinition::identity(FeatureId::new("first"), FeatureId::new("second")),
+        ],
+        vec![TransformerDefinition::lagged(
+            FeatureId::new("now"),
+            FeatureId::new("lag"),
+            0,
+        )],
+        vec![TransformerDefinition::standard_scale(
+            FeatureId::new("now"),
+            FeatureId::new("scale"),
+            0.0,
+            0.0,
+        )],
+        vec![TransformerDefinition::identity(
+            FeatureId::new("now"),
+            FeatureId::new("__reserved_0"),
+        )],
+        vec![
+            TransformerDefinition::identity(FeatureId::new("now"), FeatureId::new("same")),
+            TransformerDefinition::identity(FeatureId::new("lag"), FeatureId::new("same")),
+        ],
+    ] {
+        let (raw, base) = base();
+        let error = PipelineSpec::with_stages(
+            raw,
+            base,
+            [FittedStage::Scalar {
+                transformations: definitions,
+            }],
+            2,
+            None,
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("stage 0"), "{error}");
+    }
+}
+
+#[test]
 fn stage_numeric_and_layout_validation_is_shared_by_construction_and_json() {
     let invalid = [
         FittedStage::StandardScale {

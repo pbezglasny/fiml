@@ -243,7 +243,7 @@ stream. Reset retains fitted parameters and registered symbol handles.
 ### Fitting sklearn stages
 
 Install `fiml[sklearn]` (currently scikit-learn `>=1.9,<1.10`) for training.
-Append supported `StandardScaler` and `PCA` instances before fitting or replaying:
+Append `StandardScaler`, `PCA`, or `fiml.ScalarStage` instances before fitting or replaying:
 
 ```python
 from sklearn.preprocessing import StandardScaler
@@ -261,17 +261,42 @@ X_train = pipeline.transform(kind, symbol, timestamp, price=prices, volume=volum
 artifact = pipeline.to_json()
 ```
 
+Scalar stages select, rename, scale, or lag values from the preceding stage:
+
+```python
+pipeline = (fiml.ModelInputPipeline(base_spec)
+            .add_transformation(StandardScaler(), name="scale")
+            .add_transformation(PCA(n_components=2), name="pca")
+            .add_transformation(fiml.ScalarStage()
+                                .identity("pca__pc0", output="current")
+                                .lagged("pca__pc0", lag_window=2, output="lag2"),
+                                name="lags")
+            .add_transformation(StandardScaler(), name="final_scale"))
+```
+
+All definitions within a `ScalarStage` read the same preceding layout. To scale
+`lag2` with fixed parameters, append another stage such as
+`fiml.ScalarStage().standard_scale("lag2", mean=0., scale=2., output="scaled_lag")`.
+Only explicitly declared outputs survive a scalar stage; use `identity` to carry
+columns forward. Input IDs and parameters are validated when the stage is added
+to a spec or reached during fitting. The pipeline snapshots the builder when added.
+For inference with already known parameters, use `spec.scalar_stage(stage)`;
+this also works without sklearn.
+
 Register the event symbols with this pipeline before constructing the `symbol`
 array. `fit` takes the same event columns as `transform` and returns `self`.
 `fit_mask` is an optional boolean vector selecting training snapshots, for example
-after indicator warm-up; every event is still replayed to preserve history.
-Selected active features must be finite. Fit only the chronological training
+after indicator and downstream lag warm-up; every event is still replayed to preserve history.
+Even excluded middle rows enter lag history. Selected inputs to each sklearn estimator
+and selected final outputs must be finite; an earlier scalar selection can drop
+unneeded warm-up columns. Fitting replays each completed prefix through Rust,
+so its cost grows with the number of stages. Fit only the chronological training
 partition. Reserved cells are excluded from fitting and stay NaN in output.
 
 Each stage consumes the preceding complete active vector; the base spec can
 include lagged features. Scaling preserves names; PCA generates `pca__pc0`, etc.
 Capacity defaults to the fitted final width, while an explicitly authored
-capacity remains fixed. PCA emits all NaNs until every stage input is finite.
+capacity applies to the final vector; intermediate training layouts may be wider. PCA emits all NaNs until every stage input is finite.
 `fit_transform` fits and replays, returning every event row; keep labels aligned
 and select usable rows when training the predictor.
 
@@ -283,8 +308,10 @@ DataFrame and order-book replay still work for inference; fitting currently
 accepts the columnar event API only. Arbitrary estimators/subclasses, `copy=False`,
 and sklearn `GridSearchCV` integration are unsupported.
 
-JSON writers emit pipeline version `2.0` with numeric `model_input.stages`;
-readers also accept strict scalar-only `1.0`. The nested extractor stays at `1.0`.
+JSON writers emit pipeline version `2.1` when scalar stages are present, otherwise
+`2.0`. Readers accept both and strict scalar-only `1.0`. Scalar stages serialize as
+`{"type": "scalar", "transformations": [...]}` within `model_input.stages`, with
+the same transformation fields used by the base layout. The nested extractor stays at `1.0`.
 Rust consumers should enable `serde_json`'s `float_roundtrip` feature to preserve
 every fitted `f64` on load, as the Python bindings do. No sklearn or matrix-library
 dependency is needed in Rust.

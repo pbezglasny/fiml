@@ -2,7 +2,7 @@
 
 Status: in progress
 
-Last updated: 2026-09-09
+Last updated: 2026-09-10
 
 The pipeline runtime, model-input serialization, and Python interface are
 implemented, including Python-fitted sklearn scaling/PCA stages and Rust online
@@ -26,15 +26,22 @@ scalar transformations into a base vector. Each scalar reads the raw feature
 vector. Optional fitted vector stages then consume the preceding active layout
 in sequence. `FittedStage::StandardScale` preserves its width and IDs;
 `FittedStage::Pca` projects to named components and supports whitening.
+`FittedStage::Scalar` selects, renames, scales, or lags columns from the preceding
+layout. Definitions within a scalar stage are independent; dependent operations
+belong in successive stages. Intermediate widths may exceed final capacity.
 General transformation graphs are not supported.
 
 Python `ModelInputPipeline.add_transformation`, `fit`, and `fit_transform`
-train supported sklearn objects and freeze numeric parameters. `transform`
+train supported sklearn objects and freeze numeric parameters.
+`fiml.ScalarStage()` builders can be inserted anywhere in that sequence. Training
+replays every event through each completed prefix, including rows excluded by
+`fit_mask`, so downstream lag history matches inference. `transform`
 continues to replay events through Rust. `reset()` clears event state while
 retaining parameters and symbol handles. See [the transformer design](pipeline_transformer.md)
 and [the runnable example](../crates/fiml-python/examples/sklearn_pipeline.py).
 
-Lagged definitions for the same raw input compile into one transformer with one
+Lagged definitions for the same input within each scalar stage (or the base
+layout) compile into one transformer with one
 history buffer sized to the largest lag. Each output keeps its authored position
 and becomes available after its own positive lag window. Duplicate lag windows
 with different output IDs are supported; rejected events do not advance history.
@@ -71,7 +78,8 @@ The canonical artifact has three ownership levels:
 
 `feature_extractor` owns the raw-vector layout. `model_input` owns the final
 vector layout, scalar base transformations, and fitted vector stages. Writers
-emit `2.0`; readers accept strict `1.0` artifacts without stages too.
+emit `2.1` for specs containing scalar stages and `2.0` otherwise; readers accept
+both and strict `1.0` artifacts without stages too.
 The envelope above illustrates ownership; populated feature/transform arrays
 must agree with the declared lengths. The strict source spelling for a
 feature that observes any event is `any_event`.

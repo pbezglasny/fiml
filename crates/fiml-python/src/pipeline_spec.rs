@@ -8,6 +8,75 @@ use pyo3::{exceptions::PyValueError, prelude::*};
 
 use crate::feature_extractor_spec::FeatureExtractorSpec;
 
+/// Authors one group of scalar outputs whose inputs are resolved against the preceding stage.
+/// Resolution is deferred until fitting because PCA output IDs may not exist yet.
+#[pyclass]
+#[derive(Clone, Default)]
+pub struct ScalarStage {
+    definitions: Vec<TransformerDefinition>,
+}
+
+#[pymethods]
+impl ScalarStage {
+    #[new]
+    fn new() -> Self {
+        Self::default()
+    }
+
+    /// Independent recipe snapshot, so later edits cannot change a pipeline.
+    fn copy(&self) -> Self {
+        self.clone()
+    }
+
+    /// Copy a scalar from the preceding stage.
+    #[pyo3(signature = (input, *, output=None))]
+    fn identity<'py>(
+        mut slf: PyRefMut<'py, Self>,
+        input: &str,
+        output: Option<&str>,
+    ) -> PyRefMut<'py, Self> {
+        slf.definitions.push(TransformerDefinition::identity(
+            FeatureId::new(input),
+            FeatureId::new(output.unwrap_or(input)),
+        ));
+        slf
+    }
+
+    /// Emit a preceding-stage scalar from `lag_window` accepted events earlier.
+    #[pyo3(signature = (input, *, lag_window, output=None))]
+    fn lagged<'py>(
+        mut slf: PyRefMut<'py, Self>,
+        input: &str,
+        lag_window: usize,
+        output: Option<&str>,
+    ) -> PyRefMut<'py, Self> {
+        slf.definitions.push(TransformerDefinition::lagged(
+            FeatureId::new(input),
+            FeatureId::new(output.unwrap_or(input)),
+            lag_window,
+        ));
+        slf
+    }
+
+    /// Apply fixed `(input - mean) / scale` parameters to a preceding-stage scalar.
+    #[pyo3(signature = (input, *, mean, scale, output=None))]
+    fn standard_scale<'py>(
+        mut slf: PyRefMut<'py, Self>,
+        input: &str,
+        mean: f64,
+        scale: f64,
+        output: Option<&str>,
+    ) -> PyRefMut<'py, Self> {
+        slf.definitions.push(TransformerDefinition::standard_scale(
+            FeatureId::new(input),
+            FeatureId::new(output.unwrap_or(input)),
+            mean,
+            scale,
+        ));
+        slf
+    }
+}
+
 pub(crate) fn core_feature_ids(spec: &CoreFeatureExtractorSpec) -> Vec<String> {
     spec.definitions()
         .iter()
@@ -37,7 +106,7 @@ impl PipelineSpec {
     fn add_transformation(&mut self, definition: TransformerDefinition) -> PyResult<()> {
         if !self.core.stages().is_empty() {
             return Err(PyValueError::new_err(
-                "cannot append scalar transformations after fitted stages",
+                "cannot append base transformations after stages; use scalar_stage(ScalarStage(...))",
             ));
         }
         let mut definitions = self.core.transformation_definitions().to_vec();
@@ -80,6 +149,41 @@ impl PipelineSpec {
 
 #[pymethods]
 impl PipelineSpec {
+    /// Allow temporary training prefixes to exceed the configured final capacity.
+    fn _fit_candidate(&self) -> Self {
+        Self {
+            explicit_capacity: false,
+            ..self.clone()
+        }
+    }
+
+    /// Restore the authored final capacity after all intermediate stages have been fitted.
+    fn _finalize_fit(&mut self, base: PyRef<'_, Self>) -> PyResult<()> {
+        if base.explicit_capacity {
+            self.core = CorePipelineSpec::with_stages(
+                self.core.raw_feature_extractor_spec().clone(),
+                self.core.transformation_definitions().to_vec(),
+                self.core.stages().to_vec(),
+                base.core.feature_vector_capacity(),
+                self.core.checksum().map(str::to_owned),
+            )
+            .map_err(|error| PyValueError::new_err(error.to_string()))?;
+        }
+        self.explicit_capacity = base.explicit_capacity;
+        Ok(())
+    }
+
+    /// Append independent scalar outputs consuming the current active layout.
+    fn scalar_stage<'py>(
+        mut slf: PyRefMut<'py, Self>,
+        stage: PyRef<'_, ScalarStage>,
+    ) -> PyResult<PyRefMut<'py, Self>> {
+        slf.add_stage(FittedStage::Scalar {
+            transformations: stage.definitions.clone(),
+        })?;
+        Ok(slf)
+    }
+
     /// Number of already fitted vector stages.
     #[getter]
     fn stage_count(&self) -> usize {

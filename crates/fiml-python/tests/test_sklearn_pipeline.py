@@ -244,8 +244,11 @@ def test_unsupported_estimators_do_not_change_pipeline(estimator):
 
 
 def test_artifact_inference_does_not_import_sklearn():
-    pipeline = fiml.ModelInputPipeline(base_spec()).add_transformation(PCA(n_components=2), name="pca")
-    pipeline.fit(**events(pipeline))
+    pipeline = (fiml.ModelInputPipeline(base_spec())
+                .add_transformation(PCA(n_components=2), name="pca")
+                .add_transformation(fiml.ScalarStage().identity("pca__pc1").lagged("pca__pc0", lag_window=1), name="lags"))
+    data = events(pipeline)
+    pipeline.fit(**data, fit_mask=np.arange(len(data["timestamp"])) > 0)
     code = """
 import importlib.abc
 import sys
@@ -259,6 +262,19 @@ pipeline = fiml.ModelInputPipeline.from_json(sys.stdin.read())
 handle = pipeline.symbol('BTCUSDT')
 pipeline.update(fiml.KIND_TRADE, handle, 0, price=10., volume=1.)
 assert pipeline.n_features() == 2
+import numpy as np
+raw = fiml.FeatureExtractorSpec().sma('BTCUSDT', [1], source='trade_price')
+base = fiml.PipelineSpec(raw).identity(raw.feature_ids()[0], output='price')
+recipe = (fiml.ModelInputPipeline(base)
+          .add_transformation(fiml.ScalarStage().lagged('price', lag_window=1), name='lag')
+          .add_transformation(fiml.ScalarStage().standard_scale('price', mean=0., scale=2.), name='scale'))
+result = recipe.fit_transform(
+    np.full(2, fiml.KIND_TRADE, dtype=np.uint8),
+    np.full(2, recipe.symbol('BTCUSDT'), dtype=np.int64),
+    np.arange(2, dtype=np.int64), price=np.array([10., 20.]), volume=np.ones(2),
+    fit_mask=np.array([False, True]),
+)
+np.testing.assert_equal(result, [[np.nan], [5.]])
 assert 'sklearn' not in sys.modules
 """
     subprocess.run([sys.executable, "-c", code], input=pipeline.to_json(), text=True, check=True)
@@ -277,3 +293,90 @@ def test_shared_fixture_matches_real_sklearn_training():
     restored.symbol("BTCUSDT")
     assert restored.feature_names() == pipeline.feature_names()
     np.testing.assert_allclose(restored.transform(**data), oracle, rtol=1e-10, atol=1e-12)
+
+
+def test_scalar_stages_between_estimators_preserve_excluded_event_history():
+    spec = base_spec(capacity=5)
+    scalars = (fiml.ScalarStage()
+               .lagged("pca__pc0", lag_window=2, output="lag2")
+               .identity("pca__pc1", output="now")
+               .lagged("pca__pc0", lag_window=1, output="lag1"))
+    pipeline = (fiml.ModelInputPipeline(spec)
+                .add_transformation(StandardScaler(), name="scale")
+                .add_transformation(PCA(n_components=2, svd_solver="full"), name="pca")
+                .add_transformation(scalars, name="lags")
+                .add_transformation(fiml.ScalarStage()
+                                    .standard_scale("lag1", mean=1., scale=2., output="scaled_lag")
+                                    .identity("now")
+                                    .identity("lag2"), name="select")
+                .add_transformation(StandardScaler(), name="final"))
+    # Pipeline captured an independent recipe, including the scalar definitions.
+    scalars.identity("missing")
+    data = events(pipeline)
+    matrix = base_matrix(spec, data)
+    mask = np.arange(len(matrix)) >= 2
+    mask[::3] = False  # excluded middle events still contribute to lag history
+    scaled = StandardScaler().fit(matrix[mask]).transform(matrix)
+    projected = PCA(n_components=2, svd_solver="full").fit(scaled[mask]).transform(scaled)
+    lag1 = np.r_[np.nan, projected[:-1, 0]]
+    lag2 = np.r_[np.nan, np.nan, projected[:-2, 0]]
+    selected = np.column_stack(((lag1 - 1.) / 2., projected[:, 1], lag2))
+    expected = StandardScaler().fit(selected[mask]).transform(selected)
+    actual = pipeline.fit_transform(**data, fit_mask=mask)
+    np.testing.assert_allclose(actual[:, :3], expected, rtol=1e-10, atol=1e-12)
+    assert np.isnan(actual[:, 3:]).all()
+    assert pipeline.feature_names() == ["scaled_lag", "now", "lag2", "__reserved_3", "__reserved_4"]
+    document = pipeline.to_json()
+    assert json.loads(document)["version"] == "2.1"
+    restored = fiml.ModelInputPipeline.from_json(document)
+    events(restored)
+    np.testing.assert_array_equal(restored.transform(**data), actual)
+    pipeline.reset()
+    chunks = [pipeline.transform(**{key: value[start:end] for key, value in data.items()})
+              for start, end in [(0, 1), (1, 7), (7, 24)]]
+    np.testing.assert_array_equal(np.concatenate(chunks), actual)
+    before = pipeline.values()
+    with pytest.raises(ValueError, match="must be finite"):
+        pipeline.fit(**data)  # downstream lag warm-up requires an explicit mask
+    assert pipeline.to_json() == document
+    np.testing.assert_array_equal(pipeline.values(), before)
+    np.testing.assert_array_equal(pipeline.fit_transform(**data, fit_mask=mask), actual)
+
+
+def test_scalar_selection_can_remove_warmup_before_fitting():
+    spec = base_spec(lag=True)
+    first = spec.feature_ids()[0]
+    pipeline = (fiml.ModelInputPipeline(spec)
+                .add_transformation(fiml.ScalarStage().identity(first, output="selected"), name="select")
+                .add_transformation(StandardScaler(), name="scale"))
+    data = events(pipeline)
+    expected = StandardScaler().fit_transform(base_matrix(spec, data)[:, :1])
+    np.testing.assert_allclose(pipeline.fit_transform(**data), expected, atol=1e-12)
+
+
+def test_training_prefix_can_be_wider_than_explicit_final_capacity():
+    raw = fiml.FeatureExtractorSpec().sma("BTCUSDT", [1], source="trade_price")
+    spec = fiml.PipelineSpec(raw, capacity=1).identity(raw.feature_ids()[0], output="price")
+    pipeline = (fiml.ModelInputPipeline(spec)
+                .add_transformation(fiml.ScalarStage()
+                                    .identity("price")
+                                    .lagged("price", lag_window=1, output="lag"), name="expand")
+                .add_transformation(PCA(n_components=1, svd_solver="full"), name="pca"))
+    data = events(pipeline)
+    mask = np.arange(len(data["price"])) > 0
+    matrix = np.column_stack((data["price"], np.r_[np.nan, data["price"][:-1]]))
+    reference = PCA(n_components=1, svd_solver="full").fit_transform(matrix[mask])
+    actual = pipeline.fit_transform(**data, fit_mask=mask)
+    assert actual.shape == (len(mask), 1)
+    np.testing.assert_allclose(actual[mask], reference, rtol=1e-10, atol=1e-12)
+    assert np.isnan(actual[0]).all()
+    assert pipeline.to_spec().capacity == 1
+    restored = fiml.ModelInputPipeline.from_json(pipeline.to_json())
+    events(restored)
+    np.testing.assert_array_equal(restored.transform(**data), actual)
+    too_wide = (fiml.ModelInputPipeline(spec)
+                .add_transformation(fiml.ScalarStage().identity("price").identity("price", output="copy"), name="expand"))
+    with pytest.raises(ValueError, match="capacity"):
+        too_wide.fit(**events(too_wide))
+    with pytest.raises(ValueError, match="not fitted"):
+        too_wide.to_json()

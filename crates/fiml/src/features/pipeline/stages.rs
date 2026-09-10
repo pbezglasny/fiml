@@ -1,12 +1,19 @@
-//! Validates fitted vector stages and executes them using preallocated scratch.
+//! Validates scalar and fitted vector stages and executes them using preallocated scratch.
 
-use crate::features::transformers::validate_standard_scale;
-use crate::{FeatureId, FeatureVector, VecFeatureVector};
+use std::borrow::Cow;
 
-/// Learned numeric state for a stage consuming the preceding complete active vector.
+use crate::features::transformers::{self, Transformer, validate_standard_scale};
+use crate::{FeatureId, FeatureVector, TransformerDefinition, VecFeatureVector};
+
+/// Deployable scalar definitions or learned numeric state consuming the preceding active vector.
 /// Training stays outside Rust; these definitions freeze inference and output order.
 #[derive(Debug, Clone, PartialEq)]
 pub enum FittedStage {
+    /// Independent scalar outputs reading IDs from the preceding stage.
+    /// Use successive stages when one scalar must consume another scalar's output.
+    Scalar {
+        transformations: Vec<TransformerDefinition>,
+    },
     /// Per-column centering and scaling, preserving input IDs.
     StandardScale {
         outputs: Vec<FeatureId>,
@@ -24,9 +31,17 @@ pub enum FittedStage {
 
 impl FittedStage {
     /// Active output IDs in the order written by this stage.
-    pub fn outputs(&self) -> &[FeatureId] {
+    /// Scalar IDs are collected on this cold configuration path.
+    pub fn outputs(&self) -> Cow<'_, [FeatureId]> {
         match self {
-            Self::StandardScale { outputs, .. } | Self::Pca { outputs, .. } => outputs,
+            Self::Scalar { transformations } => transformations
+                .iter()
+                .map(|definition| definition.output().clone())
+                .collect::<Vec<_>>()
+                .into(),
+            Self::StandardScale { outputs, .. } | Self::Pca { outputs, .. } => {
+                Cow::Borrowed(outputs)
+            }
         }
     }
 
@@ -44,7 +59,7 @@ impl FittedStage {
             }
         }
         let rows = match self {
-            Self::StandardScale { .. } => 1,
+            Self::Scalar { .. } | Self::StandardScale { .. } => 1,
             Self::Pca { .. } => outputs.len(),
         };
         inputs
@@ -54,6 +69,10 @@ impl FittedStage {
             .filter(|&bytes| bytes <= isize::MAX as usize)
             .ok_or("stage dimensions exceed addressable storage")?;
         match self {
+            Self::Scalar { transformations } => {
+                transformers::validate(transformations, inputs)
+                    .map_err(|error| error.to_string())?;
+            }
             Self::StandardScale { mean, scale, .. } => {
                 if outputs != inputs || mean.len() != inputs.len() || scale.len() != inputs.len() {
                     return Err(format!(
@@ -115,6 +134,10 @@ fn dot(left: &[f64], right: &[f64]) -> f64 {
 
 /// Contiguous fitted state compiled once for numeric-only event processing.
 enum CompiledStage {
+    Scalar {
+        operations: Box<[Transformer]>,
+        output_width: usize,
+    },
     StandardScale {
         mean: Box<[f64]>,
         inverse_scale: Box<[f64]>,
@@ -127,9 +150,13 @@ enum CompiledStage {
     },
 }
 
-impl From<&FittedStage> for CompiledStage {
-    fn from(stage: &FittedStage) -> Self {
+impl CompiledStage {
+    fn new(stage: &FittedStage, inputs: &[FeatureId]) -> Self {
         match stage {
+            FittedStage::Scalar { transformations } => Self::Scalar {
+                operations: transformers::compile(transformations, inputs),
+                output_width: transformations.len(),
+            },
             FittedStage::StandardScale { mean, scale, .. } => Self::StandardScale {
                 mean: mean.clone().into_boxed_slice(),
                 inverse_scale: scale.iter().map(|scale| 1.0 / scale).collect(),
@@ -147,16 +174,26 @@ impl From<&FittedStage> for CompiledStage {
             },
         }
     }
-}
 
-impl CompiledStage {
-    fn apply<V: FeatureVector>(&self, input: &[f64], output: &mut V) {
+    fn apply<V: FeatureVector>(&mut self, input: &[f64], output: &mut V) {
         match self {
+            Self::Scalar {
+                operations,
+                output_width,
+            } => {
+                // Lag warm-up must not expose values left in reused scratch storage.
+                for index in 0..*output_width {
+                    output.set_value_at(index, f64::NAN);
+                }
+                for operation in operations {
+                    operation.apply(input, output);
+                }
+            }
             Self::StandardScale {
                 mean,
                 inverse_scale,
             } => {
-                for (i, (&mean, &inverse)) in mean.iter().zip(inverse_scale).enumerate() {
+                for (i, (&mean, &inverse)) in mean.iter().zip(inverse_scale.iter()).enumerate() {
                     output.set_value_at(i, (input[i] - mean) * inverse);
                 }
             }
@@ -190,19 +227,31 @@ pub(super) struct StageRuntime {
 }
 
 impl StageRuntime {
-    pub(super) fn new(base_width: usize, stages: &[FittedStage]) -> Option<Self> {
+    pub(super) fn new(base: &[TransformerDefinition], stages: &[FittedStage]) -> Option<Self> {
         if stages.is_empty() {
             return None;
         }
-        let width = stages
+        let base_width = base.len();
+        let mut width = base_width;
+        let mut inputs: Cow<'_, [FeatureId]> = base
             .iter()
-            .map(|stage| stage.outputs().len())
-            .fold(base_width, usize::max);
+            .map(|definition| definition.output().clone())
+            .collect::<Vec<_>>()
+            .into();
+        let stages = stages
+            .iter()
+            .map(|stage| {
+                let compiled = CompiledStage::new(stage, &inputs);
+                inputs = stage.outputs();
+                width = width.max(inputs.len());
+                compiled
+            })
+            .collect::<Box<[_]>>();
         Some(Self {
             base_width,
             input: VecFeatureVector::new(width),
             scratch: VecFeatureVector::new(if stages.len() > 1 { width } else { 0 }),
-            stages: stages.iter().map(CompiledStage::from).collect(),
+            stages,
         })
     }
 
@@ -215,7 +264,10 @@ impl StageRuntime {
     }
 
     pub(super) fn apply<V: FeatureVector>(&mut self, output: &mut V) {
-        let (last, preceding) = self.stages.split_last().expect("nonempty stage sequence");
+        let (last, preceding) = self
+            .stages
+            .split_last_mut()
+            .expect("nonempty stage sequence");
         for stage in preceding {
             stage.apply(self.input.values(), &mut self.scratch);
             std::mem::swap(&mut self.input, &mut self.scratch);

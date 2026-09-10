@@ -142,6 +142,18 @@ fn fitted_stages_do_not_allocate_during_warmup_or_steady_state() {
                 components: vec![vec![0.6, 0.8]],
                 output_scale: vec![2.0],
             },
+            FittedStage::Scalar {
+                transformations: vec![
+                    TransformerDefinition::lagged(FeatureId::new("pc"), FeatureId::new("lag1"), 1),
+                    TransformerDefinition::lagged(FeatureId::new("pc"), FeatureId::new("lag2"), 2),
+                ],
+            },
+            FittedStage::Scalar {
+                transformations: vec![TransformerDefinition::identity(
+                    FeatureId::new("lag2"),
+                    FeatureId::new("final"),
+                )],
+            },
         ],
         1,
         None,
