@@ -601,7 +601,7 @@ impl Display for InvalidIndicatorDefinitionError {
 impl Display for InvalidTransformationDefinitionError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
-            Self::InputFeatureNotFound => "input feature ID does not exist in the raw layout",
+            Self::InputFeatureNotFound => "input feature ID does not exist in the preceding layout",
             Self::DuplicateOutputFeature => "output feature ID duplicates an earlier output",
             Self::ReservedOutputFeature => "output feature ID uses the reserved namespace",
             Self::MeanNotFinite => "standard-scaler mean must be finite",

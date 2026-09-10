@@ -20,7 +20,7 @@ use feature_extractor::FeatureExtractor;
 use feature_extractor_spec::{FeatureExtractorSpec, PyWarmupPolicy};
 use model_input_pipeline::ModelInputPipeline;
 use order_book::OrderBookEvent;
-use pipeline_spec::PipelineSpec;
+use pipeline_spec::{PipelineSpec, ScalarStage};
 use runtime::{
     KIND_ORDERBOOK, KIND_PRICE, KIND_TIME, KIND_TRADE, KIND_VOLUME, SIDE_AGGRESSOR_BUY,
     SIDE_AGGRESSOR_SELL,
@@ -37,6 +37,7 @@ fn _fiml(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyWarmupPolicy>()?;
     m.add_class::<FeatureExtractorSpec>()?;
     m.add_class::<PipelineSpec>()?;
+    m.add_class::<ScalarStage>()?;
     m.add_class::<FeatureExtractor>()?;
     m.add_class::<ModelInputPipeline>()?;
     m.add("KIND_PRICE", KIND_PRICE)?;

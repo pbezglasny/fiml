@@ -5,7 +5,7 @@
 
 use std::collections::HashMap;
 
-use crate::{FeatureExtractor, FeatureId, FeatureVector, InvalidTransformationDefinitionError};
+use crate::{FeatureId, FeatureVector, FimlError, InvalidTransformationDefinitionError, Result};
 
 mod identity;
 mod lagged;
@@ -17,12 +17,12 @@ use standard_scale::StandardScaleTransformer;
 
 const WINDOW_MAX_SIZE: usize = 10_000;
 
-/// One named scalar transformation from the raw feature layout to model input.
+/// One named scalar transformation from an input layout to the next output layout.
 #[derive(Debug, Clone, PartialEq)]
 pub enum TransformerDefinition {
-    /// Copies one raw scalar without changing its value.
+    /// Copies one input scalar without changing its value.
     Identity { input: FeatureId, output: FeatureId },
-    /// Emits the raw scalar from `lag_window` accepted events earlier.
+    /// Emits the input scalar from `lag_window` accepted events earlier.
     /// The window must be in `1..=10_000`; output remains NaN until enough history exists.
     /// Definitions for the same input share one runtime history buffer.
     Lagged {
@@ -30,7 +30,7 @@ pub enum TransformerDefinition {
         output: FeatureId,
         lag_window: usize,
     },
-    /// Applies `(input - mean) / scale` to one raw scalar.
+    /// Applies `(input - mean) / scale` to one input scalar.
     StandardScale {
         input: FeatureId,
         output: FeatureId,
@@ -80,7 +80,7 @@ impl TransformerDefinition {
         }
     }
 
-    pub(crate) fn validate(&self) -> Result<(), InvalidTransformationDefinitionError> {
+    pub(crate) fn validate(&self) -> std::result::Result<(), InvalidTransformationDefinitionError> {
         if let Self::Lagged { lag_window, .. } = self {
             if *lag_window == 0 {
                 return Err(InvalidTransformationDefinitionError::LagWindowZero);
@@ -99,7 +99,7 @@ impl TransformerDefinition {
 pub(crate) fn validate_standard_scale(
     mean: f64,
     scale: f64,
-) -> Result<(), InvalidTransformationDefinitionError> {
+) -> std::result::Result<(), InvalidTransformationDefinitionError> {
     if !mean.is_finite() {
         return Err(InvalidTransformationDefinitionError::MeanNotFinite);
     }
@@ -115,17 +115,40 @@ pub(crate) fn validate_standard_scale(
     Ok(())
 }
 
+/// Validates independent scalar outputs against the preceding active layout.
+pub(crate) fn validate(definitions: &[TransformerDefinition], inputs: &[FeatureId]) -> Result<()> {
+    for (index, definition) in definitions.iter().enumerate() {
+        let reason = if !inputs.contains(definition.input()) {
+            Some(InvalidTransformationDefinitionError::InputFeatureNotFound)
+        } else if crate::features::is_reserved_feature_id(definition.output()) {
+            Some(InvalidTransformationDefinitionError::ReservedOutputFeature)
+        } else if definitions[..index]
+            .iter()
+            .any(|previous| previous.output() == definition.output())
+        {
+            Some(InvalidTransformationDefinitionError::DuplicateOutputFeature)
+        } else {
+            definition.validate().err()
+        };
+        if let Some(reason) = reason {
+            return Err(FimlError::InvalidTransformationDefinition { index, reason });
+        }
+    }
+    Ok(())
+}
+
 /// Compiles validated scalar definitions, sharing history between lags of one input.
-pub(crate) fn compile<V: FeatureVector>(
+pub(crate) fn compile(
     definitions: &[TransformerDefinition],
-    feature_extractor: &FeatureExtractor<V>,
+    inputs: &[FeatureId],
 ) -> Box<[Transformer]> {
     let mut operations = Vec::with_capacity(definitions.len());
     let mut lagged_outputs = HashMap::<usize, (Vec<usize>, Vec<usize>)>::new();
     for (output_index, definition) in definitions.iter().enumerate() {
-        let input_index = feature_extractor
-            .feature_index(definition.input())
-            .expect("pipeline construction validated every raw input ID");
+        let input_index = inputs
+            .iter()
+            .position(|id| id == definition.input())
+            .expect("pipeline construction validated every input ID");
         match definition {
             TransformerDefinition::Identity { .. } => operations.push(Transformer::Identity(
                 IdentityTransformer::new(input_index, output_index),
@@ -145,7 +168,7 @@ pub(crate) fn compile<V: FeatureVector>(
             }
         }
     }
-    // Operations read only raw values and own distinct output cells, so groups
+    // Operations read only the preceding layout and own distinct output cells, so groups
     // can run after scalar operations without changing authored output order.
     for (input_index, (windows, output_indices)) in lagged_outputs {
         operations.push(Transformer::Lagged(LaggedFeature::new(

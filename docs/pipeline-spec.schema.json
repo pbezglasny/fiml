@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "fiml PipelineSpec 2.0 (with 1.0 read compatibility)",
+  "title": "fiml PipelineSpec 2.1 (with 1.0 and 2.0 read compatibility)",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -9,15 +9,20 @@
     "model_input"
   ],
   "properties": {
-    "version": { "enum": ["1.0", "2.0"] },
+    "version": { "enum": ["1.0", "2.0", "2.1"] },
     "checksum": { "type": "string" },
     "feature_extractor": { "$ref": "feature-extractor-spec.schema.json" },
     "model_input": { "$ref": "#/$defs/model_input" }
   },
   "allOf": [{
-    "if": { "properties": { "version": { "const": "2.0" } } },
+    "if": { "properties": { "version": { "enum": ["2.0", "2.1"] } } },
     "then": { "properties": { "model_input": { "required": ["stages"] } } },
     "else": { "properties": { "model_input": { "not": { "required": ["stages"] } } } }
+  }, {
+    "if": { "properties": { "version": { "const": "2.0" } } },
+    "then": { "properties": { "model_input": { "properties": {
+      "stages": { "items": { "not": { "properties": { "type": { "const": "scalar" } }, "required": ["type"] } } }
+    } } } }
   }],
   "$defs": {
     "model_input": {
@@ -76,6 +81,14 @@
     },
     "stage": {
       "oneOf": [
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["type", "transformations"],
+          "properties": {
+            "type": { "const": "scalar" },
+            "transformations": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/transformation" } }
+          }
+        },
         {
           "type": "object", "additionalProperties": false,
           "required": ["type", "outputs", "mean", "scale"],

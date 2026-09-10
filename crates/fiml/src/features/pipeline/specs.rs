@@ -1,13 +1,14 @@
 use super::{FittedStage, Pipeline, StageRuntime};
 use crate::{
-    FeatureExtractorSpec, FeatureVector, FimlError, InvalidArgumentError,
-    InvalidTransformationDefinitionError, Result, TransformerDefinition,
+    FeatureExtractorSpec, FeatureVector, FimlError, InvalidArgumentError, Result,
+    TransformerDefinition,
 };
 
 /// Validated configuration for raw extraction and the final model-input layout.
 ///
 /// Scalar transformations define the base order; each fitted stage consumes that
-/// layout or the preceding stage. The last stage owns the final vector layout.
+/// layout or the preceding stage, as do additional scalar stages.
+/// The last stage owns the final vector layout.
 /// Layouts have separate ID namespaces and may therefore reuse names.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PipelineSpec {
@@ -64,7 +65,7 @@ impl PipelineSpec {
         )
     }
 
-    /// Validates a base scalar layout followed by fitted vector stages.
+    /// Validates a base scalar layout followed by scalar or fitted vector stages.
     /// Capacity describes the final output, independently of intermediate widths.
     pub fn with_stages(
         raw_feature_extractor_spec: FeatureExtractorSpec,
@@ -89,46 +90,22 @@ impl PipelineSpec {
             ));
         }
 
-        for (index, definition) in transformation_definitions.iter().enumerate() {
-            if !raw_feature_extractor_spec
-                .definitions()
-                .iter()
-                .any(|raw| raw.id == *definition.input())
-            {
-                return invalid_definition(
-                    index,
-                    InvalidTransformationDefinitionError::InputFeatureNotFound,
-                );
-            }
-            if crate::features::is_reserved_feature_id(definition.output()) {
-                return invalid_definition(
-                    index,
-                    InvalidTransformationDefinitionError::ReservedOutputFeature,
-                );
-            }
-            if transformation_definitions[..index]
-                .iter()
-                .any(|previous| previous.output() == definition.output())
-            {
-                return invalid_definition(
-                    index,
-                    InvalidTransformationDefinitionError::DuplicateOutputFeature,
-                );
-            }
-            definition
-                .validate()
-                .map_err(|reason| FimlError::InvalidTransformationDefinition { index, reason })?;
-        }
+        let raw_ids = raw_feature_extractor_spec
+            .definitions()
+            .iter()
+            .map(|definition| definition.id.clone())
+            .collect::<Vec<_>>();
+        crate::features::transformers::validate(&transformation_definitions, &raw_ids)?;
 
         if !stages.is_empty() {
             let base_ids = transformation_definitions
                 .iter()
                 .map(|definition| definition.output().clone())
                 .collect::<Vec<_>>();
-            let mut inputs = base_ids.as_slice();
+            let mut inputs = std::borrow::Cow::Borrowed(base_ids.as_slice());
             for (index, stage) in stages.iter().enumerate() {
                 stage
-                    .validate(inputs)
+                    .validate(&inputs)
                     .map_err(|reason| FimlError::InvalidPipelineStage { index, reason })?;
                 inputs = stage.outputs();
             }
@@ -167,7 +144,7 @@ impl PipelineSpec {
             })
     }
 
-    /// Fitted vector stages in execution order.
+    /// Scalar and fitted vector stages in execution order.
     pub fn stages(&self) -> &[FittedStage] {
         &self.stages
     }
@@ -215,7 +192,7 @@ impl PipelineSpec {
         let feature_extractor = self.raw_feature_extractor_spec.build(raw_vector)?;
         let operations = crate::features::transformers::compile(
             &self.transformation_definitions,
-            &feature_extractor,
+            feature_extractor.feature_ids(),
         );
         let output_ids = self.output_ids().into_boxed_slice();
         for index in 0..model_vector.capacity() {
@@ -225,13 +202,9 @@ impl PipelineSpec {
         Ok(Pipeline {
             feature_extractor,
             operations,
-            stages: StageRuntime::new(self.transformation_definitions.len(), &self.stages),
+            stages: StageRuntime::new(&self.transformation_definitions, &self.stages),
             model_vector,
             output_ids,
         })
     }
-}
-
-fn invalid_definition<T>(index: usize, reason: InvalidTransformationDefinitionError) -> Result<T> {
-    Err(FimlError::InvalidTransformationDefinition { index, reason })
 }

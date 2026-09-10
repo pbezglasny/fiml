@@ -41,4 +41,3 @@ def fit_stage(estimator, name, matrix, spec):
             [f"{name}__pc{i}" for i in range(fitted.n_components_)],
             fitted.mean_.tolist(), fitted.components_.tolist(), scale.tolist(),
         )
-    return np.asarray(fitted.transform(matrix), dtype=np.float64)

@@ -110,3 +110,41 @@ def test_schema_accepts_fitted_stages_and_versioned_migration():
     assert list(VALIDATOR.iter_errors(document))
     with pytest.raises(ValueError, match="missing field.*stages"):
         fiml.PipelineSpec.from_json(json.dumps(document))
+
+
+def test_scalar_stages_validate_and_round_trip_in_version_2_1():
+    spec = fiml.PipelineSpec.from_json(json.dumps(canonical_example()))
+    input_id = spec.feature_ids()[0]
+    spec.scalar_stage(fiml.ScalarStage().identity(input_id, output="selected"))
+    spec.scalar_stage(fiml.ScalarStage().lagged("selected", lag_window=2, output="lag"))
+    document = json.loads(spec.to_json())
+    assert document["version"] == "2.1"
+    assert not list(VALIDATOR.iter_errors(document))
+    assert json.loads(fiml.PipelineSpec.from_json(json.dumps(document)).to_json()) == document
+    document["version"] = "2.0"
+    assert list(VALIDATOR.iter_errors(document))
+    with pytest.raises(ValueError, match="require version 2.1"):
+        fiml.PipelineSpec.from_json(json.dumps(document))
+    document["version"] = "2.1"
+    document["model_input"]["stages"][0]["transformations"][0]["extra"] = True
+    assert list(VALIDATOR.iter_errors(document))
+    with pytest.raises(ValueError, match="unknown field"):
+        fiml.PipelineSpec.from_json(json.dumps(document))
+
+
+def test_scalar_stage_references_are_validated_atomically_against_previous_outputs():
+    spec = fiml.PipelineSpec.from_json(json.dumps(canonical_example()))
+    first = spec.feature_ids()[0]
+    spec.scalar_stage(fiml.ScalarStage().identity(first, output="selected"))
+    before = spec.to_json()
+    for invalid in [
+        fiml.ScalarStage(),
+        fiml.ScalarStage().identity(first),
+        fiml.ScalarStage().identity("selected", output="new").identity("new"),
+        fiml.ScalarStage().identity("selected").identity("selected"),
+        fiml.ScalarStage().lagged("selected", lag_window=0),
+        fiml.ScalarStage().standard_scale("selected", mean=0., scale=0.),
+    ]:
+        with pytest.raises(ValueError, match="stage 1"):
+            spec.scalar_stage(invalid)
+        assert spec.to_json() == before

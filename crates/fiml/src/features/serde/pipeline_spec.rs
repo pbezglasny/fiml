@@ -3,7 +3,7 @@ use ::serde::{Deserialize, Deserializer, Serialize, Serializer};
 use super::{FeatureExtractorSpec, serialization::deserialize_present_option};
 use crate::{FeatureId, FittedStage, PipelineSpec, TransformerDefinition};
 
-const FORMAT_VERSION: &str = "2.0";
+const FORMAT_VERSION: &str = "2.1";
 
 /// Private versioned storage representation for a complete model-input layout.
 #[derive(Serialize, Deserialize)]
@@ -39,6 +39,9 @@ struct ModelInputWire {
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 enum StageWire {
+    Scalar {
+        transformations: Vec<TransformationWire>,
+    },
     StandardScale {
         outputs: Vec<String>,
         mean: Vec<f64>,
@@ -60,6 +63,12 @@ impl From<&FittedStage> for StageWire {
             .map(|id| id.as_str().to_owned())
             .collect();
         match stage {
+            FittedStage::Scalar { transformations } => Self::Scalar {
+                transformations: transformations
+                    .iter()
+                    .map(TransformationWire::from)
+                    .collect(),
+            },
             FittedStage::StandardScale { mean, scale, .. } => Self::StandardScale {
                 outputs,
                 mean: mean.clone(),
@@ -83,6 +92,12 @@ impl From<&FittedStage> for StageWire {
 impl From<StageWire> for FittedStage {
     fn from(stage: StageWire) -> Self {
         match stage {
+            StageWire::Scalar { transformations } => Self::Scalar {
+                transformations: transformations
+                    .into_iter()
+                    .map(TransformerDefinition::from)
+                    .collect(),
+            },
             StageWire::StandardScale {
                 outputs,
                 mean,
@@ -150,7 +165,16 @@ impl<'de> Deserialize<'de> for PipelineSpec {
 impl From<&PipelineSpec> for PipelineSpecWire {
     fn from(spec: &PipelineSpec) -> Self {
         Self {
-            version: FORMAT_VERSION.to_owned(),
+            version: if spec
+                .stages()
+                .iter()
+                .any(|stage| matches!(stage, FittedStage::Scalar { .. }))
+            {
+                FORMAT_VERSION
+            } else {
+                "2.0"
+            }
+            .to_owned(),
             checksum: spec.checksum().map(str::to_owned),
             feature_extractor: spec.raw_feature_extractor_spec().clone(),
             model_input: ModelInputWire {
@@ -202,9 +226,9 @@ impl TryFrom<PipelineSpecWire> for PipelineSpec {
     type Error = String;
 
     fn try_from(wire: PipelineSpecWire) -> Result<Self, Self::Error> {
-        if wire.version != FORMAT_VERSION && wire.version != "1.0" {
+        if !matches!(wire.version.as_str(), "1.0" | "2.0" | FORMAT_VERSION) {
             return Err(format!(
-                "unsupported model-input spec version {:?}; expected 1.0 or {FORMAT_VERSION}",
+                "unsupported model-input spec version {:?}; expected 1.0, 2.0 or {FORMAT_VERSION}",
                 wire.version
             ));
         }
@@ -213,11 +237,25 @@ impl TryFrom<PipelineSpecWire> for PipelineSpec {
             ("1.0", Some(_)) => {
                 return Err("model_input.stages is not allowed in version 1.0".into());
             }
-            (_, Some(stages)) => stages
-                .into_iter()
-                .map(FittedStage::from)
-                .collect::<Vec<_>>(),
-            (_, None) => return Err("missing field model_input.stages in version 2.0".into()),
+            (_, Some(stages)) => {
+                if wire.version == "2.0"
+                    && stages
+                        .iter()
+                        .any(|stage| matches!(stage, StageWire::Scalar { .. }))
+                {
+                    return Err("scalar stages require version 2.1".into());
+                }
+                stages
+                    .into_iter()
+                    .map(FittedStage::from)
+                    .collect::<Vec<_>>()
+            }
+            (_, None) => {
+                return Err(format!(
+                    "missing field model_input.stages in version {}",
+                    wire.version
+                ));
+            }
         };
         let length = stages
             .last()

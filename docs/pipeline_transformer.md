@@ -2,7 +2,7 @@
 
 Status: implemented.
 
-Date: 2026-09-09.
+Date: 2026-09-09. Updated: 2026-09-10 (scalar stages).
 
 Related: [issue #93](https://github.com/pbezglasny/fiml/issues/93).
 
@@ -111,6 +111,14 @@ The first stage consumes the base outputs; later stages consume previous stage
 outputs. This supports `StandardScaler -> PCA` and `lags -> PCA` without branches,
 arbitrary references, or a general transformation graph.
 
+`fiml.ScalarStage()` groups can also appear anywhere in the sequence, authored
+with `identity`, `lagged`, and fixed-parameter `standard_scale`. Each definition
+reads the preceding layout; dependent definitions go into successive stages.
+A scalar stage replaces its input with its authored outputs, so use identity
+outputs for columns that must survive. Input resolution is deferred until the
+stage is reached during fitting, after PCA output dimensions are known. Rust
+represents these groups as `FittedStage::Scalar { transformations }`.
+
 Scaler stages preserve input IDs. PCA outputs receive deterministic IDs
 `<name>__pc0`, `<name>__pc1`, etc., after fitting resolves their count. Require
 unique stage names and unique, nonreserved IDs within every layout. Raw and
@@ -125,7 +133,7 @@ last stage, with the existing distinction between capacity and active length.
 | `add_transformation(estimator, *, name)` | Check supported concrete type and options, snapshot an unfitted clone, append it, and invalidate the fitted result. Allow configuration before the first successful fit or event replay; create a new pipeline to change an established recipe. |
 | `fit(kind, symbol, timestamp, *, price=None, volume=None, side=None, bid=None, ask=None, fit_mask=None)` | Replay from a fresh base runtime, fit cloned estimators sequentially, compile a candidate spec, and return `self`. On success install it with cold event state. |
 | `transform(...)` | Keep the current event-column signature. Apply frozen parameters through Rust and return all event rows. Never learn or reset implicitly. |
-| `fit_transform(..., fit_mask=None)` | Call `fit`, then replay the same events through `transform`. Return all rows, including warm-up rows. This deliberately uses two replays in the first implementation. |
+| `fit_transform(..., fit_mask=None)` | Call `fit`, then replay the same events through `transform`. Return all rows, including warm-up rows. Fitting replays each completed prefix; the final replay returns all rows. |
 | `reset()` | Rebuild from the fitted spec, clearing indicators, lag histories, books, and timestamps while retaining fitted parameters and existing symbol-handle mappings. |
 | `to_spec()` / `to_json()` | Return a fitted spec snapshot / serialize it through the canonical Rust adapter. Reject an unfitted recipe. |
 | `from_json(...)` | Load an inference-ready pipeline without importing sklearn. No training recipe is reconstructed, so `fit` on this object raises a clear inference-only error. |
@@ -169,10 +177,15 @@ finite values in every selected column; report the first invalid event row and
 feature ID. The caller can exclude indicator warm-up rows explicitly. Do not
 silently replace NaNs with zero or independently drop different rows per stage.
 
-For each stage: clone, `fit` on the selected matrix, then call its `transform`
-on that same unmodified matrix to obtain the next stage's training input. Reject
-`copy=False` initially for both supported estimators, so fitting cannot overwrite
-the data needed for this step. Check intermediate outputs are finite too.
+For each sklearn stage: clone, fit on selected rows, and export its numeric state.
+For each scalar stage: validate and append its definitions. Replay all original
+events from cold state through the completed Rust prefix to obtain the next
+matrix. Do not mask before replay: even excluded rows must advance downstream
+lags. Check selected estimator inputs and final outputs are finite. A scalar
+selection may drop unused warm-up columns before the next estimator. This simple
+implementation repeats extraction per prefix, with training cost proportional to
+stage count; online execution still processes each event once. `copy=False`
+remains unsupported.
 
 Keep fitting in `float64`, even if public output arrays are configured as
 `float32`; cast only the final returned arrays. Train the downstream predictor
@@ -254,7 +267,10 @@ stage fusion. Benchmark representative dimensions before adding those.
 
 Introduce pipeline format `2.0`, keeping the nested feature extractor at `1.0`.
 New readers should accept existing strict `1.0` artifacts as having no stages;
-new writers emit `2.0`. Existing readers reject the new version explicitly.
+writers emit `2.0` for these fitted-only sequences. Scalar stages require `2.1`,
+which readers also accept. Their representation is
+`{"type": "scalar", "transformations": [...]}`, reusing the base transformation
+wire format. A `2.0` artifact containing a scalar stage is rejected.
 Do not reinterpret `1.0`, whose reader currently requires final length to equal
 the scalar transformation count.
 
@@ -287,11 +303,12 @@ the scalar transformation count.
 ```
 
 Stage inputs are implicit: the complete preceding active layout, in order.
-Scalar definitions still resolve stable raw IDs, and explicit stage output IDs
+Base scalar definitions resolve stable raw IDs; scalar stages resolve IDs against
+the preceding layout. Explicit fitted stage output IDs
 freeze the layout across export/import. The example has two base outputs and
 one final output; base scratch width must not be taken from final `capacity`.
 
-Require `stages` in `2.0`, permitting an empty list. Derive base width from scalar
+Require `stages` in `2.0` and `2.1`, permitting an empty list. Derive base width from scalar
 definitions, each stage width from its validated arrays and outputs, and final
 active length from the last stage (or base width if empty). Final `capacity`
 must cover that final length; it may be smaller than an intermediate width.
@@ -320,8 +337,8 @@ checksums remain opaque metadata, not integrity validation.
 
 ## Rust and Python implementation boundaries
 
-Add a concrete fitted-stage enum with scaling and PCA variants beside the current
-scalar definitions. Keep `PipelineSpec` as the semantic validator and canonical
+Use a concrete stage enum with scaling, PCA, and scalar-group variants beside the
+base scalar definitions. Keep `PipelineSpec` as the semantic validator and canonical
 serde owner. Add a separate compiled-stage enum using flattened numeric arrays;
 there is no need for dynamic dispatch or a public transformer trait yet.
 
