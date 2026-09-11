@@ -203,6 +203,7 @@ Public lookup/read methods are `last_timestamp`, `feature_vector`,
 | `ExponentialMovingAverage<WINDOWS>` | Inline EMA window array | `EmaFeature` |
 | `CumulativeVolumeDelta<R, WINDOWS>` | `R::Item = f64` | `CvdFeature` |
 | `OnBalanceVolumeTimed<R, WINDOWS>` | `R::Item = ObvBucket` | `ObvTimedFeature` |
+| `VolumePriceTrend` | Previous price and cumulative value | `VptFeature` |
 | `TradeCountTimed<R>` | `R::Item = CountBucket` | `TradeCountTimedFeature` |
 
 Standalone indicators can use stack-backed history when capacity is known at

@@ -117,6 +117,11 @@ pub enum FeatureKey {
         window: Duration,
         warmup_policy: WarmupPolicy,
     },
+    /// Cumulative volume-price trend over trades for one symbol.
+    Vpt {
+        symbol: Symbol,
+        source: FeatureSource,
+    },
     TradeCountTimed {
         symbol: Symbol,
         source: FeatureSource,

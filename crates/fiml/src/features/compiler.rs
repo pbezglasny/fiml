@@ -151,6 +151,10 @@ enum GroupKey {
         aggregation: Duration,
         warmup_policy: WarmupPolicy,
     },
+    Vpt {
+        symbol: Symbol,
+        source: FeatureSource,
+    },
     TradeCountTimed {
         symbol: Symbol,
         source: FeatureSource,
@@ -195,6 +199,7 @@ impl GroupKey {
             | Self::Cvd { symbol, .. }
             | Self::SmaTimed { symbol, .. }
             | Self::ObvTimed { symbol, .. }
+            | Self::Vpt { symbol, .. }
             | Self::TradeCountTimed { symbol, .. }
             | Self::DayOfWeek { symbol, .. }
             | Self::TimeSinceFirstEventOfDay { symbol, .. } => *symbol,
@@ -225,6 +230,7 @@ impl GroupKey {
                 FeatureRoute::Kind(source.event_kind())
             }
             Self::Cvd { source, .. }
+            | Self::Vpt { source, .. }
             | Self::DayOfWeek { source, .. }
             | Self::TimeSinceFirstEventOfDay { source, .. } => {
                 route_for_source(*source, self.symbol())
@@ -736,6 +742,10 @@ fn group_key(index: usize, key: &FeatureKey) -> Result<(GroupKey, GroupOutput)> 
                 GroupOutput::TimedPeriod(validate_timed_window(index, key, aggregation, window)?),
             ))
         }
+        FeatureKey::Vpt { symbol, source } => {
+            validate_trade_source(index, key, source)?;
+            Ok((GroupKey::Vpt { symbol, source }, GroupOutput::Scalar))
+        }
         FeatureKey::TradeCountTimed {
             symbol,
             source,
@@ -997,6 +1007,7 @@ fn build_group(group: &FeatureGroup) -> Result<FeatureDerivation> {
             periods.iter().copied().max().unwrap_or(0),
             *warmup_policy,
         ),
+        (GroupKey::Vpt { symbol, .. }, GroupOutputs::Scalar) => Ok(derivation::vpt::build(*symbol)),
         (
             GroupKey::TradeCountTimed {
                 symbol,
@@ -1195,6 +1206,7 @@ fn group_kind(key: &GroupKey) -> IndicatorKind {
         GroupKey::Cvd { .. } => IndicatorKind::Cvd,
         GroupKey::SmaTimed { .. } => IndicatorKind::SmaTimed,
         GroupKey::ObvTimed { .. } => IndicatorKind::ObvTimed,
+        GroupKey::Vpt { .. } => IndicatorKind::Vpt,
         GroupKey::TradeCountTimed { .. } => IndicatorKind::TradeCountTimed,
         GroupKey::DayOfWeek { .. } => IndicatorKind::DayOfWeek,
         GroupKey::TimeSinceFirstEventOfDay { .. } => IndicatorKind::TimeSinceFirstEventOfDay,
@@ -1234,6 +1246,7 @@ fn group_kind_from_feature_key(key: &FeatureKey) -> IndicatorKind {
         FeatureKey::Cvd { .. } => IndicatorKind::Cvd,
         FeatureKey::SmaTimed { .. } => IndicatorKind::SmaTimed,
         FeatureKey::ObvTimed { .. } => IndicatorKind::ObvTimed,
+        FeatureKey::Vpt { .. } => IndicatorKind::Vpt,
         FeatureKey::TradeCountTimed { .. } => IndicatorKind::TradeCountTimed,
         FeatureKey::DayOfWeek { .. } => IndicatorKind::DayOfWeek,
         FeatureKey::TimeSinceFirstEventOfDay { .. } => IndicatorKind::TimeSinceFirstEventOfDay,

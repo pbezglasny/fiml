@@ -34,7 +34,7 @@
       "type": "object", "additionalProperties": false,
       "required": ["kind", "source"],
       "properties": {
-        "kind": { "enum": ["sma", "ema", "cvd", "sma_timed", "obv_timed", "trade_count_timed", "day_of_week", "time_since_first_event_of_day", "order_book_mid_price", "order_book_spread", "order_book_spread_bps", "order_book_weighted_mid_price", "order_book_microprice", "order_book_imbalance", "order_book_best_bid_price", "order_book_best_bid_size", "order_book_best_ask_price", "order_book_best_ask_size", "order_book_level_size", "order_book_nth_price", "order_book_nth_size", "order_book_depth_until_price", "order_book_depth_until_size_price_from", "order_book_depth_until_size_price_to", "order_book_depth_until_size_total_size", "order_book_volume_between_prices"] },
+        "kind": { "enum": ["sma", "ema", "cvd", "sma_timed", "obv_timed", "vpt", "trade_count_timed", "day_of_week", "time_since_first_event_of_day", "order_book_mid_price", "order_book_spread", "order_book_spread_bps", "order_book_weighted_mid_price", "order_book_microprice", "order_book_imbalance", "order_book_best_bid_price", "order_book_best_bid_size", "order_book_best_ask_price", "order_book_best_ask_size", "order_book_level_size", "order_book_nth_price", "order_book_nth_size", "order_book_depth_until_price", "order_book_depth_until_size_price_from", "order_book_depth_until_size_price_to", "order_book_depth_until_size_total_size", "order_book_volume_between_prices"] },
         "source": { "$ref": "#/$defs/source" },
         "warmup_policy": { "enum": ["first_value", "full_window"] },
         "options": { "$ref": "#/$defs/options" },

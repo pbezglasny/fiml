@@ -83,6 +83,18 @@ def test_schema_still_accepts_any_event_source():
     assert_valid_source({"type": "any_event"})
 
 
+def test_schema_accepts_vpt_and_core_round_trips_it():
+    document = document_with_source({"type": "event", "event": "trade"})
+    document["features"][0]["symbol"] = "btcusdt"
+    document["features"][0]["indicators"] = [{
+        "kind": "vpt",
+        "source": {"type": "event", "event": "trade"},
+    }]
+    assert not list(VALIDATOR.iter_errors(document))
+    restored = fiml.FeatureExtractorSpec.from_json(json.dumps(document))
+    assert json.loads(restored.to_json()) == document
+
+
 @pytest.mark.parametrize("kind", [
     "order_book_mid_price", "order_book_spread", "order_book_spread_bps",
     "order_book_weighted_mid_price", "order_book_microprice", "order_book_imbalance",

@@ -169,13 +169,15 @@ complete model width, while `active_feature_count()` excludes reserved cells.
 The optional `checksum` is opaque metadata and is round-tripped without being
 calculated or verified.
 
-Builder methods: `sma`, `ema`, `cvd`, `sma_timed`, `obv_timed`,
+Builder methods: `sma`, `ema`, `cvd`, `sma_timed`, `obv_timed`, `vpt`,
 `trade_count_timed`, `day_of_week`, and `time_since_first_event_of_day`
 (fixed-offset `tz`, default `"UTC"`). SMA, EMA, CVD, timed SMA, and timed OBV
 accept ordered window lists; each list becomes one runtime indicator with
 adjacent output cells. Durations are strings (`"500ms"`, `"1s"`, `"5m"`,
 `"1h"`). Every window builder accepts a keyword-only `warmup` enum; its default
 is `fiml.WarmupPolicy.FULL_WINDOW`.
+`vpt` consumes trade price and volume, starts at zero, and emits its cumulative
+value from the first trade.
 
 Moving averages accept a keyword-only `source` of `"price"`, `"volume"`,
 `"trade_price"`, or `"trade_volume"` (default `"price"`). Use a trade source

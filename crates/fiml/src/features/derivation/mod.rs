@@ -13,6 +13,7 @@ pub(crate) mod order_book;
 pub(crate) mod sma;
 pub(crate) mod time_since_first_event_of_day;
 pub(crate) mod trade_count;
+pub(crate) mod vpt;
 
 use cvd::CvdFeature;
 use day_of_week::DayOfWeek;
@@ -21,6 +22,7 @@ use obv::ObvTimedFeature;
 use sma::{SmaFeature, SmaTimedFeature};
 use time_since_first_event_of_day::TimeSinceFirstEventOfDay;
 use trade_count::TradeCountTimedFeature;
+use vpt::VptFeature;
 
 /// Closed set of feature derivations executed by
 /// [`FeatureExtractor`](crate::features::FeatureExtractor).
@@ -35,6 +37,7 @@ pub(crate) enum FeatureDerivation {
     SmaTimed(SmaTimedFeature),
     ObvTimed(ObvTimedFeature),
     TradeCountTimed(TradeCountTimedFeature),
+    Vpt(VptFeature),
     DayOfWeek(DayOfWeek),
     TimeSinceFirstEventOfDay(TimeSinceFirstEventOfDay),
     OrderBook(order_book::OrderBookFeature),
@@ -54,6 +57,7 @@ impl FeatureDerivation {
             Self::SmaTimed(sma) => sma.update(event, output_range, output),
             Self::ObvTimed(obv) => obv.update(event, output_range, output),
             Self::TradeCountTimed(count) => count.update(event, output_range, output),
+            Self::Vpt(vpt) => vpt.update(event, output_range, output),
             Self::DayOfWeek(day_of_week) => day_of_week.update(event, output_range, output),
             Self::TimeSinceFirstEventOfDay(clock) => clock.update(event, output_range, output),
             Self::OrderBook(_) => {}
@@ -82,6 +86,7 @@ impl FeatureDerivation {
             | Self::SmaTimed(_)
             | Self::ObvTimed(_)
             | Self::TradeCountTimed(_)
+            | Self::Vpt(_)
             | Self::DayOfWeek(_)
             | Self::TimeSinceFirstEventOfDay(_) => false,
         }

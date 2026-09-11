@@ -19,6 +19,7 @@ def build_feature_extractor_spec(symbols):
             symbol, aggregation="10ms", windows=["20ms"], source="trade_price"
         )
         feature_extractor_spec.obv_timed(symbol, aggregation="10ms", windows=["20ms"])
+        feature_extractor_spec.vpt(symbol)
         feature_extractor_spec.trade_count_timed(
             symbol, aggregation="10ms", window="20ms"
         )

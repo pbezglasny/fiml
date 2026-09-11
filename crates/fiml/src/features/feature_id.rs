@@ -254,6 +254,9 @@ fn write_feature_key(id: &mut String, key: &FeatureKey) -> fmt::Result {
             window.as_nanos(),
             *warmup_policy,
         ),
+        FeatureKey::Vpt { symbol, source } => {
+            write_prefix(id, "vpt", *symbol, source.canonical_name())
+        }
         FeatureKey::TradeCountTimed {
             symbol,
             source,

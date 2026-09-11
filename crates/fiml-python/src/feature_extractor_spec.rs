@@ -374,6 +374,15 @@ impl FeatureExtractorSpec {
         Ok(slf)
     }
 
+    /// Cumulative volume-price trend over trades for one symbol.
+    fn vpt<'py>(mut slf: PyRefMut<'py, Self>, symbol: &str) -> PyResult<PyRefMut<'py, Self>> {
+        slf.add_group([definition(FeatureKey::Vpt {
+            symbol: intern_symbol(symbol)?,
+            source: FeatureSource::Event(EventKind::Trade),
+        })])?;
+        Ok(slf)
+    }
+
     /// Rolling count of `symbol` trades over a `window`, bucketed by
     /// `aggregation` (duration strings).
     #[pyo3(signature = (
