@@ -108,3 +108,23 @@ def test_json_and_fluent_extractors_have_identical_names_and_values():
         btc = extractor.symbol("BTCUSDT")
         extractor.update(fiml.KIND_TRADE, btc, 1, price=10.0, volume=1.0)
     np.testing.assert_equal(restored.values(), fluent.values())
+
+
+def test_vpt_builder_round_trips_and_updates_from_trades():
+    spec = fiml.FeatureExtractorSpec().vpt("BTCUSDT")
+    document = json.loads(spec.to_json())
+    assert document["features"][0]["indicators"] == [{
+        "kind": "vpt",
+        "source": {"type": "event", "event": "trade"},
+    }]
+
+    extractor = fiml.FeatureExtractor.from_json(spec.to_json())
+    btc = extractor.symbol("BTCUSDT")
+    values = extractor.transform(
+        np.full(3, fiml.KIND_TRADE, dtype=np.uint8),
+        np.full(3, btc, dtype=np.int64),
+        np.arange(3, dtype=np.int64),
+        price=np.array([100.0, 110.0, 99.0]),
+        volume=np.array([10.0, 20.0, 30.0]),
+    )
+    np.testing.assert_allclose(values[:, 0], [0.0, 2.0, -1.0])

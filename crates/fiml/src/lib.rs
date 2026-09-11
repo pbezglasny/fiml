@@ -20,7 +20,7 @@ pub use features::{
     FeatureId, FeatureKey, FeatureSource, FittedStage, MAX_OUTPUTS_PER_INDICATOR, Pipeline,
     PipelineSpec, TransformerDefinition, UpdateResult,
 };
-pub use indicators::{CumulativeVolumeDelta, ObvBucket, OnBalanceVolumeTimed};
+pub use indicators::{CumulativeVolumeDelta, ObvBucket, OnBalanceVolumeTimed, VolumePriceTrend};
 pub use ring_buffer::{
     HeapRingBuffer, RingBuffer, StackRingBuffer, new_heap_ring_buffer, new_stack_ring_buffer,
 };
@@ -215,6 +215,7 @@ pub enum IndicatorKind {
     Cvd,
     SmaTimed,
     ObvTimed,
+    Vpt,
     TradeCountTimed,
     DayOfWeek,
     TimeSinceFirstEventOfDay,
@@ -526,6 +527,7 @@ impl Display for IndicatorKind {
             Self::Cvd => "CVD",
             Self::SmaTimed => "timed SMA",
             Self::ObvTimed => "timed OBV",
+            Self::Vpt => "VPT",
             Self::TradeCountTimed => "timed trade count",
             Self::DayOfWeek => "day of week",
             Self::TimeSinceFirstEventOfDay => "time since first event of day",

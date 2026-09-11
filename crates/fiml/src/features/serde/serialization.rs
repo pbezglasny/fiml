@@ -231,6 +231,7 @@ enum IndicatorIdentity {
     Cvd(FeatureSource, WarmupPolicy),
     SmaTimed(FeatureSource, Duration, WarmupPolicy),
     ObvTimed(FeatureSource, Duration, WarmupPolicy),
+    Vpt(FeatureSource),
     TradeCountTimed(FeatureSource, Duration, Duration, WarmupPolicy),
     DayOfWeek(FeatureSource),
     TimeSinceFirstEventOfDay(FeatureSource, i64),
@@ -459,6 +460,14 @@ fn serialize_definition(
                 ..OptionsWire::default()
             }),
             Some(WindowWire::Duration(format_duration(window)?)),
+        ),
+        FeatureKey::Vpt { source, .. } => (
+            IndicatorIdentity::Vpt(source),
+            "vpt",
+            source,
+            None,
+            None,
+            None,
         ),
         FeatureKey::TradeCountTimed {
             source,
@@ -705,6 +714,15 @@ fn deserialize_indicator(
                 };
                 definitions.push(definition_from_output(key, output.id));
             }
+        }
+        "vpt" => {
+            reject_warmup(&indicator)?;
+            require_empty_options(&indicator.kind, &options)?;
+            definitions.push(scalar_definition(
+                FeatureKey::Vpt { symbol, source },
+                outputs,
+                &indicator.kind,
+            )?);
         }
         "day_of_week" => {
             reject_warmup(&indicator)?;
@@ -1140,6 +1158,7 @@ fn symbol_of(key: &FeatureKey) -> Symbol {
         | FeatureKey::Cvd { symbol, .. }
         | FeatureKey::SmaTimed { symbol, .. }
         | FeatureKey::ObvTimed { symbol, .. }
+        | FeatureKey::Vpt { symbol, .. }
         | FeatureKey::TradeCountTimed { symbol, .. }
         | FeatureKey::DayOfWeek { symbol, .. }
         | FeatureKey::TimeSinceFirstEventOfDay { symbol, .. } => *symbol,
@@ -1154,7 +1173,7 @@ fn validate_scope_and_source(
     let global = symbol == Symbol::GLOBAL;
     let valid = match kind {
         "sma" | "ema" | "sma_timed" => !global && matches!(source, FeatureSource::Field(_)),
-        "cvd" | "obv_timed" | "trade_count_timed" => {
+        "cvd" | "obv_timed" | "vpt" | "trade_count_timed" => {
             !global && source == FeatureSource::Event(EventKind::Trade)
         }
         "day_of_week" | "time_since_first_event_of_day" => {
@@ -1414,6 +1433,10 @@ mod tests {
                     window: Duration::from_secs(5),
                     warmup_policy: WarmupPolicy::FullWindow,
                 }),
+                default(FeatureKey::Vpt {
+                    symbol: btc,
+                    source: FeatureSource::Event(EventKind::Trade),
+                }),
                 default(FeatureKey::DayOfWeek {
                     symbol: Symbol::GLOBAL,
                     source: FeatureSource::AnyEvent,
@@ -1438,7 +1461,7 @@ mod tests {
 
         assert_eq!(value["version"], "1.0");
         assert_eq!(value["capacity"], 12);
-        assert_eq!(value["length"], 9);
+        assert_eq!(value["length"], 10);
         assert_eq!(value["checksum"], "opaque-value");
         assert_eq!(value["features"][0]["symbol"], "__global__");
         assert_eq!(value["features"][1]["symbol"], "btcusdt");
@@ -1474,7 +1497,8 @@ mod tests {
                 "obv_timed",
                 "sma",
                 "sma_timed",
-                "trade_count_timed"
+                "trade_count_timed",
+                "vpt"
             ]
         );
         let sma = indicators

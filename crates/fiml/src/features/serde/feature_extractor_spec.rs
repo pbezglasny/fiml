@@ -266,6 +266,7 @@ fn canonical_sort_key(key: &FeatureKey) -> (bool, String, u8, u8, u8, u128, u128
             0,
             0,
         ),
+        FeatureKey::Vpt { symbol, source } => (*symbol, 26, source_rank(*source), 0, 0, 0, 0),
         FeatureKey::TradeCountTimed {
             symbol,
             source,
