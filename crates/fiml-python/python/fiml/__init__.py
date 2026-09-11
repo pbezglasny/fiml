@@ -295,7 +295,7 @@ class ModelInputPipeline:
         return runtime
 
     def add_transformation(self, estimator, *, name):
-        """Append a StandardScaler, RobustScaler, PCA, or ScalarStage."""
+        """Append a supported sklearn transformer or ScalarStage."""
         if self._inference_only or self._recipe_locked or self._inner._has_events:
             raise ValueError("cannot change an established recipe; create a new pipeline")
         if not isinstance(name, str) or not name or name.startswith("__reserved_"):
