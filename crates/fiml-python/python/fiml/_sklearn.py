@@ -8,15 +8,15 @@ def clone_transformer(estimator):
         import sklearn
         from sklearn.base import clone
         from sklearn.decomposition import PCA
-        from sklearn.preprocessing import RobustScaler, StandardScaler
+        from sklearn.preprocessing import MinMaxScaler, RobustScaler, StandardScaler
     except ImportError as error:
         raise ImportError('fitting transformers requires "fiml[sklearn]"') from error
 
     if not sklearn.__version__.startswith("1.9."):
         raise ValueError("supported scikit-learn version: >=1.9,<1.10")
-    if type(estimator) not in (StandardScaler, RobustScaler, PCA):
+    if type(estimator) not in (StandardScaler, RobustScaler, MinMaxScaler, PCA):
         raise TypeError(
-            "supported transformers are exactly StandardScaler, RobustScaler, and PCA"
+            "supported transformers are exactly StandardScaler, RobustScaler, MinMaxScaler, and PCA"
         )
     if not estimator.copy:
         raise ValueError("copy=False is not supported; fitting must preserve its input")
@@ -37,7 +37,7 @@ def clone_transformer(estimator):
 
 
 def fit_stage(estimator, name, matrix, spec):
-    from sklearn.preprocessing import RobustScaler, StandardScaler
+    from sklearn.preprocessing import MinMaxScaler, RobustScaler, StandardScaler
 
     fitted = clone_transformer(estimator).fit(matrix)
     if type(fitted) is StandardScaler:
@@ -48,6 +48,9 @@ def fit_stage(estimator, name, matrix, spec):
         center = fitted.center_ if fitted.with_centering else np.zeros(matrix.shape[1])
         scale = fitted.scale_ if fitted.with_scaling else np.ones(matrix.shape[1])
         spec.scale_stage(center.tolist(), scale.tolist())
+    elif type(fitted) is MinMaxScaler:
+        clip = fitted.feature_range if fitted.clip else None
+        spec.min_max_scale_stage(fitted.scale_.tolist(), fitted.min_.tolist(), clip)
     else:
         scale = (
             np.maximum(np.sqrt(fitted.explained_variance_), np.finfo(np.float64).eps)

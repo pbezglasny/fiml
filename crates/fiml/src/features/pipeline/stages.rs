@@ -20,6 +20,13 @@ pub enum FittedStage {
         mean: Vec<f64>,
         scale: Vec<f64>,
     },
+    /// Per-column sklearn MinMaxScaler coefficients and optional output clipping.
+    MinMaxScale {
+        outputs: Vec<FeatureId>,
+        scale: Vec<f64>,
+        min: Vec<f64>,
+        clip: Option<(f64, f64)>,
+    },
     /// Row-major principal axes, with effective whitening divisors (ones if disabled).
     Pca {
         outputs: Vec<FeatureId>,
@@ -39,9 +46,9 @@ impl FittedStage {
                 .map(|definition| definition.output().clone())
                 .collect::<Vec<_>>()
                 .into(),
-            Self::StandardScale { outputs, .. } | Self::Pca { outputs, .. } => {
-                Cow::Borrowed(outputs)
-            }
+            Self::StandardScale { outputs, .. }
+            | Self::MinMaxScale { outputs, .. }
+            | Self::Pca { outputs, .. } => Cow::Borrowed(outputs),
         }
     }
 
@@ -59,7 +66,7 @@ impl FittedStage {
             }
         }
         let rows = match self {
-            Self::Scalar { .. } | Self::StandardScale { .. } => 1,
+            Self::Scalar { .. } | Self::StandardScale { .. } | Self::MinMaxScale { .. } => 1,
             Self::Pca { .. } => outputs.len(),
         };
         inputs
@@ -83,6 +90,32 @@ impl FittedStage {
                 for ((id, &mean), &scale) in inputs.iter().zip(mean).zip(scale) {
                     validate_standard_scale(mean, scale)
                         .map_err(|reason| format!("input {:?}: {reason}", id.as_str()))?;
+                }
+            }
+            Self::MinMaxScale {
+                scale, min, clip, ..
+            } => {
+                if outputs != inputs || scale.len() != inputs.len() || min.len() != inputs.len() {
+                    return Err(format!(
+                        "MinMaxScaler must preserve {} input IDs and have matching scale/min lengths",
+                        inputs.len()
+                    ));
+                }
+                for ((id, &scale), &min) in inputs.iter().zip(scale).zip(min) {
+                    if !scale.is_finite() || scale <= 0.0 || !min.is_finite() {
+                        return Err(format!(
+                            "input {:?}: MinMaxScaler scale must be positive and finite and min must be finite",
+                            id.as_str()
+                        ));
+                    }
+                }
+                if let Some((lower, upper)) = clip
+                    && (!lower.is_finite() || !upper.is_finite() || lower >= upper)
+                {
+                    return Err(
+                        "MinMaxScaler clipping bounds must be finite and strictly increasing"
+                            .into(),
+                    );
                 }
             }
             Self::Pca {
@@ -142,6 +175,11 @@ enum CompiledStage {
         mean: Box<[f64]>,
         inverse_scale: Box<[f64]>,
     },
+    MinMaxScale {
+        scale: Box<[f64]>,
+        min: Box<[f64]>,
+        clip: Option<(f64, f64)>,
+    },
     Pca {
         input_width: usize,
         components: Box<[f64]>,
@@ -160,6 +198,13 @@ impl CompiledStage {
             FittedStage::StandardScale { mean, scale, .. } => Self::StandardScale {
                 mean: mean.clone().into_boxed_slice(),
                 inverse_scale: scale.iter().map(|scale| 1.0 / scale).collect(),
+            },
+            FittedStage::MinMaxScale {
+                scale, min, clip, ..
+            } => Self::MinMaxScale {
+                scale: scale.clone().into_boxed_slice(),
+                min: min.clone().into_boxed_slice(),
+                clip: *clip,
             },
             FittedStage::Pca {
                 mean,
@@ -195,6 +240,15 @@ impl CompiledStage {
             } => {
                 for (i, (&mean, &inverse)) in mean.iter().zip(inverse_scale.iter()).enumerate() {
                     output.set_value_at(i, (input[i] - mean) * inverse);
+                }
+            }
+            Self::MinMaxScale { scale, min, clip } => {
+                for (i, (&scale, &min)) in scale.iter().zip(min.iter()).enumerate() {
+                    let value = input[i] * scale + min;
+                    output.set_value_at(
+                        i,
+                        clip.map_or(value, |(lower, upper)| value.clamp(lower, upper)),
+                    );
                 }
             }
             Self::Pca {

@@ -6,7 +6,7 @@ Last updated: 2026-09-10
 
 The pipeline runtime, model-input serialization, and Python interface are
 implemented, including Python-fitted sklearn `StandardScaler`, `RobustScaler`,
-and PCA stages with Rust online inference. Remaining interface-hardening items
+`MinMaxScaler`, and PCA stages with Rust online inference. Remaining interface-hardening items
 are listed below.
 
 ## Current interface
@@ -79,8 +79,8 @@ The canonical artifact has three ownership levels:
 
 `feature_extractor` owns the raw-vector layout. `model_input` owns the final
 vector layout, scalar base transformations, and fitted vector stages. Writers
-emit `2.1` for specs containing scalar stages and `2.0` otherwise; readers accept
-both and strict `1.0` artifacts without stages too.
+emit `2.2` for specs containing MinMaxScaler stages, `2.1` for scalar stages,
+and `2.0` otherwise; readers also accept strict `1.0` artifacts without stages.
 The envelope above illustrates ownership; populated feature/transform arrays
 must agree with the declared lengths. The strict source spelling for a
 feature that observes any event is `any_event`.

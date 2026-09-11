@@ -136,6 +136,12 @@ fn fitted_stages_do_not_allocate_during_warmup_or_steady_state() {
                 mean: vec![0.0, 0.0],
                 scale: vec![2.0, 2.0],
             },
+            FittedStage::MinMaxScale {
+                outputs: vec![FeatureId::new("day"), FeatureId::new("lag")],
+                scale: vec![0.5, 0.5],
+                min: vec![-1.0, -1.0],
+                clip: Some((-1.0, 1.0)),
+            },
             FittedStage::Pca {
                 outputs: vec![FeatureId::new("pc")],
                 mean: vec![1.0, 1.0],
@@ -173,7 +179,7 @@ fn fitted_stages_do_not_allocate_during_warmup_or_steady_state() {
         }),
         0
     );
-    assert!((pipeline.values()[0] - 0.7).abs() < 1e-14);
+    assert!((pipeline.values()[0] + 0.7).abs() < 1e-14);
 }
 
 #[test]

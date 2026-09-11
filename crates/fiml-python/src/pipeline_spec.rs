@@ -210,6 +210,24 @@ impl PipelineSpec {
         Ok(slf)
     }
 
+    /// Append fitted sklearn MinMaxScaler state, preserving the current active IDs.
+    #[pyo3(signature = (scale, min, clip=None))]
+    fn min_max_scale_stage<'py>(
+        mut slf: PyRefMut<'py, Self>,
+        scale: Vec<f64>,
+        min: Vec<f64>,
+        clip: Option<(f64, f64)>,
+    ) -> PyResult<PyRefMut<'py, Self>> {
+        let outputs = slf.core.output_ids();
+        slf.add_stage(FittedStage::MinMaxScale {
+            outputs,
+            scale,
+            min,
+            clip,
+        })?;
+        Ok(slf)
+    }
+
     /// Append fitted PCA state; component rows follow output order.
     fn pca_stage<'py>(
         mut slf: PyRefMut<'py, Self>,

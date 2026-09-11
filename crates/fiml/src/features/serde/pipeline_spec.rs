@@ -3,7 +3,7 @@ use ::serde::{Deserialize, Deserializer, Serialize, Serializer};
 use super::{FeatureExtractorSpec, serialization::deserialize_present_option};
 use crate::{FeatureId, FittedStage, PipelineSpec, TransformerDefinition};
 
-const FORMAT_VERSION: &str = "2.1";
+const FORMAT_VERSION: &str = "2.2";
 
 /// Private versioned storage representation for a complete model-input layout.
 #[derive(Serialize, Deserialize)]
@@ -47,6 +47,17 @@ enum StageWire {
         mean: Vec<f64>,
         scale: Vec<f64>,
     },
+    MinMaxScale {
+        outputs: Vec<String>,
+        scale: Vec<f64>,
+        min: Vec<f64>,
+        #[serde(
+            default,
+            deserialize_with = "deserialize_present_option",
+            skip_serializing_if = "Option::is_none"
+        )]
+        clip: Option<(f64, f64)>,
+    },
     Pca {
         outputs: Vec<String>,
         mean: Vec<f64>,
@@ -73,6 +84,14 @@ impl From<&FittedStage> for StageWire {
                 outputs,
                 mean: mean.clone(),
                 scale: scale.clone(),
+            },
+            FittedStage::MinMaxScale {
+                scale, min, clip, ..
+            } => Self::MinMaxScale {
+                outputs,
+                scale: scale.clone(),
+                min: min.clone(),
+                clip: *clip,
             },
             FittedStage::Pca {
                 mean,
@@ -106,6 +125,17 @@ impl From<StageWire> for FittedStage {
                 outputs: outputs.into_iter().map(FeatureId::new).collect(),
                 mean,
                 scale,
+            },
+            StageWire::MinMaxScale {
+                outputs,
+                scale,
+                min,
+                clip,
+            } => Self::MinMaxScale {
+                outputs: outputs.into_iter().map(FeatureId::new).collect(),
+                scale,
+                min,
+                clip,
             },
             StageWire::Pca {
                 outputs,
@@ -168,9 +198,15 @@ impl From<&PipelineSpec> for PipelineSpecWire {
             version: if spec
                 .stages()
                 .iter()
-                .any(|stage| matches!(stage, FittedStage::Scalar { .. }))
+                .any(|stage| matches!(stage, FittedStage::MinMaxScale { .. }))
             {
                 FORMAT_VERSION
+            } else if spec
+                .stages()
+                .iter()
+                .any(|stage| matches!(stage, FittedStage::Scalar { .. }))
+            {
+                "2.1"
             } else {
                 "2.0"
             }
@@ -226,9 +262,12 @@ impl TryFrom<PipelineSpecWire> for PipelineSpec {
     type Error = String;
 
     fn try_from(wire: PipelineSpecWire) -> Result<Self, Self::Error> {
-        if !matches!(wire.version.as_str(), "1.0" | "2.0" | FORMAT_VERSION) {
+        if !matches!(
+            wire.version.as_str(),
+            "1.0" | "2.0" | "2.1" | FORMAT_VERSION
+        ) {
             return Err(format!(
-                "unsupported model-input spec version {:?}; expected 1.0, 2.0 or {FORMAT_VERSION}",
+                "unsupported model-input spec version {:?}; expected 1.0, 2.0, 2.1 or {FORMAT_VERSION}",
                 wire.version
             ));
         }
@@ -244,6 +283,13 @@ impl TryFrom<PipelineSpecWire> for PipelineSpec {
                         .any(|stage| matches!(stage, StageWire::Scalar { .. }))
                 {
                     return Err("scalar stages require version 2.1".into());
+                }
+                if wire.version != "2.2"
+                    && stages
+                        .iter()
+                        .any(|stage| matches!(stage, StageWire::MinMaxScale { .. }))
+                {
+                    return Err("MinMaxScaler stages require version 2.2".into());
                 }
                 stages
                     .into_iter()
