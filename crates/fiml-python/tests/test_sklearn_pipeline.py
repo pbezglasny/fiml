@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 import pytest
 from sklearn.decomposition import PCA
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import RobustScaler, StandardScaler
 
 
 def base_spec(*, capacity=None, full_window=False, lag=False):
@@ -94,6 +94,53 @@ def test_scaling_flags_and_constant_columns(with_mean, with_std):
     np.testing.assert_allclose(result[:, :3], expected)
     assert np.isnan(result[:, 3:]).all()
     assert pipeline.n_features() == 5
+
+
+@pytest.mark.parametrize(
+    "with_centering,with_scaling",
+    [(True, True), (True, False), (False, True), (False, False)],
+)
+def test_robust_scaling_flags_and_constant_columns(with_centering, with_scaling):
+    spec = base_spec(capacity=5)
+    scaler = RobustScaler(with_centering=with_centering, with_scaling=with_scaling)
+    pipeline = fiml.ModelInputPipeline(spec).add_transformation(scaler, name="robust")
+    data = events(pipeline, constant=True)
+    matrix = base_matrix(spec, data)
+    expected = scaler.fit(matrix).transform(matrix)
+    result = pipeline.fit_transform(**data)
+    np.testing.assert_allclose(result[:, :3], expected)
+    assert np.isnan(result[:, 3:]).all()
+    assert pipeline.feature_names()[:3] == spec.feature_ids()
+
+
+@pytest.mark.parametrize(
+    "options",
+    [
+        {"quantile_range": (10.0, 90.0)},
+        {"quantile_range": (20.0, 80.0), "unit_variance": True},
+    ],
+)
+def test_robust_scaler_outliers_unseen_values_and_json_reload(options):
+    spec = base_spec(full_window=True)
+    scaler = RobustScaler(**options)
+    pipeline = fiml.ModelInputPipeline(spec).add_transformation(scaler, name="robust")
+    data = events(pipeline)
+    data["price"][12] = 1_000_000.0
+    data["price"][20:] = [-1_000.0, 500.0, 2_000.0, -500.0]
+    matrix = base_matrix(spec, data)
+    fit_mask = np.isfinite(matrix).all(axis=1) & (np.arange(len(matrix)) < 18)
+    expected = scaler.fit(matrix[fit_mask]).transform(matrix)
+    actual = pipeline.fit_transform(**data, fit_mask=fit_mask)
+    np.testing.assert_allclose(actual, expected, rtol=1e-10, atol=1e-12)
+    np.testing.assert_array_equal(np.isnan(actual), np.isnan(matrix))
+
+    document = json.loads(pipeline.to_json())
+    stage = document["model_input"]["stages"][0]
+    np.testing.assert_array_equal(stage["mean"], scaler.center_)
+    np.testing.assert_array_equal(stage["scale"], scaler.scale_)
+    restored = fiml.ModelInputPipeline.from_json(json.dumps(document))
+    events(restored)
+    np.testing.assert_array_equal(restored.transform(**data), actual)
 
 
 @pytest.mark.parametrize("n_components,solver", [
@@ -234,13 +281,44 @@ def test_unfitted_guards_recipe_locking_and_cloning():
         runtime.add_transformation(PCA(), name="pca")
 
 
-@pytest.mark.parametrize("estimator", [object(), PCA(copy=False), StandardScaler(copy=False), type("CustomPCA", (PCA,), {})()])
+@pytest.mark.parametrize(
+    "estimator",
+    [
+        object(),
+        PCA(copy=False),
+        StandardScaler(copy=False),
+        RobustScaler(copy=False),
+        type("CustomPCA", (PCA,), {})(),
+        type("CustomRobustScaler", (RobustScaler,), {})(),
+    ],
+)
 def test_unsupported_estimators_do_not_change_pipeline(estimator):
     pipeline = fiml.ModelInputPipeline(base_spec())
     before = pipeline.to_json()
     with pytest.raises((TypeError, ValueError)):
         pipeline.add_transformation(estimator, name="bad")
     assert pipeline.to_json() == before
+
+
+@pytest.mark.parametrize("quantile_range", [(25.0, 25.0), (0.0, 75.0), (25.0, 100.0)])
+def test_robust_scaler_rejects_invalid_unit_variance_range(quantile_range):
+    pipeline = fiml.ModelInputPipeline(base_spec())
+    scaler = RobustScaler(unit_variance=True, quantile_range=quantile_range)
+    with pytest.raises(ValueError, match="requires 0 < q_min < q_max < 100"):
+        pipeline.add_transformation(scaler, name="bad")
+
+
+def test_robust_scaler_ignores_unit_variance_range_without_scaling():
+    spec = base_spec()
+    scaler = RobustScaler(
+        with_scaling=False, unit_variance=True, quantile_range=(25.0, 25.0)
+    )
+    pipeline = fiml.ModelInputPipeline(spec).add_transformation(scaler, name="robust")
+    data = events(pipeline)
+    matrix = base_matrix(spec, data)
+    np.testing.assert_allclose(
+        pipeline.fit_transform(**data), scaler.fit(matrix).transform(matrix)
+    )
 
 
 def test_artifact_inference_does_not_import_sklearn():

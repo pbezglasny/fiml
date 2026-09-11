@@ -2,9 +2,10 @@
 
 Status: implemented.
 
-Date: 2026-09-09. Updated: 2026-09-10 (scalar stages).
+Date: 2026-09-09. Updated: 2026-09-11 (RobustScaler).
 
-Related: [issue #93](https://github.com/pbezglasny/fiml/issues/93).
+Related: [issue #93](https://github.com/pbezglasny/fiml/issues/93) and
+[issue #118](https://github.com/pbezglasny/fiml/issues/118).
 
 Implementation: `fiml[sklearn]` supports scikit-learn `>=1.9,<1.10`; inference
 requires no sklearn installation. See the [runnable example](../crates/fiml-python/examples/sklearn_pipeline.py)
@@ -15,9 +16,9 @@ The design below records the implemented contract and deliberately deferred scop
 
 Fit supported sklearn transformers in Python, export their learned numeric state
 into `PipelineSpec`, and execute that spec through the same Rust runtime in both
-Python batch processing and online serving. Start with `StandardScaler` and
-`PCA`, including PCA whitening. Add an ordered list of vector stages after the
-existing scalar transformations.
+Python batch processing and online serving. Support `StandardScaler`,
+`RobustScaler`, and `PCA`, including PCA whitening. Add an ordered list of vector
+stages after the existing scalar transformations.
 
 “Save parameters” must mean the fitted state needed for inference. Saving only
 constructor arguments such as `n_components=2` cannot reproduce a trained PCA.
@@ -67,7 +68,7 @@ from pathlib import Path
 
 import numpy as np
 from sklearn.decomposition import PCA
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import RobustScaler
 
 import fiml
 
@@ -82,7 +83,7 @@ for feature_id in raw_spec.feature_ids():
 
 pipeline = (
     fiml.ModelInputPipeline(base_spec)
-    .add_transformation(StandardScaler(), name="scale")
+    .add_transformation(RobustScaler(unit_variance=True), name="scale")
     .add_transformation(PCA(n_components=2, whiten=True), name="pca")
 )
 events = dict(
@@ -108,7 +109,7 @@ The base spec selects and orders stage inputs. It can contain identity, lagged,
 or manually fitted scalar transformations. Reserved cells never enter sklearn.
 Each added stage consumes the entire preceding active vector and replaces it.
 The first stage consumes the base outputs; later stages consume previous stage
-outputs. This supports `StandardScaler -> PCA` and `lags -> PCA` without branches,
+outputs. This supports scaler-to-PCA and `lags -> PCA` without branches,
 arbitrary references, or a general transformation graph.
 
 `fiml.ScalarStage()` groups can also appear anywhere in the sequence, authored
@@ -207,7 +208,8 @@ indicators, order-book synchronization, or lag history.
 
 ## Fitted state and numerical operations
 
-Use a small explicit exporter dispatch for the exact `StandardScaler` and `PCA`
+Use a small explicit exporter dispatch for the exact `StandardScaler`,
+`RobustScaler`, and `PCA`
 classes. Reject subclasses with potentially overridden behavior, arbitrary
 callbacks, sparse outputs, and unsupported versions/options with a useful error.
 There is no need for a plugin registry or a Rust dependency on sklearn.
@@ -223,6 +225,16 @@ enabled. See [StandardScaler](https://scikit-learn.org/stable/modules/generated/
 The vector stage applies `(x[i] - mean[i]) / scale[i]`, using the existing scalar
 scaling arithmetic and validation where practical. Store two vectors, not a
 dense diagonal matrix. Its cost is O(d) time and O(d) fitted storage.
+
+### RobustScaler
+
+Export effective `center_[d]` and `scale_[d]` through the same vector stage.
+When `with_centering=False`, write zeros; when `with_scaling=False`, write ones.
+Otherwise use sklearn's fitted arrays directly so `quantile_range`,
+`unit_variance`, constant columns, and outliers retain sklearn's behavior.
+Unit-variance scaling requires `0 < q_min < q_max < 100`; reject other ranges
+when the stage is added because sklearn produces a non-finite or zero fitted
+scale for those configurations. The range is irrelevant when scaling is disabled.
 
 ### PCA
 

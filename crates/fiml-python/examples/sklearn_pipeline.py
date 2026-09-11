@@ -7,7 +7,7 @@ Run with fiml[sklearn] installed:
 import fiml
 import numpy as np
 from sklearn.decomposition import PCA
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import RobustScaler
 
 
 def train():
@@ -21,7 +21,7 @@ def train():
         spec.identity(name)
     spec.lagged(raw.feature_ids()[0], lag_window=2, output="lag2")
     pipeline = (fiml.ModelInputPipeline(spec)
-                .add_transformation(StandardScaler(), name="scale")
+                .add_transformation(RobustScaler(unit_variance=True), name="scale")
                 .add_transformation(PCA(n_components=2, whiten=True, svd_solver="full"), name="pca"))
     data = dict(
         kind=np.full(12, fiml.KIND_TRADE, dtype=np.uint8),
@@ -37,7 +37,7 @@ def train():
     actual = pipeline.fit_transform(**data, fit_mask=ready)
 
     # Independently check sklearn inference on the same indicator/lag snapshots.
-    scaled = StandardScaler().fit(matrix[ready]).transform(matrix[ready])
+    scaled = RobustScaler(unit_variance=True).fit(matrix[ready]).transform(matrix[ready])
     pca = PCA(n_components=2, whiten=True, svd_solver="full").fit(scaled)
     expected = np.full((len(matrix), 2), np.nan)
     expected[ready] = pca.transform(scaled)
