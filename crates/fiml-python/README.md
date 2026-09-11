@@ -243,8 +243,8 @@ stream. Reset retains fitted parameters and registered symbol handles.
 ### Fitting sklearn stages
 
 Install `fiml[sklearn]` (currently scikit-learn `>=1.9,<1.10`) for training.
-Append `StandardScaler`, `RobustScaler`, `MinMaxScaler`, `PCA`, or `fiml.ScalarStage` instances
-before fitting or replaying:
+Append `StandardScaler`, `RobustScaler`, `MinMaxScaler`, `MaxAbsScaler`, `PCA`,
+or `fiml.ScalarStage` instances before fitting or replaying:
 
 ```python
 from sklearn.preprocessing import RobustScaler
@@ -316,9 +316,13 @@ the pipeline's finite numeric state.
 Without clipping, future values outside the fitted data range can exceed the
 configured feature range, matching sklearn.
 
-JSON writers emit pipeline version `2.2` when MinMaxScaler stages are present,
-`2.1` when scalar stages are present, and `2.0` otherwise. Readers also accept
-strict scalar-only `1.0`. Scalar stages serialize as
+`MaxAbsScaler` preserves zero and sign, and supports both `clip` settings.
+Without clipping, future magnitudes can exceed `1`; fitting is not robust to
+outliers.
+
+JSON writers emit pipeline version `2.2` for `MinMaxScaler` and clipped
+`MaxAbsScaler` stages, `2.1` when scalar stages are present, and `2.0` otherwise.
+Readers also accept strict scalar-only `1.0`. Scalar stages serialize as
 `{"type": "scalar", "transformations": [...]}` within `model_input.stages`, with
 the same transformation fields used by the base layout. The nested extractor stays at `1.0`.
 Rust consumers should enable `serde_json`'s `float_roundtrip` feature to preserve

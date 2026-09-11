@@ -2,11 +2,12 @@
 
 Status: implemented.
 
-Date: 2026-09-09. Updated: 2026-09-11 (MinMaxScaler).
+Date: 2026-09-09. Updated: 2026-09-11 (MaxAbsScaler).
 
-Related: [issue #93](https://github.com/pbezglasny/fiml/issues/93) and
-[issue #118](https://github.com/pbezglasny/fiml/issues/118), and
-[issue #119](https://github.com/pbezglasny/fiml/issues/119).
+Related: [issue #93](https://github.com/pbezglasny/fiml/issues/93),
+[issue #118](https://github.com/pbezglasny/fiml/issues/118),
+[issue #119](https://github.com/pbezglasny/fiml/issues/119), and
+[issue #120](https://github.com/pbezglasny/fiml/issues/120).
 
 Implementation: `fiml[sklearn]` supports scikit-learn `>=1.9,<1.10`; inference
 requires no sklearn installation. See the [runnable example](../crates/fiml-python/examples/sklearn_pipeline.py)
@@ -18,8 +19,8 @@ The design below records the implemented contract and deliberately deferred scop
 Fit supported sklearn transformers in Python, export their learned numeric state
 into `PipelineSpec`, and execute that spec through the same Rust runtime in both
 Python batch processing and online serving. Support `StandardScaler`,
-`RobustScaler`, `MinMaxScaler`, and `PCA`, including PCA whitening. Add an ordered list of vector
-stages after the existing scalar transformations.
+`RobustScaler`, `MinMaxScaler`, `MaxAbsScaler`, and `PCA`, including PCA
+whitening. Add an ordered list of vector stages after the existing scalar transformations.
 
 “Save parameters” must mean the fitted state needed for inference. Saving only
 constructor arguments such as `n_components=2` cannot reproduce a trained PCA.
@@ -210,7 +211,7 @@ indicators, order-book synchronization, or lag history.
 ## Fitted state and numerical operations
 
 Use a small explicit exporter dispatch for the exact `StandardScaler`,
-`RobustScaler`, `MinMaxScaler`, and `PCA`
+`RobustScaler`, `MinMaxScaler`, `MaxAbsScaler`, and `PCA`
 classes. Reject subclasses with potentially overridden behavior, arbitrary
 callbacks, sparse outputs, and unsupported versions/options with a useful error.
 There is no need for a plugin registry or a Rust dependency on sklearn.
@@ -246,6 +247,14 @@ and finite; offsets and optional strictly increasing clip bounds must be finite.
 This preserves sklearn's learned handling of constant and near-constant columns.
 Without clipping, observations outside the fitted data range can exceed the
 configured feature range.
+
+### MaxAbsScaler
+
+Export sklearn's fitted `scale_[d]` directly with zero centers through the
+standard scaling stage when `clip=False`. When `clip=True`, reuse the MinMax
+stage with reciprocal scales, zero offsets, and `[-1, 1]` clipping. Both paths
+preserve input IDs, zeros, signs, and NaNs in O(d) time and storage. Without
+clipping, future magnitudes may exceed `1`; fitting is not robust to outliers.
 
 ### PCA
 
@@ -294,7 +303,8 @@ writers emit `2.0` for these fitted-only sequences. Scalar stages require `2.1`,
 which readers also accept. Their representation is
 `{"type": "scalar", "transformations": [...]}`, reusing the base transformation
 wire format. A `2.0` artifact containing a scalar stage is rejected.
-MinMaxScaler stages use `2.2`; older versions reject the new stage tag.
+MinMaxScaler and clipped MaxAbsScaler stages use `2.2`; older versions reject
+the reused stage tag.
 Do not reinterpret `1.0`, whose reader currently requires final length to equal
 the scalar transformation count.
 

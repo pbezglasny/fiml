@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 import pytest
 from sklearn.decomposition import PCA
-from sklearn.preprocessing import MinMaxScaler, RobustScaler, StandardScaler
+from sklearn.preprocessing import MaxAbsScaler, MinMaxScaler, RobustScaler, StandardScaler
 
 
 def base_spec(*, capacity=None, full_window=False, lag=False):
@@ -176,6 +176,59 @@ def test_min_max_scaler_range_clipping_constants_and_nans(options, clip):
     np.testing.assert_array_equal(restored.transform(**data), actual)
 
 
+@pytest.mark.parametrize("clip", [False, True])
+def test_max_abs_scaler_signed_constants_zeros_clipping_and_reload(clip):
+    raw = (fiml.FeatureExtractorSpec()
+           .sma("BTCUSDT", [4], source="trade_price", warmup=fiml.WarmupPolicy.FULL_WINDOW)
+           .sma("BTCUSDT", [1], source="trade_volume"))
+    spec = fiml.PipelineSpec(raw)
+    price, volume = raw.feature_ids()
+    spec.identity(price).identity(volume)
+    scalar = (fiml.ScalarStage()
+              .standard_scale(price, mean=14.0, scale=1.0, output="signed")
+              .identity(volume, output="constant")
+              .standard_scale(volume, mean=2.0, scale=1.0, output="zero"))
+    scaler = MaxAbsScaler(clip=clip)
+    pipeline = (fiml.ModelInputPipeline(spec)
+                .add_transformation(scalar, name="inputs")
+                .add_transformation(scaler, name="maxabs"))
+    data = events(pipeline)
+    data["volume"][:] = 2.0
+    data["price"][18:] = [1.0, 30.0, 2.0, 35.0, 3.0, 40.0]
+    base = base_matrix(spec, data)
+    matrix = np.column_stack((base[:, 0] - 14.0, base[:, 1], base[:, 1] - 2.0))
+    fit_mask = np.isfinite(matrix).all(axis=1) & (np.arange(len(matrix)) < 18)
+    fitted = scaler.fit(matrix[fit_mask])
+    expected = fitted.transform(matrix)
+    actual = pipeline.fit_transform(**data, fit_mask=fit_mask)
+
+    np.testing.assert_allclose(actual, expected, rtol=1e-10, atol=1e-12)
+    np.testing.assert_array_equal(np.isnan(actual), np.isnan(matrix))
+    np.testing.assert_array_equal(actual[:, 2], matrix[:, 2])
+    assert (actual[fit_mask, 0] < 0).any() and (actual[fit_mask, 0] > 0).any()
+    unseen = actual[~fit_mask & np.isfinite(matrix).all(axis=1), 0]
+    if clip:
+        assert np.max(np.abs(unseen)) <= 1.0
+    else:
+        assert np.max(np.abs(unseen)) > 1.0
+    assert pipeline.feature_names() == ["signed", "constant", "zero"]
+
+    document = json.loads(pipeline.to_json())
+    stage = document["model_input"]["stages"][1]
+    assert document["version"] == ("2.2" if clip else "2.1")
+    assert stage["type"] == ("min_max_scale" if clip else "standard_scale")
+    if clip:
+        np.testing.assert_array_equal(stage["scale"], np.reciprocal(fitted.scale_))
+        np.testing.assert_array_equal(stage["min"], np.zeros(matrix.shape[1]))
+        assert stage["clip"] == [-1.0, 1.0]
+    else:
+        np.testing.assert_array_equal(stage["mean"], np.zeros(matrix.shape[1]))
+        np.testing.assert_array_equal(stage["scale"], fitted.scale_)
+    restored = fiml.ModelInputPipeline.from_json(json.dumps(document))
+    events(restored)
+    np.testing.assert_array_equal(restored.transform(**data), actual)
+
+
 @pytest.mark.parametrize("n_components,solver", [
     (1, "full"), (0.95, "full"), (None, "full"),
     (2, "covariance_eigh"), (2, "randomized"), (2, "arpack"),
@@ -322,9 +375,11 @@ def test_unfitted_guards_recipe_locking_and_cloning():
         StandardScaler(copy=False),
         RobustScaler(copy=False),
         MinMaxScaler(copy=False),
+        MaxAbsScaler(copy=False),
         type("CustomPCA", (PCA,), {})(),
         type("CustomRobustScaler", (RobustScaler,), {})(),
         type("CustomMinMaxScaler", (MinMaxScaler,), {})(),
+        type("CustomMaxAbsScaler", (MaxAbsScaler,), {})(),
     ],
 )
 def test_unsupported_estimators_do_not_change_pipeline(estimator):
@@ -358,7 +413,7 @@ def test_robust_scaler_ignores_unit_variance_range_without_scaling():
 
 def test_artifact_inference_does_not_import_sklearn():
     pipeline = (fiml.ModelInputPipeline(base_spec())
-                .add_transformation(MinMaxScaler(feature_range=(-1., 1.), clip=True), name="minmax")
+                .add_transformation(MaxAbsScaler(clip=True), name="maxabs")
                 .add_transformation(PCA(n_components=2), name="pca")
                 .add_transformation(fiml.ScalarStage().identity("pca__pc1").lagged("pca__pc0", lag_window=1), name="lags"))
     data = events(pipeline)
