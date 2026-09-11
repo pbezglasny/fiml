@@ -2,10 +2,11 @@
 
 Status: implemented.
 
-Date: 2026-09-09. Updated: 2026-09-11 (RobustScaler).
+Date: 2026-09-09. Updated: 2026-09-11 (MinMaxScaler).
 
 Related: [issue #93](https://github.com/pbezglasny/fiml/issues/93) and
-[issue #118](https://github.com/pbezglasny/fiml/issues/118).
+[issue #118](https://github.com/pbezglasny/fiml/issues/118), and
+[issue #119](https://github.com/pbezglasny/fiml/issues/119).
 
 Implementation: `fiml[sklearn]` supports scikit-learn `>=1.9,<1.10`; inference
 requires no sklearn installation. See the [runnable example](../crates/fiml-python/examples/sklearn_pipeline.py)
@@ -17,7 +18,7 @@ The design below records the implemented contract and deliberately deferred scop
 Fit supported sklearn transformers in Python, export their learned numeric state
 into `PipelineSpec`, and execute that spec through the same Rust runtime in both
 Python batch processing and online serving. Support `StandardScaler`,
-`RobustScaler`, and `PCA`, including PCA whitening. Add an ordered list of vector
+`RobustScaler`, `MinMaxScaler`, and `PCA`, including PCA whitening. Add an ordered list of vector
 stages after the existing scalar transformations.
 
 “Save parameters” must mean the fitted state needed for inference. Saving only
@@ -209,7 +210,7 @@ indicators, order-book synchronization, or lag history.
 ## Fitted state and numerical operations
 
 Use a small explicit exporter dispatch for the exact `StandardScaler`,
-`RobustScaler`, and `PCA`
+`RobustScaler`, `MinMaxScaler`, and `PCA`
 classes. Reject subclasses with potentially overridden behavior, arbitrary
 callbacks, sparse outputs, and unsupported versions/options with a useful error.
 There is no need for a plugin registry or a Rust dependency on sklearn.
@@ -235,6 +236,16 @@ Otherwise use sklearn's fitted arrays directly so `quantile_range`,
 Unit-variance scaling requires `0 < q_min < q_max < 100`; reject other ranges
 when the stage is added because sklearn produces a non-finite or zero fitted
 scale for those configurations. The range is irrelevant when scaling is disabled.
+
+### MinMaxScaler
+
+Export sklearn's fitted `scale_[d]` and `min_[d]` directly. Apply
+`x[i] * scale[i] + min[i]` in that order, then clamp to `feature_range` only
+when `clip=True`. The stage preserves input IDs and NaNs. Scales must be positive
+and finite; offsets and optional strictly increasing clip bounds must be finite.
+This preserves sklearn's learned handling of constant and near-constant columns.
+Without clipping, observations outside the fitted data range can exceed the
+configured feature range.
 
 ### PCA
 
@@ -283,6 +294,7 @@ writers emit `2.0` for these fitted-only sequences. Scalar stages require `2.1`,
 which readers also accept. Their representation is
 `{"type": "scalar", "transformations": [...]}`, reusing the base transformation
 wire format. A `2.0` artifact containing a scalar stage is rejected.
+MinMaxScaler stages use `2.2`; older versions reject the new stage tag.
 Do not reinterpret `1.0`, whose reader currently requires final length to equal
 the scalar transformation count.
 
@@ -320,7 +332,7 @@ the preceding layout. Explicit fitted stage output IDs
 freeze the layout across export/import. The example has two base outputs and
 one final output; base scratch width must not be taken from final `capacity`.
 
-Require `stages` in `2.0` and `2.1`, permitting an empty list. Derive base width from scalar
+Require `stages` in `2.0`, `2.1`, and `2.2`, permitting an empty list. Derive base width from scalar
 definitions, each stage width from its validated arrays and outputs, and final
 active length from the last stage (or base width if empty). Final `capacity`
 must cover that final length; it may be smaller than an intermediate width.

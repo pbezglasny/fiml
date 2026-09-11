@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "fiml PipelineSpec 2.1 (with 1.0 and 2.0 read compatibility)",
+  "title": "fiml PipelineSpec 2.2 (with 1.0, 2.0 and 2.1 read compatibility)",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -9,19 +9,24 @@
     "model_input"
   ],
   "properties": {
-    "version": { "enum": ["1.0", "2.0", "2.1"] },
+    "version": { "enum": ["1.0", "2.0", "2.1", "2.2"] },
     "checksum": { "type": "string" },
     "feature_extractor": { "$ref": "feature-extractor-spec.schema.json" },
     "model_input": { "$ref": "#/$defs/model_input" }
   },
   "allOf": [{
-    "if": { "properties": { "version": { "enum": ["2.0", "2.1"] } } },
+    "if": { "properties": { "version": { "enum": ["2.0", "2.1", "2.2"] } } },
     "then": { "properties": { "model_input": { "required": ["stages"] } } },
     "else": { "properties": { "model_input": { "not": { "required": ["stages"] } } } }
   }, {
     "if": { "properties": { "version": { "const": "2.0" } } },
     "then": { "properties": { "model_input": { "properties": {
       "stages": { "items": { "not": { "properties": { "type": { "const": "scalar" } }, "required": ["type"] } } }
+    } } } }
+  }, {
+    "if": { "properties": { "version": { "enum": ["2.0", "2.1"] } } },
+    "then": { "properties": { "model_input": { "properties": {
+      "stages": { "items": { "not": { "properties": { "type": { "const": "min_max_scale" } }, "required": ["type"] } } }
     } } } }
   }],
   "$defs": {
@@ -97,6 +102,20 @@
             "outputs": { "$ref": "#/$defs/stage_outputs" },
             "mean": { "$ref": "#/$defs/numeric_vector" },
             "scale": { "$ref": "#/$defs/positive_vector" }
+          }
+        },
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["type", "outputs", "scale", "min"],
+          "properties": {
+            "type": { "const": "min_max_scale" },
+            "outputs": { "$ref": "#/$defs/stage_outputs" },
+            "scale": { "$ref": "#/$defs/positive_vector" },
+            "min": { "$ref": "#/$defs/numeric_vector" },
+            "clip": {
+              "type": "array", "minItems": 2, "maxItems": 2,
+              "prefixItems": [{ "type": "number" }, { "type": "number" }]
+            }
           }
         },
         {

@@ -44,6 +44,61 @@ fn stages() -> Vec<FittedStage> {
 }
 
 #[test]
+fn min_max_stage_preserves_nans_and_clips_only_when_configured() {
+    let (raw, definitions) = base();
+    let spec = PipelineSpec::with_stages(
+        raw,
+        definitions,
+        [
+            FittedStage::MinMaxScale {
+                outputs: vec![FeatureId::new("now"), FeatureId::new("lag")],
+                scale: vec![2.0, 4.0],
+                min: vec![-1.0, 3.0],
+                clip: None,
+            },
+            FittedStage::MinMaxScale {
+                outputs: vec![FeatureId::new("now"), FeatureId::new("lag")],
+                scale: vec![1.0, 1.0],
+                min: vec![0.0, 0.0],
+                clip: Some((-2.0, 2.0)),
+            },
+        ],
+        2,
+        None,
+    )
+    .unwrap();
+    let mut pipeline = spec
+        .build(
+            ArrayFeatureVector::<1>::new(),
+            ArrayFeatureVector::<2>::new(),
+        )
+        .unwrap();
+
+    pipeline.handle_event(Event::time(0)).unwrap();
+    assert_eq!(pipeline.values()[0], -1.0);
+    assert!(pipeline.values()[1].is_nan());
+    pipeline.handle_event(Event::time(2)).unwrap();
+    assert_eq!(pipeline.values(), &[2.0, 2.0]);
+
+    #[cfg(feature = "serde")]
+    {
+        let mut document = serde_json::to_value(&spec).unwrap();
+        assert_eq!(document["version"], "2.2");
+        assert_eq!(
+            serde_json::from_value::<PipelineSpec>(document.clone()).unwrap(),
+            spec
+        );
+        document["version"] = "2.1".into();
+        assert!(
+            serde_json::from_value::<PipelineSpec>(document)
+                .unwrap_err()
+                .to_string()
+                .contains("MinMaxScaler stages require version 2.2")
+        );
+    }
+}
+
+#[test]
 fn stages_chain_after_lags_preserve_layout_warmup_and_rejection() {
     let (raw, definitions) = base();
     let spec = PipelineSpec::with_stages(raw, definitions, stages(), 2, None).unwrap();
@@ -253,6 +308,24 @@ fn stage_numeric_and_layout_validation_is_shared_by_construction_and_json() {
             outputs: vec![FeatureId::new("now"), FeatureId::new("lag")],
             mean: vec![0.0, 0.0],
             scale: vec![1.0, f64::from_bits(1)],
+        },
+        FittedStage::MinMaxScale {
+            outputs: vec![FeatureId::new("now"), FeatureId::new("lag")],
+            scale: vec![1.0, f64::NAN],
+            min: vec![0.0, f64::NAN],
+            clip: None,
+        },
+        FittedStage::MinMaxScale {
+            outputs: vec![FeatureId::new("now"), FeatureId::new("lag")],
+            scale: vec![1.0, 1.0],
+            min: vec![0.0],
+            clip: None,
+        },
+        FittedStage::MinMaxScale {
+            outputs: vec![FeatureId::new("now"), FeatureId::new("lag")],
+            scale: vec![1.0, 1.0],
+            min: vec![0.0, 0.0],
+            clip: Some((1.0, f64::INFINITY)),
         },
         FittedStage::Pca {
             outputs: vec![FeatureId::new("pc")],

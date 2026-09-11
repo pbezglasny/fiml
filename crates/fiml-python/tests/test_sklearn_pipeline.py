@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 import pytest
 from sklearn.decomposition import PCA
-from sklearn.preprocessing import RobustScaler, StandardScaler
+from sklearn.preprocessing import MinMaxScaler, RobustScaler, StandardScaler
 
 
 def base_spec(*, capacity=None, full_window=False, lag=False):
@@ -138,6 +138,39 @@ def test_robust_scaler_outliers_unseen_values_and_json_reload(options):
     stage = document["model_input"]["stages"][0]
     np.testing.assert_array_equal(stage["mean"], scaler.center_)
     np.testing.assert_array_equal(stage["scale"], scaler.scale_)
+    restored = fiml.ModelInputPipeline.from_json(json.dumps(document))
+    events(restored)
+    np.testing.assert_array_equal(restored.transform(**data), actual)
+
+
+@pytest.mark.parametrize("options", [{}, {"feature_range": (-3.0, -1.0)}])
+@pytest.mark.parametrize("clip", [False, True])
+def test_min_max_scaler_range_clipping_constants_and_nans(options, clip):
+    spec = base_spec(full_window=True)
+    scaler = MinMaxScaler(**options, clip=clip)
+    feature_range = scaler.feature_range
+    pipeline = fiml.ModelInputPipeline(spec).add_transformation(scaler, name="minmax")
+    data = events(pipeline, constant=True)
+    data["price"][18:] = [5.0, 20.0, 4.0, 25.0, 3.0, 30.0]
+    matrix = base_matrix(spec, data)
+    fit_mask = np.isfinite(matrix).all(axis=1) & (np.arange(len(matrix)) < 18)
+    fitted = scaler.fit(matrix[fit_mask])
+    expected = fitted.transform(matrix)
+    actual = pipeline.fit_transform(**data, fit_mask=fit_mask)
+    np.testing.assert_allclose(actual, expected, rtol=1e-10, atol=1e-12)
+    finite = actual[np.isfinite(actual)]
+    if clip:
+        assert finite.min() >= feature_range[0] and finite.max() <= feature_range[1]
+    else:
+        assert finite.min() < feature_range[0] or finite.max() > feature_range[1]
+
+    document = json.loads(pipeline.to_json())
+    stage = document["model_input"]["stages"][0]
+    assert document["version"] == "2.2"
+    assert stage["type"] == "min_max_scale"
+    np.testing.assert_array_equal(stage["scale"], fitted.scale_)
+    np.testing.assert_array_equal(stage["min"], fitted.min_)
+    assert stage.get("clip") == (list(feature_range) if clip else None)
     restored = fiml.ModelInputPipeline.from_json(json.dumps(document))
     events(restored)
     np.testing.assert_array_equal(restored.transform(**data), actual)
@@ -288,8 +321,10 @@ def test_unfitted_guards_recipe_locking_and_cloning():
         PCA(copy=False),
         StandardScaler(copy=False),
         RobustScaler(copy=False),
+        MinMaxScaler(copy=False),
         type("CustomPCA", (PCA,), {})(),
         type("CustomRobustScaler", (RobustScaler,), {})(),
+        type("CustomMinMaxScaler", (MinMaxScaler,), {})(),
     ],
 )
 def test_unsupported_estimators_do_not_change_pipeline(estimator):
@@ -323,6 +358,7 @@ def test_robust_scaler_ignores_unit_variance_range_without_scaling():
 
 def test_artifact_inference_does_not_import_sklearn():
     pipeline = (fiml.ModelInputPipeline(base_spec())
+                .add_transformation(MinMaxScaler(feature_range=(-1., 1.), clip=True), name="minmax")
                 .add_transformation(PCA(n_components=2), name="pca")
                 .add_transformation(fiml.ScalarStage().identity("pca__pc1").lagged("pca__pc0", lag_window=1), name="lags"))
     data = events(pipeline)

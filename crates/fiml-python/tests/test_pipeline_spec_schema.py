@@ -148,3 +148,33 @@ def test_scalar_stage_references_are_validated_atomically_against_previous_outpu
         with pytest.raises(ValueError, match="stage 1"):
             spec.scalar_stage(invalid)
         assert spec.to_json() == before
+
+
+def test_min_max_stage_requires_version_2_2_and_valid_state():
+    document = canonical_example()
+    outputs = [item["output"] for item in document["model_input"]["transformations"]]
+    document["version"] = "2.2"
+    document["model_input"]["stages"] = [{
+        "type": "min_max_scale", "outputs": outputs,
+        "scale": [1.0] * len(outputs), "min": [0.0] * len(outputs),
+        "clip": [-2.0, 3.0],
+    }]
+    assert not list(VALIDATOR.iter_errors(document))
+    assert json.loads(fiml.PipelineSpec.from_json(json.dumps(document)).to_json()) == document
+
+    for version in ["2.0", "2.1"]:
+        invalid = json.loads(json.dumps(document))
+        invalid["version"] = version
+        assert list(VALIDATOR.iter_errors(invalid))
+        with pytest.raises(ValueError, match="require version 2.2"):
+            fiml.PipelineSpec.from_json(json.dumps(invalid))
+    for field, value in [("scale", [0.0] * len(outputs)),
+                         ("min", [0.0]), ("clip", [2.0, 1.0])]:
+        invalid = json.loads(json.dumps(document))
+        invalid["model_input"]["stages"][0][field] = value
+        with pytest.raises(ValueError, match="stage 0"):
+            fiml.PipelineSpec.from_json(json.dumps(invalid))
+    document["model_input"]["stages"][0]["clip"] = None
+    assert list(VALIDATOR.iter_errors(document))
+    with pytest.raises(ValueError):
+        fiml.PipelineSpec.from_json(json.dumps(document))
