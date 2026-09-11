@@ -243,18 +243,20 @@ stream. Reset retains fitted parameters and registered symbol handles.
 ### Fitting sklearn stages
 
 Install `fiml[sklearn]` (currently scikit-learn `>=1.9,<1.10`) for training.
-Append `StandardScaler`, `RobustScaler`, `MinMaxScaler`, `MaxAbsScaler`, `PCA`,
-or `fiml.ScalarStage` instances before fitting or replaying:
+Append `SimpleImputer`, `StandardScaler`, `RobustScaler`, `MinMaxScaler`,
+`MaxAbsScaler`, `PCA`, or `fiml.ScalarStage` instances before fitting or replaying:
 
 ```python
-from sklearn.preprocessing import RobustScaler
 from sklearn.decomposition import PCA
+from sklearn.impute import SimpleImputer
+from sklearn.preprocessing import RobustScaler
 
 base_spec = fiml.PipelineSpec(raw_spec)
 for feature_id in raw_spec.feature_ids():
     base_spec.identity(feature_id)
 
 pipeline = (fiml.ModelInputPipeline(base_spec)
+            .add_transformation(SimpleImputer(add_indicator=True), name="impute")
             .add_transformation(RobustScaler(unit_variance=True), name="scale")
             .add_transformation(PCA(n_components=2, whiten=True), name="pca"))
 pipeline.fit(kind, symbol, timestamp, price=prices, volume=volumes, fit_mask=ready)
@@ -289,7 +291,9 @@ array. `fit` takes the same event columns as `transform` and returns `self`.
 `fit_mask` is an optional boolean vector selecting training snapshots, for example
 after indicator and downstream lag warm-up; every event is still replayed to preserve history.
 Even excluded middle rows enter lag history. Selected inputs to each sklearn estimator
-and selected final outputs must be finite; an earlier scalar selection can drop
+and selected final outputs must be finite, except that an explicitly configured
+`SimpleImputer` accepts NaNs and still rejects infinities. Pipelines without an
+imputer retain the finite-input rejection. An earlier scalar selection can drop
 unneeded warm-up columns. Fitting replays each completed prefix through Rust,
 so its cost grows with the number of stages. Fit only the chronological training
 partition. Reserved cells are excluded from fitting and stay NaN in output.
@@ -320,8 +324,18 @@ configured feature range, matching sklearn.
 Without clipping, future magnitudes can exceed `1`; fitting is not robust to
 outliers.
 
-JSON writers emit pipeline version `2.2` for `MinMaxScaler` and clipped
-`MaxAbsScaler` stages, `2.1` when scalar stages are present, and `2.0` otherwise.
+`SimpleImputer` supports dense numeric input with `missing_values=np.nan`,
+`copy=True`, the `mean`, `median`, `most_frequent`, and `constant` strategies,
+and both `keep_empty_features` and `add_indicator` settings. Empty columns follow
+sklearn's fitted retained layout. Indicator columns use sklearn's
+`missingindicator_<input>` names and only cover columns missing during fitting;
+NaNs first seen during inference are still replaced but do not add new indicators.
+Filling indicator warm-up is an explicit modeling choice, not evidence that a
+feature is ready. Use `fit_mask` to exclude those rows when that distinction matters.
+
+JSON writers emit pipeline version `2.3` for `SimpleImputer`, `2.2` for
+`MinMaxScaler` and clipped `MaxAbsScaler` stages, `2.1` when scalar stages are
+present, and `2.0` otherwise.
 Readers also accept strict scalar-only `1.0`. Scalar stages serialize as
 `{"type": "scalar", "transformations": [...]}` within `model_input.stages`, with
 the same transformation fields used by the base layout. The nested extractor stays at `1.0`.

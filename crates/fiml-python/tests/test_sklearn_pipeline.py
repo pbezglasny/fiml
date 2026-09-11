@@ -9,6 +9,7 @@ import numpy as np
 import pandas as pd
 import pytest
 from sklearn.decomposition import PCA
+from sklearn.impute import SimpleImputer
 from sklearn.preprocessing import MaxAbsScaler, MinMaxScaler, RobustScaler, StandardScaler
 
 
@@ -43,6 +44,171 @@ def base_matrix(spec, data):
     base.symbol("unused")
     base.symbol("BTCUSDT")
     return base.transform(**data)[:, :spec.active_feature_count]
+
+
+@pytest.mark.parametrize(
+    "strategy,fill_value",
+    [("mean", None), ("median", None), ("most_frequent", None), ("constant", -7.0)],
+)
+def test_simple_imputer_strategies_indicators_and_json_reload(strategy, fill_value):
+    spec = base_spec(full_window=True)
+    imputer = SimpleImputer(
+        strategy=strategy, fill_value=fill_value, add_indicator=True
+    )
+    pipeline = fiml.ModelInputPipeline(spec).add_transformation(imputer, name="impute")
+    data = events(pipeline)
+    matrix = base_matrix(spec, data)
+    fitted = imputer.fit(matrix)
+    expected = fitted.transform(matrix)
+
+    actual = pipeline.fit_transform(**data)
+    np.testing.assert_allclose(actual, expected, rtol=1e-10, atol=1e-12)
+    assert pipeline.feature_names() == fitted.get_feature_names_out(
+        spec.feature_ids()
+    ).tolist()
+
+    document = json.loads(pipeline.to_json())
+    stage = document["model_input"]["stages"][0]
+    assert document["version"] == "2.3"
+    assert stage["type"] == "simple_impute"
+    assert stage["retained_input_indices"] == [0, 1, 2]
+    assert stage["indicator_input_indices"] == [1, 2]
+    assert np.isfinite(stage["replacement_values"]).all()
+    restored = fiml.ModelInputPipeline.from_json(json.dumps(document))
+    events(restored)
+    np.testing.assert_array_equal(restored.transform(**data), actual)
+
+
+@pytest.mark.parametrize("strategy", ["mean", "constant"])
+@pytest.mark.parametrize("keep_empty_features", [False, True])
+@pytest.mark.parametrize("add_indicator", [False, True])
+def test_simple_imputer_empty_columns_match_sklearn(
+    strategy, keep_empty_features, add_indicator
+):
+    spec = base_spec(full_window=True)
+    options = dict(
+        strategy=strategy,
+        keep_empty_features=keep_empty_features,
+        add_indicator=add_indicator,
+    )
+    if strategy == "constant":
+        options["fill_value"] = -3.0
+    imputer = SimpleImputer(**options)
+    pipeline = fiml.ModelInputPipeline(spec).add_transformation(imputer, name="impute")
+    data = events(pipeline)
+    matrix = base_matrix(spec, data)
+    fit_mask = np.arange(len(matrix)) < 2
+    fitted = imputer.fit(matrix[fit_mask])
+
+    actual = pipeline.fit_transform(**data, fit_mask=fit_mask)
+    np.testing.assert_allclose(actual, fitted.transform(matrix), rtol=1e-10, atol=1e-12)
+    assert pipeline.feature_names() == fitted.get_feature_names_out(
+        spec.feature_ids()
+    ).tolist()
+
+
+def test_simple_imputer_then_scaler_and_pca_matches_sklearn():
+    spec = base_spec(full_window=True)
+    imputer = SimpleImputer(strategy="median", add_indicator=True)
+    scaler = StandardScaler()
+    pca = PCA(n_components=2, svd_solver="full")
+    pipeline = (
+        fiml.ModelInputPipeline(spec)
+        .add_transformation(imputer, name="impute")
+        .add_transformation(scaler, name="scale")
+        .add_transformation(pca, name="pca")
+    )
+    data = events(pipeline)
+    matrix = base_matrix(spec, data)
+    imputed = imputer.fit_transform(matrix)
+    scaled = scaler.fit_transform(imputed)
+    expected = pca.fit(scaled).transform(scaled)
+
+    actual = pipeline.fit_transform(**data)
+    np.testing.assert_allclose(actual, expected, rtol=1e-10, atol=1e-12)
+    assert np.isfinite(actual).all()
+
+
+def test_simple_imputer_replaces_new_inference_nans_without_new_indicators():
+    spec = base_spec(full_window=True)
+    imputer = SimpleImputer(add_indicator=True)
+    pipeline = fiml.ModelInputPipeline(spec).add_transformation(imputer, name="impute")
+    data = events(pipeline)
+    matrix = base_matrix(spec, data)
+    fit_mask = np.arange(len(matrix)) >= 4
+    fitted = imputer.fit(matrix[fit_mask])
+
+    actual = pipeline.fit_transform(**data, fit_mask=fit_mask)
+    np.testing.assert_allclose(actual, fitted.transform(matrix), rtol=1e-10, atol=1e-12)
+    assert np.isfinite(actual).all()
+    assert not any(name.startswith("missingindicator_") for name in pipeline.feature_names())
+
+
+def test_simple_imputer_rejects_infinity_and_zero_output_atomically():
+    raw = fiml.FeatureExtractorSpec().sma(
+        "BTCUSDT", [1], source="trade_price"
+    )
+    input_id = raw.feature_ids()[0]
+    overflow = fiml.PipelineSpec(raw).standard_scale(
+        input_id, mean=-1e308, scale=1.0, output="overflow"
+    )
+    pipeline = fiml.ModelInputPipeline(overflow).add_transformation(
+        SimpleImputer(), name="impute"
+    )
+    data = events(pipeline)
+    data["price"][:] = 1e308
+    with pytest.raises(ValueError, match="must not be infinite"):
+        pipeline.fit(**data)
+    with pytest.raises(ValueError, match="not fitted"):
+        pipeline.to_json()
+
+    empty_raw = fiml.FeatureExtractorSpec().sma(
+        "BTCUSDT", [4], source="trade_price",
+        warmup=fiml.WarmupPolicy.FULL_WINDOW,
+    )
+    empty_spec = fiml.PipelineSpec(empty_raw).identity(empty_raw.feature_ids()[0])
+    empty = fiml.ModelInputPipeline(empty_spec).add_transformation(
+        SimpleImputer(), name="impute"
+    )
+    empty_data = events(empty)
+    mask = np.zeros(len(empty_data["price"]), dtype=bool)
+    mask[0] = True
+    with pytest.raises(ValueError, match="zero output features"):
+        empty.fit(**empty_data, fit_mask=mask)
+
+    indicators = fiml.ModelInputPipeline(empty_spec).add_transformation(
+        SimpleImputer(add_indicator=True), name="impute"
+    )
+    indicator_data = events(indicators)
+    expected = SimpleImputer(add_indicator=True).fit(
+        base_matrix(empty_spec, indicator_data)[mask]
+    )
+    actual = indicators.fit_transform(**indicator_data, fit_mask=mask)
+    np.testing.assert_array_equal(
+        actual, expected.transform(base_matrix(empty_spec, indicator_data))
+    )
+    stage = json.loads(indicators.to_json())["model_input"]["stages"][0]
+    assert stage["retained_input_indices"] == []
+    assert stage["replacement_values"] == []
+    assert stage["indicator_input_indices"] == [0]
+
+
+def test_simple_imputer_failed_downstream_refit_preserves_runtime():
+    spec = base_spec(full_window=True)
+    pipeline = (
+        fiml.ModelInputPipeline(spec)
+        .add_transformation(SimpleImputer(strategy="constant"), name="impute")
+        .add_transformation(PCA(n_components=2), name="pca")
+    )
+    data = events(pipeline)
+    pipeline.fit_transform(**data)
+    before_json, before_values = pipeline.to_json(), pipeline.values()
+    one_row = np.zeros(len(data["price"]), dtype=bool)
+    one_row[0] = True
+    with pytest.raises(ValueError, match="n_components"):
+        pipeline.fit(**data, fit_mask=one_row)
+    assert pipeline.to_json() == before_json
+    np.testing.assert_array_equal(pipeline.values(), before_values)
 
 
 @pytest.mark.parametrize("whiten", [False, True])
@@ -376,10 +542,12 @@ def test_unfitted_guards_recipe_locking_and_cloning():
         RobustScaler(copy=False),
         MinMaxScaler(copy=False),
         MaxAbsScaler(copy=False),
+        SimpleImputer(copy=False),
         type("CustomPCA", (PCA,), {})(),
         type("CustomRobustScaler", (RobustScaler,), {})(),
         type("CustomMinMaxScaler", (MinMaxScaler,), {})(),
         type("CustomMaxAbsScaler", (MaxAbsScaler,), {})(),
+        type("CustomSimpleImputer", (SimpleImputer,), {})(),
     ],
 )
 def test_unsupported_estimators_do_not_change_pipeline(estimator):
@@ -387,6 +555,25 @@ def test_unsupported_estimators_do_not_change_pipeline(estimator):
     before = pipeline.to_json()
     with pytest.raises((TypeError, ValueError)):
         pipeline.add_transformation(estimator, name="bad")
+    assert pipeline.to_json() == before
+
+
+@pytest.mark.parametrize(
+    "imputer",
+    [
+        SimpleImputer(missing_values=0.0),
+        SimpleImputer(strategy=lambda values: 0.0),
+        SimpleImputer(strategy="constant", fill_value="missing"),
+        SimpleImputer(strategy="constant", fill_value=np.inf),
+        SimpleImputer(add_indicator=1),
+        SimpleImputer(keep_empty_features=1),
+    ],
+)
+def test_simple_imputer_rejects_unsupported_configuration(imputer):
+    pipeline = fiml.ModelInputPipeline(base_spec())
+    before = pipeline.to_json()
+    with pytest.raises(ValueError):
+        pipeline.add_transformation(imputer, name="bad")
     assert pipeline.to_json() == before
 
 
@@ -413,6 +600,7 @@ def test_robust_scaler_ignores_unit_variance_range_without_scaling():
 
 def test_artifact_inference_does_not_import_sklearn():
     pipeline = (fiml.ModelInputPipeline(base_spec())
+                .add_transformation(SimpleImputer(), name="impute")
                 .add_transformation(MaxAbsScaler(clip=True), name="maxabs")
                 .add_transformation(PCA(n_components=2), name="pca")
                 .add_transformation(fiml.ScalarStage().identity("pca__pc1").lagged("pca__pc0", lag_window=1), name="lags"))

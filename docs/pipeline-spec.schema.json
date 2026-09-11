@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "fiml PipelineSpec 2.2 (with 1.0, 2.0 and 2.1 read compatibility)",
+  "title": "fiml PipelineSpec 2.3 (with 1.0 through 2.2 read compatibility)",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -9,13 +9,13 @@
     "model_input"
   ],
   "properties": {
-    "version": { "enum": ["1.0", "2.0", "2.1", "2.2"] },
+    "version": { "enum": ["1.0", "2.0", "2.1", "2.2", "2.3"] },
     "checksum": { "type": "string" },
     "feature_extractor": { "$ref": "feature-extractor-spec.schema.json" },
     "model_input": { "$ref": "#/$defs/model_input" }
   },
   "allOf": [{
-    "if": { "properties": { "version": { "enum": ["2.0", "2.1", "2.2"] } } },
+    "if": { "properties": { "version": { "enum": ["2.0", "2.1", "2.2", "2.3"] } } },
     "then": { "properties": { "model_input": { "required": ["stages"] } } },
     "else": { "properties": { "model_input": { "not": { "required": ["stages"] } } } }
   }, {
@@ -27,6 +27,11 @@
     "if": { "properties": { "version": { "enum": ["2.0", "2.1"] } } },
     "then": { "properties": { "model_input": { "properties": {
       "stages": { "items": { "not": { "properties": { "type": { "const": "min_max_scale" } }, "required": ["type"] } } }
+    } } } }
+  }, {
+    "if": { "properties": { "version": { "enum": ["2.0", "2.1", "2.2"] } } },
+    "then": { "properties": { "model_input": { "properties": {
+      "stages": { "items": { "not": { "properties": { "type": { "const": "simple_impute" } }, "required": ["type"] } } }
     } } } }
   }],
   "$defs": {
@@ -120,6 +125,17 @@
         },
         {
           "type": "object", "additionalProperties": false,
+          "required": ["type", "outputs", "retained_input_indices", "replacement_values", "indicator_input_indices"],
+          "properties": {
+            "type": { "const": "simple_impute" },
+            "outputs": { "$ref": "#/$defs/stage_outputs" },
+            "retained_input_indices": { "$ref": "#/$defs/index_vector" },
+            "replacement_values": { "type": "array", "items": { "type": "number" } },
+            "indicator_input_indices": { "$ref": "#/$defs/index_vector" }
+          }
+        },
+        {
+          "type": "object", "additionalProperties": false,
           "required": ["type", "outputs", "mean", "components", "output_scale"],
           "properties": {
             "type": { "const": "pca" },
@@ -137,6 +153,7 @@
     },
     "numeric_vector": { "type": "array", "minItems": 1, "items": { "type": "number" } },
     "positive_vector": { "type": "array", "minItems": 1, "items": { "type": "number", "exclusiveMinimum": 0 } },
+    "index_vector": { "type": "array", "uniqueItems": true, "items": { "type": "integer", "minimum": 0 } },
     "feature_id": { "type": "string" },
     "output_feature_id": {
       "type": "string",

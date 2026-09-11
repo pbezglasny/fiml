@@ -228,6 +228,23 @@ impl PipelineSpec {
         Ok(slf)
     }
 
+    /// Append fitted sklearn SimpleImputer state and its frozen output layout.
+    fn simple_impute_stage<'py>(
+        mut slf: PyRefMut<'py, Self>,
+        outputs: Vec<String>,
+        retained_input_indices: Vec<usize>,
+        replacement_values: Vec<f64>,
+        indicator_input_indices: Vec<usize>,
+    ) -> PyResult<PyRefMut<'py, Self>> {
+        slf.add_stage(FittedStage::SimpleImpute {
+            outputs: outputs.into_iter().map(FeatureId::new).collect(),
+            retained_input_indices,
+            replacement_values,
+            indicator_input_indices,
+        })?;
+        Ok(slf)
+    }
+
     /// Append fitted PCA state; component rows follow output order.
     fn pca_stage<'py>(
         mut slf: PyRefMut<'py, Self>,
