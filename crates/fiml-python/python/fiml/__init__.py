@@ -319,7 +319,8 @@ class ModelInputPipeline:
         """Fit on selected event snapshots; replay all events to preserve history.
 
         fit_mask is a boolean vector selecting training rows (e.g. excluding
-        warm-up). Selected rows must be finite. Failed refits preserve live state.
+        warm-up). Only SimpleImputer inputs may contain NaNs; infinities are
+        always rejected. Failed refits preserve live state.
         """
         if self._inference_only:
             raise ValueError("this pipeline is inference-only; create a Python training recipe")
@@ -342,22 +343,28 @@ class ModelInputPipeline:
         if not rows.size or not matrix.shape[1]:
             raise ValueError("fit requires nonempty training rows and active features")
 
-        def validate_matrix():
-            invalid = np.argwhere(~np.isfinite(matrix[fit_mask]))
+        def validate_matrix(*, allow_nan=False):
+            selected = matrix[fit_mask]
+            invalid = np.argwhere(np.isinf(selected) if allow_nan else ~np.isfinite(selected))
             if invalid.size:
                 row, column = invalid[0]
+                requirement = (
+                    "must not be infinite for SimpleImputer fitting"
+                    if allow_nan
+                    else "must be finite for fitting; exclude warm-up with fit_mask"
+                )
                 raise ValueError(
                     f"row {rows[row]}: feature {candidate.feature_ids()[column]!r} "
-                    "must be finite for fitting; exclude warm-up with fit_mask"
+                    f"{requirement}"
                 )
 
         for name, template in self._templates:
             if type(template) is ScalarStage:
                 candidate.scalar_stage(template)
             else:
-                from ._sklearn import fit_stage
+                from ._sklearn import accepts_nan, fit_stage
 
-                validate_matrix()
+                validate_matrix(allow_nan=accepts_nan(template))
                 fit_stage(template, name, np.ascontiguousarray(matrix[fit_mask]), candidate)
             # ponytail: O(stages * events) prefix replays; stream stages if fitting cost matters.
             # Replay excluded rows too: downstream lags count accepted events, not training rows.

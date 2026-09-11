@@ -131,6 +131,12 @@ fn fitted_stages_do_not_allocate_during_warmup_or_steady_state() {
             TransformerDefinition::lagged(FeatureId::new("day"), FeatureId::new("lag"), 2),
         ],
         [
+            FittedStage::SimpleImpute {
+                outputs: vec![FeatureId::new("day"), FeatureId::new("lag")],
+                retained_input_indices: vec![0, 1],
+                replacement_values: vec![0.0, 0.0],
+                indicator_input_indices: vec![],
+            },
             FittedStage::StandardScale {
                 outputs: vec![FeatureId::new("day"), FeatureId::new("lag")],
                 mean: vec![0.0, 0.0],

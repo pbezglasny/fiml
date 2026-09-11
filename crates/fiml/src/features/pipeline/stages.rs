@@ -27,6 +27,13 @@ pub enum FittedStage {
         min: Vec<f64>,
         clip: Option<(f64, f64)>,
     },
+    /// Replaces NaNs in retained columns and optionally appends fitted missing indicators.
+    SimpleImpute {
+        outputs: Vec<FeatureId>,
+        retained_input_indices: Vec<usize>,
+        replacement_values: Vec<f64>,
+        indicator_input_indices: Vec<usize>,
+    },
     /// Row-major principal axes, with effective whitening divisors (ones if disabled).
     Pca {
         outputs: Vec<FeatureId>,
@@ -48,6 +55,7 @@ impl FittedStage {
                 .into(),
             Self::StandardScale { outputs, .. }
             | Self::MinMaxScale { outputs, .. }
+            | Self::SimpleImpute { outputs, .. }
             | Self::Pca { outputs, .. } => Cow::Borrowed(outputs),
         }
     }
@@ -66,7 +74,10 @@ impl FittedStage {
             }
         }
         let rows = match self {
-            Self::Scalar { .. } | Self::StandardScale { .. } | Self::MinMaxScale { .. } => 1,
+            Self::Scalar { .. }
+            | Self::StandardScale { .. }
+            | Self::MinMaxScale { .. }
+            | Self::SimpleImpute { .. } => 1,
             Self::Pca { .. } => outputs.len(),
         };
         inputs
@@ -118,6 +129,41 @@ impl FittedStage {
                     );
                 }
             }
+            Self::SimpleImpute {
+                retained_input_indices,
+                replacement_values,
+                indicator_input_indices,
+                ..
+            } => {
+                if retained_input_indices.len() != replacement_values.len()
+                    || outputs.len() != retained_input_indices.len() + indicator_input_indices.len()
+                {
+                    return Err(
+                        "SimpleImputer outputs, retained indices, replacements, and indicators have inconsistent lengths"
+                            .into(),
+                    );
+                }
+                if !strictly_increasing_in_range(retained_input_indices, inputs.len())
+                    || !strictly_increasing_in_range(indicator_input_indices, inputs.len())
+                {
+                    return Err(format!(
+                        "SimpleImputer input indices must be unique, increasing, and below {}",
+                        inputs.len()
+                    ));
+                }
+                if replacement_values.iter().any(|value| !value.is_finite()) {
+                    return Err("SimpleImputer replacement values must be finite".into());
+                }
+                if outputs[..retained_input_indices.len()]
+                    .iter()
+                    .zip(retained_input_indices)
+                    .any(|(output, &input_index)| output != &inputs[input_index])
+                {
+                    return Err(
+                        "SimpleImputer retained output IDs must match their input IDs".into(),
+                    );
+                }
+            }
             Self::Pca {
                 mean,
                 components,
@@ -161,6 +207,11 @@ impl FittedStage {
     }
 }
 
+fn strictly_increasing_in_range(indices: &[usize], upper_bound: usize) -> bool {
+    indices.iter().all(|&index| index < upper_bound)
+        && indices.windows(2).all(|pair| pair[0] < pair[1])
+}
+
 fn dot(left: &[f64], right: &[f64]) -> f64 {
     left.iter().zip(right).map(|(a, b)| a * b).sum()
 }
@@ -179,6 +230,11 @@ enum CompiledStage {
         scale: Box<[f64]>,
         min: Box<[f64]>,
         clip: Option<(f64, f64)>,
+    },
+    SimpleImpute {
+        retained_input_indices: Box<[usize]>,
+        replacement_values: Box<[f64]>,
+        indicator_input_indices: Box<[usize]>,
     },
     Pca {
         input_width: usize,
@@ -205,6 +261,16 @@ impl CompiledStage {
                 scale: scale.clone().into_boxed_slice(),
                 min: min.clone().into_boxed_slice(),
                 clip: *clip,
+            },
+            FittedStage::SimpleImpute {
+                retained_input_indices,
+                replacement_values,
+                indicator_input_indices,
+                ..
+            } => Self::SimpleImpute {
+                retained_input_indices: retained_input_indices.clone().into_boxed_slice(),
+                replacement_values: replacement_values.clone().into_boxed_slice(),
+                indicator_input_indices: indicator_input_indices.clone().into_boxed_slice(),
             },
             FittedStage::Pca {
                 mean,
@@ -248,6 +314,34 @@ impl CompiledStage {
                     output.set_value_at(
                         i,
                         clip.map_or(value, |(lower, upper)| value.clamp(lower, upper)),
+                    );
+                }
+            }
+            Self::SimpleImpute {
+                retained_input_indices,
+                replacement_values,
+                indicator_input_indices,
+            } => {
+                for (output_index, (&input_index, &replacement)) in retained_input_indices
+                    .iter()
+                    .zip(replacement_values.iter())
+                    .enumerate()
+                {
+                    let value = input[input_index];
+                    output.set_value_at(
+                        output_index,
+                        if value.is_nan() { replacement } else { value },
+                    );
+                }
+                let offset = retained_input_indices.len();
+                for (indicator_index, &input_index) in indicator_input_indices.iter().enumerate() {
+                    output.set_value_at(
+                        offset + indicator_index,
+                        if input[input_index].is_nan() {
+                            1.0
+                        } else {
+                            0.0
+                        },
                     );
                 }
             }

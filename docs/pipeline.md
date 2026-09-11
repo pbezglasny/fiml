@@ -5,8 +5,8 @@ Status: in progress
 Last updated: 2026-09-11
 
 The pipeline runtime, model-input serialization, and Python interface are
-implemented, including Python-fitted sklearn `StandardScaler`, `RobustScaler`,
-`MinMaxScaler`, `MaxAbsScaler`, and PCA stages with Rust online inference.
+implemented, including Python-fitted sklearn `SimpleImputer`, `StandardScaler`,
+`RobustScaler`, `MinMaxScaler`, `MaxAbsScaler`, and PCA stages with Rust online inference.
 Remaining interface-hardening items are listed below.
 
 ## Current interface
@@ -27,6 +27,8 @@ scalar transformations into a base vector. Each scalar reads the raw feature
 vector. Optional fitted vector stages then consume the preceding active layout
 in sequence. `FittedStage::StandardScale` preserves its width and IDs;
 `MaxAbsScaler` reuses it without clipping and the MinMax stage with clipping.
+`FittedStage::SimpleImpute` stores retained inputs, finite replacements, and
+fitted missing-indicator inputs.
 `FittedStage::Pca` projects to named components and supports whitening.
 `FittedStage::Scalar` selects, renames, scales, or lags columns from the preceding
 layout. Definitions within a scalar stage are independent; dependent operations
@@ -80,7 +82,7 @@ The canonical artifact has three ownership levels:
 
 `feature_extractor` owns the raw-vector layout. `model_input` owns the final
 vector layout, scalar base transformations, and fitted vector stages. Writers
-emit `2.2` for specs containing MinMaxScaler or clipped MaxAbsScaler stages,
+emit `2.3` for SimpleImputer, `2.2` for MinMaxScaler or clipped MaxAbsScaler,
 `2.1` for scalar stages, and `2.0` otherwise; readers also accept strict `1.0`
 artifacts without stages.
 The envelope above illustrates ownership; populated feature/transform arrays

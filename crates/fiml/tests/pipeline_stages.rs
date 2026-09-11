@@ -99,6 +99,93 @@ fn min_max_stage_preserves_nans_and_clips_only_when_configured() {
 }
 
 #[test]
+fn simple_imputer_replaces_only_nans_and_appends_fitted_indicators() {
+    let (raw, definitions) = base();
+    let spec = PipelineSpec::with_stages(
+        raw,
+        definitions,
+        [FittedStage::SimpleImpute {
+            outputs: vec![
+                FeatureId::new("now"),
+                FeatureId::new("lag"),
+                FeatureId::new("missingindicator_lag"),
+            ],
+            retained_input_indices: vec![0, 1],
+            replacement_values: vec![10.0, 20.0],
+            indicator_input_indices: vec![1],
+        }],
+        3,
+        None,
+    )
+    .unwrap();
+    let mut pipeline = spec
+        .build(
+            ArrayFeatureVector::<1>::new(),
+            ArrayFeatureVector::<3>::new(),
+        )
+        .unwrap();
+
+    pipeline.handle_event(Event::time(0)).unwrap();
+    assert_eq!(pipeline.values(), &[0.0, 20.0, 1.0]);
+    pipeline.handle_event(Event::time(2)).unwrap();
+    assert_eq!(pipeline.values(), &[2.0, 0.0, 0.0]);
+
+    let (raw, definitions) = base();
+    let overflow = PipelineSpec::with_stages(
+        raw,
+        definitions,
+        [
+            FittedStage::Pca {
+                outputs: vec![FeatureId::new("projected")],
+                mean: vec![0.0, 0.0],
+                components: vec![vec![f64::MAX, 0.0]],
+                output_scale: vec![1.0],
+            },
+            FittedStage::SimpleImpute {
+                outputs: vec![
+                    FeatureId::new("projected"),
+                    FeatureId::new("missingindicator_projected"),
+                ],
+                retained_input_indices: vec![0],
+                replacement_values: vec![5.0],
+                indicator_input_indices: vec![0],
+            },
+        ],
+        2,
+        None,
+    )
+    .unwrap();
+    let mut overflow = overflow
+        .build(
+            ArrayFeatureVector::<1>::new(),
+            ArrayFeatureVector::<2>::new(),
+        )
+        .unwrap();
+    overflow.handle_event(Event::time(0)).unwrap();
+    assert_eq!(overflow.values(), &[5.0, 1.0]);
+    overflow.handle_event(Event::time(2)).unwrap();
+    assert!(overflow.values()[0].is_infinite());
+    assert_eq!(overflow.values()[1], 0.0);
+
+    #[cfg(feature = "serde")]
+    {
+        let mut document = serde_json::to_value(&spec).unwrap();
+        assert_eq!(document["version"], "2.3");
+        assert_eq!(
+            serde_json::from_value::<PipelineSpec>(document.clone()).unwrap(),
+            spec
+        );
+        document["version"] = "2.2".into();
+        assert!(
+            serde_json::from_value::<PipelineSpec>(document)
+                .unwrap_err()
+                .to_string()
+                .contains("SimpleImputer stages require version 2.3")
+        );
+    }
+}
+
+#[test]
 fn stages_chain_after_lags_preserve_layout_warmup_and_rejection() {
     let (raw, definitions) = base();
     let spec = PipelineSpec::with_stages(raw, definitions, stages(), 2, None).unwrap();
@@ -326,6 +413,24 @@ fn stage_numeric_and_layout_validation_is_shared_by_construction_and_json() {
             scale: vec![1.0, 1.0],
             min: vec![0.0, 0.0],
             clip: Some((1.0, f64::INFINITY)),
+        },
+        FittedStage::SimpleImpute {
+            outputs: vec![FeatureId::new("now"), FeatureId::new("lag")],
+            retained_input_indices: vec![0, 1],
+            replacement_values: vec![0.0],
+            indicator_input_indices: vec![],
+        },
+        FittedStage::SimpleImpute {
+            outputs: vec![FeatureId::new("lag"), FeatureId::new("now")],
+            retained_input_indices: vec![1, 0],
+            replacement_values: vec![0.0, 0.0],
+            indicator_input_indices: vec![],
+        },
+        FittedStage::SimpleImpute {
+            outputs: vec![FeatureId::new("now"), FeatureId::new("lag")],
+            retained_input_indices: vec![0, 1],
+            replacement_values: vec![0.0, f64::INFINITY],
+            indicator_input_indices: vec![],
         },
         FittedStage::Pca {
             outputs: vec![FeatureId::new("pc")],

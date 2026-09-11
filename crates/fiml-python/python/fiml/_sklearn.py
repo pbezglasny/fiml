@@ -8,6 +8,7 @@ def clone_transformer(estimator):
         import sklearn
         from sklearn.base import clone
         from sklearn.decomposition import PCA
+        from sklearn.impute import SimpleImputer
         from sklearn.preprocessing import (
             MaxAbsScaler,
             MinMaxScaler,
@@ -24,13 +25,14 @@ def clone_transformer(estimator):
         RobustScaler,
         MinMaxScaler,
         MaxAbsScaler,
+        SimpleImputer,
         PCA,
     ):
         raise TypeError(
             "supported transformers are exactly StandardScaler, RobustScaler, "
-            "MinMaxScaler, MaxAbsScaler, and PCA"
+            "MinMaxScaler, MaxAbsScaler, SimpleImputer, and PCA"
         )
-    if not estimator.copy:
+    if type(estimator.copy) is not bool or not estimator.copy:
         raise ValueError("copy=False is not supported; fitting must preserve its input")
     if (
         type(estimator) is RobustScaler
@@ -42,13 +44,47 @@ def clone_transformer(estimator):
             raise ValueError(
                 "RobustScaler unit-variance scaling requires 0 < q_min < q_max < 100"
             )
+    if type(estimator) is SimpleImputer:
+        if not isinstance(estimator.missing_values, (float, np.floating)) or not np.isnan(
+            estimator.missing_values
+        ):
+            raise ValueError("SimpleImputer supports only missing_values=np.nan")
+        if estimator.strategy not in ("mean", "median", "most_frequent", "constant"):
+            raise ValueError(
+                "SimpleImputer strategy must be mean, median, most_frequent, or constant"
+            )
+        if type(estimator.add_indicator) is not bool or type(
+            estimator.keep_empty_features
+        ) is not bool:
+            raise ValueError(
+                "SimpleImputer add_indicator and keep_empty_features must be booleans"
+            )
+        if estimator.strategy == "constant":
+            fill_value = 0.0 if estimator.fill_value is None else estimator.fill_value
+            if isinstance(fill_value, (bool, np.bool_)):
+                raise ValueError("SimpleImputer fill_value must be a finite number")
+            try:
+                fill_value = float(fill_value)
+            except (TypeError, ValueError):
+                raise ValueError(
+                    "SimpleImputer fill_value must be a finite number"
+                ) from None
+            if not np.isfinite(fill_value):
+                raise ValueError("SimpleImputer fill_value must be a finite number")
     result = clone(estimator)
     # sklearn's output container configuration is not part of the artifact.
     result.set_output(transform="default")
     return result
 
 
+def accepts_nan(estimator):
+    from sklearn.impute import SimpleImputer
+
+    return type(estimator) is SimpleImputer
+
+
 def fit_stage(estimator, name, matrix, spec):
+    from sklearn.impute import SimpleImputer
     from sklearn.preprocessing import (
         MaxAbsScaler,
         MinMaxScaler,
@@ -57,7 +93,25 @@ def fit_stage(estimator, name, matrix, spec):
     )
 
     fitted = clone_transformer(estimator).fit(matrix)
-    if type(fitted) is StandardScaler:
+    if type(fitted) is SimpleImputer:
+        input_ids = spec.feature_ids()
+        statistics = np.asarray(fitted.statistics_, dtype=np.float64)
+        retained = np.flatnonzero(~np.isnan(statistics))
+        replacements = statistics[retained]
+        indicators = (
+            np.asarray(fitted.indicator_.features_, dtype=np.int64)
+            if fitted.indicator_ is not None
+            else np.empty(0, dtype=np.int64)
+        )
+        outputs = fitted.get_feature_names_out(input_ids).tolist()
+        if not outputs:
+            raise ValueError("SimpleImputer produced zero output features")
+        if not np.isfinite(replacements).all():
+            raise ValueError("SimpleImputer fitted non-finite replacement values")
+        spec.simple_impute_stage(
+            outputs, retained.tolist(), replacements.tolist(), indicators.tolist()
+        )
+    elif type(fitted) is StandardScaler:
         mean = fitted.mean_ if fitted.with_mean else np.zeros(matrix.shape[1])
         scale = fitted.scale_ if fitted.with_std else np.ones(matrix.shape[1])
         spec.scale_stage(mean.tolist(), scale.tolist())

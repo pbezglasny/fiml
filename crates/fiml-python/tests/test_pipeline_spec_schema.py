@@ -178,3 +178,36 @@ def test_min_max_stage_requires_version_2_2_and_valid_state():
     assert list(VALIDATOR.iter_errors(document))
     with pytest.raises(ValueError):
         fiml.PipelineSpec.from_json(json.dumps(document))
+
+
+def test_simple_imputer_stage_requires_version_2_3_and_valid_state():
+    document = canonical_example()
+    inputs = [item["output"] for item in document["model_input"]["transformations"]]
+    document["version"] = "2.3"
+    document["model_input"]["length"] = len(inputs) + 1
+    document["model_input"]["capacity"] = len(inputs) + 1
+    document["model_input"]["stages"] = [{
+        "type": "simple_impute",
+        "outputs": inputs + [f"missingindicator_{inputs[0]}"],
+        "retained_input_indices": list(range(len(inputs))),
+        "replacement_values": [0.0] * len(inputs),
+        "indicator_input_indices": [0],
+    }]
+    assert not list(VALIDATOR.iter_errors(document))
+    assert json.loads(fiml.PipelineSpec.from_json(json.dumps(document)).to_json()) == document
+
+    old = json.loads(json.dumps(document))
+    old["version"] = "2.2"
+    assert list(VALIDATOR.iter_errors(old))
+    with pytest.raises(ValueError, match="require version 2.3"):
+        fiml.PipelineSpec.from_json(json.dumps(old))
+
+    for field, value in [
+        ("replacement_values", [0.0]),
+        ("retained_input_indices", [1, 0] + list(range(2, len(inputs)))),
+        ("indicator_input_indices", [len(inputs)]),
+    ]:
+        invalid = json.loads(json.dumps(document))
+        invalid["model_input"]["stages"][0][field] = value
+        with pytest.raises(ValueError, match="stage 0"):
+            fiml.PipelineSpec.from_json(json.dumps(invalid))
