@@ -243,10 +243,11 @@ stream. Reset retains fitted parameters and registered symbol handles.
 ### Fitting sklearn stages
 
 Install `fiml[sklearn]` (currently scikit-learn `>=1.9,<1.10`) for training.
-Append `StandardScaler`, `PCA`, or `fiml.ScalarStage` instances before fitting or replaying:
+Append `StandardScaler`, `RobustScaler`, `PCA`, or `fiml.ScalarStage` instances
+before fitting or replaying:
 
 ```python
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import RobustScaler
 from sklearn.decomposition import PCA
 
 base_spec = fiml.PipelineSpec(raw_spec)
@@ -254,7 +255,7 @@ for feature_id in raw_spec.feature_ids():
     base_spec.identity(feature_id)
 
 pipeline = (fiml.ModelInputPipeline(base_spec)
-            .add_transformation(StandardScaler(), name="scale")
+            .add_transformation(RobustScaler(unit_variance=True), name="scale")
             .add_transformation(PCA(n_components=2, whiten=True), name="pca"))
 pipeline.fit(kind, symbol, timestamp, price=prices, volume=volumes, fit_mask=ready)
 X_train = pipeline.transform(kind, symbol, timestamp, price=prices, volume=volumes)
@@ -306,7 +307,10 @@ independent fitted spec snapshot. `from_json` restores an inference-only pipelin
 without sklearn; it starts cold and requires the historical warm-up prefix.
 DataFrame and order-book replay still work for inference; fitting currently
 accepts the columnar event API only. Arbitrary estimators/subclasses, `copy=False`,
-and sklearn `GridSearchCV` integration are unsupported.
+`RobustScaler(with_scaling=True, unit_variance=True)` with equal quantiles or
+quantiles at 0 or 100, and sklearn `GridSearchCV` integration are unsupported.
+Those quantile ranges produce a non-finite or zero fitted scale that cannot enter
+the pipeline's finite numeric state.
 
 JSON writers emit pipeline version `2.1` when scalar stages are present, otherwise
 `2.0`. Readers accept both and strict scalar-only `1.0`. Scalar stages serialize as

@@ -5,8 +5,9 @@ Status: in progress
 Last updated: 2026-09-10
 
 The pipeline runtime, model-input serialization, and Python interface are
-implemented, including Python-fitted sklearn scaling/PCA stages and Rust online
-inference. Remaining interface-hardening items are listed below.
+implemented, including Python-fitted sklearn `StandardScaler`, `RobustScaler`,
+and PCA stages with Rust online inference. Remaining interface-hardening items
+are listed below.
 
 ## Current interface
 
