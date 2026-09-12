@@ -3,7 +3,7 @@ use ::serde::{Deserialize, Deserializer, Serialize, Serializer};
 use super::{FeatureExtractorSpec, serialization::deserialize_present_option};
 use crate::{FeatureId, FittedStage, PipelineSpec, TransformerDefinition};
 
-const FORMAT_VERSION: &str = "2.5";
+const FORMAT_VERSION: &str = "2.6";
 
 /// Private versioned storage representation for a complete model-input layout.
 #[derive(Serialize, Deserialize)]
@@ -69,6 +69,20 @@ enum StageWire {
         mean: Vec<f64>,
         scale: Vec<f64>,
     },
+    QuantileTransform {
+        outputs: Vec<String>,
+        output_distribution: String,
+        quantiles: Vec<Vec<f64>>,
+        references: Vec<f64>,
+        all_nan_input_indices: Vec<usize>,
+        bounds_threshold: f64,
+        #[serde(
+            default,
+            deserialize_with = "deserialize_present_option",
+            skip_serializing_if = "Option::is_none"
+        )]
+        normal_clip: Option<(f64, f64)>,
+    },
     SimpleImpute {
         outputs: Vec<String>,
         retained_input_indices: Vec<usize>,
@@ -126,6 +140,23 @@ impl From<&FittedStage> for StageWire {
                 lambdas: lambdas.clone(),
                 mean: mean.clone(),
                 scale: scale.clone(),
+            },
+            FittedStage::QuantileTransform {
+                output_distribution,
+                quantiles,
+                references,
+                all_nan_input_indices,
+                bounds_threshold,
+                normal_clip,
+                ..
+            } => Self::QuantileTransform {
+                outputs,
+                output_distribution: output_distribution.clone(),
+                quantiles: quantiles.clone(),
+                references: references.clone(),
+                all_nan_input_indices: all_nan_input_indices.clone(),
+                bounds_threshold: *bounds_threshold,
+                normal_clip: *normal_clip,
             },
             FittedStage::SimpleImpute {
                 retained_input_indices,
@@ -202,6 +233,23 @@ impl From<StageWire> for FittedStage {
                 mean,
                 scale,
             },
+            StageWire::QuantileTransform {
+                outputs,
+                output_distribution,
+                quantiles,
+                references,
+                all_nan_input_indices,
+                bounds_threshold,
+                normal_clip,
+            } => Self::QuantileTransform {
+                outputs: outputs.into_iter().map(FeatureId::new).collect(),
+                output_distribution,
+                quantiles,
+                references,
+                all_nan_input_indices,
+                bounds_threshold,
+                normal_clip,
+            },
             StageWire::SimpleImpute {
                 outputs,
                 retained_input_indices,
@@ -274,9 +322,15 @@ impl From<&PipelineSpec> for PipelineSpecWire {
             version: if spec
                 .stages()
                 .iter()
-                .any(|stage| matches!(stage, FittedStage::Select { .. }))
+                .any(|stage| matches!(stage, FittedStage::QuantileTransform { .. }))
             {
                 FORMAT_VERSION
+            } else if spec
+                .stages()
+                .iter()
+                .any(|stage| matches!(stage, FittedStage::Select { .. }))
+            {
+                "2.5"
             } else if spec
                 .stages()
                 .iter()
@@ -358,10 +412,10 @@ impl TryFrom<PipelineSpecWire> for PipelineSpec {
     fn try_from(wire: PipelineSpecWire) -> Result<Self, Self::Error> {
         if !matches!(
             wire.version.as_str(),
-            "1.0" | "2.0" | "2.1" | "2.2" | "2.3" | "2.4" | FORMAT_VERSION
+            "1.0" | "2.0" | "2.1" | "2.2" | "2.3" | "2.4" | "2.5" | FORMAT_VERSION
         ) {
             return Err(format!(
-                "unsupported model-input spec version {:?}; expected 1.0, 2.0, 2.1, 2.2, 2.3, 2.4 or {FORMAT_VERSION}",
+                "unsupported model-input spec version {:?}; expected 1.0, 2.0, 2.1, 2.2, 2.3, 2.4, 2.5 or {FORMAT_VERSION}",
                 wire.version
             ));
         }
@@ -378,33 +432,40 @@ impl TryFrom<PipelineSpecWire> for PipelineSpec {
                 {
                     return Err("scalar stages require version 2.1".into());
                 }
-                if !matches!(wire.version.as_str(), "2.2" | "2.3" | "2.4" | "2.5")
+                if !matches!(wire.version.as_str(), "2.2" | "2.3" | "2.4" | "2.5" | "2.6")
                     && stages
                         .iter()
                         .any(|stage| matches!(stage, StageWire::MinMaxScale { .. }))
                 {
                     return Err("MinMaxScaler stages require version 2.2".into());
                 }
-                if !matches!(wire.version.as_str(), "2.3" | "2.4" | "2.5")
+                if !matches!(wire.version.as_str(), "2.3" | "2.4" | "2.5" | "2.6")
                     && stages
                         .iter()
                         .any(|stage| matches!(stage, StageWire::SimpleImpute { .. }))
                 {
                     return Err("SimpleImputer stages require version 2.3".into());
                 }
-                if !matches!(wire.version.as_str(), "2.4" | "2.5")
+                if !matches!(wire.version.as_str(), "2.4" | "2.5" | "2.6")
                     && stages
                         .iter()
                         .any(|stage| matches!(stage, StageWire::PowerTransform { .. }))
                 {
                     return Err("PowerTransformer stages require version 2.4".into());
                 }
-                if wire.version != "2.5"
+                if !matches!(wire.version.as_str(), "2.5" | "2.6")
                     && stages
                         .iter()
                         .any(|stage| matches!(stage, StageWire::Select { .. }))
                 {
                     return Err("selection stages require version 2.5".into());
+                }
+                if wire.version != "2.6"
+                    && stages
+                        .iter()
+                        .any(|stage| matches!(stage, StageWire::QuantileTransform { .. }))
+                {
+                    return Err("QuantileTransformer stages require version 2.6".into());
                 }
                 stages
                     .into_iter()

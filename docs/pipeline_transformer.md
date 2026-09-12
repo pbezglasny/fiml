@@ -2,15 +2,16 @@
 
 Status: implemented.
 
-Date: 2026-09-09. Updated: 2026-09-12 (VarianceThreshold).
+Date: 2026-09-09. Updated: 2026-09-12 (QuantileTransformer).
 
 Related: [issue #93](https://github.com/pbezglasny/fiml/issues/93),
 [issue #118](https://github.com/pbezglasny/fiml/issues/118),
 [issue #119](https://github.com/pbezglasny/fiml/issues/119),
 [issue #120](https://github.com/pbezglasny/fiml/issues/120),
 [issue #121](https://github.com/pbezglasny/fiml/issues/121),
-[issue #122](https://github.com/pbezglasny/fiml/issues/122), and
-[issue #123](https://github.com/pbezglasny/fiml/issues/123).
+[issue #122](https://github.com/pbezglasny/fiml/issues/122),
+[issue #123](https://github.com/pbezglasny/fiml/issues/123), and
+[issue #124](https://github.com/pbezglasny/fiml/issues/124).
 
 Implementation: `fiml[sklearn]` supports scikit-learn `>=1.9,<1.10`; inference
 requires no sklearn installation. See the [runnable example](../crates/fiml-python/examples/sklearn_pipeline.py)
@@ -23,7 +24,7 @@ Fit supported sklearn transformers in Python, export their learned numeric state
 into `PipelineSpec`, and execute that spec through the same Rust runtime in both
 Python batch processing and online serving. Support `SimpleImputer`,
 `StandardScaler`, `RobustScaler`, `MinMaxScaler`, `MaxAbsScaler`,
-`PowerTransformer`, `VarianceThreshold`, and `PCA`, including PCA whitening.
+`PowerTransformer`, `QuantileTransformer`, `VarianceThreshold`, and `PCA`, including PCA whitening.
 Add an ordered list of vector stages after the existing scalar transformations.
 
 “Save parameters” must mean the fitted state needed for inference. Saving only
@@ -180,8 +181,8 @@ Build a dense `float64` matrix from active base outputs. `fit_mask`, if supplied
 must be a one-dimensional boolean array with one entry per event. It selects
 which snapshots train every stage, without suppressing the corresponding events.
 With no mask, all snapshots are training rows. Require a nonempty selection and
-finite values in every selected column, except that SimpleImputer and
-PowerTransformer inputs may contain NaNs but not infinities. Report the first invalid
+finite values in every selected column, except that SimpleImputer, PowerTransformer,
+and QuantileTransformer inputs may contain NaNs but not infinities. Report the first invalid
 event row and feature ID. The caller can exclude indicator warm-up rows explicitly.
 Do not silently replace NaNs or independently drop different rows outside that stage.
 
@@ -217,7 +218,7 @@ indicators, order-book synchronization, or lag history.
 
 Use a small explicit exporter dispatch for the exact `SimpleImputer`, `StandardScaler`,
 `RobustScaler`, `MinMaxScaler`, `MaxAbsScaler`, `PowerTransformer`,
-`VarianceThreshold`, and `PCA`
+`QuantileTransformer`, `VarianceThreshold`, and `PCA`
 classes. Reject subclasses with potentially overridden behavior, arbitrary
 callbacks, sparse outputs, and unsupported versions/options with a useful error.
 There is no need for a plugin registry or a Rust dependency on sklearn.
@@ -282,6 +283,44 @@ forms for Yeo-Johnson and Box-Cox in O(d) time and storage. NaNs are preserved.
 Box-Cox rejects nonpositive fitting values; frozen inference writes NaN only for
 an affected nonpositive column, rather than rejecting the event as sklearn does.
 
+### QuantileTransformer
+
+Export fitted `quantiles_[q][d]`, `references_[q]`, the output distribution,
+sklearn's `1e-7` boundary threshold, and its finite normal clipping bounds. Validate
+finite rectangular tables, matching dimensions, nondecreasing quantiles per column,
+and strictly increasing reference probabilities starting at `0` and ending at `1`
+when `q > 1`; repeated quantiles are
+valid. Compile the row-major artifact once into contiguous per-column tables.
+
+An all-NaN fitted column has no finite quantile table. Export its input index and
+a finite placeholder column; Rust then reproduces sklearn's NaN propagation so a
+following imputer can fill it. With the degenerate `q = 1`, finite inference values
+map to `0` (or the lower normal clip), matching sklearn's single-reference behavior.
+
+For each value, binary-search both sides of a repeated quantile and average the two
+linear interpolations, matching sklearn's tie behavior in O(log q) work. Preserve
+NaNs and saturate values outside the fitted range. Uniform output stops at the
+interpolated probability. Normal output applies Wichura's AS 241 inverse-normal
+rational approximation, accurate to floating-point precision across the supported
+clipped range, then applies the exported finite tail bounds. This costs O(d*q)
+fitted storage and no per-event allocation. The nonlinear rank mapping changes
+linear correlations and should be chosen deliberately.
+
+Representative normal-output measurements on an AMD Ryzen 9 9900X with the
+committed Criterion benchmark (`cargo bench -p fiml --bench quantile_transform
+-- --quick`) are:
+
+| Features (`d`) | Quantiles (`q`) | Compact JSON artifact | Median per row |
+| ---: | ---: | ---: | ---: |
+| 8 | 64 | 21,718 bytes | 152 ns |
+| 32 | 256 | 274,199 bytes | 667 ns |
+
+The artifact measurement uses short output IDs and includes the complete pipeline
+JSON. Latency includes one raw feature update, base-vector expansion, binary
+lookups, and normal conversion. Both scale as the stored O(d*q) tables and
+O(d*log(q)) lookup path predict; compare again on deployment hardware before
+using these numbers for capacity planning.
+
 ### VarianceThreshold
 
 Require a finite, nonnegative `threshold` and finite selected training inputs.
@@ -345,6 +384,7 @@ the reused stage tag.
 SimpleImputer stages use `2.3`; older versions reject the stage tag.
 PowerTransformer stages use `2.4`; older versions reject the stage tag.
 VarianceThreshold selection stages use `2.5`; older versions reject the stage tag.
+QuantileTransformer stages use `2.6`; older versions reject the stage tag.
 Do not reinterpret `1.0`, whose reader currently requires final length to equal
 the scalar transformation count.
 
@@ -382,7 +422,7 @@ the preceding layout. Explicit fitted stage output IDs
 freeze the layout across export/import. The example has two base outputs and
 one final output; base scratch width must not be taken from final `capacity`.
 
-Require `stages` in `2.0` through `2.5`, permitting an empty list. Derive base
+Require `stages` in `2.0` through `2.6`, permitting an empty list. Derive base
 width from scalar definitions, each stage width from its validated arrays and outputs, and final
 active length from the last stage (or base width if empty). Final `capacity`
 must cover that final length; it may be smaller than an intermediate width.

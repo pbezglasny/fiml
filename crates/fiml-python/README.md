@@ -248,14 +248,14 @@ stream. Reset retains fitted parameters and registered symbol handles.
 
 Install `fiml[sklearn]` (currently scikit-learn `>=1.9,<1.10`) for training.
 Append `SimpleImputer`, `StandardScaler`, `RobustScaler`, `MinMaxScaler`,
-`MaxAbsScaler`, `PowerTransformer`, `VarianceThreshold`, `PCA`, or
+`MaxAbsScaler`, `PowerTransformer`, `QuantileTransformer`, `VarianceThreshold`, `PCA`, or
 `fiml.ScalarStage` instances before fitting or replaying:
 
 ```python
 from sklearn.decomposition import PCA
 from sklearn.feature_selection import VarianceThreshold
 from sklearn.impute import SimpleImputer
-from sklearn.preprocessing import PowerTransformer, RobustScaler
+from sklearn.preprocessing import PowerTransformer, QuantileTransformer, RobustScaler
 
 base_spec = fiml.PipelineSpec(raw_spec)
 for feature_id in raw_spec.feature_ids():
@@ -266,6 +266,7 @@ pipeline = (fiml.ModelInputPipeline(base_spec)
             .add_transformation(VarianceThreshold(), name="variance")
             .add_transformation(RobustScaler(unit_variance=True), name="scale")
             .add_transformation(PowerTransformer(), name="power")
+            .add_transformation(QuantileTransformer(n_quantiles=256), name="quantile")
             .add_transformation(PCA(n_components=2, whiten=True), name="pca"))
 pipeline.fit(kind, symbol, timestamp, price=prices, volume=volumes, fit_mask=ready)
 X_train = pipeline.transform(kind, symbol, timestamp, price=prices, volume=volumes)
@@ -300,7 +301,7 @@ array. `fit` takes the same event columns as `transform` and returns `self`.
 after indicator and downstream lag warm-up; every event is still replayed to preserve history.
 Even excluded middle rows enter lag history. Selected inputs to each sklearn estimator
 and selected final outputs must be finite, except that `SimpleImputer` and
-`PowerTransformer` accept NaNs and still reject infinities. A later imputer is
+`PowerTransformer` and `QuantileTransformer` accept NaNs and still reject infinities. A later imputer is
 required if selected final outputs retain NaNs. An earlier scalar selection can drop
 unneeded warm-up columns. Fitting replays each completed prefix through Rust,
 so its cost grows with the number of stages. Fit only the chronological training
@@ -347,6 +348,17 @@ feature is ready. Use `fit_mask` to exclude those rows when that distinction mat
 Box-Cox rejects nonpositive fitting values; during frozen inference, a nonpositive
 value produces NaN only in that output column instead of rejecting the event.
 
+`QuantileTransformer` supports exact sklearn estimators with `copy=True`, dense
+input, and `uniform` or `normal` output. Python owns fitting options such as
+`n_quantiles`, `subsample`, and `random_state`; artifacts store only the effective
+quantile/reference tables and boundary constants. Inference preserves IDs and
+NaNs, averages both sides of repeated quantiles like sklearn, and saturates values
+outside the fitted range. Normal output uses a full-precision AS 241 inverse-normal
+approximation and sklearn's exported finite tail clipping. The nonlinear mapping
+changes linear correlations. All-NaN fitted columns are stored as explicit indices
+and keep producing NaN, allowing a following imputer to fill them without putting
+non-finite numbers in the JSON artifact.
+
 `VarianceThreshold` supports the exact sklearn estimator with any finite,
 nonnegative `threshold`; it has no `copy` option. Fitting requires finite selected
 training inputs. Rust stores only sklearn's ordered retained-column indices, not
@@ -354,7 +366,7 @@ variances or training statistics. Inference preserves NaNs in retained columns
 and ignores discarded columns. Positive thresholds depend on input scale;
 VarianceThreshold is neither correlation-based nor supervised feature selection.
 
-JSON writers emit pipeline version `2.5` for `VarianceThreshold` selection stages,
+JSON writers emit pipeline version `2.6` for `QuantileTransformer`, `2.5` for `VarianceThreshold` selection stages,
 `2.4` for `PowerTransformer`, `2.3` for `SimpleImputer`, `2.2` for
 `MinMaxScaler` and clipped `MaxAbsScaler` stages, `2.1` when scalar stages are
 present, and `2.0` otherwise.

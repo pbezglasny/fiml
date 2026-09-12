@@ -280,3 +280,54 @@ def test_selection_stage_requires_version_2_5_and_valid_mapping():
             assert list(VALIDATOR.iter_errors(invalid))
         with pytest.raises(ValueError, match="stage 0"):
             fiml.PipelineSpec.from_json(json.dumps(invalid))
+
+
+def test_quantile_transform_stage_requires_version_2_6_and_valid_state():
+    document = canonical_example()
+    outputs = [item["output"] for item in document["model_input"]["transformations"]]
+    document["version"] = "2.6"
+    document["model_input"]["stages"] = [{
+        "type": "quantile_transform",
+        "outputs": outputs,
+        "output_distribution": "normal",
+        "quantiles": [[0.0] * len(outputs), [1.0] * len(outputs)],
+        "references": [0.0, 1.0],
+        "all_nan_input_indices": [],
+        "bounds_threshold": 1e-7,
+        "normal_clip": [-5.199337582605575, 5.19933758270342],
+    }]
+    assert not list(VALIDATOR.iter_errors(document))
+    assert json.loads(fiml.PipelineSpec.from_json(json.dumps(document)).to_json()) == document
+
+    old = json.loads(json.dumps(document))
+    old["version"] = "2.5"
+    assert list(VALIDATOR.iter_errors(old))
+    with pytest.raises(ValueError, match="require version 2.6"):
+        fiml.PipelineSpec.from_json(json.dumps(old))
+
+    for field, value in [
+        ("outputs", outputs[:-1]),
+        ("quantiles", [[1.0] * len(outputs), [0.0] * len(outputs)]),
+        ("quantiles", [[0.0], [1.0]]),
+        ("references", [0.5, 0.5]),
+        ("references", [-0.1, 1.0]),
+        ("references", [0.1, 1.0]),
+        ("references", [0.0, 0.9]),
+        ("all_nan_input_indices", [len(outputs)]),
+        ("all_nan_input_indices", [1, 0]),
+        ("bounds_threshold", -1.0),
+        ("normal_clip", [1.0, -1.0]),
+        ("output_distribution", "unknown"),
+    ]:
+        invalid = json.loads(json.dumps(document))
+        invalid["model_input"]["stages"][0][field] = value
+        if field == "outputs":
+            invalid["model_input"]["length"] = len(value)
+        with pytest.raises(ValueError, match="stage 0"):
+            fiml.PipelineSpec.from_json(json.dumps(invalid))
+
+    uniform = json.loads(json.dumps(document))
+    uniform["model_input"]["stages"][0]["output_distribution"] = "uniform"
+    del uniform["model_input"]["stages"][0]["normal_clip"]
+    assert not list(VALIDATOR.iter_errors(uniform))
+    assert json.loads(fiml.PipelineSpec.from_json(json.dumps(uniform)).to_json()) == uniform

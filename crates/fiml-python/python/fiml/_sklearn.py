@@ -16,6 +16,7 @@ def clone_transformer(estimator):
             MaxAbsScaler,
             MinMaxScaler,
             PowerTransformer,
+            QuantileTransformer,
             RobustScaler,
             StandardScaler,
         )
@@ -30,13 +31,14 @@ def clone_transformer(estimator):
         MinMaxScaler,
         MaxAbsScaler,
         PowerTransformer,
+        QuantileTransformer,
         SimpleImputer,
         VarianceThreshold,
         PCA,
     ):
         raise TypeError(
             "supported transformers are exactly StandardScaler, RobustScaler, "
-            "MinMaxScaler, MaxAbsScaler, PowerTransformer, SimpleImputer, "
+            "MinMaxScaler, MaxAbsScaler, PowerTransformer, QuantileTransformer, SimpleImputer, "
             "VarianceThreshold, and PCA"
         )
     if hasattr(estimator, "copy") and (
@@ -65,6 +67,13 @@ def clone_transformer(estimator):
             raise ValueError("PowerTransformer method must be yeo-johnson or box-cox")
         if type(estimator.standardize) is not bool:
             raise ValueError("PowerTransformer standardize must be a boolean")
+    if type(estimator) is QuantileTransformer and estimator.output_distribution not in (
+        "uniform",
+        "normal",
+    ):
+        raise ValueError(
+            "QuantileTransformer output_distribution must be uniform or normal"
+        )
     if type(estimator) is SimpleImputer:
         if not isinstance(estimator.missing_values, (float, np.floating)) or not np.isnan(
             estimator.missing_values
@@ -100,9 +109,9 @@ def clone_transformer(estimator):
 
 def accepts_nan(estimator):
     from sklearn.impute import SimpleImputer
-    from sklearn.preprocessing import PowerTransformer
+    from sklearn.preprocessing import PowerTransformer, QuantileTransformer
 
-    return type(estimator) in (SimpleImputer, PowerTransformer)
+    return type(estimator) in (SimpleImputer, PowerTransformer, QuantileTransformer)
 
 
 def fit_stage(estimator, name, matrix, spec):
@@ -112,6 +121,7 @@ def fit_stage(estimator, name, matrix, spec):
         MaxAbsScaler,
         MinMaxScaler,
         PowerTransformer,
+        QuantileTransformer,
         RobustScaler,
         StandardScaler,
     )
@@ -182,6 +192,25 @@ def fit_stage(estimator, name, matrix, spec):
             fitted.lambdas_.tolist(),
             mean.tolist(),
             scale.tolist(),
+        )
+    elif type(fitted) is QuantileTransformer:
+        bounds_threshold = 1e-7
+        quantiles = fitted.quantiles_.copy()
+        all_nan_input_indices = np.flatnonzero(np.isnan(quantiles).all(axis=0))
+        quantiles[:, all_nan_input_indices] = 0.0
+        normal_clip = None
+        if fitted.output_distribution == "normal":
+            from scipy.stats import norm
+
+            probability = bounds_threshold - np.spacing(1)
+            normal_clip = (norm.ppf(probability), norm.ppf(1 - probability))
+        spec.quantile_transform_stage(
+            fitted.output_distribution,
+            quantiles.tolist(),
+            fitted.references_.tolist(),
+            all_nan_input_indices.tolist(),
+            bounds_threshold,
+            normal_clip,
         )
     else:
         scale = (

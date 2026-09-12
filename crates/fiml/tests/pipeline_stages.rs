@@ -270,6 +270,76 @@ fn power_transform_stage_handles_limits_domains_and_overflow() {
 }
 
 #[test]
+fn quantile_transform_stage_interpolates_ties_clips_normal_tails_and_round_trips() {
+    let (raw, mut definitions) = base();
+    definitions.truncate(1);
+    let uniform = FittedStage::QuantileTransform {
+        outputs: vec![FeatureId::new("now")],
+        output_distribution: "uniform".into(),
+        quantiles: vec![vec![0.0], vec![1.0], vec![1.0], vec![3.0]],
+        references: vec![0.0, 1.0 / 3.0, 2.0 / 3.0, 1.0],
+        all_nan_input_indices: vec![],
+        bounds_threshold: 1e-7,
+        normal_clip: None,
+    };
+    let spec = PipelineSpec::with_stages(raw, definitions, [uniform], 1, None).unwrap();
+    let mut pipeline = spec
+        .build(
+            ArrayFeatureVector::<1>::new(),
+            ArrayFeatureVector::<1>::new(),
+        )
+        .unwrap();
+    for (timestamp, expected) in [(0, 0.0), (1, 0.5), (2, 5.0 / 6.0), (4, 1.0)] {
+        pipeline.handle_event(Event::time(timestamp)).unwrap();
+        assert!((pipeline.values()[0] - expected).abs() < 1e-15);
+    }
+
+    let (raw, mut definitions) = base();
+    definitions.truncate(1);
+    let normal = FittedStage::QuantileTransform {
+        outputs: vec![FeatureId::new("now")],
+        output_distribution: "normal".into(),
+        quantiles: vec![vec![0.0], vec![2.0]],
+        references: vec![0.0, 1.0],
+        all_nan_input_indices: vec![],
+        bounds_threshold: 1e-7,
+        normal_clip: Some((-5.199_337_582_605_575, 5.199_337_582_703_42)),
+    };
+    let normal_spec = PipelineSpec::with_stages(raw, definitions, [normal], 1, None).unwrap();
+    let mut pipeline = normal_spec
+        .build(
+            ArrayFeatureVector::<1>::new(),
+            ArrayFeatureVector::<1>::new(),
+        )
+        .unwrap();
+    for (timestamp, expected) in [
+        (0, -5.199_337_582_605_575),
+        (1, 0.0),
+        (2, 5.199_337_582_703_42),
+    ] {
+        pipeline.handle_event(Event::time(timestamp)).unwrap();
+        assert!((pipeline.values()[0] - expected).abs() < 1e-14);
+    }
+
+    #[cfg(feature = "serde")]
+    {
+        let mut document = serde_json::to_value(&normal_spec).unwrap();
+        assert_eq!(document["version"], "2.6");
+        assert_eq!(
+            serde_json::from_value::<PipelineSpec>(document.clone()).unwrap(),
+            normal_spec
+        );
+        document["version"] = "2.5".into();
+        assert!(
+            serde_json::from_value::<PipelineSpec>(document)
+                .unwrap_err()
+                .to_string()
+                .contains("QuantileTransformer stages require version 2.6")
+        );
+    }
+}
+
+#[test]
 fn simple_imputer_replaces_only_nans_and_appends_fitted_indicators() {
     let (raw, definitions) = base();
     let spec = PipelineSpec::with_stages(
