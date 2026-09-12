@@ -211,3 +211,36 @@ def test_simple_imputer_stage_requires_version_2_3_and_valid_state():
         invalid["model_input"]["stages"][0][field] = value
         with pytest.raises(ValueError, match="stage 0"):
             fiml.PipelineSpec.from_json(json.dumps(invalid))
+
+
+def test_power_transform_stage_requires_version_2_4_and_valid_state():
+    document = canonical_example()
+    outputs = [item["output"] for item in document["model_input"]["transformations"]]
+    document["version"] = "2.4"
+    document["model_input"]["stages"] = [{
+        "type": "power_transform",
+        "outputs": outputs,
+        "method": "yeo-johnson",
+        "lambdas": [1.0] * len(outputs),
+        "mean": [0.0] * len(outputs),
+        "scale": [1.0] * len(outputs),
+    }]
+    assert not list(VALIDATOR.iter_errors(document))
+    assert json.loads(fiml.PipelineSpec.from_json(json.dumps(document)).to_json()) == document
+
+    old = json.loads(json.dumps(document))
+    old["version"] = "2.3"
+    assert list(VALIDATOR.iter_errors(old))
+    with pytest.raises(ValueError, match="require version 2.4"):
+        fiml.PipelineSpec.from_json(json.dumps(old))
+
+    for field, value in [
+        ("method", "unknown"),
+        ("lambdas", [1.0]),
+        ("scale", [0.0] * len(outputs)),
+    ]:
+        invalid = json.loads(json.dumps(document))
+        invalid["model_input"]["stages"][0][field] = value
+        assert list(VALIDATOR.iter_errors(invalid)) or field == "lambdas"
+        with pytest.raises(ValueError, match="stage 0"):
+            fiml.PipelineSpec.from_json(json.dumps(invalid))

@@ -27,6 +27,14 @@ pub enum FittedStage {
         min: Vec<f64>,
         clip: Option<(f64, f64)>,
     },
+    /// Per-column Box-Cox or Yeo-Johnson transform followed by effective scaling.
+    PowerTransform {
+        outputs: Vec<FeatureId>,
+        method: String,
+        lambdas: Vec<f64>,
+        mean: Vec<f64>,
+        scale: Vec<f64>,
+    },
     /// Replaces NaNs in retained columns and optionally appends fitted missing indicators.
     SimpleImpute {
         outputs: Vec<FeatureId>,
@@ -55,6 +63,7 @@ impl FittedStage {
                 .into(),
             Self::StandardScale { outputs, .. }
             | Self::MinMaxScale { outputs, .. }
+            | Self::PowerTransform { outputs, .. }
             | Self::SimpleImpute { outputs, .. }
             | Self::Pca { outputs, .. } => Cow::Borrowed(outputs),
         }
@@ -77,6 +86,7 @@ impl FittedStage {
             Self::Scalar { .. }
             | Self::StandardScale { .. }
             | Self::MinMaxScale { .. }
+            | Self::PowerTransform { .. }
             | Self::SimpleImpute { .. } => 1,
             Self::Pca { .. } => outputs.len(),
         };
@@ -127,6 +137,39 @@ impl FittedStage {
                         "MinMaxScaler clipping bounds must be finite and strictly increasing"
                             .into(),
                     );
+                }
+            }
+            Self::PowerTransform {
+                method,
+                lambdas,
+                mean,
+                scale,
+                ..
+            } => {
+                if outputs != inputs
+                    || lambdas.len() != inputs.len()
+                    || mean.len() != inputs.len()
+                    || scale.len() != inputs.len()
+                {
+                    return Err(format!(
+                        "PowerTransformer must preserve {} input IDs and have matching lambdas/mean/scale lengths",
+                        inputs.len()
+                    ));
+                }
+                if !matches!(method.as_str(), "yeo-johnson" | "box-cox") {
+                    return Err("PowerTransformer method must be yeo-johnson or box-cox".into());
+                }
+                for (((id, &lambda), &mean), &scale) in
+                    inputs.iter().zip(lambdas).zip(mean).zip(scale)
+                {
+                    if !lambda.is_finite() {
+                        return Err(format!(
+                            "input {:?}: PowerTransformer lambda must be finite",
+                            id.as_str()
+                        ));
+                    }
+                    validate_standard_scale(mean, scale)
+                        .map_err(|reason| format!("input {:?}: {reason}", id.as_str()))?;
                 }
             }
             Self::SimpleImpute {
@@ -231,6 +274,12 @@ enum CompiledStage {
         min: Box<[f64]>,
         clip: Option<(f64, f64)>,
     },
+    PowerTransform {
+        box_cox: bool,
+        lambdas: Box<[f64]>,
+        mean: Box<[f64]>,
+        inverse_scale: Box<[f64]>,
+    },
     SimpleImpute {
         retained_input_indices: Box<[usize]>,
         replacement_values: Box<[f64]>,
@@ -261,6 +310,18 @@ impl CompiledStage {
                 scale: scale.clone().into_boxed_slice(),
                 min: min.clone().into_boxed_slice(),
                 clip: *clip,
+            },
+            FittedStage::PowerTransform {
+                method,
+                lambdas,
+                mean,
+                scale,
+                ..
+            } => Self::PowerTransform {
+                box_cox: method == "box-cox",
+                lambdas: lambdas.clone().into_boxed_slice(),
+                mean: mean.clone().into_boxed_slice(),
+                inverse_scale: scale.iter().map(|scale| 1.0 / scale).collect(),
             },
             FittedStage::SimpleImpute {
                 retained_input_indices,
@@ -317,6 +378,22 @@ impl CompiledStage {
                     );
                 }
             }
+            Self::PowerTransform {
+                box_cox,
+                lambdas,
+                mean,
+                inverse_scale,
+            } => {
+                for (i, ((&lambda, &mean), &inverse_scale)) in lambdas
+                    .iter()
+                    .zip(mean.iter())
+                    .zip(inverse_scale.iter())
+                    .enumerate()
+                {
+                    let value = power_transform(input[i], lambda, *box_cox);
+                    output.set_value_at(i, (value - mean) * inverse_scale);
+                }
+            }
             Self::SimpleImpute {
                 retained_input_indices,
                 replacement_values,
@@ -363,6 +440,29 @@ impl CompiledStage {
                 }
             }
         }
+    }
+}
+
+fn power_transform(value: f64, lambda: f64, box_cox: bool) -> f64 {
+    if value.is_nan() || (box_cox && value <= 0.0) {
+        return f64::NAN;
+    }
+    if box_cox {
+        if lambda.abs() < f64::EPSILON {
+            value.ln()
+        } else {
+            (lambda * value.ln()).exp_m1() / lambda
+        }
+    } else if value >= 0.0 {
+        if lambda.abs() < f64::EPSILON {
+            value.ln_1p()
+        } else {
+            (lambda * value.ln_1p()).exp_m1() / lambda
+        }
+    } else if (lambda - 2.0).abs() > f64::EPSILON {
+        -((2.0 - lambda) * (-value).ln_1p()).exp_m1() / (2.0 - lambda)
+    } else {
+        -(-value).ln_1p()
     }
 }
 

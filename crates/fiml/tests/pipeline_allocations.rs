@@ -137,6 +137,13 @@ fn fitted_stages_do_not_allocate_during_warmup_or_steady_state() {
                 replacement_values: vec![0.0, 0.0],
                 indicator_input_indices: vec![],
             },
+            FittedStage::PowerTransform {
+                outputs: vec![FeatureId::new("day"), FeatureId::new("lag")],
+                method: "yeo-johnson".into(),
+                lambdas: vec![1.0, 1.0],
+                mean: vec![0.0, 0.0],
+                scale: vec![1.0, 1.0],
+            },
             FittedStage::StandardScale {
                 outputs: vec![FeatureId::new("day"), FeatureId::new("lag")],
                 mean: vec![0.0, 0.0],

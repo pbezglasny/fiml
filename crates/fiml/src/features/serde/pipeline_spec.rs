@@ -3,7 +3,7 @@ use ::serde::{Deserialize, Deserializer, Serialize, Serializer};
 use super::{FeatureExtractorSpec, serialization::deserialize_present_option};
 use crate::{FeatureId, FittedStage, PipelineSpec, TransformerDefinition};
 
-const FORMAT_VERSION: &str = "2.3";
+const FORMAT_VERSION: &str = "2.4";
 
 /// Private versioned storage representation for a complete model-input layout.
 #[derive(Serialize, Deserialize)]
@@ -58,6 +58,13 @@ enum StageWire {
         )]
         clip: Option<(f64, f64)>,
     },
+    PowerTransform {
+        outputs: Vec<String>,
+        method: String,
+        lambdas: Vec<f64>,
+        mean: Vec<f64>,
+        scale: Vec<f64>,
+    },
     SimpleImpute {
         outputs: Vec<String>,
         retained_input_indices: Vec<usize>,
@@ -98,6 +105,19 @@ impl From<&FittedStage> for StageWire {
                 scale: scale.clone(),
                 min: min.clone(),
                 clip: *clip,
+            },
+            FittedStage::PowerTransform {
+                method,
+                lambdas,
+                mean,
+                scale,
+                ..
+            } => Self::PowerTransform {
+                outputs,
+                method: method.clone(),
+                lambdas: lambdas.clone(),
+                mean: mean.clone(),
+                scale: scale.clone(),
             },
             FittedStage::SimpleImpute {
                 retained_input_indices,
@@ -153,6 +173,19 @@ impl From<StageWire> for FittedStage {
                 scale,
                 min,
                 clip,
+            },
+            StageWire::PowerTransform {
+                outputs,
+                method,
+                lambdas,
+                mean,
+                scale,
+            } => Self::PowerTransform {
+                outputs: outputs.into_iter().map(FeatureId::new).collect(),
+                method,
+                lambdas,
+                mean,
+                scale,
             },
             StageWire::SimpleImpute {
                 outputs,
@@ -226,9 +259,15 @@ impl From<&PipelineSpec> for PipelineSpecWire {
             version: if spec
                 .stages()
                 .iter()
-                .any(|stage| matches!(stage, FittedStage::SimpleImpute { .. }))
+                .any(|stage| matches!(stage, FittedStage::PowerTransform { .. }))
             {
                 FORMAT_VERSION
+            } else if spec
+                .stages()
+                .iter()
+                .any(|stage| matches!(stage, FittedStage::SimpleImpute { .. }))
+            {
+                "2.3"
             } else if spec
                 .stages()
                 .iter()
@@ -298,10 +337,10 @@ impl TryFrom<PipelineSpecWire> for PipelineSpec {
     fn try_from(wire: PipelineSpecWire) -> Result<Self, Self::Error> {
         if !matches!(
             wire.version.as_str(),
-            "1.0" | "2.0" | "2.1" | "2.2" | FORMAT_VERSION
+            "1.0" | "2.0" | "2.1" | "2.2" | "2.3" | FORMAT_VERSION
         ) {
             return Err(format!(
-                "unsupported model-input spec version {:?}; expected 1.0, 2.0, 2.1, 2.2 or {FORMAT_VERSION}",
+                "unsupported model-input spec version {:?}; expected 1.0, 2.0, 2.1, 2.2, 2.3 or {FORMAT_VERSION}",
                 wire.version
             ));
         }
@@ -318,19 +357,26 @@ impl TryFrom<PipelineSpecWire> for PipelineSpec {
                 {
                     return Err("scalar stages require version 2.1".into());
                 }
-                if !matches!(wire.version.as_str(), "2.2" | "2.3")
+                if !matches!(wire.version.as_str(), "2.2" | "2.3" | "2.4")
                     && stages
                         .iter()
                         .any(|stage| matches!(stage, StageWire::MinMaxScale { .. }))
                 {
                     return Err("MinMaxScaler stages require version 2.2".into());
                 }
-                if wire.version != "2.3"
+                if !matches!(wire.version.as_str(), "2.3" | "2.4")
                     && stages
                         .iter()
                         .any(|stage| matches!(stage, StageWire::SimpleImpute { .. }))
                 {
                     return Err("SimpleImputer stages require version 2.3".into());
+                }
+                if wire.version != "2.4"
+                    && stages
+                        .iter()
+                        .any(|stage| matches!(stage, StageWire::PowerTransform { .. }))
+                {
+                    return Err("PowerTransformer stages require version 2.4".into());
                 }
                 stages
                     .into_iter()

@@ -10,7 +10,13 @@ import pandas as pd
 import pytest
 from sklearn.decomposition import PCA
 from sklearn.impute import SimpleImputer
-from sklearn.preprocessing import MaxAbsScaler, MinMaxScaler, RobustScaler, StandardScaler
+from sklearn.preprocessing import (
+    MaxAbsScaler,
+    MinMaxScaler,
+    PowerTransformer,
+    RobustScaler,
+    StandardScaler,
+)
 
 
 def base_spec(*, capacity=None, full_window=False, lag=False):
@@ -542,11 +548,13 @@ def test_unfitted_guards_recipe_locking_and_cloning():
         RobustScaler(copy=False),
         MinMaxScaler(copy=False),
         MaxAbsScaler(copy=False),
+        PowerTransformer(copy=False),
         SimpleImputer(copy=False),
         type("CustomPCA", (PCA,), {})(),
         type("CustomRobustScaler", (RobustScaler,), {})(),
         type("CustomMinMaxScaler", (MinMaxScaler,), {})(),
         type("CustomMaxAbsScaler", (MaxAbsScaler,), {})(),
+        type("CustomPowerTransformer", (PowerTransformer,), {})(),
         type("CustomSimpleImputer", (SimpleImputer,), {})(),
     ],
 )
@@ -577,6 +585,18 @@ def test_simple_imputer_rejects_unsupported_configuration(imputer):
     assert pipeline.to_json() == before
 
 
+@pytest.mark.parametrize(
+    "transformer",
+    [PowerTransformer(method="bad"), PowerTransformer(standardize=1)],
+)
+def test_power_transformer_rejects_unsupported_configuration(transformer):
+    pipeline = fiml.ModelInputPipeline(base_spec())
+    before = pipeline.to_json()
+    with pytest.raises(ValueError):
+        pipeline.add_transformation(transformer, name="bad")
+    assert pipeline.to_json() == before
+
+
 @pytest.mark.parametrize("quantile_range", [(25.0, 25.0), (0.0, 75.0), (25.0, 100.0)])
 def test_robust_scaler_rejects_invalid_unit_variance_range(quantile_range):
     pipeline = fiml.ModelInputPipeline(base_spec())
@@ -598,10 +618,106 @@ def test_robust_scaler_ignores_unit_variance_range_without_scaling():
     )
 
 
+@pytest.mark.parametrize("method", ["yeo-johnson", "box-cox"])
+@pytest.mark.parametrize("standardize", [False, True])
+def test_power_transformer_matches_sklearn_and_json_reload(method, standardize):
+    spec = base_spec(full_window=True)
+    pipeline = fiml.ModelInputPipeline(spec)
+    if method == "yeo-johnson":
+        signed = fiml.ScalarStage()
+        for index, feature_id in enumerate(spec.feature_ids()):
+            signed.standard_scale(
+                feature_id, mean=15.0, scale=1.0, output=f"signed_{index}"
+            )
+        pipeline.add_transformation(signed, name="signed")
+    transformer = PowerTransformer(method=method, standardize=standardize)
+    pipeline.add_transformation(transformer, name="power")
+    data = events(pipeline)
+    matrix = base_matrix(spec, data)
+    if method == "yeo-johnson":
+        matrix -= 15.0
+    fit_mask = np.isfinite(matrix).all(axis=1)
+    assert not hasattr(transformer, "lambdas_")
+    fitted = PowerTransformer(method=method, standardize=standardize).fit(matrix[fit_mask])
+
+    actual = pipeline.fit_transform(**data, fit_mask=fit_mask)
+    expected = fitted.transform(matrix)
+    np.testing.assert_allclose(actual, expected, rtol=1e-10, atol=1e-12)
+    np.testing.assert_array_equal(np.isnan(actual), np.isnan(matrix))
+    document = json.loads(pipeline.to_json())
+    stage = document["model_input"]["stages"][-1]
+    assert document["version"] == "2.4"
+    assert stage["type"] == "power_transform"
+    assert stage["method"] == method
+    np.testing.assert_array_equal(stage["lambdas"], fitted.lambdas_)
+    if not standardize:
+        assert stage["mean"] == [0.0] * matrix.shape[1]
+        assert stage["scale"] == [1.0] * matrix.shape[1]
+    restored = fiml.ModelInputPipeline.from_json(json.dumps(document))
+    events(restored)
+    np.testing.assert_array_equal(restored.transform(**data), actual)
+
+
+def test_power_transformer_constants_and_box_cox_runtime_domain():
+    spec = base_spec()
+    constant = fiml.ModelInputPipeline(spec).add_transformation(
+        PowerTransformer(), name="power"
+    )
+    constant_data = events(constant, constant=True)
+    actual = constant.fit_transform(**constant_data)
+    assert np.all(actual[:, :3] == 0.0)
+    assert json.loads(constant.to_json())["model_input"]["stages"][0][
+        "lambdas"
+    ] == [1.0, 1.0, 1.0]
+
+    raw = fiml.FeatureExtractorSpec().sma("BTCUSDT", [1], source="trade_price")
+    feature_id = raw.feature_ids()[0]
+    box_cox_spec = fiml.PipelineSpec(raw).identity(feature_id)
+    signed = fiml.ScalarStage().standard_scale(
+        feature_id, mean=15.0, scale=1.0, output="signed"
+    )
+    box_cox = (
+        fiml.ModelInputPipeline(box_cox_spec)
+        .add_transformation(signed, name="signed")
+        .add_transformation(PowerTransformer(method="box-cox"), name="power")
+    )
+    data = events(box_cox, offset=10.0)
+    data["price"][-4:] = [15.0, 14.0, 16.0, 13.0]
+    matrix = data["price"][:, None] - 15.0
+    fit_mask = np.arange(len(matrix)) < 18
+    fitted = PowerTransformer(method="box-cox").fit(matrix[fit_mask])
+    actual = box_cox.fit_transform(**data, fit_mask=fit_mask)
+    valid = matrix[:, 0] > 0.0
+    np.testing.assert_allclose(
+        actual[valid], fitted.transform(matrix[valid]), rtol=1e-10, atol=1e-12
+    )
+    assert np.isnan(actual[~valid]).all()
+
+    restored = fiml.ModelInputPipeline.from_json(box_cox.to_json())
+    events(restored)
+    np.testing.assert_array_equal(restored.transform(**data), actual)
+    online = fiml.ModelInputPipeline.from_json(box_cox.to_json())
+    events(online)
+    for kind, symbol, timestamp, price, volume in zip(
+        data["kind"], data["symbol"], data["timestamp"], data["price"], data["volume"]
+    ):
+        online.update(kind, symbol, timestamp, price=price, volume=volume)
+    np.testing.assert_array_equal(online.values()[0], actual[-1, 0])
+
+    before_json, before_values = box_cox.to_json(), box_cox.values()
+    invalid = dict(data, price=data["price"].copy())
+    invalid["price"][0] = 15.0
+    with pytest.raises(ValueError, match="strictly positive"):
+        box_cox.fit(**invalid, fit_mask=fit_mask)
+    assert box_cox.to_json() == before_json
+    np.testing.assert_array_equal(box_cox.values(), before_values)
+
+
 def test_artifact_inference_does_not_import_sklearn():
     pipeline = (fiml.ModelInputPipeline(base_spec())
                 .add_transformation(SimpleImputer(), name="impute")
                 .add_transformation(MaxAbsScaler(clip=True), name="maxabs")
+                .add_transformation(PowerTransformer(), name="power")
                 .add_transformation(PCA(n_components=2), name="pca")
                 .add_transformation(fiml.ScalarStage().identity("pca__pc1").lagged("pca__pc0", lag_window=1), name="lags"))
     data = events(pipeline)

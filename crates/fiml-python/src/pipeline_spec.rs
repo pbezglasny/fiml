@@ -228,6 +228,25 @@ impl PipelineSpec {
         Ok(slf)
     }
 
+    /// Append fitted sklearn PowerTransformer state, preserving the current active IDs.
+    fn power_transform_stage<'py>(
+        mut slf: PyRefMut<'py, Self>,
+        method: String,
+        lambdas: Vec<f64>,
+        mean: Vec<f64>,
+        scale: Vec<f64>,
+    ) -> PyResult<PyRefMut<'py, Self>> {
+        let outputs = slf.core.output_ids();
+        slf.add_stage(FittedStage::PowerTransform {
+            outputs,
+            method,
+            lambdas,
+            mean,
+            scale,
+        })?;
+        Ok(slf)
+    }
+
     /// Append fitted sklearn SimpleImputer state and its frozen output layout.
     fn simple_impute_stage<'py>(
         mut slf: PyRefMut<'py, Self>,

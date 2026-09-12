@@ -2,13 +2,14 @@
 
 Status: implemented.
 
-Date: 2026-09-09. Updated: 2026-09-11 (SimpleImputer).
+Date: 2026-09-09. Updated: 2026-09-12 (PowerTransformer).
 
 Related: [issue #93](https://github.com/pbezglasny/fiml/issues/93),
 [issue #118](https://github.com/pbezglasny/fiml/issues/118),
-[issue #119](https://github.com/pbezglasny/fiml/issues/119), and
-[issue #120](https://github.com/pbezglasny/fiml/issues/120), and
-[issue #121](https://github.com/pbezglasny/fiml/issues/121).
+[issue #119](https://github.com/pbezglasny/fiml/issues/119),
+[issue #120](https://github.com/pbezglasny/fiml/issues/120),
+[issue #121](https://github.com/pbezglasny/fiml/issues/121), and
+[issue #123](https://github.com/pbezglasny/fiml/issues/123).
 
 Implementation: `fiml[sklearn]` supports scikit-learn `>=1.9,<1.10`; inference
 requires no sklearn installation. See the [runnable example](../crates/fiml-python/examples/sklearn_pipeline.py)
@@ -19,9 +20,10 @@ The design below records the implemented contract and deliberately deferred scop
 
 Fit supported sklearn transformers in Python, export their learned numeric state
 into `PipelineSpec`, and execute that spec through the same Rust runtime in both
-Python batch processing and online serving. Support `SimpleImputer`, `StandardScaler`,
-`RobustScaler`, `MinMaxScaler`, `MaxAbsScaler`, and `PCA`, including PCA
-whitening. Add an ordered list of vector stages after the existing scalar transformations.
+Python batch processing and online serving. Support `SimpleImputer`,
+`StandardScaler`, `RobustScaler`, `MinMaxScaler`, `MaxAbsScaler`,
+`PowerTransformer`, and `PCA`, including PCA whitening. Add an ordered list of
+vector stages after the existing scalar transformations.
 
 “Save parameters” must mean the fitted state needed for inference. Saving only
 constructor arguments such as `n_components=2` cannot reproduce a trained PCA.
@@ -177,8 +179,8 @@ Build a dense `float64` matrix from active base outputs. `fit_mask`, if supplied
 must be a one-dimensional boolean array with one entry per event. It selects
 which snapshots train every stage, without suppressing the corresponding events.
 With no mask, all snapshots are training rows. Require a nonempty selection and
-finite values in every selected column, except that an explicitly configured
-SimpleImputer input may contain NaNs but not infinities. Report the first invalid
+finite values in every selected column, except that SimpleImputer and
+PowerTransformer inputs may contain NaNs but not infinities. Report the first invalid
 event row and feature ID. The caller can exclude indicator warm-up rows explicitly.
 Do not silently replace NaNs or independently drop different rows outside that stage.
 
@@ -213,7 +215,7 @@ indicators, order-book synchronization, or lag history.
 ## Fitted state and numerical operations
 
 Use a small explicit exporter dispatch for the exact `SimpleImputer`, `StandardScaler`,
-`RobustScaler`, `MinMaxScaler`, `MaxAbsScaler`, and `PCA`
+`RobustScaler`, `MinMaxScaler`, `MaxAbsScaler`, `PowerTransformer`, and `PCA`
 classes. Reject subclasses with potentially overridden behavior, arbitrary
 callbacks, sparse outputs, and unsupported versions/options with a useful error.
 There is no need for a plugin registry or a Rust dependency on sklearn.
@@ -268,6 +270,16 @@ stage with reciprocal scales, zero offsets, and `[-1, 1]` clipping. Both paths
 preserve input IDs, zeros, signs, and NaNs in O(d) time and storage. Without
 clipping, future magnitudes may exceed `1`; fitting is not robust to outliers.
 
+### PowerTransformer
+
+Export the method, fitted `lambdas_[d]`, and effective post-transform `mean[d]`
+and `scale[d]`; disabled standardization uses zeros and ones. Derive scaling by
+applying SciPy's public transform functions and fitting a public `StandardScaler`,
+without reading sklearn's private scaler. Rust uses stable `log1p`/`expm1`
+forms for Yeo-Johnson and Box-Cox in O(d) time and storage. NaNs are preserved.
+Box-Cox rejects nonpositive fitting values; frozen inference writes NaN only for
+an affected nonpositive column, rather than rejecting the event as sklearn does.
+
 ### PCA
 
 Export `mean[d]`, `components[k][d]`, and `output_scale[k]`. Matrix rows are output
@@ -318,6 +330,7 @@ wire format. A `2.0` artifact containing a scalar stage is rejected.
 MinMaxScaler and clipped MaxAbsScaler stages use `2.2`; older versions reject
 the reused stage tag.
 SimpleImputer stages use `2.3`; older versions reject the stage tag.
+PowerTransformer stages use `2.4`; older versions reject the stage tag.
 Do not reinterpret `1.0`, whose reader currently requires final length to equal
 the scalar transformation count.
 
@@ -355,7 +368,7 @@ the preceding layout. Explicit fitted stage output IDs
 freeze the layout across export/import. The example has two base outputs and
 one final output; base scratch width must not be taken from final `capacity`.
 
-Require `stages` in `2.0` through `2.3`, permitting an empty list. Derive base width from scalar
+Require `stages` in `2.0` through `2.4`, permitting an empty list. Derive base width from scalar
 definitions, each stage width from its validated arrays and outputs, and final
 active length from the last stage (or base width if empty). Final `capacity`
 must cover that final length; it may be smaller than an intermediate width.
