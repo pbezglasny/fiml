@@ -1,5 +1,7 @@
 """Optional sklearn authoring: export only numeric state understood by Rust."""
 
+from numbers import Real
+
 import numpy as np
 
 
@@ -8,6 +10,7 @@ def clone_transformer(estimator):
         import sklearn
         from sklearn.base import clone
         from sklearn.decomposition import PCA
+        from sklearn.feature_selection import VarianceThreshold
         from sklearn.impute import SimpleImputer
         from sklearn.preprocessing import (
             MaxAbsScaler,
@@ -28,14 +31,25 @@ def clone_transformer(estimator):
         MaxAbsScaler,
         PowerTransformer,
         SimpleImputer,
+        VarianceThreshold,
         PCA,
     ):
         raise TypeError(
             "supported transformers are exactly StandardScaler, RobustScaler, "
-            "MinMaxScaler, MaxAbsScaler, PowerTransformer, SimpleImputer, and PCA"
+            "MinMaxScaler, MaxAbsScaler, PowerTransformer, SimpleImputer, "
+            "VarianceThreshold, and PCA"
         )
-    if type(estimator.copy) is not bool or not estimator.copy:
+    if hasattr(estimator, "copy") and (
+        type(estimator.copy) is not bool or not estimator.copy
+    ):
         raise ValueError("copy=False is not supported; fitting must preserve its input")
+    if type(estimator) is VarianceThreshold and (
+        isinstance(estimator.threshold, (bool, np.bool_))
+        or not isinstance(estimator.threshold, Real)
+        or not np.isfinite(estimator.threshold)
+        or estimator.threshold < 0
+    ):
+        raise ValueError("VarianceThreshold threshold must be a finite nonnegative number")
     if (
         type(estimator) is RobustScaler
         and estimator.with_scaling
@@ -92,6 +106,7 @@ def accepts_nan(estimator):
 
 
 def fit_stage(estimator, name, matrix, spec):
+    from sklearn.feature_selection import VarianceThreshold
     from sklearn.impute import SimpleImputer
     from sklearn.preprocessing import (
         MaxAbsScaler,
@@ -102,7 +117,12 @@ def fit_stage(estimator, name, matrix, spec):
     )
 
     fitted = clone_transformer(estimator).fit(matrix)
-    if type(fitted) is SimpleImputer:
+    if type(fitted) is VarianceThreshold:
+        indices = fitted.get_support(indices=True).tolist()
+        if not indices:
+            raise ValueError("VarianceThreshold produced zero output features")
+        spec.select_stage(indices)
+    elif type(fitted) is SimpleImputer:
         input_ids = spec.feature_ids()
         statistics = np.asarray(fitted.statistics_, dtype=np.float64)
         retained = np.flatnonzero(~np.isnan(statistics))

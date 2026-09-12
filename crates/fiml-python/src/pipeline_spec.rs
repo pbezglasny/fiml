@@ -247,6 +247,30 @@ impl PipelineSpec {
         Ok(slf)
     }
 
+    /// Append an ordered fitted column selection, preserving retained input IDs.
+    fn select_stage<'py>(
+        mut slf: PyRefMut<'py, Self>,
+        input_indices: Vec<usize>,
+    ) -> PyResult<PyRefMut<'py, Self>> {
+        let inputs = slf.core.output_ids();
+        let outputs = input_indices
+            .iter()
+            .map(|&index| {
+                inputs.get(index).cloned().ok_or_else(|| {
+                    PyValueError::new_err(format!(
+                        "selection index {index} is out of bounds for {} inputs",
+                        inputs.len()
+                    ))
+                })
+            })
+            .collect::<PyResult<_>>()?;
+        slf.add_stage(FittedStage::Select {
+            outputs,
+            input_indices,
+        })?;
+        Ok(slf)
+    }
+
     /// Append fitted sklearn SimpleImputer state and its frozen output layout.
     fn simple_impute_stage<'py>(
         mut slf: PyRefMut<'py, Self>,

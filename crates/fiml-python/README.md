@@ -246,10 +246,12 @@ stream. Reset retains fitted parameters and registered symbol handles.
 
 Install `fiml[sklearn]` (currently scikit-learn `>=1.9,<1.10`) for training.
 Append `SimpleImputer`, `StandardScaler`, `RobustScaler`, `MinMaxScaler`,
-`MaxAbsScaler`, `PowerTransformer`, `PCA`, or `fiml.ScalarStage` instances before fitting or replaying:
+`MaxAbsScaler`, `PowerTransformer`, `VarianceThreshold`, `PCA`, or
+`fiml.ScalarStage` instances before fitting or replaying:
 
 ```python
 from sklearn.decomposition import PCA
+from sklearn.feature_selection import VarianceThreshold
 from sklearn.impute import SimpleImputer
 from sklearn.preprocessing import PowerTransformer, RobustScaler
 
@@ -259,6 +261,7 @@ for feature_id in raw_spec.feature_ids():
 
 pipeline = (fiml.ModelInputPipeline(base_spec)
             .add_transformation(SimpleImputer(add_indicator=True), name="impute")
+            .add_transformation(VarianceThreshold(), name="variance")
             .add_transformation(RobustScaler(unit_variance=True), name="scale")
             .add_transformation(PowerTransformer(), name="power")
             .add_transformation(PCA(n_components=2, whiten=True), name="pca"))
@@ -303,6 +306,7 @@ partition. Reserved cells are excluded from fitting and stay NaN in output.
 
 Each stage consumes the preceding complete active vector; the base spec can
 include lagged features. Scaling preserves names; PCA generates `pca__pc0`, etc.
+VarianceThreshold preserves the IDs and order of retained inputs.
 Capacity defaults to the fitted final width, while an explicitly authored
 capacity applies to the final vector; intermediate training layouts may be wider. PCA emits all NaNs until every stage input is finite.
 `fit_transform` fits and replays, returning every event row; keep labels aligned
@@ -341,7 +345,15 @@ feature is ready. Use `fit_mask` to exclude those rows when that distinction mat
 Box-Cox rejects nonpositive fitting values; during frozen inference, a nonpositive
 value produces NaN only in that output column instead of rejecting the event.
 
-JSON writers emit pipeline version `2.4` for `PowerTransformer`, `2.3` for `SimpleImputer`, `2.2` for
+`VarianceThreshold` supports the exact sklearn estimator with any finite,
+nonnegative `threshold`; it has no `copy` option. Fitting requires finite selected
+training inputs. Rust stores only sklearn's ordered retained-column indices, not
+variances or training statistics. Inference preserves NaNs in retained columns
+and ignores discarded columns. Positive thresholds depend on input scale;
+VarianceThreshold is neither correlation-based nor supervised feature selection.
+
+JSON writers emit pipeline version `2.5` for `VarianceThreshold` selection stages,
+`2.4` for `PowerTransformer`, `2.3` for `SimpleImputer`, `2.2` for
 `MinMaxScaler` and clipped `MaxAbsScaler` stages, `2.1` when scalar stages are
 present, and `2.0` otherwise.
 Readers also accept strict scalar-only `1.0`. Scalar stages serialize as

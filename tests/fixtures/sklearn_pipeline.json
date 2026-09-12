@@ -1,6 +1,6 @@
 {
   "pipeline": {
-    "version": "2.3",
+    "version": "2.5",
     "feature_extractor": {
       "version": "1.0",
       "capacity": 3,
@@ -121,6 +121,27 @@
           "clip": [
             -1.0,
             1.0
+          ]
+        },
+        {
+          "type": "select",
+          "outputs": [
+            "sma:symbol=7:btcusdt:source=field.trade_price:window=1:warmup=full_window",
+            "sma:symbol=7:btcusdt:source=field.trade_price:window=3:warmup=full_window",
+            "sma:symbol=7:btcusdt:source=field.trade_price:window=5:warmup=full_window",
+            "lag2",
+            "missingindicator_sma:symbol=7:btcusdt:source=field.trade_price:window=3:warmup=full_window",
+            "missingindicator_sma:symbol=7:btcusdt:source=field.trade_price:window=5:warmup=full_window",
+            "missingindicator_lag2"
+          ],
+          "input_indices": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6
           ]
         },
         {

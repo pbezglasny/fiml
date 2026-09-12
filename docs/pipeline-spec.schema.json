@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "fiml PipelineSpec 2.4 (with 1.0 through 2.3 read compatibility)",
+  "title": "fiml PipelineSpec 2.5 (with 1.0 through 2.4 read compatibility)",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -9,13 +9,13 @@
     "model_input"
   ],
   "properties": {
-    "version": { "enum": ["1.0", "2.0", "2.1", "2.2", "2.3", "2.4"] },
+    "version": { "enum": ["1.0", "2.0", "2.1", "2.2", "2.3", "2.4", "2.5"] },
     "checksum": { "type": "string" },
     "feature_extractor": { "$ref": "feature-extractor-spec.schema.json" },
     "model_input": { "$ref": "#/$defs/model_input" }
   },
   "allOf": [{
-    "if": { "properties": { "version": { "enum": ["2.0", "2.1", "2.2", "2.3", "2.4"] } } },
+    "if": { "properties": { "version": { "enum": ["2.0", "2.1", "2.2", "2.3", "2.4", "2.5"] } } },
     "then": { "properties": { "model_input": { "required": ["stages"] } } },
     "else": { "properties": { "model_input": { "not": { "required": ["stages"] } } } }
   }, {
@@ -37,6 +37,11 @@
     "if": { "properties": { "version": { "enum": ["2.0", "2.1", "2.2", "2.3"] } } },
     "then": { "properties": { "model_input": { "properties": {
       "stages": { "items": { "not": { "properties": { "type": { "const": "power_transform" } }, "required": ["type"] } } }
+    } } } }
+  }, {
+    "if": { "properties": { "version": { "enum": ["2.0", "2.1", "2.2", "2.3", "2.4"] } } },
+    "then": { "properties": { "model_input": { "properties": {
+      "stages": { "items": { "not": { "properties": { "type": { "const": "select" } }, "required": ["type"] } } }
     } } } }
   }],
   "$defs": {
@@ -96,6 +101,15 @@
     },
     "stage": {
       "oneOf": [
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["type", "outputs", "input_indices"],
+          "properties": {
+            "type": { "const": "select" },
+            "outputs": { "$ref": "#/$defs/stage_outputs" },
+            "input_indices": { "$ref": "#/$defs/nonempty_index_vector" }
+          }
+        },
         {
           "type": "object", "additionalProperties": false,
           "required": ["type", "transformations"],
@@ -171,6 +185,7 @@
     "numeric_vector": { "type": "array", "minItems": 1, "items": { "type": "number" } },
     "positive_vector": { "type": "array", "minItems": 1, "items": { "type": "number", "exclusiveMinimum": 0 } },
     "index_vector": { "type": "array", "uniqueItems": true, "items": { "type": "integer", "minimum": 0 } },
+    "nonempty_index_vector": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "integer", "minimum": 0 } },
     "feature_id": { "type": "string" },
     "output_feature_id": {
       "type": "string",

@@ -6,7 +6,8 @@ Last updated: 2026-09-12
 
 The pipeline runtime, model-input serialization, and Python interface are
 implemented, including Python-fitted sklearn `SimpleImputer`, `StandardScaler`,
-`RobustScaler`, `MinMaxScaler`, `MaxAbsScaler`, `PowerTransformer`, and PCA
+`RobustScaler`, `MinMaxScaler`, `MaxAbsScaler`, `PowerTransformer`,
+`VarianceThreshold`, and PCA
 stages with Rust online inference.
 Remaining interface-hardening items are listed below.
 
@@ -31,6 +32,7 @@ in sequence. `FittedStage::StandardScale` preserves its width and IDs;
 `FittedStage::SimpleImpute` stores retained inputs, finite replacements, and
 fitted missing-indicator inputs.
 `FittedStage::PowerTransform` applies Box-Cox or Yeo-Johnson and effective scaling.
+`FittedStage::Select` copies retained columns by prevalidated numeric index.
 `FittedStage::Pca` projects to named components and supports whitening.
 `FittedStage::Scalar` selects, renames, scales, or lags columns from the preceding
 layout. Definitions within a scalar stage are independent; dependent operations
@@ -84,7 +86,8 @@ The canonical artifact has three ownership levels:
 
 `feature_extractor` owns the raw-vector layout. `model_input` owns the final
 vector layout, scalar base transformations, and fitted vector stages. Writers
-emit `2.4` for PowerTransformer, `2.3` for SimpleImputer, `2.2` for MinMaxScaler or clipped MaxAbsScaler,
+emit `2.5` for VarianceThreshold selection, `2.4` for PowerTransformer,
+`2.3` for SimpleImputer, `2.2` for MinMaxScaler or clipped MaxAbsScaler,
 `2.1` for scalar stages, and `2.0` otherwise; readers also accept strict `1.0`
 artifacts without stages.
 The envelope above illustrates ownership; populated feature/transform arrays
