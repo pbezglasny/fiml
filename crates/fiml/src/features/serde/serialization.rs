@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashSet};
 use std::time::Duration;
 
 use rust_decimal::Decimal;
@@ -13,7 +13,7 @@ use crate::{
     WarmupPolicy,
 };
 
-const FORMAT_VERSION: &str = "1.0";
+const FORMAT_VERSION: &str = "1.1";
 
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -21,6 +21,7 @@ struct FeatureExtractorSpecWire {
     version: String,
     capacity: usize,
     length: usize,
+    required_events: Vec<RequiredEventWire>,
     #[serde(
         default,
         deserialize_with = "deserialize_present_option",
@@ -30,6 +31,14 @@ struct FeatureExtractorSpecWire {
     features: Vec<FeatureGroupWire>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     order_books: Vec<OrderBookConfigWire>,
+}
+
+/// Concrete input subscription exposed so callers know which events to supply.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RequiredEventWire {
+    symbol: String,
+    event: String,
 }
 
 /// Wire configuration excludes all live order-book state.
@@ -269,6 +278,7 @@ impl TryFrom<&FeatureExtractorSpec> for FeatureExtractorSpecWire {
         let mut groups = Vec::<FeatureGroupWire>::new();
         let mut current_symbol = None::<Symbol>;
         let mut indicators = Vec::<IndicatorAccumulator>::new();
+        let mut required_events = BTreeSet::new();
 
         for definition in feature_extractor_spec.definitions() {
             let symbol = symbol_of(&definition.key);
@@ -281,6 +291,7 @@ impl TryFrom<&FeatureExtractorSpec> for FeatureExtractorSpecWire {
             }
 
             let (identity, wire, output) = serialize_definition(definition)?;
+            add_required_events(symbol, &wire.source, &mut required_events);
             if let Some(current) = indicators.last_mut()
                 && current.identity == identity
             {
@@ -319,6 +330,7 @@ impl TryFrom<&FeatureExtractorSpec> for FeatureExtractorSpecWire {
             version: FORMAT_VERSION.to_owned(),
             capacity: feature_extractor_spec.feature_vector_capacity(),
             length: feature_extractor_spec.feature_vector_length(),
+            required_events: required_events.into_iter().collect(),
             checksum: feature_extractor_spec.checksum().map(str::to_owned),
             features: groups,
             order_books: feature_extractor_spec
@@ -543,6 +555,7 @@ impl TryFrom<FeatureExtractorSpecWire> for FeatureExtractorSpec {
         }
         let mut scopes = HashSet::with_capacity(wire.features.len());
         let mut definitions = Vec::with_capacity(wire.scalar_output_count());
+        let mut required_events = BTreeSet::new();
         for group in wire.features {
             if group.symbol.is_empty() {
                 return Err("feature group symbol must not be empty".to_owned());
@@ -561,8 +574,29 @@ impl TryFrom<FeatureExtractorSpecWire> for FeatureExtractorSpec {
                 ));
             }
             for indicator in group.indicators {
+                add_required_events(symbol, &indicator.source, &mut required_events);
                 deserialize_indicator(symbol, indicator, &mut definitions)?;
             }
+        }
+        let mut serialized_required_events = BTreeSet::new();
+        for required in wire.required_events {
+            let event = parse_event(&required.event)?;
+            let symbol = Symbol::new(&required.symbol).map_err(|error| error.to_string())?;
+            if (event == EventKind::Time) != (symbol == Symbol::GLOBAL) {
+                return Err(format!(
+                    "event {:?} has invalid symbol {:?}",
+                    required.event, required.symbol
+                ));
+            }
+            if !serialized_required_events.insert(RequiredEventWire {
+                symbol: symbol.resolve_as_string(),
+                event: event_name(event).to_owned(),
+            }) {
+                return Err("duplicate normalized required event".to_owned());
+            }
+        }
+        if serialized_required_events != required_events {
+            return Err("required_events does not match feature extractor inputs".to_owned());
         }
         if wire.length != definitions.len() {
             return Err(format!(
@@ -594,6 +628,37 @@ impl TryFrom<FeatureExtractorSpecWire> for FeatureExtractorSpec {
         FeatureExtractorSpec::with_metadata(definitions, wire.capacity, wire.checksum)
             .and_then(|spec| spec.with_order_books(configs))
             .map_err(|error| error.to_string())
+    }
+}
+
+fn add_required_events(
+    symbol: Symbol,
+    source: &SourceWire,
+    required_events: &mut BTreeSet<RequiredEventWire>,
+) {
+    let symbol = if source.source_type == "any_event" {
+        Symbol::GLOBAL
+    } else {
+        symbol
+    }
+    .resolve_as_string();
+    let mut add = |event: &str| {
+        required_events.insert(RequiredEventWire {
+            symbol: symbol.clone(),
+            event: event.to_owned(),
+        });
+    };
+    match source.source_type.as_str() {
+        "order_book" => {
+            add("order_book_delta");
+            add("order_book_snapshot");
+        }
+        "any_event" => add("time"),
+        _ => {
+            if let Some(event) = source.event.as_deref() {
+                add(event);
+            }
+        }
     }
 }
 
@@ -1459,10 +1524,19 @@ mod tests {
         let text = serde_json::to_string_pretty(&spec).unwrap();
         let value: Value = serde_json::from_str(&text).unwrap();
 
-        assert_eq!(value["version"], "1.0");
+        assert_eq!(value["version"], "1.1");
         assert_eq!(value["capacity"], 12);
         assert_eq!(value["length"], 10);
         assert_eq!(value["checksum"], "opaque-value");
+        assert_eq!(
+            value["required_events"],
+            json!([
+                {"symbol":"__global__", "event":"time"},
+                {"symbol":"btcusdt", "event":"price"},
+                {"symbol":"btcusdt", "event":"trade"},
+                {"symbol":"btcusdt", "event":"volume"}
+            ])
+        );
         assert_eq!(value["features"][0]["symbol"], "__global__");
         assert_eq!(value["features"][1]["symbol"], "btcusdt");
         assert!(
@@ -1567,9 +1641,10 @@ mod tests {
 
     fn valid_day_set() -> Value {
         json!({
-            "version": "1.0",
+            "version": "1.1",
             "capacity": 1,
             "length": 1,
+            "required_events": [{"symbol":"__global__", "event":"time"}],
             "features": [{
                 "symbol": "__global__",
                 "indicators": [{
@@ -1589,9 +1664,13 @@ mod tests {
     #[test]
     fn unsorted_input_is_accepted_and_reserialized_canonically() {
         let value = json!({
-            "version": "1.0",
+            "version": "1.1",
             "capacity": 3,
             "length": 3,
+            "required_events": [
+                {"symbol":"z", "event":"trade"},
+                {"symbol":"__global__", "event":"time"}
+            ],
             "features": [
                 {"symbol":"z", "indicators":[{
                     "kind":"sma", "source":{"type":"field","event":"trade","field":"price"},
@@ -1605,6 +1684,13 @@ mod tests {
         let spec: FeatureExtractorSpec = serde_json::from_value(value).unwrap();
         let canonical = serde_json::to_value(spec).unwrap();
         assert_eq!(canonical["features"][0]["symbol"], "__global__");
+        assert_eq!(
+            canonical["required_events"],
+            json!([
+                {"symbol":"__global__", "event":"time"},
+                {"symbol":"z", "event":"trade"}
+            ])
+        );
         assert!(
             canonical["features"][0]["indicators"][0]
                 .get("outputs")
@@ -1657,7 +1743,8 @@ mod tests {
     #[test]
     fn rejects_duplicate_normalized_scopes_and_empty_groups() {
         let value = json!({
-            "version":"1.0", "capacity":2, "length":2,
+            "version":"1.1", "capacity":2, "length":2,
+            "required_events":[{"symbol":"btc", "event":"price"}],
             "features":[
                 {"symbol":"BTC", "indicators":[{"kind":"sma","source":{"type":"field","event":"price","field":"value"},"warmup_policy":"first_value","outputs":[{"window":1}]}]},
                 {"symbol":"btc", "indicators":[{"kind":"ema","source":{"type":"field","event":"price","field":"value"},"warmup_policy":"first_value","outputs":[{"window":1}]}]}
@@ -1701,7 +1788,8 @@ mod tests {
     #[test]
     fn rejects_malformed_durations_and_structurally_invalid_outputs() {
         let value = json!({
-            "version":"1.0", "capacity":1, "length":1,
+            "version":"1.1", "capacity":1, "length":1,
+            "required_events":[{"symbol":"btc", "event":"trade"}],
             "features":[{"symbol":"btc","indicators":[{
                 "kind":"trade_count_timed", "source":{"type":"event","event":"trade"},
                 "warmup_policy":"full_window", "options":{"aggregation":"01s"},
@@ -1718,5 +1806,33 @@ mod tests {
         let mut value = valid_day_set();
         value["features"][0]["indicators"][0]["outputs"] = json!([{"unknown":1}]);
         assert!(error(value).contains("unknown field"));
+    }
+
+    #[test]
+    fn rejects_required_events_that_do_not_match_inputs() {
+        let mut value = valid_day_set();
+        value["required_events"] = json!([]);
+        assert!(error(value).contains("does not match"));
+
+        let mut value = valid_day_set();
+        value["required_events"][0]["symbol"] = json!("btc");
+        assert!(error(value).contains("invalid symbol"));
+    }
+
+    #[test]
+    fn normalizes_and_rejects_duplicate_required_event_symbols() {
+        let mut value = valid_day_set();
+        value["required_events"][0]["symbol"] = json!("__GLOBAL__");
+        let spec: FeatureExtractorSpec = serde_json::from_value(value.clone()).unwrap();
+        assert_eq!(
+            serde_json::to_value(spec).unwrap()["required_events"][0]["symbol"],
+            "__global__"
+        );
+
+        value["required_events"] = json!([
+            {"symbol":"__global__", "event":"time"},
+            {"symbol":"__GLOBAL__", "event":"time"}
+        ]);
+        assert!(error(value).contains("duplicate normalized required event"));
     }
 }

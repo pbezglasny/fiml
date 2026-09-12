@@ -278,8 +278,8 @@ is a separate concept from a serialized feature group.
 ### Feature-vector spec format version
 
 The version of the serialized feature-vector spec contract. It is independent of the
-Rust crate or Python package version. Writers emit exact version `1.0`; readers
-accept only `1.0` until another version is explicitly supported.
+Rust crate or Python package version. Writers emit exact version `1.1`; readers
+accept only `1.1` until another version is explicitly supported.
 
 ### Parity artifact
 

@@ -168,6 +168,8 @@ capacity raises `ValueError`. `n_features()` and `feature_names()` cover the
 complete model width, while `active_feature_count()` excludes reserved cells.
 The optional `checksum` is opaque metadata and is round-tripped without being
 calculated or verified.
+Serialized specs also include a canonical `required_events` list of concrete
+`symbol`/`event` pairs that callers must feed to the extractor.
 
 Builder methods: `sma`, `ema`, `cvd`, `sma_timed`, `obv_timed`, `vpt`,
 `trade_count_timed`, `day_of_week`, and `time_since_first_event_of_day`

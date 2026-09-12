@@ -17,15 +17,16 @@ columns.
 ## Decision
 
 Compatibility with the old derived shape is intentionally not preserved.
-Writers emit exact version `1.0`, and readers accept only that version.
+Writers emit exact version `1.1`, and readers accept only that version.
 
 The top-level shape is:
 
 ```json
 {
-  "version": "1.0",
+  "version": "1.1",
   "capacity": 128,
   "length": 100,
+  "required_events": [],
   "checksum": "optional opaque metadata",
   "features": []
 }
@@ -34,6 +35,11 @@ The top-level shape is:
 `features` contains feature groups. Every group has a required normalized
 `symbol`; global features use `__global__`. Each group has a nonempty
 `indicators` array. Duplicate normalized symbol groups are errors.
+
+`required_events` is derived from those groups and contains canonical,
+deduplicated `{symbol, event}` inputs. Readers reject metadata that does not
+match the indicators. Global `any_event` features use a concrete global `time`
+input; order-book features require both delta and snapshot inputs.
 
 Each indicator uses a common strict envelope with `kind`, `source`, applicable
 `warmup_policy`, optional shared `options`, and optional `outputs`. Empty
@@ -47,10 +53,11 @@ spellings and serialize as `±HH:MM`.
 
 Canonical order is:
 
-1. the global feature group;
-2. symbol groups by normalized symbol;
-3. indicators by name and then their identity fields;
-4. output cells in authored window order.
+1. required events by normalized symbol and event name;
+2. the global feature group;
+3. symbol groups by normalized symbol;
+4. indicators by name and then their identity fields;
+5. output cells in authored window order.
 
 Input need not be sorted; deserialization produces a canonically ordered
 runtime `FeatureExtractorSpec`.

@@ -2,9 +2,27 @@
   "pipeline": {
     "version": "2.0",
     "feature_extractor": {
-      "version": "1.0",
+      "version": "1.1",
       "capacity": 21,
       "length": 20,
+      "required_events": [
+        {
+          "symbol": "btcusdt",
+          "event": "order_book_delta"
+        },
+        {
+          "symbol": "btcusdt",
+          "event": "order_book_snapshot"
+        },
+        {
+          "symbol": "ethusdt",
+          "event": "order_book_delta"
+        },
+        {
+          "symbol": "ethusdt",
+          "event": "order_book_snapshot"
+        }
+      ],
       "features": [
         {
           "symbol": "btcusdt",

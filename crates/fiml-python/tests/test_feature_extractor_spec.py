@@ -25,10 +25,11 @@ def test_fluent_spec_uses_core_json_and_round_trips_metadata():
     assert feature_extractor_spec.checksum == "opaque"
 
     document = json.loads(feature_extractor_spec.to_json())
-    assert document["version"] == "1.0"
+    assert document["version"] == "1.1"
     assert document["capacity"] == 4
     assert document["length"] == 2
     assert document["checksum"] == "opaque"
+    assert document["required_events"] == [{"symbol": "btcusdt", "event": "trade"}]
     assert [output["window"] for output in document["features"][0]["indicators"][0]["outputs"]] == [2, 3]
     assert all("id" not in output for output in document["features"][0]["indicators"][0]["outputs"])
 
