@@ -99,6 +99,129 @@ fn min_max_stage_preserves_nans_and_clips_only_when_configured() {
 }
 
 #[test]
+fn power_transform_stage_handles_limits_domains_and_overflow() {
+    let (raw, mut definitions) = base();
+    definitions[0] = TransformerDefinition::standard_scale(
+        FeatureId::new("elapsed"),
+        FeatureId::new("now"),
+        1.0,
+        1.0,
+    );
+    let spec = PipelineSpec::with_stages(
+        raw,
+        definitions,
+        [FittedStage::PowerTransform {
+            outputs: vec![FeatureId::new("now"), FeatureId::new("lag")],
+            method: "yeo-johnson".into(),
+            lambdas: vec![2.0, f64::EPSILON / 2.0],
+            mean: vec![0.0, 0.0],
+            scale: vec![1.0, 1.0],
+        }],
+        2,
+        None,
+    )
+    .unwrap();
+    let mut pipeline = spec
+        .build(
+            ArrayFeatureVector::<1>::new(),
+            ArrayFeatureVector::<2>::new(),
+        )
+        .unwrap();
+    pipeline.handle_event(Event::time(0)).unwrap();
+    assert!((pipeline.values()[0] + 2.0_f64.ln()).abs() < 1e-14);
+    assert!(pipeline.values()[1].is_nan());
+    pipeline.handle_event(Event::time(2)).unwrap();
+    assert!((pipeline.values()[0] - 1.5).abs() < 1e-14);
+    assert_eq!(pipeline.values()[1], 0.0);
+    pipeline.handle_event(Event::time(4)).unwrap();
+    assert!((pipeline.values()[0] - 7.5).abs() < 1e-14);
+    assert!((pipeline.values()[1] - 3.0_f64.ln()).abs() < 1e-14);
+
+    let (raw, mut definitions) = base();
+    definitions[0] = TransformerDefinition::standard_scale(
+        FeatureId::new("elapsed"),
+        FeatureId::new("now"),
+        1.0,
+        1.0,
+    );
+    let box_cox = PipelineSpec::with_stages(
+        raw,
+        definitions,
+        [FittedStage::PowerTransform {
+            outputs: vec![FeatureId::new("now"), FeatureId::new("lag")],
+            method: "box-cox".into(),
+            lambdas: vec![0.0, 0.0],
+            mean: vec![0.0, 0.0],
+            scale: vec![1.0, 1.0],
+        }],
+        2,
+        None,
+    )
+    .unwrap();
+    let mut pipeline = box_cox
+        .build(
+            ArrayFeatureVector::<1>::new(),
+            ArrayFeatureVector::<2>::new(),
+        )
+        .unwrap();
+    pipeline.handle_event(Event::time(0)).unwrap();
+    assert!(pipeline.values().iter().all(|value| value.is_nan()));
+    pipeline.handle_event(Event::time(2)).unwrap();
+    assert_eq!(pipeline.values()[0], 0.0);
+    assert!(pipeline.values()[1].is_nan());
+    pipeline.handle_event(Event::time(4)).unwrap();
+    assert!((pipeline.values()[0] - 3.0_f64.ln()).abs() < 1e-14);
+    assert!((pipeline.values()[1] - 2.0_f64.ln()).abs() < 1e-14);
+
+    let (raw, mut definitions) = base();
+    definitions[0] = TransformerDefinition::standard_scale(
+        FeatureId::new("elapsed"),
+        FeatureId::new("now"),
+        -f64::MAX,
+        1.0,
+    );
+    let overflow = PipelineSpec::with_stages(
+        raw,
+        definitions,
+        [FittedStage::PowerTransform {
+            outputs: vec![FeatureId::new("now"), FeatureId::new("lag")],
+            method: "yeo-johnson".into(),
+            lambdas: vec![2.0, 1.0],
+            mean: vec![0.0, 0.0],
+            scale: vec![1.0, 1.0],
+        }],
+        2,
+        None,
+    )
+    .unwrap();
+    let mut overflow = overflow
+        .build(
+            ArrayFeatureVector::<1>::new(),
+            ArrayFeatureVector::<2>::new(),
+        )
+        .unwrap();
+    overflow.handle_event(Event::time(0)).unwrap();
+    assert!(overflow.values()[0].is_infinite());
+
+    #[cfg(feature = "serde")]
+    {
+        let mut document = serde_json::to_value(&box_cox).unwrap();
+        assert_eq!(document["version"], "2.4");
+        assert_eq!(
+            serde_json::from_value::<PipelineSpec>(document.clone()).unwrap(),
+            box_cox
+        );
+        document["version"] = "2.3".into();
+        assert!(
+            serde_json::from_value::<PipelineSpec>(document)
+                .unwrap_err()
+                .to_string()
+                .contains("PowerTransformer stages require version 2.4")
+        );
+    }
+}
+
+#[test]
 fn simple_imputer_replaces_only_nans_and_appends_fitted_indicators() {
     let (raw, definitions) = base();
     let spec = PipelineSpec::with_stages(
@@ -381,6 +504,27 @@ fn scalar_stages_reject_inputs_outside_the_preceding_layout() {
 #[test]
 fn stage_numeric_and_layout_validation_is_shared_by_construction_and_json() {
     let invalid = [
+        FittedStage::PowerTransform {
+            outputs: vec![FeatureId::new("now"), FeatureId::new("lag")],
+            method: "unknown".into(),
+            lambdas: vec![1.0, 1.0],
+            mean: vec![0.0, 0.0],
+            scale: vec![1.0, 1.0],
+        },
+        FittedStage::PowerTransform {
+            outputs: vec![FeatureId::new("now"), FeatureId::new("lag")],
+            method: "yeo-johnson".into(),
+            lambdas: vec![f64::NAN, 1.0],
+            mean: vec![0.0, 0.0],
+            scale: vec![1.0, 1.0],
+        },
+        FittedStage::PowerTransform {
+            outputs: vec![FeatureId::new("now"), FeatureId::new("lag")],
+            method: "box-cox".into(),
+            lambdas: vec![1.0],
+            mean: vec![0.0, 0.0],
+            scale: vec![1.0, 1.0],
+        },
         FittedStage::StandardScale {
             outputs: vec![FeatureId::new("wrong")],
             mean: vec![0.0],

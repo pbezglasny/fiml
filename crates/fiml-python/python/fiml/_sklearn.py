@@ -12,6 +12,7 @@ def clone_transformer(estimator):
         from sklearn.preprocessing import (
             MaxAbsScaler,
             MinMaxScaler,
+            PowerTransformer,
             RobustScaler,
             StandardScaler,
         )
@@ -25,12 +26,13 @@ def clone_transformer(estimator):
         RobustScaler,
         MinMaxScaler,
         MaxAbsScaler,
+        PowerTransformer,
         SimpleImputer,
         PCA,
     ):
         raise TypeError(
             "supported transformers are exactly StandardScaler, RobustScaler, "
-            "MinMaxScaler, MaxAbsScaler, SimpleImputer, and PCA"
+            "MinMaxScaler, MaxAbsScaler, PowerTransformer, SimpleImputer, and PCA"
         )
     if type(estimator.copy) is not bool or not estimator.copy:
         raise ValueError("copy=False is not supported; fitting must preserve its input")
@@ -44,6 +46,11 @@ def clone_transformer(estimator):
             raise ValueError(
                 "RobustScaler unit-variance scaling requires 0 < q_min < q_max < 100"
             )
+    if type(estimator) is PowerTransformer:
+        if estimator.method not in ("yeo-johnson", "box-cox"):
+            raise ValueError("PowerTransformer method must be yeo-johnson or box-cox")
+        if type(estimator.standardize) is not bool:
+            raise ValueError("PowerTransformer standardize must be a boolean")
     if type(estimator) is SimpleImputer:
         if not isinstance(estimator.missing_values, (float, np.floating)) or not np.isnan(
             estimator.missing_values
@@ -79,8 +86,9 @@ def clone_transformer(estimator):
 
 def accepts_nan(estimator):
     from sklearn.impute import SimpleImputer
+    from sklearn.preprocessing import PowerTransformer
 
-    return type(estimator) is SimpleImputer
+    return type(estimator) in (SimpleImputer, PowerTransformer)
 
 
 def fit_stage(estimator, name, matrix, spec):
@@ -88,6 +96,7 @@ def fit_stage(estimator, name, matrix, spec):
     from sklearn.preprocessing import (
         MaxAbsScaler,
         MinMaxScaler,
+        PowerTransformer,
         RobustScaler,
         StandardScaler,
     )
@@ -130,6 +139,30 @@ def fit_stage(estimator, name, matrix, spec):
             )
         else:
             spec.scale_stage(zeros.tolist(), fitted.scale_.tolist())
+    elif type(fitted) is PowerTransformer:
+        if fitted.standardize:
+            if fitted.method == "box-cox":
+                from scipy.special import boxcox
+
+                transform = boxcox
+            else:
+                from scipy.stats import yeojohnson
+
+                transform = yeojohnson
+            transformed = np.empty_like(matrix)
+            for index, lambda_ in enumerate(fitted.lambdas_):
+                transformed[:, index] = transform(matrix[:, index], lambda_)
+            scaler = StandardScaler().fit(transformed)
+            mean, scale = scaler.mean_, scaler.scale_
+        else:
+            mean = np.zeros(matrix.shape[1])
+            scale = np.ones(matrix.shape[1])
+        spec.power_transform_stage(
+            fitted.method,
+            fitted.lambdas_.tolist(),
+            mean.tolist(),
+            scale.tolist(),
+        )
     else:
         scale = (
             np.maximum(np.sqrt(fitted.explained_variance_), np.finfo(np.float64).eps)

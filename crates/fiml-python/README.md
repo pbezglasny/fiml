@@ -246,12 +246,12 @@ stream. Reset retains fitted parameters and registered symbol handles.
 
 Install `fiml[sklearn]` (currently scikit-learn `>=1.9,<1.10`) for training.
 Append `SimpleImputer`, `StandardScaler`, `RobustScaler`, `MinMaxScaler`,
-`MaxAbsScaler`, `PCA`, or `fiml.ScalarStage` instances before fitting or replaying:
+`MaxAbsScaler`, `PowerTransformer`, `PCA`, or `fiml.ScalarStage` instances before fitting or replaying:
 
 ```python
 from sklearn.decomposition import PCA
 from sklearn.impute import SimpleImputer
-from sklearn.preprocessing import RobustScaler
+from sklearn.preprocessing import PowerTransformer, RobustScaler
 
 base_spec = fiml.PipelineSpec(raw_spec)
 for feature_id in raw_spec.feature_ids():
@@ -260,6 +260,7 @@ for feature_id in raw_spec.feature_ids():
 pipeline = (fiml.ModelInputPipeline(base_spec)
             .add_transformation(SimpleImputer(add_indicator=True), name="impute")
             .add_transformation(RobustScaler(unit_variance=True), name="scale")
+            .add_transformation(PowerTransformer(), name="power")
             .add_transformation(PCA(n_components=2, whiten=True), name="pca"))
 pipeline.fit(kind, symbol, timestamp, price=prices, volume=volumes, fit_mask=ready)
 X_train = pipeline.transform(kind, symbol, timestamp, price=prices, volume=volumes)
@@ -293,9 +294,9 @@ array. `fit` takes the same event columns as `transform` and returns `self`.
 `fit_mask` is an optional boolean vector selecting training snapshots, for example
 after indicator and downstream lag warm-up; every event is still replayed to preserve history.
 Even excluded middle rows enter lag history. Selected inputs to each sklearn estimator
-and selected final outputs must be finite, except that an explicitly configured
-`SimpleImputer` accepts NaNs and still rejects infinities. Pipelines without an
-imputer retain the finite-input rejection. An earlier scalar selection can drop
+and selected final outputs must be finite, except that `SimpleImputer` and
+`PowerTransformer` accept NaNs and still reject infinities. A later imputer is
+required if selected final outputs retain NaNs. An earlier scalar selection can drop
 unneeded warm-up columns. Fitting replays each completed prefix through Rust,
 so its cost grows with the number of stages. Fit only the chronological training
 partition. Reserved cells are excluded from fitting and stay NaN in output.
@@ -335,7 +336,12 @@ NaNs first seen during inference are still replaced but do not add new indicator
 Filling indicator warm-up is an explicit modeling choice, not evidence that a
 feature is ready. Use `fit_mask` to exclude those rows when that distinction matters.
 
-JSON writers emit pipeline version `2.3` for `SimpleImputer`, `2.2` for
+`PowerTransformer` supports exact sklearn estimators with `copy=True`, both
+`yeo-johnson` and `box-cox`, and `standardize=True/False`. FIML preserves NaNs.
+Box-Cox rejects nonpositive fitting values; during frozen inference, a nonpositive
+value produces NaN only in that output column instead of rejecting the event.
+
+JSON writers emit pipeline version `2.4` for `PowerTransformer`, `2.3` for `SimpleImputer`, `2.2` for
 `MinMaxScaler` and clipped `MaxAbsScaler` stages, `2.1` when scalar stages are
 present, and `2.0` otherwise.
 Readers also accept strict scalar-only `1.0`. Scalar stages serialize as

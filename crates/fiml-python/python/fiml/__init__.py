@@ -319,8 +319,8 @@ class ModelInputPipeline:
         """Fit on selected event snapshots; replay all events to preserve history.
 
         fit_mask is a boolean vector selecting training rows (e.g. excluding
-        warm-up). Only SimpleImputer inputs may contain NaNs; infinities are
-        always rejected. Failed refits preserve live state.
+        warm-up). SimpleImputer and PowerTransformer inputs may contain NaNs;
+        infinities are always rejected. Failed refits preserve live state.
         """
         if self._inference_only:
             raise ValueError("this pipeline is inference-only; create a Python training recipe")

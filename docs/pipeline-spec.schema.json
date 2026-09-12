@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "fiml PipelineSpec 2.3 (with 1.0 through 2.2 read compatibility)",
+  "title": "fiml PipelineSpec 2.4 (with 1.0 through 2.3 read compatibility)",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -9,13 +9,13 @@
     "model_input"
   ],
   "properties": {
-    "version": { "enum": ["1.0", "2.0", "2.1", "2.2", "2.3"] },
+    "version": { "enum": ["1.0", "2.0", "2.1", "2.2", "2.3", "2.4"] },
     "checksum": { "type": "string" },
     "feature_extractor": { "$ref": "feature-extractor-spec.schema.json" },
     "model_input": { "$ref": "#/$defs/model_input" }
   },
   "allOf": [{
-    "if": { "properties": { "version": { "enum": ["2.0", "2.1", "2.2", "2.3"] } } },
+    "if": { "properties": { "version": { "enum": ["2.0", "2.1", "2.2", "2.3", "2.4"] } } },
     "then": { "properties": { "model_input": { "required": ["stages"] } } },
     "else": { "properties": { "model_input": { "not": { "required": ["stages"] } } } }
   }, {
@@ -32,6 +32,11 @@
     "if": { "properties": { "version": { "enum": ["2.0", "2.1", "2.2"] } } },
     "then": { "properties": { "model_input": { "properties": {
       "stages": { "items": { "not": { "properties": { "type": { "const": "simple_impute" } }, "required": ["type"] } } }
+    } } } }
+  }, {
+    "if": { "properties": { "version": { "enum": ["2.0", "2.1", "2.2", "2.3"] } } },
+    "then": { "properties": { "model_input": { "properties": {
+      "stages": { "items": { "not": { "properties": { "type": { "const": "power_transform" } }, "required": ["type"] } } }
     } } } }
   }],
   "$defs": {
@@ -132,6 +137,18 @@
             "retained_input_indices": { "$ref": "#/$defs/index_vector" },
             "replacement_values": { "type": "array", "items": { "type": "number" } },
             "indicator_input_indices": { "$ref": "#/$defs/index_vector" }
+          }
+        },
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["type", "outputs", "method", "lambdas", "mean", "scale"],
+          "properties": {
+            "type": { "const": "power_transform" },
+            "outputs": { "$ref": "#/$defs/stage_outputs" },
+            "method": { "enum": ["yeo-johnson", "box-cox"] },
+            "lambdas": { "$ref": "#/$defs/numeric_vector" },
+            "mean": { "$ref": "#/$defs/numeric_vector" },
+            "scale": { "$ref": "#/$defs/positive_vector" }
           }
         },
         {
