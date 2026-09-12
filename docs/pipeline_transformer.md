@@ -2,13 +2,14 @@
 
 Status: implemented.
 
-Date: 2026-09-09. Updated: 2026-09-12 (PowerTransformer).
+Date: 2026-09-09. Updated: 2026-09-12 (VarianceThreshold).
 
 Related: [issue #93](https://github.com/pbezglasny/fiml/issues/93),
 [issue #118](https://github.com/pbezglasny/fiml/issues/118),
 [issue #119](https://github.com/pbezglasny/fiml/issues/119),
 [issue #120](https://github.com/pbezglasny/fiml/issues/120),
-[issue #121](https://github.com/pbezglasny/fiml/issues/121), and
+[issue #121](https://github.com/pbezglasny/fiml/issues/121),
+[issue #122](https://github.com/pbezglasny/fiml/issues/122), and
 [issue #123](https://github.com/pbezglasny/fiml/issues/123).
 
 Implementation: `fiml[sklearn]` supports scikit-learn `>=1.9,<1.10`; inference
@@ -22,8 +23,8 @@ Fit supported sklearn transformers in Python, export their learned numeric state
 into `PipelineSpec`, and execute that spec through the same Rust runtime in both
 Python batch processing and online serving. Support `SimpleImputer`,
 `StandardScaler`, `RobustScaler`, `MinMaxScaler`, `MaxAbsScaler`,
-`PowerTransformer`, and `PCA`, including PCA whitening. Add an ordered list of
-vector stages after the existing scalar transformations.
+`PowerTransformer`, `VarianceThreshold`, and `PCA`, including PCA whitening.
+Add an ordered list of vector stages after the existing scalar transformations.
 
 “Save parameters” must mean the fitted state needed for inference. Saving only
 constructor arguments such as `n_components=2` cannot reproduce a trained PCA.
@@ -215,7 +216,8 @@ indicators, order-book synchronization, or lag history.
 ## Fitted state and numerical operations
 
 Use a small explicit exporter dispatch for the exact `SimpleImputer`, `StandardScaler`,
-`RobustScaler`, `MinMaxScaler`, `MaxAbsScaler`, `PowerTransformer`, and `PCA`
+`RobustScaler`, `MinMaxScaler`, `MaxAbsScaler`, `PowerTransformer`,
+`VarianceThreshold`, and `PCA`
 classes. Reject subclasses with potentially overridden behavior, arbitrary
 callbacks, sparse outputs, and unsupported versions/options with a useful error.
 There is no need for a plugin registry or a Rust dependency on sklearn.
@@ -280,6 +282,17 @@ forms for Yeo-Johnson and Box-Cox in O(d) time and storage. NaNs are preserved.
 Box-Cox rejects nonpositive fitting values; frozen inference writes NaN only for
 an affected nonpositive column, rather than rejecting the event as sklearn does.
 
+### VarianceThreshold
+
+Require a finite, nonnegative `threshold` and finite selected training inputs.
+After fitting in Python, export `get_support(indices=True)` as a nonempty,
+strictly increasing index vector. A generic selection stage stores only those
+indices and the matching retained input IDs; it does not store variances or
+compute statistics in Rust. Inference copies O(k) retained values into
+preallocated output, preserving retained NaNs and ignoring discarded columns.
+Positive thresholds depend on input scale. This is neither correlation-based nor
+supervised feature selection.
+
 ### PCA
 
 Export `mean[d]`, `components[k][d]`, and `output_scale[k]`. Matrix rows are output
@@ -331,6 +344,7 @@ MinMaxScaler and clipped MaxAbsScaler stages use `2.2`; older versions reject
 the reused stage tag.
 SimpleImputer stages use `2.3`; older versions reject the stage tag.
 PowerTransformer stages use `2.4`; older versions reject the stage tag.
+VarianceThreshold selection stages use `2.5`; older versions reject the stage tag.
 Do not reinterpret `1.0`, whose reader currently requires final length to equal
 the scalar transformation count.
 
@@ -368,8 +382,8 @@ the preceding layout. Explicit fitted stage output IDs
 freeze the layout across export/import. The example has two base outputs and
 one final output; base scratch width must not be taken from final `capacity`.
 
-Require `stages` in `2.0` through `2.4`, permitting an empty list. Derive base width from scalar
-definitions, each stage width from its validated arrays and outputs, and final
+Require `stages` in `2.0` through `2.5`, permitting an empty list. Derive base
+width from scalar definitions, each stage width from its validated arrays and outputs, and final
 active length from the last stage (or base width if empty). Final `capacity`
 must cover that final length; it may be smaller than an intermediate width.
 For Python authoring, default final capacity to the fitted final width; any

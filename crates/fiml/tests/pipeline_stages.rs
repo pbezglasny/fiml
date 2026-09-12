@@ -99,6 +99,54 @@ fn min_max_stage_preserves_nans_and_clips_only_when_configured() {
 }
 
 #[test]
+fn selection_copies_only_retained_columns_and_round_trips() {
+    let (raw, definitions) = base();
+    let spec = PipelineSpec::with_stages(
+        raw,
+        definitions,
+        [FittedStage::Select {
+            outputs: vec![FeatureId::new("now")],
+            input_indices: vec![0],
+        }],
+        2,
+        None,
+    )
+    .unwrap();
+    let mut pipeline = spec
+        .build(
+            ArrayFeatureVector::<1>::new(),
+            ArrayFeatureVector::<2>::new_of_length(1),
+        )
+        .unwrap();
+
+    pipeline.handle_event(Event::time(0)).unwrap();
+    assert_eq!(pipeline.values()[0], 0.0);
+    assert!(pipeline.values()[1].is_nan());
+    assert_eq!(pipeline.output_ids(), &[FeatureId::new("now")]);
+
+    #[cfg(feature = "serde")]
+    {
+        let mut document = serde_json::to_value(&spec).unwrap();
+        assert_eq!(document["version"], "2.5");
+        assert_eq!(
+            document["model_input"]["stages"][0]["input_indices"],
+            serde_json::json!([0])
+        );
+        assert_eq!(
+            serde_json::from_value::<PipelineSpec>(document.clone()).unwrap(),
+            spec
+        );
+        document["version"] = "2.4".into();
+        assert!(
+            serde_json::from_value::<PipelineSpec>(document)
+                .unwrap_err()
+                .to_string()
+                .contains("selection stages require version 2.5")
+        );
+    }
+}
+
+#[test]
 fn power_transform_stage_handles_limits_domains_and_overflow() {
     let (raw, mut definitions) = base();
     definitions[0] = TransformerDefinition::standard_scale(

@@ -155,6 +155,10 @@ fn fitted_stages_do_not_allocate_during_warmup_or_steady_state() {
                 min: vec![-1.0, -1.0],
                 clip: Some((-1.0, 1.0)),
             },
+            FittedStage::Select {
+                outputs: vec![FeatureId::new("day"), FeatureId::new("lag")],
+                input_indices: vec![0, 1],
+            },
             FittedStage::Pca {
                 outputs: vec![FeatureId::new("pc")],
                 mean: vec![1.0, 1.0],

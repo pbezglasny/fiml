@@ -9,6 +9,7 @@ import numpy as np
 import pandas as pd
 import pytest
 from sklearn.decomposition import PCA
+from sklearn.feature_selection import VarianceThreshold
 from sklearn.impute import SimpleImputer
 from sklearn.preprocessing import (
     MaxAbsScaler,
@@ -50,6 +51,121 @@ def base_matrix(spec, data):
     base.symbol("unused")
     base.symbol("BTCUSDT")
     return base.transform(**data)[:, :spec.active_feature_count]
+
+
+def variance_spec(*, capacity=None, full_window=False):
+    raw = (
+        fiml.FeatureExtractorSpec()
+        .sma(
+            "BTCUSDT",
+            [1, 4],
+            source="trade_price",
+            warmup=(
+                fiml.WarmupPolicy.FULL_WINDOW
+                if full_window
+                else fiml.WarmupPolicy.FIRST_VALUE
+            ),
+        )
+        .sma("BTCUSDT", [1], source="trade_volume")
+    )
+    spec = fiml.PipelineSpec(raw, capacity=capacity)
+    for feature_id in raw.feature_ids():
+        spec.identity(feature_id)
+    return spec
+
+
+def test_variance_threshold_removes_constants_preserves_layout_nans_and_json():
+    spec = variance_spec(capacity=4, full_window=True)
+    pipeline = fiml.ModelInputPipeline(spec).add_transformation(
+        VarianceThreshold(), name="variance"
+    )
+    data = events(pipeline)
+    matrix = base_matrix(spec, data)
+    fit_mask = np.arange(len(matrix)) >= 3
+    fitted = VarianceThreshold().fit(matrix[fit_mask])
+    support = fitted.get_support(indices=True)
+
+    actual = pipeline.fit_transform(**data, fit_mask=fit_mask)
+    expected = fitted.transform(matrix)
+    np.testing.assert_array_equal(actual[:, : len(support)], expected)
+    assert np.isnan(actual[:, len(support) :]).all()
+    assert pipeline.active_feature_count() == len(support) == 2
+    assert pipeline.n_features() == 4
+    assert pipeline.feature_names()[: len(support)] == np.asarray(spec.feature_ids())[
+        support
+    ].tolist()
+    assert np.isfinite(actual[0, 0]) and np.isnan(actual[0, 1])
+
+    document = json.loads(pipeline.to_json())
+    stage = document["model_input"]["stages"][0]
+    assert document["version"] == "2.5"
+    assert stage == {
+        "type": "select",
+        "outputs": np.asarray(spec.feature_ids())[support].tolist(),
+        "input_indices": support.tolist(),
+    }
+    restored = fiml.ModelInputPipeline.from_json(json.dumps(document))
+    events(restored)
+    np.testing.assert_array_equal(restored.transform(**data), actual)
+
+
+def test_variance_threshold_positive_boundary_matches_sklearn():
+    spec = base_spec()
+    probe = fiml.ModelInputPipeline(spec)
+    data = events(probe)
+    matrix = base_matrix(spec, data)
+    threshold = np.min(VarianceThreshold().fit(matrix).variances_)
+    fitted = VarianceThreshold(threshold=threshold).fit(matrix)
+    assert 0 < fitted.get_support(indices=True).size < matrix.shape[1]
+
+    pipeline = fiml.ModelInputPipeline(spec).add_transformation(
+        VarianceThreshold(threshold=threshold), name="variance"
+    )
+    actual_data = events(pipeline)
+    np.testing.assert_array_equal(
+        pipeline.fit_transform(**actual_data), fitted.transform(matrix)
+    )
+
+
+@pytest.mark.parametrize("selector_first", [True, False])
+def test_variance_threshold_chains_with_scaler_and_pca(selector_first):
+    spec = variance_spec()
+    selector = VarianceThreshold()
+    scaler = StandardScaler()
+    pca = PCA(n_components=1, svd_solver="full")
+    pipeline = fiml.ModelInputPipeline(spec)
+    stages = (selector, scaler) if selector_first else (scaler, selector)
+    for index, stage in enumerate((*stages, pca)):
+        pipeline.add_transformation(stage, name=f"stage_{index}")
+    data = events(pipeline)
+    matrix = base_matrix(spec, data)
+    expected = matrix
+    for stage in (*stages, pca):
+        expected = stage.fit(expected).transform(expected)
+
+    np.testing.assert_allclose(
+        pipeline.fit_transform(**data), expected, rtol=1e-10, atol=1e-12
+    )
+
+
+def test_variance_threshold_fit_failures_are_atomic():
+    pipeline = fiml.ModelInputPipeline(base_spec()).add_transformation(
+        VarianceThreshold(), name="variance"
+    )
+    data = events(pipeline)
+    pipeline.fit_transform(**data)
+    before_json, before_values = pipeline.to_json(), pipeline.values()
+
+    with pytest.raises(ValueError, match="No feature.*variance threshold"):
+        pipeline.fit(**events(pipeline, constant=True))
+    assert pipeline.to_json() == before_json
+    np.testing.assert_array_equal(pipeline.values(), before_values)
+
+    warmup = fiml.ModelInputPipeline(base_spec(full_window=True)).add_transformation(
+        VarianceThreshold(), name="variance"
+    )
+    with pytest.raises(ValueError, match="must be finite for fitting"):
+        warmup.fit(**events(warmup))
 
 
 @pytest.mark.parametrize(
@@ -556,6 +672,7 @@ def test_unfitted_guards_recipe_locking_and_cloning():
         type("CustomMaxAbsScaler", (MaxAbsScaler,), {})(),
         type("CustomPowerTransformer", (PowerTransformer,), {})(),
         type("CustomSimpleImputer", (SimpleImputer,), {})(),
+        type("CustomVarianceThreshold", (VarianceThreshold,), {})(),
     ],
 )
 def test_unsupported_estimators_do_not_change_pipeline(estimator):
@@ -594,6 +711,15 @@ def test_power_transformer_rejects_unsupported_configuration(transformer):
     before = pipeline.to_json()
     with pytest.raises(ValueError):
         pipeline.add_transformation(transformer, name="bad")
+    assert pipeline.to_json() == before
+
+
+@pytest.mark.parametrize("threshold", [-1.0, np.inf, np.nan, True, "0"])
+def test_variance_threshold_rejects_invalid_threshold(threshold):
+    pipeline = fiml.ModelInputPipeline(base_spec())
+    before = pipeline.to_json()
+    with pytest.raises(ValueError, match="finite nonnegative"):
+        pipeline.add_transformation(VarianceThreshold(threshold=threshold), name="bad")
     assert pipeline.to_json() == before
 
 
@@ -716,6 +842,7 @@ def test_power_transformer_constants_and_box_cox_runtime_domain():
 def test_artifact_inference_does_not_import_sklearn():
     pipeline = (fiml.ModelInputPipeline(base_spec())
                 .add_transformation(SimpleImputer(), name="impute")
+                .add_transformation(VarianceThreshold(), name="variance")
                 .add_transformation(MaxAbsScaler(clip=True), name="maxabs")
                 .add_transformation(PowerTransformer(), name="power")
                 .add_transformation(PCA(n_components=2), name="pca")

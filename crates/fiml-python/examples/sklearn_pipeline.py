@@ -1,4 +1,4 @@
-"""Fit imputation/scaling/PCA and print the deployable PipelineSpec JSON.
+"""Fit imputation/selection/scaling/PCA and print deployable PipelineSpec JSON.
 
 Run with fiml[sklearn] installed:
     python crates/fiml-python/examples/sklearn_pipeline.py
@@ -7,6 +7,7 @@ Run with fiml[sklearn] installed:
 import fiml
 import numpy as np
 from sklearn.decomposition import PCA
+from sklearn.feature_selection import VarianceThreshold
 from sklearn.impute import SimpleImputer
 from sklearn.preprocessing import MaxAbsScaler
 
@@ -24,6 +25,7 @@ def train():
     pipeline = (fiml.ModelInputPipeline(spec)
                 .add_transformation(SimpleImputer(strategy="median", add_indicator=True), name="impute")
                 .add_transformation(MaxAbsScaler(clip=True), name="scale")
+                .add_transformation(VarianceThreshold(), name="variance")
                 .add_transformation(PCA(n_components=2, whiten=True, svd_solver="full"), name="pca"))
     data = dict(
         kind=np.full(12, fiml.KIND_TRADE, dtype=np.uint8),
@@ -40,8 +42,9 @@ def train():
     # Independently check sklearn inference on the same indicator/lag snapshots.
     imputed = SimpleImputer(strategy="median", add_indicator=True).fit_transform(matrix)
     scaled = MaxAbsScaler(clip=True).fit_transform(imputed)
-    pca = PCA(n_components=2, whiten=True, svd_solver="full").fit(scaled)
-    expected = pca.transform(scaled)
+    selected = VarianceThreshold().fit_transform(scaled)
+    pca = PCA(n_components=2, whiten=True, svd_solver="full").fit(selected)
+    expected = pca.transform(selected)
     np.testing.assert_allclose(actual, expected, rtol=1e-10, atol=1e-12)
     return pipeline, data, expected
 

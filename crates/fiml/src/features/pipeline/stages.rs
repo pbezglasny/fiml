@@ -14,6 +14,11 @@ pub enum FittedStage {
     Scalar {
         transformations: Vec<TransformerDefinition>,
     },
+    /// Ordered column selection preserving retained input IDs.
+    Select {
+        outputs: Vec<FeatureId>,
+        input_indices: Vec<usize>,
+    },
     /// Per-column centering and scaling, preserving input IDs.
     StandardScale {
         outputs: Vec<FeatureId>,
@@ -61,7 +66,8 @@ impl FittedStage {
                 .map(|definition| definition.output().clone())
                 .collect::<Vec<_>>()
                 .into(),
-            Self::StandardScale { outputs, .. }
+            Self::Select { outputs, .. }
+            | Self::StandardScale { outputs, .. }
             | Self::MinMaxScale { outputs, .. }
             | Self::PowerTransform { outputs, .. }
             | Self::SimpleImpute { outputs, .. }
@@ -84,6 +90,7 @@ impl FittedStage {
         }
         let rows = match self {
             Self::Scalar { .. }
+            | Self::Select { .. }
             | Self::StandardScale { .. }
             | Self::MinMaxScale { .. }
             | Self::PowerTransform { .. }
@@ -100,6 +107,23 @@ impl FittedStage {
             Self::Scalar { transformations } => {
                 transformers::validate(transformations, inputs)
                     .map_err(|error| error.to_string())?;
+            }
+            Self::Select { input_indices, .. } => {
+                if outputs.len() != input_indices.len()
+                    || !strictly_increasing_in_range(input_indices, inputs.len())
+                {
+                    return Err(format!(
+                        "selection indices must be nonempty, unique, increasing, and below {}",
+                        inputs.len()
+                    ));
+                }
+                if outputs
+                    .iter()
+                    .zip(input_indices)
+                    .any(|(output, &input_index)| output != &inputs[input_index])
+                {
+                    return Err("selected output IDs must match their input IDs".into());
+                }
             }
             Self::StandardScale { mean, scale, .. } => {
                 if outputs != inputs || mean.len() != inputs.len() || scale.len() != inputs.len() {
@@ -265,6 +289,9 @@ enum CompiledStage {
         operations: Box<[Transformer]>,
         output_width: usize,
     },
+    Select {
+        input_indices: Box<[usize]>,
+    },
     StandardScale {
         mean: Box<[f64]>,
         inverse_scale: Box<[f64]>,
@@ -299,6 +326,9 @@ impl CompiledStage {
             FittedStage::Scalar { transformations } => Self::Scalar {
                 operations: transformers::compile(transformations, inputs),
                 output_width: transformations.len(),
+            },
+            FittedStage::Select { input_indices, .. } => Self::Select {
+                input_indices: input_indices.clone().into_boxed_slice(),
             },
             FittedStage::StandardScale { mean, scale, .. } => Self::StandardScale {
                 mean: mean.clone().into_boxed_slice(),
@@ -359,6 +389,11 @@ impl CompiledStage {
                 }
                 for operation in operations {
                     operation.apply(input, output);
+                }
+            }
+            Self::Select { input_indices } => {
+                for (output_index, &input_index) in input_indices.iter().enumerate() {
+                    output.set_value_at(output_index, input[input_index]);
                 }
             }
             Self::StandardScale {

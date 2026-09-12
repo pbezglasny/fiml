@@ -244,3 +244,39 @@ def test_power_transform_stage_requires_version_2_4_and_valid_state():
         assert list(VALIDATOR.iter_errors(invalid)) or field == "lambdas"
         with pytest.raises(ValueError, match="stage 0"):
             fiml.PipelineSpec.from_json(json.dumps(invalid))
+
+
+def test_selection_stage_requires_version_2_5_and_valid_mapping():
+    document = canonical_example()
+    inputs = [item["output"] for item in document["model_input"]["transformations"]]
+    document["version"] = "2.5"
+    document["model_input"]["length"] = 2
+    document["model_input"]["stages"] = [{
+        "type": "select",
+        "outputs": [inputs[0], inputs[2]],
+        "input_indices": [0, 2],
+    }]
+    assert not list(VALIDATOR.iter_errors(document))
+    assert json.loads(fiml.PipelineSpec.from_json(json.dumps(document)).to_json()) == document
+
+    old = json.loads(json.dumps(document))
+    old["version"] = "2.4"
+    assert list(VALIDATOR.iter_errors(old))
+    with pytest.raises(ValueError, match="require version 2.5"):
+        fiml.PipelineSpec.from_json(json.dumps(old))
+
+    for outputs, indices in [
+        ([inputs[0], inputs[2]], [2, 0]),
+        ([inputs[0]], [0, 2]),
+        ([inputs[1], inputs[2]], [0, 2]),
+        ([inputs[0], inputs[2]], [0, len(inputs)]),
+        ([], []),
+    ]:
+        invalid = json.loads(json.dumps(document))
+        invalid["model_input"]["length"] = len(outputs)
+        invalid["model_input"]["stages"][0]["outputs"] = outputs
+        invalid["model_input"]["stages"][0]["input_indices"] = indices
+        if not outputs:
+            assert list(VALIDATOR.iter_errors(invalid))
+        with pytest.raises(ValueError, match="stage 0"):
+            fiml.PipelineSpec.from_json(json.dumps(invalid))
