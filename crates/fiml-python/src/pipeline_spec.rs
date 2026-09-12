@@ -247,6 +247,30 @@ impl PipelineSpec {
         Ok(slf)
     }
 
+    /// Append fitted sklearn QuantileTransformer state, preserving the current active IDs.
+    #[pyo3(signature = (output_distribution, quantiles, references, all_nan_input_indices, bounds_threshold, normal_clip=None))]
+    fn quantile_transform_stage<'py>(
+        mut slf: PyRefMut<'py, Self>,
+        output_distribution: String,
+        quantiles: Vec<Vec<f64>>,
+        references: Vec<f64>,
+        all_nan_input_indices: Vec<usize>,
+        bounds_threshold: f64,
+        normal_clip: Option<(f64, f64)>,
+    ) -> PyResult<PyRefMut<'py, Self>> {
+        let outputs = slf.core.output_ids();
+        slf.add_stage(FittedStage::QuantileTransform {
+            outputs,
+            output_distribution,
+            quantiles,
+            references,
+            all_nan_input_indices,
+            bounds_threshold,
+            normal_clip,
+        })?;
+        Ok(slf)
+    }
+
     /// Append an ordered fitted column selection, preserving retained input IDs.
     fn select_stage<'py>(
         mut slf: PyRefMut<'py, Self>,

@@ -200,6 +200,54 @@ fn fitted_stages_do_not_allocate_during_warmup_or_steady_state() {
 }
 
 #[test]
+fn quantile_transform_stage_does_not_allocate_per_event() {
+    use fiml::FittedStage;
+    let raw = FeatureExtractorSpec::new([FeatureDefinition::new(
+        FeatureKey::DayOfWeek {
+            symbol: Symbol::GLOBAL,
+            source: FeatureSource::AnyEvent,
+        },
+        FeatureId::new("day"),
+    )])
+    .unwrap();
+    let spec = PipelineSpec::with_stages(
+        raw,
+        [TransformerDefinition::identity(
+            FeatureId::new("day"),
+            FeatureId::new("day"),
+        )],
+        [FittedStage::QuantileTransform {
+            outputs: vec![FeatureId::new("day")],
+            output_distribution: "normal".into(),
+            quantiles: vec![vec![0.0], vec![3.0], vec![6.0]],
+            references: vec![0.0, 0.5, 1.0],
+            all_nan_input_indices: vec![],
+            bounds_threshold: 1e-7,
+            normal_clip: Some((-5.199_337_582_605_575, 5.199_337_582_703_42)),
+        }],
+        1,
+        None,
+    )
+    .unwrap();
+    let mut pipeline = spec
+        .build(
+            ArrayFeatureVector::<1>::new(),
+            ArrayFeatureVector::<1>::new(),
+        )
+        .unwrap();
+
+    assert_eq!(
+        count_allocations(|| {
+            for timestamp in 0..128 {
+                black_box(pipeline.handle_event(Event::time(timestamp)).unwrap());
+            }
+        }),
+        0
+    );
+    assert!(pipeline.values()[0].is_finite());
+}
+
+#[test]
 fn configured_book_derivation_and_transformation_do_not_allocate() {
     use fiml::order_book::{
         OrderBookConfig, OrderBookDelta, OrderBookLevel, OrderBookLevelUpdate, OrderBookSnapshot,

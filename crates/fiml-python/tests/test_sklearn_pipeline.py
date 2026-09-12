@@ -15,6 +15,7 @@ from sklearn.preprocessing import (
     MaxAbsScaler,
     MinMaxScaler,
     PowerTransformer,
+    QuantileTransformer,
     RobustScaler,
     StandardScaler,
 )
@@ -665,12 +666,14 @@ def test_unfitted_guards_recipe_locking_and_cloning():
         MinMaxScaler(copy=False),
         MaxAbsScaler(copy=False),
         PowerTransformer(copy=False),
+        QuantileTransformer(copy=False),
         SimpleImputer(copy=False),
         type("CustomPCA", (PCA,), {})(),
         type("CustomRobustScaler", (RobustScaler,), {})(),
         type("CustomMinMaxScaler", (MinMaxScaler,), {})(),
         type("CustomMaxAbsScaler", (MaxAbsScaler,), {})(),
         type("CustomPowerTransformer", (PowerTransformer,), {})(),
+        type("CustomQuantileTransformer", (QuantileTransformer,), {})(),
         type("CustomSimpleImputer", (SimpleImputer,), {})(),
         type("CustomVarianceThreshold", (VarianceThreshold,), {})(),
     ],
@@ -711,6 +714,16 @@ def test_power_transformer_rejects_unsupported_configuration(transformer):
     before = pipeline.to_json()
     with pytest.raises(ValueError):
         pipeline.add_transformation(transformer, name="bad")
+    assert pipeline.to_json() == before
+
+
+def test_quantile_transformer_rejects_unsupported_configuration():
+    pipeline = fiml.ModelInputPipeline(base_spec())
+    before = pipeline.to_json()
+    with pytest.raises(ValueError, match="output_distribution"):
+        pipeline.add_transformation(
+            QuantileTransformer(output_distribution="bad"), name="bad"
+        )
     assert pipeline.to_json() == before
 
 
@@ -839,12 +852,149 @@ def test_power_transformer_constants_and_box_cox_runtime_domain():
     np.testing.assert_array_equal(box_cox.values(), before_values)
 
 
+@pytest.mark.parametrize("output_distribution", ["uniform", "normal"])
+def test_quantile_transformer_matches_sklearn_boundaries_nans_and_json(
+    output_distribution,
+):
+    spec = base_spec(full_window=True)
+    transformer = QuantileTransformer(
+        n_quantiles=7, output_distribution=output_distribution, random_state=42
+    )
+    pipeline = fiml.ModelInputPipeline(spec).add_transformation(
+        transformer, name="quantile"
+    )
+    data = events(pipeline)
+    matrix = base_matrix(spec, data)
+    fit_mask = np.arange(len(matrix)) >= 5
+    fit_mask[-3:] = False
+    fitted = QuantileTransformer(
+        n_quantiles=7, output_distribution=output_distribution, random_state=42
+    ).fit(matrix[fit_mask])
+
+    actual = pipeline.fit_transform(**data, fit_mask=fit_mask)
+    expected = fitted.transform(matrix)
+    np.testing.assert_allclose(actual, expected, rtol=2e-14, atol=2e-14)
+    np.testing.assert_array_equal(np.isnan(actual), np.isnan(matrix))
+    assert not hasattr(transformer, "quantiles_")
+
+    document = json.loads(pipeline.to_json())
+    stage = document["model_input"]["stages"][0]
+    assert document["version"] == "2.6"
+    assert stage["type"] == "quantile_transform"
+    assert stage["output_distribution"] == output_distribution
+    assert stage["bounds_threshold"] == 1e-7
+    np.testing.assert_array_equal(stage["quantiles"], fitted.quantiles_)
+    np.testing.assert_array_equal(stage["references"], fitted.references_)
+    assert stage["all_nan_input_indices"] == []
+    assert ("normal_clip" in stage) == (output_distribution == "normal")
+
+    restored = fiml.ModelInputPipeline.from_json(json.dumps(document))
+    events(restored)
+    np.testing.assert_array_equal(restored.transform(**data), actual)
+
+
+def test_quantile_transformer_accepts_training_nans_before_imputation():
+    spec = base_spec(full_window=True)
+    quantile = QuantileTransformer(n_quantiles=7)
+    imputer = SimpleImputer(strategy="constant", fill_value=-1.0)
+    pipeline = (
+        fiml.ModelInputPipeline(spec)
+        .add_transformation(quantile, name="quantile")
+        .add_transformation(imputer, name="impute")
+    )
+    data = events(pipeline)
+    matrix = base_matrix(spec, data)
+    fit_mask = np.arange(len(matrix)) < len(matrix) - 3
+    transformed = quantile.fit(matrix[fit_mask]).transform(matrix)
+    expected = imputer.fit(transformed[fit_mask]).transform(transformed)
+
+    np.testing.assert_allclose(
+        pipeline.fit_transform(**data, fit_mask=fit_mask),
+        expected,
+        rtol=2e-14,
+        atol=2e-14,
+    )
+
+
+@pytest.mark.parametrize("n_quantiles", [1, 2])
+def test_quantile_transformer_all_nan_column_is_exported_for_later_imputation(
+    n_quantiles,
+):
+    spec = base_spec(full_window=True)
+    quantile = QuantileTransformer(n_quantiles=n_quantiles)
+    imputer = SimpleImputer(
+        strategy="constant", fill_value=-1.0, keep_empty_features=True
+    )
+    pipeline = (
+        fiml.ModelInputPipeline(spec)
+        .add_transformation(quantile, name="quantile")
+        .add_transformation(imputer, name="impute")
+    )
+    data = events(pipeline)
+    matrix = base_matrix(spec, data)
+    fit_mask = np.arange(len(matrix)) < 2
+    with pytest.warns(RuntimeWarning, match="All-NaN slice"):
+        transformed = quantile.fit(matrix[fit_mask]).transform(matrix)
+    expected = imputer.fit(transformed[fit_mask]).transform(transformed)
+
+    with pytest.warns(RuntimeWarning, match="All-NaN slice"):
+        actual = pipeline.fit_transform(**data, fit_mask=fit_mask)
+    np.testing.assert_allclose(actual, expected, rtol=2e-14, atol=2e-14)
+    stage = json.loads(pipeline.to_json())["model_input"]["stages"][0]
+    assert stage["all_nan_input_indices"] == [2]
+    assert np.isfinite(stage["quantiles"]).all()
+    restored = fiml.ModelInputPipeline.from_json(pipeline.to_json())
+    events(restored)
+    np.testing.assert_array_equal(restored.transform(**data), actual)
+
+
+@pytest.mark.parametrize("output_distribution", ["uniform", "normal"])
+def test_quantile_transformer_reduced_quantiles_repeated_values_and_constants(
+    output_distribution,
+):
+    spec = base_spec()
+    transformer = QuantileTransformer(
+        n_quantiles=100, output_distribution=output_distribution
+    )
+    pipeline = fiml.ModelInputPipeline(spec).add_transformation(
+        transformer, name="quantile"
+    )
+    data = events(pipeline)
+    data["price"][:] = np.repeat([10.0, 12.0, 12.0, 15.0], 6)
+    matrix = base_matrix(spec, data)
+    fit_mask = np.arange(len(matrix)) % 3 == 0
+    with pytest.warns(UserWarning, match="n_quantiles"):
+        fitted = QuantileTransformer(
+            n_quantiles=100, output_distribution=output_distribution
+        ).fit(matrix[fit_mask])
+    with pytest.warns(UserWarning, match="n_quantiles"):
+        actual = pipeline.fit_transform(**data, fit_mask=fit_mask)
+
+    np.testing.assert_allclose(
+        actual, fitted.transform(matrix), rtol=2e-14, atol=2e-14
+    )
+    assert len(json.loads(pipeline.to_json())["model_input"]["stages"][0]["references"]) == fit_mask.sum()
+
+    constant = fiml.ModelInputPipeline(spec).add_transformation(
+        QuantileTransformer(n_quantiles=1, output_distribution=output_distribution),
+        name="constant",
+    )
+    constant_data = events(constant, constant=True)
+    expected = QuantileTransformer(
+        n_quantiles=1, output_distribution=output_distribution
+    ).fit_transform(base_matrix(spec, constant_data))
+    np.testing.assert_allclose(
+        constant.fit_transform(**constant_data), expected, rtol=2e-14, atol=2e-14
+    )
+
+
 def test_artifact_inference_does_not_import_sklearn():
     pipeline = (fiml.ModelInputPipeline(base_spec())
                 .add_transformation(SimpleImputer(), name="impute")
                 .add_transformation(VarianceThreshold(), name="variance")
                 .add_transformation(MaxAbsScaler(clip=True), name="maxabs")
                 .add_transformation(PowerTransformer(), name="power")
+                .add_transformation(QuantileTransformer(n_quantiles=8), name="quantile")
                 .add_transformation(PCA(n_components=2), name="pca")
                 .add_transformation(fiml.ScalarStage().identity("pca__pc1").lagged("pca__pc0", lag_window=1), name="lags"))
     data = events(pipeline)

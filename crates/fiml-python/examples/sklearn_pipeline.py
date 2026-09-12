@@ -9,7 +9,7 @@ import numpy as np
 from sklearn.decomposition import PCA
 from sklearn.feature_selection import VarianceThreshold
 from sklearn.impute import SimpleImputer
-from sklearn.preprocessing import MaxAbsScaler
+from sklearn.preprocessing import MaxAbsScaler, QuantileTransformer
 
 
 def train():
@@ -26,6 +26,7 @@ def train():
                 .add_transformation(SimpleImputer(strategy="median", add_indicator=True), name="impute")
                 .add_transformation(MaxAbsScaler(clip=True), name="scale")
                 .add_transformation(VarianceThreshold(), name="variance")
+                .add_transformation(QuantileTransformer(n_quantiles=8), name="quantile")
                 .add_transformation(PCA(n_components=2, whiten=True, svd_solver="full"), name="pca"))
     data = dict(
         kind=np.full(12, fiml.KIND_TRADE, dtype=np.uint8),
@@ -43,8 +44,9 @@ def train():
     imputed = SimpleImputer(strategy="median", add_indicator=True).fit_transform(matrix)
     scaled = MaxAbsScaler(clip=True).fit_transform(imputed)
     selected = VarianceThreshold().fit_transform(scaled)
-    pca = PCA(n_components=2, whiten=True, svd_solver="full").fit(selected)
-    expected = pca.transform(selected)
+    transformed = QuantileTransformer(n_quantiles=8).fit_transform(selected)
+    pca = PCA(n_components=2, whiten=True, svd_solver="full").fit(transformed)
+    expected = pca.transform(transformed)
     np.testing.assert_allclose(actual, expected, rtol=1e-10, atol=1e-12)
     return pipeline, data, expected
 
