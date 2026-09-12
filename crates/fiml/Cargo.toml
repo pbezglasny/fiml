@@ -37,6 +37,10 @@ harness = false
 name = "ring_buffer"
 harness = false
 
+[[bench]]
+name = "quantile_transform"
+harness = false
+
 [[example]]
 name = "feature_extractor"
 
