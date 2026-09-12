@@ -433,9 +433,10 @@ mod tests {
         json!({
             "version": "2.0",
             "feature_extractor": {
-                "version": "1.0",
+                "version": "1.1",
                 "capacity": 1,
                 "length": 1,
+                "required_events": [{"symbol":"__global__", "event":"time"}],
                 "features": [{
                     "symbol": "__global__",
                     "indicators": [{
@@ -531,9 +532,10 @@ mod tests {
                 "version": "2.0",
                 "checksum": "model-checksum",
                 "feature_extractor": {
-                    "version": "1.0",
+                    "version": "1.1",
                     "capacity": 3,
                     "length": 2,
+                    "required_events": [{"symbol":"__global__", "event":"time"}],
                     "checksum": "raw-checksum",
                     "features": [{
                         "symbol": "__global__",

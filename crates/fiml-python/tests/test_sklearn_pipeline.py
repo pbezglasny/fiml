@@ -234,7 +234,7 @@ def test_fit_export_and_replay_match_sklearn(whiten, dtype):
     assert pipeline.active_feature_count() == pipeline.n_features() == 2
     document = json.loads(pipeline.to_json())
     assert document["version"] == "2.0"
-    assert document["feature_extractor"]["version"] == "1.0"
+    assert document["feature_extractor"]["version"] == "1.1"
     assert document["checksum"] == "training-test"
     assert document["model_input"]["length"] == document["model_input"]["capacity"] == 2
     assert set(document["model_input"]["stages"][1]) == {"type", "outputs", "mean", "components", "output_scale"}

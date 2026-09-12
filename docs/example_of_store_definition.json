@@ -2,9 +2,27 @@
   "version": "2.0",
   "checksum": "opaque model metadata",
   "feature_extractor": {
-    "version": "1.0",
+    "version": "1.1",
     "capacity": 8,
     "length": 5,
+    "required_events": [
+      {
+        "symbol": "__global__",
+        "event": "time"
+      },
+      {
+        "symbol": "btcusd",
+        "event": "order_book_delta"
+      },
+      {
+        "symbol": "btcusd",
+        "event": "order_book_snapshot"
+      },
+      {
+        "symbol": "btcusd",
+        "event": "trade"
+      }
+    ],
     "checksum": "opaque raw-feature metadata",
     "features": [
       {

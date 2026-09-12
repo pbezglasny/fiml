@@ -66,9 +66,10 @@ The canonical artifact has three ownership levels:
   "version": "2.0",
   "checksum": "optional model metadata",
   "feature_extractor": {
-    "version": "1.0",
+    "version": "1.1",
     "capacity": 2,
     "length": 2,
+    "required_events": [],
     "features": []
   },
   "model_input": {
@@ -86,7 +87,9 @@ emit `2.3` for SimpleImputer, `2.2` for MinMaxScaler or clipped MaxAbsScaler,
 `2.1` for scalar stages, and `2.0` otherwise; readers also accept strict `1.0`
 artifacts without stages.
 The envelope above illustrates ownership; populated feature/transform arrays
-must agree with the declared lengths. The strict source spelling for a
+must agree with the declared lengths. `required_events` is the canonical,
+deduplicated list of concrete symbol/event inputs consumed by the extractor.
+The strict source spelling for a
 feature that observes any event is `any_event`.
 
 ## Open issues

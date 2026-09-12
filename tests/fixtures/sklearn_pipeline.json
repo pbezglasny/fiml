@@ -2,9 +2,15 @@
   "pipeline": {
     "version": "2.3",
     "feature_extractor": {
-      "version": "1.0",
+      "version": "1.1",
       "capacity": 3,
       "length": 3,
+      "required_events": [
+        {
+          "symbol": "btcusdt",
+          "event": "trade"
+        }
+      ],
       "features": [
         {
           "symbol": "btcusdt",

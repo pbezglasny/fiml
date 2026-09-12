@@ -12,10 +12,24 @@ VALIDATOR = Draft202012Validator(SCHEMA)
 
 
 def document_with_source(source):
+    if source["type"] == "order_book":
+        required_events = [
+            {"symbol": "btcusdt", "event": "order_book_delta"},
+            {"symbol": "btcusdt", "event": "order_book_snapshot"},
+        ]
+    elif source["type"] == "any_event":
+        required_events = [{"symbol": "__global__", "event": "time"}]
+    else:
+        event = source.get("event", "trade")
+        required_events = [{
+            "symbol": "__global__" if event == "time" else "btcusdt",
+            "event": event,
+        }]
     return {
-        "version": "1.0",
+        "version": "1.1",
         "capacity": 1,
         "length": 1,
+        "required_events": required_events,
         "features": [
             {
                 "symbol": "BTCUSDT",
@@ -42,6 +56,14 @@ def assert_invalid_source(source):
 
 def test_feature_extractor_spec_schema_is_valid_draft_2020_12():
     Draft202012Validator.check_schema(SCHEMA)
+
+
+def test_schema_and_reader_reject_duplicate_required_events():
+    document = document_with_source({"type": "field", "event": "trade", "field": "price"})
+    document["required_events"] *= 2
+    assert list(VALIDATOR.iter_errors(document))
+    with pytest.raises(ValueError, match="duplicate normalized required event"):
+        fiml.FeatureExtractorSpec.from_json(json.dumps(document))
 
 
 @pytest.mark.parametrize(
@@ -187,6 +209,7 @@ def test_order_book_configuration_schema_and_canonical_round_trip():
     document = document_with_source({"type": "any_event"})
     document["features"] = []
     document["capacity"] = document["length"] = 0
+    document["required_events"] = []
     document["order_books"] = [
         {"symbol": "eth", "update_policy": "monotonic", "buffer_size": 0},
         {"symbol": "btc", "update_policy": "contiguous", "buffer_size": 8},
