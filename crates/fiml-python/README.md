@@ -99,6 +99,8 @@ import pandas as pd
 import fiml
 
 spec = (fiml.FeatureExtractorSpec()
+      .simple_returns("BTCUSDT", [1, 5], source="trade_price")
+      .log_returns("BTCUSDT", [1, 5], source="trade_price")
       .sma("BTCUSDT", [12, 24], source="trade_price")
       .ema("BTCUSDT", [12], source="trade_price")
       .obv_timed("BTCUSDT", aggregation="1ms", windows=["30s", "60s"])
@@ -118,8 +120,10 @@ to feed to lightgbm/xgboost/catboost/sklearn. Window indicators default to
 `fiml.WarmupPolicy.FULL_WINDOW`, so each cell remains **NaN until its complete
 sample or time window is ready**. Pass
 `warmup=fiml.WarmupPolicy.FIRST_VALUE` to a builder method when partial values
-are desired. Gradient-boosting libraries handle NaN natively; drop or mask
-those rows for models that don't.
+are desired. Returns remain NaN until their exact sample lag exists. Simple
+returns also require a nonzero lagged value; log returns require positive
+current and lagged values. Gradient-boosting libraries handle NaN natively;
+drop or mask those rows for models that don't.
 
 Column mappings remain configurable when a frame uses other names:
 
@@ -171,7 +175,8 @@ calculated or verified.
 Serialized specs also include a canonical `required_events` list of concrete
 `symbol`/`event` pairs that callers must feed to the extractor.
 
-Builder methods: `sma`, `ema`, `cvd`, `sma_timed`, `obv_timed`, `vpt`,
+Builder methods: `simple_returns`, `log_returns`, `sma`, `ema`, `cvd`,
+`volatility`, `sma_timed`, `obv_timed`, `volatility_timed`, `vpt`,
 `trade_count_timed`, `day_of_week`, and `time_since_first_event_of_day`
 (fixed-offset `tz`, default `"UTC"`). SMA, EMA, CVD, timed SMA, and timed OBV
 accept ordered window lists; each list becomes one runtime indicator with

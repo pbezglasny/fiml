@@ -4,7 +4,7 @@ use rust_decimal::Decimal;
 
 use crate::order_book::Side;
 
-use crate::{Symbol, WarmupPolicy};
+use crate::{ReturnKind, Symbol, WarmupPolicy};
 
 use super::feature_source::FeatureSource;
 
@@ -102,6 +102,13 @@ pub enum FeatureKey {
         source: FeatureSource,
         window: usize,
         warmup_policy: WarmupPolicy,
+    },
+    /// Simple or logarithmic return from the current value to a lagged sample.
+    Return {
+        symbol: Symbol,
+        source: FeatureSource,
+        kind: ReturnKind,
+        lag: usize,
     },
     /// Population volatility of simple returns over a sample window.
     Volatility {

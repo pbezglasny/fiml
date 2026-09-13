@@ -7,8 +7,8 @@ use std::{
 
 use fiml::{
     ArrayFeatureVector, Event, FeatureDefinition, FeatureExtractorSpec, FeatureId, FeatureKey,
-    FeatureSource, FeatureVector, Pipeline, PipelineSpec, Symbol, TransformerDefinition,
-    WarmupPolicy,
+    FeatureSource, FeatureVector, Pipeline, PipelineSpec, ReturnKind, Symbol,
+    TransformerDefinition, WarmupPolicy,
 };
 
 thread_local! {
@@ -116,7 +116,7 @@ fn allocation_counter_detects_heap_allocation() {
 }
 
 #[test]
-fn rolling_volatility_updates_do_not_allocate() {
+fn returns_and_rolling_volatility_updates_do_not_allocate() {
     let symbol = Symbol::new("volatility-allocations").unwrap();
     let mut extractor = FeatureExtractorSpec::new([
         FeatureDefinition::with_default_id(FeatureKey::Volatility {
@@ -132,9 +132,21 @@ fn rolling_volatility_updates_do_not_allocate() {
             window: Duration::from_millis(4),
             warmup_policy: WarmupPolicy::FirstValue,
         }),
+        FeatureDefinition::with_default_id(FeatureKey::Return {
+            symbol,
+            source: FeatureSource::Field(fiml::EventField::Price),
+            kind: ReturnKind::Simple,
+            lag: 4,
+        }),
+        FeatureDefinition::with_default_id(FeatureKey::Return {
+            symbol,
+            source: FeatureSource::Field(fiml::EventField::Price),
+            kind: ReturnKind::Log,
+            lag: 4,
+        }),
     ])
     .unwrap()
-    .build(ArrayFeatureVector::<2>::new())
+    .build(ArrayFeatureVector::<4>::new())
     .unwrap();
 
     assert_eq!(

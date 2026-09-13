@@ -20,7 +20,9 @@ pub use features::{
     FeatureId, FeatureKey, FeatureSource, FittedStage, MAX_OUTPUTS_PER_INDICATOR, Pipeline,
     PipelineSpec, TransformerDefinition, UpdateResult,
 };
-pub use indicators::{CumulativeVolumeDelta, ObvBucket, OnBalanceVolumeTimed, VolumePriceTrend};
+pub use indicators::{
+    CumulativeVolumeDelta, ObvBucket, OnBalanceVolumeTimed, ReturnKind, VolumePriceTrend,
+};
 pub use ring_buffer::{
     HeapRingBuffer, RingBuffer, StackRingBuffer, new_heap_ring_buffer, new_stack_ring_buffer,
 };
@@ -213,6 +215,8 @@ pub enum IndicatorKind {
     Sma,
     Ema,
     Cvd,
+    SimpleReturn,
+    LogReturn,
     Volatility,
     SmaTimed,
     ObvTimed,
@@ -527,6 +531,8 @@ impl Display for IndicatorKind {
             Self::Sma => "SMA",
             Self::Ema => "EMA",
             Self::Cvd => "CVD",
+            Self::SimpleReturn => "simple return",
+            Self::LogReturn => "log return",
             Self::Volatility => "rolling volatility",
             Self::SmaTimed => "timed SMA",
             Self::ObvTimed => "timed OBV",

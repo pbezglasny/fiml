@@ -12,7 +12,7 @@ use crate::features::{FeatureRoute, FeatureSource, MAX_OUTPUTS_PER_INDICATOR};
 use crate::{
     DefinitionDurationField, EventField, EventKind, FeatureDefinition, FeatureId, FeatureKey,
     FimlError, IndicatorKind, InvalidArgumentError, InvalidIndicatorDefinitionError, LimitTarget,
-    Result, Symbol, WarmupPolicy,
+    Result, ReturnKind, Symbol, WarmupPolicy,
 };
 
 /// Contiguous section of the output feature vector written by one derivation.
@@ -139,6 +139,11 @@ enum GroupKey {
         source: FeatureSource,
         warmup_policy: WarmupPolicy,
     },
+    Returns {
+        symbol: Symbol,
+        source: EventField,
+        kind: ReturnKind,
+    },
     Volatility {
         symbol: Symbol,
         source: EventField,
@@ -208,6 +213,7 @@ impl GroupKey {
             | Self::OrderBookImbalance { symbol, .. }
             | Self::Ema { symbol, .. }
             | Self::Cvd { symbol, .. }
+            | Self::Returns { symbol, .. }
             | Self::Volatility { symbol, .. }
             | Self::SmaTimed { symbol, .. }
             | Self::ObvTimed { symbol, .. }
@@ -241,6 +247,7 @@ impl GroupKey {
             | Self::OrderBookImbalance { .. } => FeatureRoute::OrderBook,
             Self::Sma { source, .. }
             | Self::Ema { source, .. }
+            | Self::Returns { source, .. }
             | Self::Volatility { source, .. } => FeatureRoute::Kind(source.event_kind()),
             Self::Cvd { source, .. }
             | Self::Vpt { source, .. }
@@ -723,6 +730,22 @@ fn group_key(index: usize, key: &FeatureKey) -> Result<(GroupKey, GroupOutput)> 
                 GroupOutput::SampleWindow(window),
             ))
         }
+        FeatureKey::Return {
+            symbol,
+            source,
+            kind,
+            lag,
+        } => {
+            validate_sample_window(index, key, lag, false)?;
+            Ok((
+                GroupKey::Returns {
+                    symbol,
+                    source: scalar_source(index, key, source)?,
+                    kind,
+                },
+                GroupOutput::SampleWindow(lag),
+            ))
+        }
         FeatureKey::Volatility {
             symbol,
             source,
@@ -1022,6 +1045,14 @@ fn build_group(group: &FeatureGroup) -> Result<FeatureDerivation> {
             GroupOutputs::SampleWindows(windows),
         ) => derivation::cvd::build(*symbol, windows, *warmup_policy),
         (
+            GroupKey::Returns {
+                symbol,
+                source,
+                kind,
+            },
+            GroupOutputs::SampleWindows(lags),
+        ) => derivation::returns::build(*symbol, *source, *kind, lags),
+        (
             GroupKey::Volatility {
                 symbol,
                 source,
@@ -1272,6 +1303,10 @@ fn group_kind(key: &GroupKey) -> IndicatorKind {
         GroupKey::Sma { .. } => IndicatorKind::Sma,
         GroupKey::Ema { .. } => IndicatorKind::Ema,
         GroupKey::Cvd { .. } => IndicatorKind::Cvd,
+        GroupKey::Returns { kind, .. } => match kind {
+            ReturnKind::Simple => IndicatorKind::SimpleReturn,
+            ReturnKind::Log => IndicatorKind::LogReturn,
+        },
         GroupKey::Volatility { .. } => IndicatorKind::Volatility,
         GroupKey::SmaTimed { .. } => IndicatorKind::SmaTimed,
         GroupKey::ObvTimed { .. } => IndicatorKind::ObvTimed,
@@ -1314,6 +1349,10 @@ fn group_kind_from_feature_key(key: &FeatureKey) -> IndicatorKind {
         FeatureKey::Sma { .. } => IndicatorKind::Sma,
         FeatureKey::Ema { .. } => IndicatorKind::Ema,
         FeatureKey::Cvd { .. } => IndicatorKind::Cvd,
+        FeatureKey::Return { kind, .. } => match kind {
+            ReturnKind::Simple => IndicatorKind::SimpleReturn,
+            ReturnKind::Log => IndicatorKind::LogReturn,
+        },
         FeatureKey::Volatility { .. } => IndicatorKind::Volatility,
         FeatureKey::SmaTimed { .. } => IndicatorKind::SmaTimed,
         FeatureKey::ObvTimed { .. } => IndicatorKind::ObvTimed,
@@ -1459,5 +1498,24 @@ mod tests {
             }
         ));
         assert!(compile(Vec::new(), 1).is_err());
+    }
+
+    #[test]
+    fn rejects_zero_and_overflowing_return_lags() {
+        let symbol = Symbol::new("compiler-returns").unwrap();
+        for lag in [0, usize::MAX] {
+            assert!(
+                compile(
+                    vec![definition(FeatureKey::Return {
+                        symbol,
+                        source: FeatureSource::Field(EventField::Price),
+                        kind: ReturnKind::Simple,
+                        lag,
+                    })],
+                    1,
+                )
+                .is_err()
+            );
+        }
     }
 }

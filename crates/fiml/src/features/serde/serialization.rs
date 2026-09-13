@@ -9,8 +9,8 @@ use ::serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use super::FeatureExtractorSpec;
 use crate::{
-    EventField, EventKind, FeatureDefinition, FeatureId, FeatureKey, FeatureSource, Symbol,
-    WarmupPolicy,
+    EventField, EventKind, FeatureDefinition, FeatureId, FeatureKey, FeatureSource, ReturnKind,
+    Symbol, WarmupPolicy,
 };
 
 const FORMAT_VERSION: &str = "1.1";
@@ -201,6 +201,12 @@ struct OutputWire {
         deserialize_with = "deserialize_present_option",
         skip_serializing_if = "Option::is_none"
     )]
+    lag: Option<usize>,
+    #[serde(
+        default,
+        deserialize_with = "deserialize_present_option",
+        skip_serializing_if = "Option::is_none"
+    )]
     window: Option<WindowWire>,
     #[serde(
         default,
@@ -212,7 +218,7 @@ struct OutputWire {
 
 impl OutputWire {
     fn is_empty(&self) -> bool {
-        self.window.is_none() && self.n_levels.is_none() && self.id.is_none()
+        self.window.is_none() && self.lag.is_none() && self.n_levels.is_none() && self.id.is_none()
     }
 }
 
@@ -238,6 +244,7 @@ enum IndicatorIdentity {
     Sma(FeatureSource, WarmupPolicy),
     Ema(FeatureSource, WarmupPolicy),
     Cvd(FeatureSource, WarmupPolicy),
+    Returns(ReturnKind, FeatureSource),
     Volatility(FeatureSource, WarmupPolicy),
     SmaTimed(FeatureSource, Duration, WarmupPolicy),
     ObvTimed(FeatureSource, Duration, WarmupPolicy),
@@ -439,6 +446,21 @@ fn serialize_definition(
             None,
             Some(WindowWire::Samples(window)),
         ),
+        FeatureKey::Return { source, kind, .. } => {
+            crate::features::compiler::validate_key(&definition.key)
+                .map_err(|error| error.to_string())?;
+            (
+                IndicatorIdentity::Returns(kind, source),
+                match kind {
+                    ReturnKind::Simple => "simple_return",
+                    ReturnKind::Log => "log_return",
+                },
+                source,
+                None,
+                None,
+                None,
+            )
+        }
         FeatureKey::Volatility {
             source,
             window,
@@ -570,6 +592,10 @@ fn serialize_definition(
         },
         OutputWire {
             window,
+            lag: match definition.key {
+                FeatureKey::Return { lag, .. } => Some(lag),
+                _ => None,
+            },
             id,
             n_levels: None,
         },
@@ -725,10 +751,38 @@ fn deserialize_indicator(
     }
 
     match indicator.kind.as_str() {
+        "simple_return" | "log_return" => {
+            reject_warmup(&indicator)?;
+            require_empty_options(&indicator.kind, &options)?;
+            let kind = if indicator.kind == "simple_return" {
+                ReturnKind::Simple
+            } else {
+                ReturnKind::Log
+            };
+            for output in outputs {
+                if output.window.is_some() {
+                    return Err(format!("{} output does not allow window", indicator.kind));
+                }
+                let lag = output
+                    .lag
+                    .ok_or_else(|| format!("{} output requires an integer lag", indicator.kind))?;
+                let key = FeatureKey::Return {
+                    symbol,
+                    source,
+                    kind,
+                    lag,
+                };
+                crate::features::compiler::validate_key(&key).map_err(|error| error.to_string())?;
+                definitions.push(definition_from_output(key, output.id));
+            }
+        }
         "sma" | "ema" | "cvd" | "volatility" => {
             let warmup = required_warmup(&indicator)?;
             require_empty_options(&indicator.kind, &options)?;
             for output in outputs {
+                if output.lag.is_some() {
+                    return Err(format!("{} output does not allow lag", indicator.kind));
+                }
                 let window = match output.window {
                     Some(WindowWire::Samples(window)) => window,
                     _ => {
@@ -784,6 +838,9 @@ fn deserialize_indicator(
                 return Err("trade_count_timed requires exactly one output".to_owned());
             }
             for output in outputs {
+                if output.lag.is_some() {
+                    return Err(format!("{} output does not allow lag", indicator.kind));
+                }
                 let window = match output.window {
                     Some(WindowWire::Duration(window)) => parse_duration(&window)?,
                     _ => {
@@ -1049,6 +1106,7 @@ fn serialize_order_book_definition(
         },
         OutputWire {
             n_levels,
+            lag: None,
             window: None,
             id,
         },
@@ -1162,8 +1220,10 @@ fn deserialize_order_book_indicator(
                 return Err("order_book_imbalance exceeds 16 outputs".to_owned());
             }
             for output in outputs {
-                if output.window.is_some() {
-                    return Err("order_book_imbalance output does not allow window".to_owned());
+                if output.window.is_some() || output.lag.is_some() {
+                    return Err(
+                        "order_book_imbalance output does not allow window or lag".to_owned()
+                    );
                 }
                 let n_levels = output
                     .n_levels
@@ -1209,8 +1269,10 @@ fn scalar_definition(
         return Err(format!("{kind} requires exactly one output"));
     }
     let output = outputs.pop().expect("length checked");
-    if output.window.is_some() || output.n_levels.is_some() {
-        return Err(format!("{kind} output does not allow window or n_levels"));
+    if output.window.is_some() || output.lag.is_some() || output.n_levels.is_some() {
+        return Err(format!(
+            "{kind} output does not allow window, lag, or n_levels"
+        ));
     }
     Ok(definition_from_output(key, output.id))
 }
@@ -1267,6 +1329,7 @@ fn symbol_of(key: &FeatureKey) -> Symbol {
         | FeatureKey::OrderBookImbalance { symbol, .. }
         | FeatureKey::Ema { symbol, .. }
         | FeatureKey::Cvd { symbol, .. }
+        | FeatureKey::Return { symbol, .. }
         | FeatureKey::Volatility { symbol, .. }
         | FeatureKey::SmaTimed { symbol, .. }
         | FeatureKey::ObvTimed { symbol, .. }
@@ -1285,9 +1348,8 @@ fn validate_scope_and_source(
 ) -> Result<(), String> {
     let global = symbol == Symbol::GLOBAL;
     let valid = match kind {
-        "sma" | "ema" | "sma_timed" | "volatility" | "volatility_timed" => {
-            !global && matches!(source, FeatureSource::Field(_))
-        }
+        "sma" | "ema" | "simple_return" | "log_return" | "sma_timed" | "volatility"
+        | "volatility_timed" => !global && matches!(source, FeatureSource::Field(_)),
         "cvd" | "obv_timed" | "vpt" | "trade_count_timed" => {
             !global && source == FeatureSource::Event(EventKind::Trade)
         }
@@ -1541,6 +1603,18 @@ mod tests {
                     window: 5,
                     warmup_policy: WarmupPolicy::FullWindow,
                 }),
+                default(FeatureKey::Return {
+                    symbol: btc,
+                    source: FeatureSource::Field(EventField::TradePrice),
+                    kind: ReturnKind::Simple,
+                    lag: 1,
+                }),
+                default(FeatureKey::Return {
+                    symbol: btc,
+                    source: FeatureSource::Field(EventField::TradePrice),
+                    kind: ReturnKind::Log,
+                    lag: 5,
+                }),
                 default(FeatureKey::ObvTimed {
                     symbol: btc,
                     source: FeatureSource::Event(EventKind::Trade),
@@ -1589,7 +1663,7 @@ mod tests {
 
         assert_eq!(value["version"], "1.1");
         assert_eq!(value["capacity"], 14);
-        assert_eq!(value["length"], 12);
+        assert_eq!(value["length"], 14);
         assert_eq!(value["checksum"], "opaque-value");
         assert_eq!(
             value["required_events"],
@@ -1637,7 +1711,9 @@ mod tests {
                 "trade_count_timed",
                 "vpt",
                 "volatility",
-                "volatility_timed"
+                "volatility_timed",
+                "simple_return",
+                "log_return"
             ]
         );
         let sma = indicators
@@ -1658,6 +1734,12 @@ mod tests {
             .unwrap();
         assert_eq!(timed["options"]["aggregation"], "1s");
         assert_eq!(timed["outputs"][0]["window"], "1m");
+        let log_return = indicators
+            .iter()
+            .find(|item| item["kind"] == "log_return")
+            .unwrap();
+        assert_eq!(log_return["outputs"][0]["lag"], 5);
+        assert!(log_return.get("warmup_policy").is_none());
 
         let restored: FeatureExtractorSpec = serde_json::from_str(&text).unwrap();
         assert_eq!(restored, spec);
