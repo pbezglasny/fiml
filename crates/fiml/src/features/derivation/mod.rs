@@ -10,6 +10,7 @@ pub(crate) mod day_of_week;
 pub(crate) mod ema;
 pub(crate) mod obv;
 pub(crate) mod order_book;
+pub(crate) mod returns;
 pub(crate) mod sma;
 pub(crate) mod time_since_first_event_of_day;
 pub(crate) mod trade_count;
@@ -20,6 +21,7 @@ use cvd::CvdFeature;
 use day_of_week::DayOfWeek;
 use ema::EmaFeature;
 use obv::ObvTimedFeature;
+use returns::ReturnsFeature;
 use sma::{SmaFeature, SmaTimedFeature};
 use time_since_first_event_of_day::TimeSinceFirstEventOfDay;
 use trade_count::TradeCountTimedFeature;
@@ -39,6 +41,7 @@ pub(crate) enum FeatureDerivation {
     SmaTimed(SmaTimedFeature),
     ObvTimed(ObvTimedFeature),
     TradeCountTimed(TradeCountTimedFeature),
+    Returns(ReturnsFeature),
     Volatility(VolatilityFeature),
     VolatilityTimed(VolatilityTimedFeature),
     Vpt(VptFeature),
@@ -61,6 +64,7 @@ impl FeatureDerivation {
             Self::SmaTimed(sma) => sma.update(event, output_range, output),
             Self::ObvTimed(obv) => obv.update(event, output_range, output),
             Self::TradeCountTimed(count) => count.update(event, output_range, output),
+            Self::Returns(returns) => returns.update(event, output_range, output),
             Self::Volatility(volatility) => volatility.update(event, output_range, output),
             Self::VolatilityTimed(volatility) => volatility.update(event, output_range, output),
             Self::Vpt(vpt) => vpt.update(event, output_range, output),
@@ -92,6 +96,7 @@ impl FeatureDerivation {
             | Self::SmaTimed(_)
             | Self::ObvTimed(_)
             | Self::TradeCountTimed(_)
+            | Self::Returns(_)
             | Self::Volatility(_)
             | Self::VolatilityTimed(_)
             | Self::Vpt(_)

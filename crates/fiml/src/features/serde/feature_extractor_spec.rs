@@ -236,6 +236,23 @@ fn canonical_sort_key(key: &FeatureKey) -> (bool, String, u8, u8, u8, u128, u128
             0,
             0,
         ),
+        FeatureKey::Return {
+            symbol,
+            source,
+            kind,
+            ..
+        } => (
+            *symbol,
+            match kind {
+                crate::ReturnKind::Simple => 29,
+                crate::ReturnKind::Log => 30,
+            },
+            source_rank(*source),
+            0,
+            0,
+            0,
+            0,
+        ),
         FeatureKey::Volatility {
             symbol,
             source,

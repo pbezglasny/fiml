@@ -20,6 +20,19 @@ def sample_name(kind, symbol, source, window, warmup="full_window"):
     )
 
 
+def return_name(kind, symbol, source, lag):
+    source_name = {
+        "price": "field.price",
+        "volume": "field.volume",
+        "trade_price": "field.trade_price",
+        "trade_volume": "field.trade_volume",
+    }[source]
+    normalized = symbol.lower()
+    return (
+        f"{kind}:symbol={len(normalized)}:{normalized}:source={source_name}:lag={lag}"
+    )
+
+
 def count_name(symbol):
     normalized = symbol.lower()
     return (
@@ -152,6 +165,59 @@ def test_sample_and_timed_volatility_use_population_stddev_of_simple_returns():
         equal_nan=True,
         atol=1e-12,
     )
+
+
+def test_simple_and_log_returns_use_configured_sample_lags():
+    spec = (
+        fiml.FeatureExtractorSpec()
+        .simple_returns("BTCUSDT", [1, 2], source="trade_price")
+        .log_returns("BTCUSDT", [1], source="trade_price")
+    )
+    extractor = fiml.FeatureExtractor(spec)
+    result = extractor.compute_features(
+        pd.DataFrame(
+            {
+                "symbol": ["BTCUSDT"] * 4,
+                "ts": np.arange(4, dtype=np.int64),
+                "price": [100.0, 110.0, 121.0, 133.1],
+                "volume": [1.0] * 4,
+            }
+        )
+    )
+
+    assert extractor.feature_names() == [
+        return_name("simple_return", "BTCUSDT", "trade_price", 1),
+        return_name("simple_return", "BTCUSDT", "trade_price", 2),
+        return_name("log_return", "BTCUSDT", "trade_price", 1),
+    ]
+    np.testing.assert_allclose(
+        result[extractor.feature_names()].to_numpy(),
+        [
+            [np.nan, np.nan, np.nan],
+            [0.1, np.nan, np.log(1.1)],
+            [0.1, 0.21, np.log(1.1)],
+            [0.1, 0.21, np.log(1.1)],
+        ],
+        equal_nan=True,
+        atol=1e-12,
+    )
+
+
+def test_returns_validate_lags_sources_and_log_domain():
+    with pytest.raises(ValueError, match="lags must not be empty"):
+        fiml.FeatureExtractorSpec().simple_returns("BTCUSDT", [])
+    with pytest.raises(ValueError, match="lags must be positive"):
+        fiml.FeatureExtractorSpec().log_returns("BTCUSDT", [0])
+    with pytest.raises(ValueError, match="invalid `source`"):
+        fiml.FeatureExtractorSpec().simple_returns("BTCUSDT", [1], source="book")
+
+    extractor = fiml.FeatureExtractor(
+        fiml.FeatureExtractorSpec().log_returns("BTCUSDT", [1], source="price")
+    )
+    btc = extractor.symbol("BTCUSDT")
+    extractor.update(fiml.KIND_PRICE, btc, 0, price=-1.0)
+    extractor.update(fiml.KIND_PRICE, btc, 1, price=1.0)
+    assert np.isnan(extractor.values()[0])
 
 
 def test_feature_names_keep_canonical_source_order():

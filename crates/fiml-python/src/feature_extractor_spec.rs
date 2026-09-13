@@ -5,7 +5,7 @@ use std::time::Duration;
 use fiml::order_book::{OrderBookConfig, UpdatePolicy};
 use fiml::{
     EventField, EventKind, FeatureDefinition, FeatureExtractorSpec as CoreFeatureExtractorSpec,
-    FeatureKey, FeatureSource, Symbol, WarmupPolicy as CoreWarmupPolicy,
+    FeatureKey, FeatureSource, ReturnKind, Symbol, WarmupPolicy as CoreWarmupPolicy,
 };
 use pyo3::{exceptions::PyValueError, prelude::*};
 
@@ -152,6 +152,34 @@ impl FeatureExtractorSpec {
         } else {
             Ok(())
         }
+    }
+
+    fn add_returns(
+        &mut self,
+        symbol: &str,
+        lags: Vec<usize>,
+        source: &str,
+        kind: ReturnKind,
+    ) -> PyResult<()> {
+        if lags.is_empty() {
+            return Err(PyValueError::new_err("lags must not be empty"));
+        }
+        if lags.contains(&0) {
+            return Err(PyValueError::new_err("lags must be positive"));
+        }
+        if lags.contains(&usize::MAX) {
+            return Err(PyValueError::new_err("lags are too large"));
+        }
+        let symbol = intern_symbol(symbol)?;
+        let source = FeatureSource::Field(parse_value_source("source", source)?);
+        self.add_group(lags.into_iter().map(|lag| {
+            definition(FeatureKey::Return {
+                symbol,
+                source,
+                kind,
+                lag,
+            })
+        }))
     }
 }
 
@@ -304,6 +332,30 @@ impl FeatureExtractorSpec {
                 warmup_policy,
             })
         }))?;
+        Ok(slf)
+    }
+
+    /// Simple percentage returns over ordered sample lags.
+    #[pyo3(signature = (symbol, lags, *, source="price"))]
+    fn simple_returns<'py>(
+        mut slf: PyRefMut<'py, Self>,
+        symbol: &str,
+        lags: Vec<usize>,
+        source: &str,
+    ) -> PyResult<PyRefMut<'py, Self>> {
+        slf.add_returns(symbol, lags, source, ReturnKind::Simple)?;
+        Ok(slf)
+    }
+
+    /// Logarithmic returns over ordered sample lags.
+    #[pyo3(signature = (symbol, lags, *, source="price"))]
+    fn log_returns<'py>(
+        mut slf: PyRefMut<'py, Self>,
+        symbol: &str,
+        lags: Vec<usize>,
+        source: &str,
+    ) -> PyResult<PyRefMut<'py, Self>> {
+        slf.add_returns(symbol, lags, source, ReturnKind::Log)?;
         Ok(slf)
     }
 

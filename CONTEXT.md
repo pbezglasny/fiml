@@ -82,6 +82,13 @@ assign each return to the newer observation's bucket and retain exact count,
 mean, and central-moment statistics per bucket. A zero previous value
 establishes a new baseline because its percentage return is undefined.
 
+## Sample returns
+
+Simple returns use `(current - lagged) / lagged`; log returns use
+`ln(current) - ln(lagged)`. Each configured lag counts matching source samples.
+An output is missing until `lag + 1` samples exist. A zero lagged value makes a
+simple return unavailable; non-positive endpoints make a log return unavailable.
+
 ## Canonical feature name
 
 A library-generated, globally unique output name derived from symbol, value

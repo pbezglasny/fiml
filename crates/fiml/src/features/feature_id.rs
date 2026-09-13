@@ -1,7 +1,7 @@
 use std::fmt::{self, Write};
 
 use crate::features::feature_key::FeatureKey;
-use crate::{Symbol, WarmupPolicy};
+use crate::{ReturnKind, Symbol, WarmupPolicy};
 
 use super::feature_source::FeatureSource;
 
@@ -224,6 +224,23 @@ fn write_feature_key(id: &mut String, key: &FeatureKey) -> fmt::Result {
             window,
             warmup_policy,
         } => write_sample_window(id, "cvd", *symbol, *source, *window, *warmup_policy),
+        FeatureKey::Return {
+            symbol,
+            source,
+            kind,
+            lag,
+        } => {
+            write_prefix(
+                id,
+                match kind {
+                    ReturnKind::Simple => "simple_return",
+                    ReturnKind::Log => "log_return",
+                },
+                *symbol,
+                source.canonical_name(),
+            )?;
+            write!(id, ":lag={lag}")
+        }
         FeatureKey::Volatility {
             symbol,
             source,
@@ -398,6 +415,21 @@ mod tests {
         assert_eq!(
             FeatureId::from(&key).as_str(),
             "obv_timed:symbol=6:ethusd:source=event.trade:aggregation_ns=100000000:window_ns=5000000000:warmup=first_value"
+        );
+    }
+
+    #[test]
+    fn creates_canonical_id_for_log_return() {
+        let key = FeatureKey::Return {
+            symbol: Symbol::new("BTCUSD").unwrap(),
+            source: FeatureSource::Field(EventField::TradePrice),
+            kind: ReturnKind::Log,
+            lag: 5,
+        };
+
+        assert_eq!(
+            FeatureId::from(&key).as_str(),
+            "log_return:symbol=6:btcusd:source=field.trade_price:lag=5"
         );
     }
 }

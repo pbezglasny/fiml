@@ -33,7 +33,7 @@ documentation, and Python distribution still need work.
 Do not delay `v0.1.0` for a large indicator catalogue. Add only the missing
 ML fundamentals, then stop:
 
-- [ ] Simple and log returns over configurable sample lags.
+- [x] Simple and log returns over configurable sample lags.
 - [x] Rolling volatility as the standard deviation of returns over
   configurable windows.
 - [ ] Rolling trade volume over timed windows.
