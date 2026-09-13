@@ -117,6 +117,43 @@ def test_grouped_sma_and_ema_can_consume_trade_price_and_volume():
     ].isna().any()
 
 
+def test_sample_and_timed_volatility_use_population_stddev_of_simple_returns():
+    spec = (
+        fiml.FeatureExtractorSpec()
+        .volatility(
+            "BTCUSDT",
+            [2],
+            source="trade_price",
+            warmup=fiml.WarmupPolicy.FIRST_VALUE,
+        )
+        .volatility_timed(
+            "BTCUSDT",
+            "1ms",
+            ["2ms"],
+            source="trade_price",
+            warmup=fiml.WarmupPolicy.FIRST_VALUE,
+        )
+    )
+    extractor = fiml.FeatureExtractor(spec)
+    source = pd.DataFrame(
+        {
+            "symbol": ["BTCUSDT"] * 4,
+            "ts": np.array([0, 1, 2, 3], dtype=np.int64),
+            "price": [100.0, 110.0, 99.0, 118.8],
+            "volume": [1.0] * 4,
+        }
+    )
+
+    result = extractor.compute_features(source)
+
+    np.testing.assert_allclose(
+        result[extractor.feature_names()].to_numpy(),
+        [[np.nan, np.nan], [0.0, 0.0], [0.1, 0.1], [0.15, 0.15]],
+        equal_nan=True,
+        atol=1e-12,
+    )
+
+
 def test_feature_names_keep_canonical_source_order():
     extractor = fiml.FeatureExtractor(
         fiml.FeatureExtractorSpec()

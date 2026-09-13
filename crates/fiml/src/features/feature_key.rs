@@ -103,7 +103,22 @@ pub enum FeatureKey {
         window: usize,
         warmup_policy: WarmupPolicy,
     },
+    /// Population volatility of simple returns over a sample window.
+    Volatility {
+        symbol: Symbol,
+        source: FeatureSource,
+        window: usize,
+        warmup_policy: WarmupPolicy,
+    },
     SmaTimed {
+        symbol: Symbol,
+        source: FeatureSource,
+        aggregation: Duration,
+        window: Duration,
+        warmup_policy: WarmupPolicy,
+    },
+    /// Population volatility of simple returns over a timed window.
+    VolatilityTimed {
         symbol: Symbol,
         source: FeatureSource,
         aggregation: Duration,

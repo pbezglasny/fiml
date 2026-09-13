@@ -224,6 +224,12 @@ fn write_feature_key(id: &mut String, key: &FeatureKey) -> fmt::Result {
             window,
             warmup_policy,
         } => write_sample_window(id, "cvd", *symbol, *source, *window, *warmup_policy),
+        FeatureKey::Volatility {
+            symbol,
+            source,
+            window,
+            warmup_policy,
+        } => write_sample_window(id, "volatility", *symbol, *source, *window, *warmup_policy),
         FeatureKey::SmaTimed {
             symbol,
             source,
@@ -248,6 +254,21 @@ fn write_feature_key(id: &mut String, key: &FeatureKey) -> fmt::Result {
         } => write_timed_window(
             id,
             "obv_timed",
+            *symbol,
+            *source,
+            aggregation.as_nanos(),
+            window.as_nanos(),
+            *warmup_policy,
+        ),
+        FeatureKey::VolatilityTimed {
+            symbol,
+            source,
+            aggregation,
+            window,
+            warmup_policy,
+        } => write_timed_window(
+            id,
+            "volatility_timed",
             *symbol,
             *source,
             aggregation.as_nanos(),

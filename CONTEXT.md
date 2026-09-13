@@ -74,6 +74,14 @@ A shared timed-indicator definition containing one aggregation duration and an
 ordered list of rolling window durations. Every window is a nonzero exact
 multiple of the aggregation and must fit in signed 64-bit milliseconds.
 
+## Rolling volatility
+
+The population standard deviation of consecutive simple returns
+`(current - previous) / previous`. Sample windows count returns. Timed windows
+assign each return to the newer observation's bucket and retain exact count,
+mean, and central-moment statistics per bucket. A zero previous value
+establishes a new baseline because its percentage return is undefined.
+
 ## Canonical feature name
 
 A library-generated, globally unique output name derived from symbol, value

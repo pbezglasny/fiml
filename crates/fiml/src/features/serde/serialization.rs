@@ -238,8 +238,10 @@ enum IndicatorIdentity {
     Sma(FeatureSource, WarmupPolicy),
     Ema(FeatureSource, WarmupPolicy),
     Cvd(FeatureSource, WarmupPolicy),
+    Volatility(FeatureSource, WarmupPolicy),
     SmaTimed(FeatureSource, Duration, WarmupPolicy),
     ObvTimed(FeatureSource, Duration, WarmupPolicy),
+    VolatilityTimed(FeatureSource, Duration, WarmupPolicy),
     Vpt(FeatureSource),
     TradeCountTimed(FeatureSource, Duration, Duration, WarmupPolicy),
     DayOfWeek(FeatureSource),
@@ -437,6 +439,19 @@ fn serialize_definition(
             None,
             Some(WindowWire::Samples(window)),
         ),
+        FeatureKey::Volatility {
+            source,
+            window,
+            warmup_policy,
+            ..
+        } => (
+            IndicatorIdentity::Volatility(source, warmup_policy),
+            "volatility",
+            source,
+            Some(warmup_policy),
+            None,
+            Some(WindowWire::Samples(window)),
+        ),
         FeatureKey::SmaTimed {
             source,
             aggregation,
@@ -464,6 +479,24 @@ fn serialize_definition(
         } => (
             IndicatorIdentity::ObvTimed(source, aggregation, warmup_policy),
             "obv_timed",
+            source,
+            Some(warmup_policy),
+            Some(OptionsWire {
+                aggregation: Some(format_duration(aggregation)?),
+                utc_offset: None,
+                ..OptionsWire::default()
+            }),
+            Some(WindowWire::Duration(format_duration(window)?)),
+        ),
+        FeatureKey::VolatilityTimed {
+            source,
+            aggregation,
+            window,
+            warmup_policy,
+            ..
+        } => (
+            IndicatorIdentity::VolatilityTimed(source, aggregation, warmup_policy),
+            "volatility_timed",
             source,
             Some(warmup_policy),
             Some(OptionsWire {
@@ -692,7 +725,7 @@ fn deserialize_indicator(
     }
 
     match indicator.kind.as_str() {
-        "sma" | "ema" | "cvd" => {
+        "sma" | "ema" | "cvd" | "volatility" => {
             let warmup = required_warmup(&indicator)?;
             require_empty_options(&indicator.kind, &options)?;
             for output in outputs {
@@ -718,7 +751,13 @@ fn deserialize_indicator(
                         window,
                         warmup_policy: warmup,
                     },
-                    _ => FeatureKey::Cvd {
+                    "cvd" => FeatureKey::Cvd {
+                        symbol,
+                        source,
+                        window,
+                        warmup_policy: warmup,
+                    },
+                    _ => FeatureKey::Volatility {
                         symbol,
                         source,
                         window,
@@ -728,7 +767,7 @@ fn deserialize_indicator(
                 definitions.push(definition_from_output(key, output.id));
             }
         }
-        "sma_timed" | "obv_timed" | "trade_count_timed" => {
+        "sma_timed" | "obv_timed" | "trade_count_timed" | "volatility_timed" => {
             let warmup = required_warmup(&indicator)?;
             if options.utc_offset.is_some() {
                 return Err(format!(
@@ -769,7 +808,14 @@ fn deserialize_indicator(
                         window,
                         warmup_policy: warmup,
                     },
-                    _ => FeatureKey::TradeCountTimed {
+                    "trade_count_timed" => FeatureKey::TradeCountTimed {
+                        symbol,
+                        source,
+                        aggregation,
+                        window,
+                        warmup_policy: warmup,
+                    },
+                    _ => FeatureKey::VolatilityTimed {
                         symbol,
                         source,
                         aggregation,
@@ -1221,8 +1267,10 @@ fn symbol_of(key: &FeatureKey) -> Symbol {
         | FeatureKey::OrderBookImbalance { symbol, .. }
         | FeatureKey::Ema { symbol, .. }
         | FeatureKey::Cvd { symbol, .. }
+        | FeatureKey::Volatility { symbol, .. }
         | FeatureKey::SmaTimed { symbol, .. }
         | FeatureKey::ObvTimed { symbol, .. }
+        | FeatureKey::VolatilityTimed { symbol, .. }
         | FeatureKey::Vpt { symbol, .. }
         | FeatureKey::TradeCountTimed { symbol, .. }
         | FeatureKey::DayOfWeek { symbol, .. }
@@ -1237,7 +1285,9 @@ fn validate_scope_and_source(
 ) -> Result<(), String> {
     let global = symbol == Symbol::GLOBAL;
     let valid = match kind {
-        "sma" | "ema" | "sma_timed" => !global && matches!(source, FeatureSource::Field(_)),
+        "sma" | "ema" | "sma_timed" | "volatility" | "volatility_timed" => {
+            !global && matches!(source, FeatureSource::Field(_))
+        }
         "cvd" | "obv_timed" | "vpt" | "trade_count_timed" => {
             !global && source == FeatureSource::Event(EventKind::Trade)
         }
@@ -1498,6 +1548,19 @@ mod tests {
                     window: Duration::from_secs(5),
                     warmup_policy: WarmupPolicy::FullWindow,
                 }),
+                default(FeatureKey::Volatility {
+                    symbol: btc,
+                    source: FeatureSource::Field(EventField::TradePrice),
+                    window: 20,
+                    warmup_policy: WarmupPolicy::FullWindow,
+                }),
+                default(FeatureKey::VolatilityTimed {
+                    symbol: btc,
+                    source: FeatureSource::Field(EventField::Price),
+                    aggregation: Duration::from_secs(1),
+                    window: Duration::from_secs(30),
+                    warmup_policy: WarmupPolicy::FirstValue,
+                }),
                 default(FeatureKey::Vpt {
                     symbol: btc,
                     source: FeatureSource::Event(EventKind::Trade),
@@ -1512,7 +1575,7 @@ mod tests {
                     utc_offset_millis: 7_200_000,
                 }),
             ],
-            12,
+            14,
             Some("opaque-value".to_owned()),
         )
         .unwrap()
@@ -1525,8 +1588,8 @@ mod tests {
         let value: Value = serde_json::from_str(&text).unwrap();
 
         assert_eq!(value["version"], "1.1");
-        assert_eq!(value["capacity"], 12);
-        assert_eq!(value["length"], 10);
+        assert_eq!(value["capacity"], 14);
+        assert_eq!(value["length"], 12);
         assert_eq!(value["checksum"], "opaque-value");
         assert_eq!(
             value["required_events"],
@@ -1572,7 +1635,9 @@ mod tests {
                 "sma",
                 "sma_timed",
                 "trade_count_timed",
-                "vpt"
+                "vpt",
+                "volatility",
+                "volatility_timed"
             ]
         );
         let sma = indicators
