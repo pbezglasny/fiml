@@ -236,6 +236,20 @@ fn canonical_sort_key(key: &FeatureKey) -> (bool, String, u8, u8, u8, u128, u128
             0,
             0,
         ),
+        FeatureKey::Volatility {
+            symbol,
+            source,
+            warmup_policy,
+            ..
+        } => (
+            *symbol,
+            27,
+            source_rank(*source),
+            warmup_rank(*warmup_policy),
+            0,
+            0,
+            0,
+        ),
         FeatureKey::SmaTimed {
             symbol,
             source,
@@ -260,6 +274,21 @@ fn canonical_sort_key(key: &FeatureKey) -> (bool, String, u8, u8, u8, u128, u128
         } => (
             *symbol,
             3,
+            source_rank(*source),
+            warmup_rank(*warmup_policy),
+            aggregation.as_nanos(),
+            0,
+            0,
+        ),
+        FeatureKey::VolatilityTimed {
+            symbol,
+            source,
+            aggregation,
+            warmup_policy,
+            ..
+        } => (
+            *symbol,
+            28,
             source_rank(*source),
             warmup_rank(*warmup_policy),
             aggregation.as_nanos(),

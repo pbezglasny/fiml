@@ -307,6 +307,36 @@ impl FeatureExtractorSpec {
         Ok(slf)
     }
 
+    /// Grouped population volatility of simple returns over sample windows.
+    #[pyo3(signature = (
+        symbol,
+        windows,
+        *,
+        source="price",
+        warmup=PyWarmupPolicy::FullWindow
+    ))]
+    fn volatility<'py>(
+        mut slf: PyRefMut<'py, Self>,
+        symbol: &str,
+        windows: Vec<usize>,
+        source: &str,
+        warmup: PyWarmupPolicy,
+    ) -> PyResult<PyRefMut<'py, Self>> {
+        Self::require_windows(&windows)?;
+        let symbol = intern_symbol(symbol)?;
+        let source = FeatureSource::Field(parse_value_source("source", source)?);
+        let warmup_policy = warmup.into();
+        slf.add_group(windows.into_iter().map(|window| {
+            definition(FeatureKey::Volatility {
+                symbol,
+                source,
+                window,
+                warmup_policy,
+            })
+        }))?;
+        Ok(slf)
+    }
+
     /// Grouped time-bucketed moving averages over ordered duration windows.
     #[pyo3(signature = (
         symbol,
@@ -334,6 +364,41 @@ impl FeatureExtractorSpec {
             definition(FeatureKey::SmaTimed {
                 symbol,
                 source: FeatureSource::Field(field),
+                aggregation,
+                window,
+                warmup_policy,
+            })
+        }))?;
+        Ok(slf)
+    }
+
+    /// Grouped population volatility of simple returns over timed windows.
+    #[pyo3(signature = (
+        symbol,
+        aggregation,
+        windows,
+        *,
+        source="price",
+        warmup=PyWarmupPolicy::FullWindow
+    ))]
+    fn volatility_timed<'py>(
+        mut slf: PyRefMut<'py, Self>,
+        symbol: &str,
+        aggregation: &str,
+        windows: Vec<String>,
+        source: &str,
+        warmup: PyWarmupPolicy,
+    ) -> PyResult<PyRefMut<'py, Self>> {
+        Self::require_windows(&windows)?;
+        let symbol = intern_symbol(symbol)?;
+        let source = FeatureSource::Field(parse_value_source("source", source)?);
+        let aggregation = parse_duration("aggregation", aggregation)?;
+        let windows = parse_durations("windows", windows)?;
+        let warmup_policy = warmup.into();
+        slf.add_group(windows.into_iter().map(|window| {
+            definition(FeatureKey::VolatilityTimed {
+                symbol,
+                source,
                 aggregation,
                 window,
                 warmup_policy,

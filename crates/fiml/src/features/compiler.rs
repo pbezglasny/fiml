@@ -139,7 +139,18 @@ enum GroupKey {
         source: FeatureSource,
         warmup_policy: WarmupPolicy,
     },
+    Volatility {
+        symbol: Symbol,
+        source: EventField,
+        warmup_policy: WarmupPolicy,
+    },
     SmaTimed {
+        symbol: Symbol,
+        source: EventField,
+        aggregation: Duration,
+        warmup_policy: WarmupPolicy,
+    },
+    VolatilityTimed {
         symbol: Symbol,
         source: EventField,
         aggregation: Duration,
@@ -197,8 +208,10 @@ impl GroupKey {
             | Self::OrderBookImbalance { symbol, .. }
             | Self::Ema { symbol, .. }
             | Self::Cvd { symbol, .. }
+            | Self::Volatility { symbol, .. }
             | Self::SmaTimed { symbol, .. }
             | Self::ObvTimed { symbol, .. }
+            | Self::VolatilityTimed { symbol, .. }
             | Self::Vpt { symbol, .. }
             | Self::TradeCountTimed { symbol, .. }
             | Self::DayOfWeek { symbol, .. }
@@ -226,18 +239,19 @@ impl GroupKey {
             | Self::OrderBookWeightedMidPrice { .. }
             | Self::OrderBookMicroprice { .. }
             | Self::OrderBookImbalance { .. } => FeatureRoute::OrderBook,
-            Self::Sma { source, .. } | Self::Ema { source, .. } => {
-                FeatureRoute::Kind(source.event_kind())
-            }
+            Self::Sma { source, .. }
+            | Self::Ema { source, .. }
+            | Self::Volatility { source, .. } => FeatureRoute::Kind(source.event_kind()),
             Self::Cvd { source, .. }
             | Self::Vpt { source, .. }
             | Self::DayOfWeek { source, .. }
             | Self::TimeSinceFirstEventOfDay { source, .. } => {
                 route_for_source(*source, self.symbol())
             }
-            Self::SmaTimed { .. } | Self::ObvTimed { .. } | Self::TradeCountTimed { .. } => {
-                FeatureRoute::SymbolAny
-            }
+            Self::SmaTimed { .. }
+            | Self::ObvTimed { .. }
+            | Self::VolatilityTimed { .. }
+            | Self::TradeCountTimed { .. } => FeatureRoute::SymbolAny,
         }
     }
 }
@@ -709,6 +723,22 @@ fn group_key(index: usize, key: &FeatureKey) -> Result<(GroupKey, GroupOutput)> 
                 GroupOutput::SampleWindow(window),
             ))
         }
+        FeatureKey::Volatility {
+            symbol,
+            source,
+            window,
+            warmup_policy,
+        } => {
+            validate_sample_window(index, key, window, true)?;
+            Ok((
+                GroupKey::Volatility {
+                    symbol,
+                    source: scalar_source(index, key, source)?,
+                    warmup_policy,
+                },
+                GroupOutput::SampleWindow(window),
+            ))
+        }
         FeatureKey::SmaTimed {
             symbol,
             source,
@@ -742,6 +772,21 @@ fn group_key(index: usize, key: &FeatureKey) -> Result<(GroupKey, GroupOutput)> 
                 GroupOutput::TimedPeriod(validate_timed_window(index, key, aggregation, window)?),
             ))
         }
+        FeatureKey::VolatilityTimed {
+            symbol,
+            source,
+            aggregation,
+            window,
+            warmup_policy,
+        } => Ok((
+            GroupKey::VolatilityTimed {
+                symbol,
+                source: scalar_source(index, key, source)?,
+                aggregation,
+                warmup_policy,
+            },
+            GroupOutput::TimedPeriod(validate_timed_window(index, key, aggregation, window)?),
+        )),
         FeatureKey::Vpt { symbol, source } => {
             validate_trade_source(index, key, source)?;
             Ok((GroupKey::Vpt { symbol, source }, GroupOutput::Scalar))
@@ -977,6 +1022,14 @@ fn build_group(group: &FeatureGroup) -> Result<FeatureDerivation> {
             GroupOutputs::SampleWindows(windows),
         ) => derivation::cvd::build(*symbol, windows, *warmup_policy),
         (
+            GroupKey::Volatility {
+                symbol,
+                source,
+                warmup_policy,
+            },
+            GroupOutputs::SampleWindows(windows),
+        ) => derivation::volatility::build(*symbol, *source, windows, *warmup_policy),
+        (
             GroupKey::SmaTimed {
                 symbol,
                 source,
@@ -1005,6 +1058,21 @@ fn build_group(group: &FeatureGroup) -> Result<FeatureDerivation> {
             *aggregation,
             periods,
             periods.iter().copied().max().unwrap_or(0),
+            *warmup_policy,
+        ),
+        (
+            GroupKey::VolatilityTimed {
+                symbol,
+                source,
+                aggregation,
+                warmup_policy,
+            },
+            GroupOutputs::TimedPeriods(periods),
+        ) => derivation::volatility::build_timed(
+            *symbol,
+            *source,
+            *aggregation,
+            periods,
             *warmup_policy,
         ),
         (GroupKey::Vpt { symbol, .. }, GroupOutputs::Scalar) => Ok(derivation::vpt::build(*symbol)),
@@ -1204,8 +1272,10 @@ fn group_kind(key: &GroupKey) -> IndicatorKind {
         GroupKey::Sma { .. } => IndicatorKind::Sma,
         GroupKey::Ema { .. } => IndicatorKind::Ema,
         GroupKey::Cvd { .. } => IndicatorKind::Cvd,
+        GroupKey::Volatility { .. } => IndicatorKind::Volatility,
         GroupKey::SmaTimed { .. } => IndicatorKind::SmaTimed,
         GroupKey::ObvTimed { .. } => IndicatorKind::ObvTimed,
+        GroupKey::VolatilityTimed { .. } => IndicatorKind::VolatilityTimed,
         GroupKey::Vpt { .. } => IndicatorKind::Vpt,
         GroupKey::TradeCountTimed { .. } => IndicatorKind::TradeCountTimed,
         GroupKey::DayOfWeek { .. } => IndicatorKind::DayOfWeek,
@@ -1244,8 +1314,10 @@ fn group_kind_from_feature_key(key: &FeatureKey) -> IndicatorKind {
         FeatureKey::Sma { .. } => IndicatorKind::Sma,
         FeatureKey::Ema { .. } => IndicatorKind::Ema,
         FeatureKey::Cvd { .. } => IndicatorKind::Cvd,
+        FeatureKey::Volatility { .. } => IndicatorKind::Volatility,
         FeatureKey::SmaTimed { .. } => IndicatorKind::SmaTimed,
         FeatureKey::ObvTimed { .. } => IndicatorKind::ObvTimed,
+        FeatureKey::VolatilityTimed { .. } => IndicatorKind::VolatilityTimed,
         FeatureKey::Vpt { .. } => IndicatorKind::Vpt,
         FeatureKey::TradeCountTimed { .. } => IndicatorKind::TradeCountTimed,
         FeatureKey::DayOfWeek { .. } => IndicatorKind::DayOfWeek,

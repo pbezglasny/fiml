@@ -2,11 +2,13 @@ use std::{
     alloc::{GlobalAlloc, Layout, System},
     cell::Cell,
     hint::black_box,
+    time::Duration,
 };
 
 use fiml::{
     ArrayFeatureVector, Event, FeatureDefinition, FeatureExtractorSpec, FeatureId, FeatureKey,
-    FeatureSource, Pipeline, PipelineSpec, Symbol, TransformerDefinition,
+    FeatureSource, FeatureVector, Pipeline, PipelineSpec, Symbol, TransformerDefinition,
+    WarmupPolicy,
 };
 
 thread_local! {
@@ -111,6 +113,49 @@ fn allocation_counter_detects_heap_allocation() {
     });
 
     assert!(allocations > 0);
+}
+
+#[test]
+fn rolling_volatility_updates_do_not_allocate() {
+    let symbol = Symbol::new("volatility-allocations").unwrap();
+    let mut extractor = FeatureExtractorSpec::new([
+        FeatureDefinition::with_default_id(FeatureKey::Volatility {
+            symbol,
+            source: FeatureSource::Field(fiml::EventField::Price),
+            window: 4,
+            warmup_policy: WarmupPolicy::FirstValue,
+        }),
+        FeatureDefinition::with_default_id(FeatureKey::VolatilityTimed {
+            symbol,
+            source: FeatureSource::Field(fiml::EventField::Price),
+            aggregation: Duration::from_millis(1),
+            window: Duration::from_millis(4),
+            warmup_policy: WarmupPolicy::FirstValue,
+        }),
+    ])
+    .unwrap()
+    .build(ArrayFeatureVector::<2>::new())
+    .unwrap();
+
+    assert_eq!(
+        count_allocations(|| {
+            for timestamp in 0..128 {
+                black_box(
+                    extractor
+                        .handle_event(Event::price(symbol, 100.0 + timestamp as f64, timestamp))
+                        .unwrap(),
+                );
+            }
+        }),
+        0
+    );
+    assert!(
+        extractor
+            .feature_vector()
+            .values()
+            .iter()
+            .all(|value| value.is_finite())
+    );
 }
 
 #[test]
