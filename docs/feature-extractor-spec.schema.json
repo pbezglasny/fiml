@@ -46,7 +46,12 @@
       "properties": {
         "symbol": { "type": "string", "minLength": 1 },
         "indicators": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/indicator" } }
-      }
+      },
+      "allOf": [{
+        "if": { "properties": { "symbol": { "const": "__global__" } } },
+        "then": { "properties": { "indicators": { "items": { "properties": { "kind": { "enum": ["day_of_week", "time_since_first_event_of_day"] } } } } } },
+        "else": { "properties": { "indicators": { "items": { "properties": { "kind": { "not": { "enum": ["day_of_week", "time_since_first_event_of_day"] } } } } } } }
+      }]
     },
     "indicator": {
       "type": "object", "additionalProperties": false,
@@ -109,17 +114,33 @@
             "required": ["outputs"],
             "properties": {
               "warmup_policy": false,
+              "options": { "maxProperties": 0 },
               "outputs": { "maxItems": 16, "items": { "required": ["lag"], "not": { "required": ["window"] } } }
             }
           },
           "else": { "properties": { "outputs": { "items": { "not": { "required": ["lag"] } } } } }
         },
         {
-          "if": { "properties": { "kind": { "const": "vwap_timed" } } },
+          "if": { "properties": { "kind": { "enum": ["sma", "ema", "cvd", "volatility"] } } },
+          "then": {
+            "required": ["warmup_policy", "outputs"],
+            "properties": {
+              "options": { "maxProperties": 0 },
+              "outputs": {
+                "maxItems": 16,
+                "items": {
+                  "required": ["window"],
+                  "properties": { "window": { "type": "integer", "minimum": 1 } }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "kind": { "enum": ["sma_timed", "obv_timed", "volatility_timed", "trade_count_timed", "trade_volume_timed", "vwap_timed"] } } },
           "then": {
             "required": ["warmup_policy", "options", "outputs"],
             "properties": {
-              "source": { "const": { "type": "event", "event": "trade" } },
               "options": {
                 "type": "object", "additionalProperties": false,
                 "required": ["aggregation"],
@@ -129,15 +150,52 @@
                 "maxItems": 16,
                 "items": {
                   "required": ["window"],
-                  "properties": { "window": { "$ref": "#/$defs/duration" } },
-                  "allOf": [
-                    { "not": { "required": ["lag"] } },
-                    { "not": { "required": ["n_levels"] } }
-                  ]
+                  "properties": { "window": { "$ref": "#/$defs/duration" } }
                 }
               }
             }
           }
+        },
+        {
+          "if": { "properties": { "kind": { "const": "trade_count_timed" } } },
+          "then": { "properties": { "outputs": { "maxItems": 1 } } }
+        },
+        {
+          "if": { "properties": { "kind": { "enum": ["vpt", "day_of_week"] } } },
+          "then": {
+            "properties": {
+              "warmup_policy": false,
+              "options": { "maxProperties": 0 },
+              "outputs": { "maxItems": 1, "items": { "not": { "required": ["window"] } } }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "kind": { "const": "time_since_first_event_of_day" } } },
+          "then": {
+            "required": ["options"],
+            "properties": {
+              "warmup_policy": false,
+              "options": {
+                "type": "object", "additionalProperties": false,
+                "required": ["utc_offset"],
+                "properties": { "utc_offset": { "type": "string", "pattern": "^[+-][0-9]{2}:[0-9]{2}$" } }
+              },
+              "outputs": { "maxItems": 1, "items": { "not": { "required": ["window"] } } }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "kind": { "enum": ["sma", "ema", "simple_return", "log_return", "volatility", "sma_timed", "volatility_timed"] } } },
+          "then": { "properties": { "source": { "properties": { "type": { "const": "field" } } } } }
+        },
+        {
+          "if": { "properties": { "kind": { "enum": ["cvd", "obv_timed", "vpt", "trade_count_timed", "trade_volume_timed", "vwap_timed"] } } },
+          "then": { "properties": { "source": { "const": { "type": "event", "event": "trade" } } } }
+        },
+        {
+          "if": { "properties": { "kind": { "enum": ["day_of_week", "time_since_first_event_of_day"] } } },
+          "then": { "properties": { "source": { "const": { "type": "any_event" } } } }
         }
       ]
     },
