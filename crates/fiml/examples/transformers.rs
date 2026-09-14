@@ -3,11 +3,11 @@
 
 use fiml::{
     ArrayFeatureVector, Event, EventField, FeatureDefinition, FeatureExtractorSpec, FeatureId,
-    FeatureKey, FeatureSource, PipelineSpec, TransformerDefinition, WarmupPolicy, symbols,
+    FeatureKey, FeatureSource, PipelineSpec, Symbol, TransformerDefinition, WarmupPolicy,
 };
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let btc = symbols::intern("BTCUSDT")?;
+    let btc = Symbol::new("BTCUSDT")?;
     let raw_id = FeatureId::new("raw_sma");
     let raw_spec = FeatureExtractorSpec::new([FeatureDefinition::new(
         FeatureKey::Sma {

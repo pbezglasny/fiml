@@ -8,7 +8,7 @@ use crate::{
 };
 
 /// Number of [`EventKind`] variants.
-pub const EVENT_KIND_COUNT: usize = 6;
+pub(crate) const EVENT_KIND_COUNT: usize = 6;
 
 /// Kind tag of an [`Event`]. Discriminants must stay in
 /// `0..EVENT_KIND_COUNT` so feature routing can use them as array indexes.
@@ -263,7 +263,7 @@ impl Event {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::symbols;
+    use crate::Symbol;
 
     #[test]
     fn numeric_payloads_must_be_finite() {
@@ -319,7 +319,7 @@ mod tests {
 
     #[test]
     fn volume_event_has_volume_kind() {
-        let aapl = symbols::intern("AAPL").unwrap();
+        let aapl = Symbol::new("AAPL").unwrap();
         let event = Event::volume(aapl, 42.0, 123);
 
         assert_eq!(event.kind(), EventKind::Volume);
@@ -327,7 +327,7 @@ mod tests {
 
     #[test]
     fn trade_event_has_trade_kind_and_payload() {
-        let aapl = symbols::intern("AAPL").unwrap();
+        let aapl = Symbol::new("AAPL").unwrap();
         let event = Event::trade(aapl, 42.0, 100.0, 123, Some(TradeSide::AgressorSell));
 
         assert_eq!(event.kind(), EventKind::Trade);

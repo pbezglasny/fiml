@@ -58,7 +58,7 @@ pub(crate) fn build(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{ArrayFeatureVector, FeatureVector, symbols};
+    use crate::{ArrayFeatureVector, FeatureVector, Symbol};
 
     fn approx_eq(a: f64, b: f64) -> bool {
         (a - b).abs() < 1e-9
@@ -66,8 +66,8 @@ mod tests {
 
     #[test]
     fn ema_reacts_to_price_events() {
-        let aapl = symbols::intern("AAPL").unwrap();
-        let googl = symbols::intern("GOOGL").unwrap();
+        let aapl = Symbol::new("AAPL").unwrap();
+        let googl = Symbol::new("GOOGL").unwrap();
         let mut fv: ArrayFeatureVector<1> = ArrayFeatureVector::new();
         let mut ema: ExponentialMovingAverage<MAX_OUTPUTS_PER_INDICATOR> =
             ExponentialMovingAverage::new(WarmupPolicy::FirstValue);
@@ -87,8 +87,8 @@ mod tests {
 
     #[test]
     fn ema_reacts_to_volume_events() {
-        let aapl = symbols::intern("AAPL").unwrap();
-        let googl = symbols::intern("GOOGL").unwrap();
+        let aapl = Symbol::new("AAPL").unwrap();
+        let googl = Symbol::new("GOOGL").unwrap();
         let mut fv: ArrayFeatureVector<1> = ArrayFeatureVector::new();
         let mut ema: ExponentialMovingAverage<MAX_OUTPUTS_PER_INDICATOR> =
             ExponentialMovingAverage::new(WarmupPolicy::FirstValue);
@@ -108,8 +108,8 @@ mod tests {
 
     #[test]
     fn ema_reacts_to_trade_price_events() {
-        let aapl = symbols::intern("AAPL").unwrap();
-        let googl = symbols::intern("GOOGL").unwrap();
+        let aapl = Symbol::new("AAPL").unwrap();
+        let googl = Symbol::new("GOOGL").unwrap();
         let mut fv: ArrayFeatureVector<1> = ArrayFeatureVector::new();
         let mut ema: ExponentialMovingAverage<MAX_OUTPUTS_PER_INDICATOR> =
             ExponentialMovingAverage::new(WarmupPolicy::FirstValue);

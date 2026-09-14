@@ -45,12 +45,12 @@ pub(crate) fn build(symbol: Symbol) -> FeatureDerivation {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{ArrayFeatureVector, FeatureVector, symbols};
+    use crate::{ArrayFeatureVector, FeatureVector, Symbol};
 
     #[test]
     fn vpt_ingests_only_matching_trades() {
-        let aapl = symbols::intern("AAPL").unwrap();
-        let googl = symbols::intern("GOOGL").unwrap();
+        let aapl = Symbol::new("AAPL").unwrap();
+        let googl = Symbol::new("GOOGL").unwrap();
         let mut output = ArrayFeatureVector::<1>::new();
         let mut feature = VptFeature::new(aapl);
         let range = OutputRange { start: 0, count: 1 };

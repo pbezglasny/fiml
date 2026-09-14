@@ -13,7 +13,7 @@ mod order_book;
 mod pipeline_spec;
 mod runtime;
 
-use fiml::{Symbol, symbols};
+use fiml::Symbol;
 use pyo3::{exceptions::PyValueError, prelude::*};
 
 use feature_extractor::FeatureExtractor;
@@ -28,7 +28,7 @@ use runtime::{
 
 /// Interns a symbol and translates core errors for all Python callers.
 pub(crate) fn intern_symbol(name: &str) -> PyResult<Symbol> {
-    symbols::intern(name).map_err(|error| PyValueError::new_err(error.to_string()))
+    Symbol::new(name).map_err(|error| PyValueError::new_err(error.to_string()))
 }
 
 #[pymodule]

@@ -58,7 +58,7 @@ pub(crate) fn build(utc_offset_millis: i64) -> FeatureDerivation {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{ArrayFeatureVector, FeatureVector, symbols};
+    use crate::{ArrayFeatureVector, FeatureVector, Symbol};
 
     fn approx_eq(a: f64, b: f64) -> bool {
         (a - b).abs() < 1e-9
@@ -66,7 +66,7 @@ mod tests {
 
     #[test]
     fn measures_elapsed_since_first_event_of_the_day() {
-        let aapl = symbols::intern("AAPL").unwrap();
+        let aapl = Symbol::new("AAPL").unwrap();
         let mut fv: ArrayFeatureVector<1> = ArrayFeatureVector::new();
         let mut feat = TimeSinceFirstEventOfDay::new(0);
         let output_range = OutputRange { start: 0, count: 1 };
@@ -87,7 +87,7 @@ mod tests {
 
     #[test]
     fn resets_at_the_next_day_boundary() {
-        let aapl = symbols::intern("AAPL").unwrap();
+        let aapl = Symbol::new("AAPL").unwrap();
         let mut fv: ArrayFeatureVector<1> = ArrayFeatureVector::new();
         let mut feat = TimeSinceFirstEventOfDay::new(0);
         let output_range = OutputRange { start: 0, count: 1 };

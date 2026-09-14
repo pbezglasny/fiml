@@ -2,8 +2,7 @@
 use fiml::{
     ArrayFeatureVector, Event, EventField, FeatureDefinition, FeatureExtractorSpec, FeatureKey,
     FeatureSource, FeatureVector, FimlError, InvalidArgumentError, LimitTarget, Symbol,
-    WarmupPolicy,
-    symbols::{self, MAX_SYMBOL_NUMBER},
+    WarmupPolicy, symbols::MAX_SYMBOL_NUMBER,
 };
 
 #[test]
@@ -13,7 +12,7 @@ fn capacity_errors_preserve_existing_symbols_and_runtime() {
         .collect();
     let symbols: Vec<_> = names
         .iter()
-        .map(|name| symbols::intern(name).unwrap())
+        .map(|name| Symbol::new(name).unwrap())
         .collect();
     let first = symbols[0];
     let spec = FeatureExtractorSpec::new([FeatureDefinition::with_default_id(FeatureKey::Sma {
@@ -29,11 +28,10 @@ fn capacity_errors_preserve_existing_symbols_and_runtime() {
         .unwrap();
 
     for result in [
-        symbols::intern("overflow"),
         Symbol::new("overflow"),
         Symbol::try_from("overflow"),
         Symbol::try_from(String::from("overflow")),
-        symbols::intern("another-overflow"),
+        Symbol::new("another-overflow"),
     ] {
         let error = result.unwrap_err();
         assert!(matches!(
@@ -77,8 +75,8 @@ fn capacity_errors_preserve_existing_symbols_and_runtime() {
     }
 
     for (name, &symbol) in names.iter().zip(&symbols) {
-        assert_eq!(symbols::intern(&name.to_ascii_uppercase()).unwrap(), symbol);
-        assert_eq!(symbols::resolve(symbol).as_ref(), Some(name));
+        assert_eq!(Symbol::new(&name.to_ascii_uppercase()).unwrap(), symbol);
+        assert_eq!(symbol.resolve_as_string(), *name);
     }
     assert_eq!(Symbol::new("__GLOBAL__").unwrap(), Symbol::GLOBAL);
     assert_eq!(Symbol::try_from("CAPACITY-0").unwrap(), first);

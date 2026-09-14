@@ -3,7 +3,11 @@
 mod book;
 mod book_side;
 
-pub use book::*;
+pub(crate) use book::PreparedOrderBookUpdate;
+pub use book::{
+    DepthUntilSizeResult, OrderBook, OrderBookUpdateError, OrderBookUpdateOutcome, SyncState,
+    UpdatePolicy,
+};
 use rust_decimal::Decimal;
 
 pub type OrderBookUpdateId = u64;

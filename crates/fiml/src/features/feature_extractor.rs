@@ -1,5 +1,6 @@
 //! Routes accepted events through compiled derivations into caller-owned feature storage.
 //!
+use crate::event::EVENT_KIND_COUNT;
 use crate::features::FeatureRoute;
 use crate::features::compiler::{Compilation, OutputRange};
 use crate::features::derivation::FeatureDerivation;
@@ -9,8 +10,8 @@ use crate::order_book::{
 };
 use crate::symbols::MAX_SYMBOL_NUMBER;
 use crate::{
-    EVENT_KIND_COUNT, Event, EventKind, FeatureId, FeatureVector, FimlError, InvalidArgumentError,
-    LimitTarget, Result, Symbol,
+    Event, EventKind, FeatureId, FeatureVector, FimlError, InvalidArgumentError, LimitTarget,
+    Result, Symbol,
 };
 
 #[derive(Clone, Copy, Default)]
@@ -332,7 +333,7 @@ pub struct UpdateResult {
 }
 
 impl UpdateResult {
-    pub fn combine_with(self, other: UpdateResult) -> Self {
+    fn combine_with(self, other: UpdateResult) -> Self {
         Self {
             features_updated: self.features_updated + other.features_updated,
         }

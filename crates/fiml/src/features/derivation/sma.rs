@@ -130,7 +130,7 @@ pub(crate) fn build_timed(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{ArrayFeatureVector, FeatureVector, symbols};
+    use crate::{ArrayFeatureVector, FeatureVector, Symbol};
 
     fn approx_eq(a: f64, b: f64) -> bool {
         (a - b).abs() < 1e-9
@@ -138,7 +138,7 @@ mod tests {
 
     #[test]
     fn grouped_sma_writes_adjacent_outputs() {
-        let symbol = symbols::intern("AAPL").unwrap();
+        let symbol = Symbol::new("AAPL").unwrap();
         let mut feature =
             match build(symbol, EventField::Price, &[2, 3], WarmupPolicy::FullWindow).unwrap() {
                 FeatureDerivation::Sma(feature) => feature,
@@ -157,7 +157,7 @@ mod tests {
 
     #[test]
     fn sma_can_consume_trade_volume() {
-        let symbol = symbols::intern("AAPL").unwrap();
+        let symbol = Symbol::new("AAPL").unwrap();
         let mut feature = match build(
             symbol,
             EventField::TradeVolume,

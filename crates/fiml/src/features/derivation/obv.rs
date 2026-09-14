@@ -74,7 +74,7 @@ pub(crate) fn build_timed(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{ArrayFeatureVector, FeatureVector, symbols};
+    use crate::{ArrayFeatureVector, FeatureVector, Symbol};
 
     fn approx_eq(a: f64, b: f64) -> bool {
         (a - b).abs() < 1e-9
@@ -82,8 +82,8 @@ mod tests {
 
     #[test]
     fn obv_timed_ingests_matching_trades_and_observes_other_events() {
-        let aapl = symbols::intern("AAPL").unwrap();
-        let googl = symbols::intern("GOOGL").unwrap();
+        let aapl = Symbol::new("AAPL").unwrap();
+        let googl = Symbol::new("GOOGL").unwrap();
         let mut fv: ArrayFeatureVector<1> = ArrayFeatureVector::new();
         let mut obv: OnBalanceVolumeTimed<HeapRingBuffer<ObvBucket>, MAX_OUTPUTS_PER_INDICATOR> =
             OnBalanceVolumeTimed::new_heap(
