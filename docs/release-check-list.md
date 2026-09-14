@@ -71,7 +71,7 @@ package dry run:
 
 ### 4. Complete Python package metadata and documentation
 
-- [ ] Add the license, project URLs, maintainers, and supported Python-version
+- [x] Add the license, project URLs, maintainers, and supported Python-version
   classifiers to `crates/fiml-python/pyproject.toml`.
 - [ ] Replace the `<repo-url>` placeholder in
   `crates/fiml-python/README.md`.
