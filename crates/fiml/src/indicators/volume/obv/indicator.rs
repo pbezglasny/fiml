@@ -1,3 +1,5 @@
+//! Implements on-balance volume over rolling time windows.
+//!
 use std::mem::MaybeUninit;
 use std::time::Duration;
 

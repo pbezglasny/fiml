@@ -1,3 +1,5 @@
+//! Defines shared policies used across indicators and feature compilation.
+//!
 /// Determines when a window indicator starts exposing values.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(

@@ -1,3 +1,5 @@
+//! Validates, groups, and compiles feature definitions into runtime derivations and routes.
+//!
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 

@@ -1,3 +1,5 @@
+//! Provides fixed-capacity stack and heap ring buffers for rolling indicators.
+//!
 use std::{collections::VecDeque, mem::MaybeUninit};
 
 pub trait RingBuffer {

@@ -1,3 +1,5 @@
+//! Routes accepted events through compiled derivations into caller-owned feature storage.
+//!
 use crate::features::FeatureRoute;
 use crate::features::compiler::{Compilation, OutputRange};
 use crate::features::derivation::FeatureDerivation;

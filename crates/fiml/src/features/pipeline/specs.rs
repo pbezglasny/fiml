@@ -1,3 +1,5 @@
+//! Defines validated raw-feature and model-input pipeline layouts.
+//!
 use super::{FittedStage, Pipeline, StageRuntime};
 use crate::{
     FeatureExtractorSpec, FeatureVector, FimlError, InvalidArgumentError, Result,

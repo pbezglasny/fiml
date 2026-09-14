@@ -1,3 +1,5 @@
+//! Stores the canonical feature-extractor specification independently of runtime state.
+//!
 use crate::order_book::{OrderBook, OrderBookConfig};
 use crate::{
     FeatureDefinition, FeatureExtractor, FeatureSource, FeatureVector, FimlError,

@@ -1,3 +1,5 @@
+//! Calculates volume-weighted average price over rolling time windows.
+//!
 use std::time::Duration;
 
 use crate::indicators::timed_sum::{RollingTimedSum, TimedSumBucket};

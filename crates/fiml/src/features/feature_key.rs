@@ -1,3 +1,5 @@
+//! Defines the structural identity of every supported scalar feature output.
+//!
 use std::time::Duration;
 
 use rust_decimal::Decimal;

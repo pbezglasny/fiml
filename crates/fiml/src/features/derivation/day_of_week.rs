@@ -1,3 +1,5 @@
+//! Derives a UTC day-of-week value from accepted event timestamps.
+//!
 use crate::event::Event;
 use crate::features::compiler::OutputRange;
 use crate::features::derivation::FeatureDerivation;

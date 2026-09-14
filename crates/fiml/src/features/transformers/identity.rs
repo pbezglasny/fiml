@@ -1,3 +1,5 @@
+//! Copies selected raw features into model-input positions.
+//!
 use crate::FeatureVector;
 
 /// Copies a raw scalar into model input using resolved indexes without allocation.

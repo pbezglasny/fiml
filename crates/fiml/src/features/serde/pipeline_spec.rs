@@ -1,3 +1,5 @@
+//! Serializes and deserializes versioned model-input pipeline specifications.
+//!
 use ::serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use super::{FeatureExtractorSpec, serialization::deserialize_present_option};

@@ -1,3 +1,5 @@
+//! Provides shared fixed-bucket rolling sums for time-window indicators.
+//!
 use std::mem::MaybeUninit;
 use std::time::Duration;
 

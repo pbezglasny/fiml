@@ -1,3 +1,5 @@
+//! Applies sequenced snapshots and deltas to a synchronized two-sided order book.
+//!
 use std::collections::VecDeque;
 use std::fmt;
 

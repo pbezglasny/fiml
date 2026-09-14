@@ -1,3 +1,5 @@
+//! Stores one price-ordered side of an order book and answers depth queries.
+//!
 use std::collections::BTreeMap;
 
 use rust_decimal::Decimal;

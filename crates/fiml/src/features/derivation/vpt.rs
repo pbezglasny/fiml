@@ -1,3 +1,5 @@
+//! Adapts volume-price trend to a compiled feature output.
+//!
 use crate::Symbol;
 use crate::event::Event;
 use crate::features::compiler::OutputRange;

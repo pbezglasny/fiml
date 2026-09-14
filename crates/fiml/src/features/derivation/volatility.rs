@@ -1,3 +1,5 @@
+//! Adapts sample and timed rolling volatility to compiled feature outputs.
+//!
 use std::time::Duration;
 
 use crate::event::Event;

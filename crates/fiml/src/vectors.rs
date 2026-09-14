@@ -1,3 +1,5 @@
+//! Defines caller-owned feature-vector storage backed by arrays or vectors.
+//!
 use crate::{FimlError, InvalidArgumentError, Result};
 
 /// Abstraction layer for feature vector.

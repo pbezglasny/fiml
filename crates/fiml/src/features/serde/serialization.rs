@@ -1,3 +1,5 @@
+//! Implements the strict versioned wire format for feature-extractor specifications.
+//!
 use std::collections::{BTreeSet, HashSet};
 use std::time::Duration;
 
