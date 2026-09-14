@@ -303,6 +303,8 @@ impl OrderBookStorage {
 /// Construction resets every output cell to `NaN`, including reserved cells.
 /// Handling an event updates the subscribed features directly in that vector
 /// without allocating on the event-processing path.
+///
+/// Create with [`Self::builder`] and borrow outputs through [`Self::feature_vector`].
 pub struct FeatureExtractor<V>
 where
     V: FeatureVector,
@@ -326,6 +328,7 @@ where
     max_timestamp: Option<i64>,
 }
 
+/// Processing summary for an accepted event; one handler may write multiple output cells.
 #[derive(Clone, Copy)]
 pub struct UpdateResult {
     /// Number of runtime feature handlers invoked for the accepted event.
@@ -378,6 +381,8 @@ where
         })
     }
 
+    /// Starts configuring an extractor using the supplied output storage.
+    /// The active length must match the number of feature definitions at build time.
     pub fn builder(output_vector: V) -> FeatureExtractorBuilder<V> {
         FeatureExtractorBuilder::new(output_vector)
     }

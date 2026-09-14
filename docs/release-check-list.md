@@ -15,8 +15,8 @@ documentation, and Python distribution still need work.
 - [x] `cargo package -p fiml`: 81 files, 134.0 KiB compressed
 - [x] Current GitHub `main` build
 - [x] No existing `fiml` package was found on crates.io or PyPI on 2026-09-12
-- [ ] Strict Rust documentation check; `missing_docs` currently reports many
-  undocumented public items
+- [x] Strict Rust documentation check: `-D warnings -D missing_docs` passes,
+  including on Rust 1.89.
 
 ## Release blockers
 
@@ -84,8 +84,8 @@ package dry run:
 - [ ] Decide which modules and types are intentionally public; make
   implementation details private before users depend on them.
 - [x] Add crate-level documentation with a minimal end-to-end example.
-- [ ] Document the supported public types, traits, methods, errors, and limits.
-- [ ] Add a CI documentation check once the public surface is documented:
+- [x] Document the supported public types, traits, methods, errors, and limits.
+- [x] Add a CI documentation check once the public surface is documented:
 
   ```bash
   RUSTDOCFLAGS="-D warnings -D missing_docs" \

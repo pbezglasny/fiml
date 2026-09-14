@@ -4,6 +4,10 @@ use crate::features::compiler;
 use crate::order_book::OrderBook;
 use crate::{FeatureDefinition, FeatureExtractor, FeatureVector, FimlError, Symbol};
 
+/// Collects feature definitions and order books before compiling an extractor.
+///
+/// Obtain this through [`FeatureExtractor::builder`]. Construction validates the
+/// definitions against the supplied storage length; event processing reuses that storage.
 pub struct FeatureExtractorBuilder<V>
 where
     V: FeatureVector,

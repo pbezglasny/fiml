@@ -77,6 +77,11 @@ where
 impl<const PERIODS: usize, const WINDOWS: usize>
     SimpleMovingAverage<StackRingBuffer<PERIODS, f64>, WINDOWS>
 {
+    /// Creates an empty indicator with inline history; add windows before updating.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the compile-time history capacity is zero.
     pub fn new_stack(warmup_policy: WarmupPolicy) -> Self {
         let stack_data = new_stack_ring_buffer::<PERIODS, f64>();
         let windows = [const { MaybeUninit::<SmaWindow>::uninit() }; WINDOWS];
@@ -85,6 +90,11 @@ impl<const PERIODS: usize, const WINDOWS: usize>
 }
 
 impl<const WINDOWS: usize> SimpleMovingAverage<HeapRingBuffer<f64>, WINDOWS> {
+    /// Creates an empty indicator with heap-allocated history; add windows before updating.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `periods` is zero.
     pub fn new_heap(periods: usize, warmup_policy: WarmupPolicy) -> Self {
         let heap_data = new_heap_ring_buffer::<f64>(periods);
         let windows = [const { MaybeUninit::<SmaWindow>::uninit() }; WINDOWS];
@@ -96,6 +106,12 @@ impl<R, const WINDOWS: usize> SimpleMovingAverage<R, WINDOWS>
 where
     R: RingBuffer<Item = f64>,
 {
+    /// Adds a rolling window with a positive sample period.
+    ///
+    /// # Errors
+    ///
+    /// Rejects additions after data has arrived or once `WINDOWS` windows are configured. Also
+    /// rejects zero periods or periods exceeding history capacity.
     pub fn add_window(&mut self, period: usize) -> Result<()> {
         if self.window_count >= WINDOWS {
             return Err(FimlError::InvalidArgument(
@@ -138,6 +154,7 @@ where
         Ok(())
     }
 
+    /// Records a finite sample and updates each rolling average in place.
     pub fn update(&mut self, value: f64) {
         let old_value = self.data.push_back(value);
         for i in 0..self.window_count {
@@ -156,6 +173,7 @@ where
         }
     }
 
+    /// Returns the zero-based window's value, or `None` if absent or still warming up.
     pub fn value_at(&self, window_id: usize) -> Option<f64> {
         if !self.is_ready_at(window_id) {
             return None;
@@ -164,6 +182,7 @@ where
         Some(window.moving_avg)
     }
 
+    /// Reports whether the zero-based window has met its warm-up policy; false if absent.
     pub fn is_ready_at(&self, index: usize) -> bool {
         if index >= self.window_count {
             return false;
@@ -175,10 +194,12 @@ where
         }
     }
 
+    /// Returns true when at least one window exists and all windows meet their warm-up policy.
     pub fn is_ready(&self) -> bool {
         self.window_count > 0 && (0..self.window_count).all(|index| self.is_ready_at(index))
     }
 
+    /// Returns window values in insertion order, with `NaN` for unused or unavailable slots.
     pub fn values(&self) -> [f64; WINDOWS] {
         let mut result = [f64::NAN; WINDOWS];
         for (i, item) in result.iter_mut().enumerate().take(self.window_count) {
@@ -198,13 +219,12 @@ struct SmaWindowTimed {
     ready: bool,
 }
 
-///Simple Moving Average(SMA) with time-based windows. Event stream aggregated for specified duration.
-///Each window tracks the sum and count of values within its time period, and calculates the average
-///as sum/count.
-///Window cannot be less than the aggregation duration, and all windows must be multiples of the
-///aggregation duration.
-///Aggeregation can not be less than one millisecond.
-///All windows must be added before the first input value is recorded.
+/// Simple moving average of nonempty time-bucket means over rolling windows.
+///
+/// Each bucket averages its samples; each window gives equal weight to the
+/// nonempty buckets it contains. Durations must use whole milliseconds, with
+/// positive aggregation and windows that are exact multiples of aggregation.
+/// Add all windows before recording input values.
 pub struct SimpleMovingAverageTimed<R, const WINDOWS: usize>
 where
     R: RingBuffer<Item = (i64, f64)>,
@@ -298,6 +318,12 @@ where
         })
     }
 
+    /// Adds a window spanning `periods` aggregation buckets.
+    ///
+    /// # Errors
+    ///
+    /// Rejects zero periods, periods at least as large as history capacity, durations
+    /// outside `i64` milliseconds, additions after data, or more than `WINDOWS` windows.
     pub fn add_window_with_periods(&mut self, periods: usize) -> Result<()> {
         if self.window_count >= WINDOWS {
             return Err(FimlError::InvalidArgument(
@@ -354,6 +380,12 @@ where
         Ok(())
     }
 
+    /// Adds a duration-based window before receiving data.
+    ///
+    /// # Errors
+    ///
+    /// The duration must use whole `i64` milliseconds and be a positive multiple of
+    /// aggregation. The window-count and capacity limits of [`Self::add_window_with_periods`] apply.
     pub fn add_window_with_duration(&mut self, period: Duration) -> Result<()> {
         if !period.subsec_nanos().is_multiple_of(1_000_000) {
             return Err(FimlError::InvalidArgument(
@@ -450,6 +482,8 @@ where
         true
     }
 
+    /// Records a finite value at an epoch-millisecond timestamp and updates bucket means.
+    /// Supply nondecreasing timestamps; this method does not validate their ordering.
     pub fn update(&mut self, value: f64, event_timestamp: i64) {
         if self.first_timestamp.is_none() {
             self.first_timestamp = Some(event_timestamp);
@@ -502,7 +536,7 @@ where
         }
     }
 
-    /// Return value of i-th Window
+    /// Returns the zero-based window's mean, or `None` if absent, warming up, or empty.
     pub fn value_at(&self, index: usize) -> Option<f64> {
         if !self.is_ready_at(index) {
             return None;
@@ -511,6 +545,7 @@ where
         (window.bucket_count > 0).then_some(window.moving_avg)
     }
 
+    /// Reports whether the zero-based window has met its warm-up policy; false if absent.
     pub fn is_ready_at(&self, index: usize) -> bool {
         if index >= self.window_count {
             return false;
@@ -519,11 +554,12 @@ where
         window.ready
     }
 
+    /// Returns true when at least one window exists and all windows meet their warm-up policy.
     pub fn is_ready(&self) -> bool {
         self.window_count > 0 && (0..self.window_count).all(|index| self.is_ready_at(index))
     }
 
-    /// Return values of windows
+    /// Returns window means in insertion order, with `NaN` for unused or unavailable slots.
     pub fn values(&self) -> [f64; WINDOWS] {
         let mut result = [f64::NAN; WINDOWS];
         for (i, item) in result.iter_mut().enumerate().take(self.window_count) {

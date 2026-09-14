@@ -12,6 +12,7 @@ pub struct VolumePriceTrend {
 }
 
 impl VolumePriceTrend {
+    /// Creates a zero-valued accumulator with no previous-price baseline.
     pub const fn new() -> Self {
         Self {
             previous_price: None,
@@ -19,6 +20,9 @@ impl VolumePriceTrend {
         }
     }
 
+    /// Adds `volume * (price - previous_price) / previous_price` and returns the total.
+    /// The first price, or a zero previous price, only sets the baseline.
+    /// The caller must supply finite price and volume.
     pub fn update(&mut self, price: f64, volume: f64) -> f64 {
         if let Some(previous_price) = self.previous_price
             && previous_price != 0.0
@@ -29,6 +33,7 @@ impl VolumePriceTrend {
         self.value
     }
 
+    /// Returns the cumulative value, or `None` before the first update.
     pub fn value(&self) -> Option<f64> {
         self.previous_price.map(|_| self.value)
     }

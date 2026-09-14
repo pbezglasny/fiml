@@ -10,64 +10,82 @@ pub use book::{
 };
 use rust_decimal::Decimal;
 
+/// Sequence identifier supplied by the market-data feed.
 pub type OrderBookUpdateId = u64;
 
+/// Side of a two-sided order book.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Side {
+    /// Resting buy orders.
     Bid,
+    /// Resting sell orders.
     Ask,
 }
 
-/// Describe aggregated order book level with price and size.
+/// Aggregated price and size for one level of a snapshot.
 #[derive(Clone)]
 pub struct OrderBookLevel {
+    /// Nonnegative price of the level.
     pub price: Decimal,
+    /// Nonnegative size; zero removes this price level.
     pub size: Decimal,
 }
 
 impl OrderBookLevel {
+    /// Creates a level; price and size are validated when the update is applied.
     pub fn new(price: Decimal, size: Decimal) -> Self {
         Self { price, size }
     }
 }
 
+/// Absolute size replacement for one side and price; a zero size deletes the level.
 #[derive(Clone)]
 pub struct OrderBookLevelUpdate {
+    /// Side containing the changed level.
     pub side: Side,
+    /// Nonnegative price of the level.
     pub price: Decimal,
+    /// Nonnegative size; zero removes this price level.
     pub size: Decimal,
 }
 
 impl OrderBookLevelUpdate {
+    /// Creates an absolute size update; zero size deletes the level when applied.
     pub fn new(side: Side, price: Decimal, size: Decimal) -> Self {
         Self { side, price, size }
     }
 }
 
+/// Sequenced collection of absolute level-size changes.
 #[derive(Clone)]
 pub struct OrderBookDelta {
+    /// Sequence ID of this delta.
     pub update_id: OrderBookUpdateId,
+    /// Absolute level sizes to apply in order, not size increments.
     pub changes: Vec<OrderBookLevelUpdate>,
 }
 
 impl OrderBookDelta {
+    /// Creates a delta from a sequence ID and ordered level changes.
     pub fn new(update_id: OrderBookUpdateId, changes: Vec<OrderBookLevelUpdate>) -> Self {
         Self { update_id, changes }
     }
 }
 
-/// Whole order book update.
-/// Order book supposed to set all vales from event
-/// and apply deltas from buffer that id greater that
-/// this snapshot
+/// Complete book image through a sequence ID.
+/// Applying it replaces visible levels and replays eligible newer buffered deltas.
 #[derive(Clone)]
 pub struct OrderBookSnapshot {
+    /// Latest delta sequence ID included in this snapshot.
     pub last_update_id: OrderBookUpdateId,
+    /// Complete bid levels.
     pub bids: Vec<OrderBookLevel>,
+    /// Complete ask levels.
     pub asks: Vec<OrderBookLevel>,
 }
 
 impl OrderBookSnapshot {
+    /// Creates a snapshot containing all levels through `last_update_id`.
     pub fn new(
         last_update_id: OrderBookUpdateId,
         bids: Vec<OrderBookLevel>,
@@ -81,9 +99,12 @@ impl OrderBookSnapshot {
     }
 }
 
+/// Owned delta or snapshot passed to an order book.
 #[derive(Clone)]
 pub enum OrderBookUpdate {
+    /// Incremental changes to existing levels.
     Delta(OrderBookDelta),
+    /// Complete replacement image used to synchronize the book.
     Snapshot(OrderBookSnapshot),
 }
 
@@ -94,10 +115,12 @@ pub(crate) enum OrderBookUpdateRef<'a> {
 }
 
 impl OrderBookUpdate {
+    /// Creates a delta update without applying or validating its levels.
     pub fn new_delta(update_id: OrderBookUpdateId, changes: Vec<OrderBookLevelUpdate>) -> Self {
         OrderBookUpdate::Delta(OrderBookDelta::new(update_id, changes))
     }
 
+    /// Creates a full snapshot update without applying or validating its levels.
     pub fn new_snapshot(
         last_update_id: OrderBookUpdateId,
         bids: Vec<OrderBookLevel>,
@@ -122,8 +145,11 @@ impl OrderBookUpdate {
 /// Live levels and synchronization history are intentionally excluded.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct OrderBookConfig {
+    /// Non-global market symbol assigned to the book.
     pub symbol: crate::Symbol,
+    /// Rule used to detect missing or stale delta sequence IDs.
     pub update_policy: UpdatePolicy,
+    /// Maximum number of deltas retained for synchronization and snapshot replay.
     pub buffer_size: usize,
 }
 

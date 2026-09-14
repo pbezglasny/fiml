@@ -59,10 +59,12 @@ where
         self.sum.window_value(0, 0)
     }
 
+    /// Reports whether the zero-based window has met its warm-up policy; false if absent.
     pub fn is_ready_at(&self, index: usize) -> bool {
         self.sum.is_ready_at(index)
     }
 
+    /// Returns true when at least one window exists and all windows meet their warm-up policy.
     pub fn is_ready(&self) -> bool {
         self.sum.is_ready()
     }
