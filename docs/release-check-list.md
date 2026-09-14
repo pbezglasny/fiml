@@ -12,7 +12,7 @@ documentation, and Python distribution still need work.
 - [x] Rust workspace tests: 220 passed
 - [x] Python tests: 380 passed
 - [x] Notebook execution
-- [x] `cargo package -p fiml`: 80 files, 133.8 KiB compressed
+- [x] `cargo package -p fiml`: 81 files, 134.0 KiB compressed
 - [x] Current GitHub `main` build
 - [x] No existing `fiml` package was found on crates.io or PyPI on 2026-09-12
 - [ ] Strict Rust documentation check; `missing_docs` currently reports many
@@ -60,10 +60,10 @@ proper OHLC/bar event model.
   - important limits and warm-up behavior;
   - Rust and Python support policy;
   - Apache-2.0 license notice.
-- [ ] Add `description`, `license`, `repository`, `readme`, and `rust-version`
+- [x] Add `description`, `license`, `repository`, `readme`, and `rust-version`
   to `crates/fiml/Cargo.toml`.
-- [ ] Add useful crates.io `keywords` and `categories`.
-- [ ] Make `cargo package -p fiml` complete without metadata warnings.
+- [x] Add useful crates.io `keywords` and `categories`.
+- [x] Make `cargo package -p fiml` complete without metadata warnings.
 
 Cargo's official publishing guide recommends this metadata and a successful
 package dry run:
