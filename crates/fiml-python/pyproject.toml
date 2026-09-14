@@ -6,13 +6,25 @@ build-backend = "maturin"
 name = "fiml"
 description = "Python bindings for the fiml indicator engine (runs the exact Rust feature extractor)."
 readme = "README.md"
+license = { text = "Apache-2.0" }
+maintainers = [{ name = "Pavel Bezglasnyy", email = "pavelb23@gmail.com" }]
 requires-python = ">=3.12"
 dependencies = ["numpy>=1.21"]
 classifiers = [
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Programming Language :: Rust",
     "Programming Language :: Python :: Implementation :: CPython",
 ]
 dynamic = ["version"]
+
+[project.urls]
+Homepage = "https://github.com/pbezglasny/fiml"
+Repository = "https://github.com/pbezglasny/fiml"
+Issues = "https://github.com/pbezglasny/fiml/issues"
 
 [project.optional-dependencies]
 pandas = ["pandas>=2.0"]
