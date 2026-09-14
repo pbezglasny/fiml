@@ -1,3 +1,5 @@
+//! Implements cumulative volume delta over multiple sample windows.
+//!
 use std::mem::MaybeUninit;
 
 use crate::event::TradeSide;

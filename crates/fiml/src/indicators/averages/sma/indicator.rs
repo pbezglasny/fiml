@@ -1,3 +1,5 @@
+//! Implements simple moving averages over multiple sample or time windows.
+//!
 use std::fmt::Display;
 use std::mem::MaybeUninit;
 use std::time::Duration;

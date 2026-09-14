@@ -1,3 +1,5 @@
+//! Generates and validates stable identifiers for scalar feature outputs.
+//!
 use std::fmt::{self, Write};
 
 use crate::features::feature_key::FeatureKey;

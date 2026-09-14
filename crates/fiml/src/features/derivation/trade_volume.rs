@@ -1,3 +1,5 @@
+//! Adapts timed trade-volume sums to compiled feature outputs.
+//!
 use std::time::Duration;
 
 use crate::event::Event;

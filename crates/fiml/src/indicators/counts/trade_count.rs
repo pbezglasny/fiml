@@ -1,3 +1,5 @@
+//! Counts trades in a rolling time window.
+//!
 use std::time::Duration;
 
 use crate::indicators::timed_sum::{RollingTimedSum, TimedSumBucket};

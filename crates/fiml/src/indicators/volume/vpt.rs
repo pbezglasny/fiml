@@ -1,3 +1,5 @@
+//! Implements cumulative volume-price trend from trade price and volume.
+//!
 /// Cumulative volume-price trend (VPT).
 ///
 /// Each update adds the current volume multiplied by the percentage price

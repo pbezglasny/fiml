@@ -1,3 +1,5 @@
+//! Moving-average indicators over sample and time windows.
+//!
 mod ema;
 mod sma;
 

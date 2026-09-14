@@ -1,3 +1,5 @@
+//! Allocation-conscious streaming financial indicators and feature-vector pipelines for ML inference.
+//!
 pub mod event;
 pub mod features;
 pub mod indicators;

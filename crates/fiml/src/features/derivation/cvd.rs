@@ -1,3 +1,5 @@
+//! Adapts cumulative volume delta indicators to compiled feature outputs.
+//!
 use crate::event::Event;
 use crate::features::MAX_OUTPUTS_PER_INDICATOR;
 use crate::features::compiler::OutputRange;

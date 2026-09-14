@@ -1,3 +1,5 @@
+//! Emits a feature value from a fixed number of accepted updates ago.
+//!
 use crate::{FeatureVector, HeapRingBuffer, RingBuffer};
 
 /// Emits multiple event lags of one raw feature using one shared history buffer.

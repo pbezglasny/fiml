@@ -1,3 +1,5 @@
+//! Implements allocation-free exponential moving averages over multiple sample windows.
+//!
 use std::fmt::Display;
 use std::mem::MaybeUninit;
 

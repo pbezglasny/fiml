@@ -1,3 +1,5 @@
+//! Selects event fields or complete events as feature inputs.
+//!
 use crate::{Event, EventKind};
 
 /// Source of value to calculate feature

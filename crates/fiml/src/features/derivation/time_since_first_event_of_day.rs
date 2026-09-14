@@ -1,3 +1,5 @@
+//! Tracks elapsed time since the first accepted event in each fixed-offset day.
+//!
 use crate::event::Event;
 use crate::features::compiler::OutputRange;
 use crate::features::derivation::FeatureDerivation;

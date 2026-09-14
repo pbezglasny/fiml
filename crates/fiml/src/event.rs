@@ -1,3 +1,5 @@
+//! Defines timestamped market events and the fields available to feature extraction.
+//!
 use std::fmt;
 
 use crate::{

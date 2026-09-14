@@ -1,3 +1,5 @@
+//! Sums traded volume over rolling time windows.
+//!
 use std::time::Duration;
 
 use crate::indicators::timed_sum::{RollingTimedSum, TimedSumBucket};

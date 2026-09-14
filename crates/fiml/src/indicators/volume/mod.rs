@@ -1,3 +1,5 @@
+//! Volume-derived indicators, including CVD, OBV, VPT, rolling volume, and VWAP.
+//!
 mod cvd;
 mod obv;
 mod trade_volume;

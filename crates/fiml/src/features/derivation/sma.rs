@@ -1,3 +1,5 @@
+//! Adapts sample and timed simple moving averages to compiled feature outputs.
+//!
 use std::time::Duration;
 
 use crate::event::Event;

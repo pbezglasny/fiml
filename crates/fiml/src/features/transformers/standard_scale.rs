@@ -1,3 +1,5 @@
+//! Applies pre-fitted standard scaling to one scalar feature.
+//!
 use crate::FeatureVector;
 
 /// Scales a raw scalar into model input using a precomputed inverse scale.

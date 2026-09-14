@@ -1,3 +1,5 @@
+//! Builds feature extractors from validated definitions and caller-provided storage.
+//!
 use crate::features::compiler;
 use crate::order_book::OrderBook;
 use crate::{FeatureDefinition, FeatureExtractor, FeatureVector, FimlError, Symbol};
