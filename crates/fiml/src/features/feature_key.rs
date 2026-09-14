@@ -159,6 +159,14 @@ pub enum FeatureKey {
         window: Duration,
         warmup_policy: WarmupPolicy,
     },
+    /// Volume-weighted average trade price over a time-bucketed rolling window.
+    VwapTimed {
+        symbol: Symbol,
+        source: FeatureSource,
+        aggregation: Duration,
+        window: Duration,
+        warmup_policy: WarmupPolicy,
+    },
     DayOfWeek {
         symbol: Symbol,
         source: FeatureSource,

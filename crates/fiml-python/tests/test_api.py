@@ -212,6 +212,42 @@ def test_trade_volume_timed_validates_windows():
         fiml.FeatureExtractor(spec)
 
 
+def test_grouped_vwap_timed_weights_price_by_volume_and_respects_warmup():
+    spec = fiml.FeatureExtractorSpec().vwap_timed(
+        "BTCUSDT", aggregation="1s", windows=["2s", "3s"]
+    )
+    assert spec.indicator_count() == 1
+    assert spec.output_count() == 2
+    extractor = fiml.FeatureExtractor(spec)
+    btc = extractor.symbol("BTCUSDT")
+    values = extractor.transform(
+        np.full(4, fiml.KIND_TRADE, dtype=np.uint8),
+        np.full(4, btc, dtype=np.int64),
+        np.array([0, 1_000, 2_000, 3_000], dtype=np.int64),
+        price=np.array([10.0, 20.0, 30.0, 40.0]),
+        volume=np.array([1.0, 3.0, 2.0, 4.0]),
+    )
+
+    assert extractor.feature_names() == [
+        timed_name("vwap_timed", "BTCUSDT", 1_000_000_000, 2_000_000_000),
+        timed_name("vwap_timed", "BTCUSDT", 1_000_000_000, 3_000_000_000),
+    ]
+    np.testing.assert_allclose(
+        values,
+        [[np.nan, np.nan], [np.nan, np.nan], [24.0, np.nan], [110.0 / 3.0, 280.0 / 9.0]],
+        equal_nan=True,
+    )
+
+
+def test_vwap_timed_validates_windows():
+    with pytest.raises(ValueError, match="windows must not be empty"):
+        fiml.FeatureExtractorSpec().vwap_timed("BTCUSDT", "1s", [])
+
+    spec = fiml.FeatureExtractorSpec().vwap_timed("BTCUSDT", "1s", ["1500ms"])
+    with pytest.raises(ValueError, match="multiple of aggregation"):
+        fiml.FeatureExtractor(spec)
+
+
 def test_simple_and_log_returns_use_configured_sample_lags():
     spec = (
         fiml.FeatureExtractorSpec()

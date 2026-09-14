@@ -8,14 +8,14 @@ use crate::{
 };
 
 /// One fixed-duration bucket of trade counts.
-pub type CountBucket = TimedSumBucket;
+pub type CountBucket = TimedSumBucket<1>;
 
 /// Number of trades within a single rolling time window.
 pub struct TradeCountTimed<R>
 where
     R: RingBuffer<Item = CountBucket>,
 {
-    sum: RollingTimedSum<R, 1>,
+    sum: RollingTimedSum<R, 1, 1>,
 }
 
 impl TradeCountTimed<HeapRingBuffer<CountBucket>> {
@@ -44,7 +44,7 @@ where
 {
     /// Record one trade at `now` (epoch milliseconds).
     pub(crate) fn update(&mut self, now: i64) {
-        self.sum.update(1.0, now);
+        self.sum.update([1.0], now);
     }
 
     /// Advance the indicator to `now` without recording a trade.
@@ -54,7 +54,7 @@ where
 
     /// Current rolling trade count over the window.
     pub fn window_value(&self) -> Option<f64> {
-        self.sum.window_value(0)
+        self.sum.window_value(0, 0)
     }
 
     pub fn is_ready_at(&self, index: usize) -> bool {

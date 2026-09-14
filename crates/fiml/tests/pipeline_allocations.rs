@@ -171,7 +171,7 @@ fn returns_and_rolling_volatility_updates_do_not_allocate() {
 }
 
 #[test]
-fn rolling_trade_volume_updates_do_not_allocate() {
+fn rolling_trade_volume_and_vwap_updates_do_not_allocate() {
     let symbol = Symbol::new("trade-volume-allocations").unwrap();
     let mut extractor = FeatureExtractorSpec::new([
         FeatureDefinition::with_default_id(FeatureKey::TradeVolumeTimed {
@@ -188,9 +188,23 @@ fn rolling_trade_volume_updates_do_not_allocate() {
             window: Duration::from_millis(8),
             warmup_policy: WarmupPolicy::FirstValue,
         }),
+        FeatureDefinition::with_default_id(FeatureKey::VwapTimed {
+            symbol,
+            source: FeatureSource::Event(fiml::EventKind::Trade),
+            aggregation: Duration::from_millis(1),
+            window: Duration::from_millis(4),
+            warmup_policy: WarmupPolicy::FirstValue,
+        }),
+        FeatureDefinition::with_default_id(FeatureKey::VwapTimed {
+            symbol,
+            source: FeatureSource::Event(fiml::EventKind::Trade),
+            aggregation: Duration::from_millis(1),
+            window: Duration::from_millis(8),
+            warmup_policy: WarmupPolicy::FirstValue,
+        }),
     ])
     .unwrap()
-    .build(ArrayFeatureVector::<2>::new())
+    .build(ArrayFeatureVector::<4>::new())
     .unwrap();
 
     assert_eq!(
@@ -211,7 +225,10 @@ fn rolling_trade_volume_updates_do_not_allocate() {
         }),
         0
     );
-    assert_eq!(extractor.feature_vector().values(), &[506.0, 996.0]);
+    assert_eq!(
+        extractor.feature_vector().values(),
+        &[506.0, 996.0, 100.0, 100.0]
+    );
 }
 
 #[test]

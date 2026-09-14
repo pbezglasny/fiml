@@ -37,15 +37,15 @@ ML fundamentals, then stop:
 - [x] Rolling volatility as the standard deviation of returns over
   configurable windows.
 - [x] Rolling trade volume over timed windows.
-- [ ] VWAP from trade price and volume over timed windows.
+- [x] VWAP from trade price and volume over timed windows.
 
 For every added indicator:
 
-- [ ] Update the feature-vector builder, feature key, compiler, and runtime
+- [x] Update the feature-vector builder, feature key, compiler, and runtime
   derivation.
-- [ ] Update serialization, JSON schema, and canonical feature IDs.
-- [ ] Update the Python builder and documentation.
-- [ ] Add Rust/Python parity, warm-up, input-validation, and steady-state
+- [x] Update serialization, JSON schema, and canonical feature IDs.
+- [x] Update the Python builder and documentation.
+- [x] Add Rust/Python parity, warm-up, input-validation, and steady-state
   allocation checks.
 
 Defer RSI, MACD, Bollinger Bands, ATR, ADX, and stochastic oscillators. Add

@@ -22,6 +22,9 @@ def build_feature_extractor_spec(symbols):
         feature_extractor_spec.trade_volume_timed(
             symbol, aggregation="10ms", windows=["20ms", "30ms"]
         )
+        feature_extractor_spec.vwap_timed(
+            symbol, aggregation="10ms", windows=["20ms", "30ms"]
+        )
         feature_extractor_spec.vpt(symbol)
         feature_extractor_spec.trade_count_timed(
             symbol, aggregation="10ms", window="20ms"

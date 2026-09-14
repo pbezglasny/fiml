@@ -63,6 +63,7 @@ spec = (fiml.FeatureExtractorSpec()
       .ema("BTCUSDT", [12], source="trade_price")
       .obv_timed("BTCUSDT", aggregation="1s", windows=["2s"])
       .trade_volume_timed("BTCUSDT", aggregation="1s", windows=["2s", "5s"])
+      .vwap_timed("BTCUSDT", aggregation="1s", windows=["2s", "5s"])
       .day_of_week())
 
 extractor = fiml.FeatureExtractor(spec)

@@ -184,6 +184,12 @@ enum GroupKey {
         aggregation: Duration,
         warmup_policy: WarmupPolicy,
     },
+    VwapTimed {
+        symbol: Symbol,
+        source: FeatureSource,
+        aggregation: Duration,
+        warmup_policy: WarmupPolicy,
+    },
     DayOfWeek {
         symbol: Symbol,
         source: FeatureSource,
@@ -227,6 +233,7 @@ impl GroupKey {
             | Self::Vpt { symbol, .. }
             | Self::TradeCountTimed { symbol, .. }
             | Self::TradeVolumeTimed { symbol, .. }
+            | Self::VwapTimed { symbol, .. }
             | Self::DayOfWeek { symbol, .. }
             | Self::TimeSinceFirstEventOfDay { symbol, .. } => *symbol,
         }
@@ -266,7 +273,8 @@ impl GroupKey {
             | Self::ObvTimed { .. }
             | Self::VolatilityTimed { .. }
             | Self::TradeCountTimed { .. }
-            | Self::TradeVolumeTimed { .. } => FeatureRoute::SymbolAny,
+            | Self::TradeVolumeTimed { .. }
+            | Self::VwapTimed { .. } => FeatureRoute::SymbolAny,
         }
     }
 }
@@ -860,6 +868,24 @@ fn group_key(index: usize, key: &FeatureKey) -> Result<(GroupKey, GroupOutput)> 
                 GroupOutput::TimedPeriod(validate_timed_window(index, key, aggregation, window)?),
             ))
         }
+        FeatureKey::VwapTimed {
+            symbol,
+            source,
+            aggregation,
+            window,
+            warmup_policy,
+        } => {
+            validate_trade_source(index, key, source)?;
+            Ok((
+                GroupKey::VwapTimed {
+                    symbol,
+                    source,
+                    aggregation,
+                    warmup_policy,
+                },
+                GroupOutput::TimedPeriod(validate_timed_window(index, key, aggregation, window)?),
+            ))
+        }
         FeatureKey::DayOfWeek { symbol, source } => {
             Ok((GroupKey::DayOfWeek { symbol, source }, GroupOutput::Scalar))
         }
@@ -1149,6 +1175,21 @@ fn build_group(group: &FeatureGroup) -> Result<FeatureDerivation> {
             *warmup_policy,
         ),
         (
+            GroupKey::VwapTimed {
+                symbol,
+                aggregation,
+                warmup_policy,
+                ..
+            },
+            GroupOutputs::TimedPeriods(periods),
+        ) => derivation::vwap::build_timed(
+            *symbol,
+            *aggregation,
+            periods,
+            periods.iter().copied().max().unwrap_or(0),
+            *warmup_policy,
+        ),
+        (
             GroupKey::TradeCountTimed {
                 symbol,
                 aggregation,
@@ -1355,6 +1396,7 @@ fn group_kind(key: &GroupKey) -> IndicatorKind {
         GroupKey::Vpt { .. } => IndicatorKind::Vpt,
         GroupKey::TradeCountTimed { .. } => IndicatorKind::TradeCountTimed,
         GroupKey::TradeVolumeTimed { .. } => IndicatorKind::TradeVolumeTimed,
+        GroupKey::VwapTimed { .. } => IndicatorKind::VwapTimed,
         GroupKey::DayOfWeek { .. } => IndicatorKind::DayOfWeek,
         GroupKey::TimeSinceFirstEventOfDay { .. } => IndicatorKind::TimeSinceFirstEventOfDay,
     }
@@ -1402,6 +1444,7 @@ fn group_kind_from_feature_key(key: &FeatureKey) -> IndicatorKind {
         FeatureKey::Vpt { .. } => IndicatorKind::Vpt,
         FeatureKey::TradeCountTimed { .. } => IndicatorKind::TradeCountTimed,
         FeatureKey::TradeVolumeTimed { .. } => IndicatorKind::TradeVolumeTimed,
+        FeatureKey::VwapTimed { .. } => IndicatorKind::VwapTimed,
         FeatureKey::DayOfWeek { .. } => IndicatorKind::DayOfWeek,
         FeatureKey::TimeSinceFirstEventOfDay { .. } => IndicatorKind::TimeSinceFirstEventOfDay,
     }

@@ -17,6 +17,7 @@ pub(crate) mod trade_count;
 pub(crate) mod trade_volume;
 pub(crate) mod volatility;
 pub(crate) mod vpt;
+pub(crate) mod vwap;
 
 use cvd::CvdFeature;
 use day_of_week::DayOfWeek;
@@ -29,6 +30,7 @@ use trade_count::TradeCountTimedFeature;
 use trade_volume::TradeVolumeTimedFeature;
 use volatility::{VolatilityFeature, VolatilityTimedFeature};
 use vpt::VptFeature;
+use vwap::VwapTimedFeature;
 
 /// Closed set of feature derivations executed by
 /// [`FeatureExtractor`](crate::features::FeatureExtractor).
@@ -44,6 +46,7 @@ pub(crate) enum FeatureDerivation {
     ObvTimed(ObvTimedFeature),
     TradeCountTimed(TradeCountTimedFeature),
     TradeVolumeTimed(TradeVolumeTimedFeature),
+    VwapTimed(VwapTimedFeature),
     Returns(ReturnsFeature),
     Volatility(VolatilityFeature),
     VolatilityTimed(VolatilityTimedFeature),
@@ -68,6 +71,7 @@ impl FeatureDerivation {
             Self::ObvTimed(obv) => obv.update(event, output_range, output),
             Self::TradeCountTimed(count) => count.update(event, output_range, output),
             Self::TradeVolumeTimed(volume) => volume.update(event, output_range, output),
+            Self::VwapTimed(vwap) => vwap.update(event, output_range, output),
             Self::Returns(returns) => returns.update(event, output_range, output),
             Self::Volatility(volatility) => volatility.update(event, output_range, output),
             Self::VolatilityTimed(volatility) => volatility.update(event, output_range, output),
@@ -101,6 +105,7 @@ impl FeatureDerivation {
             | Self::ObvTimed(_)
             | Self::TradeCountTimed(_)
             | Self::TradeVolumeTimed(_)
+            | Self::VwapTimed(_)
             | Self::Returns(_)
             | Self::Volatility(_)
             | Self::VolatilityTimed(_)

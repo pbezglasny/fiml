@@ -135,6 +135,7 @@ the router. Temporary maps are dropped before event processing.
 | `ObvTimed` | `ObvTimedFeature` | `OnBalanceVolumeTimed<HeapRingBuffer<ObvBucket>, 16>` | Every event for the configured symbol. |
 | `TradeCountTimed` | `TradeCountTimedFeature` | `TradeCountTimed<HeapRingBuffer<CountBucket>>` | Every event for the configured symbol. |
 | `TradeVolumeTimed` | `TradeVolumeTimedFeature` | `RollingTradeVolumeTimed<HeapRingBuffer<TradeVolumeBucket>, 16>` | Every event for the configured symbol. |
+| `VwapTimed` | `VwapTimedFeature` | `VolumeWeightedAveragePriceTimed<HeapRingBuffer<VwapBucket>, 16>` | Every event for the configured symbol. |
 | `DayOfWeek` | `DayOfWeek` | Clock state in the derivation. | Global AnyEvent: at or beyond the maximum accepted timestamp; explicit symbol/event routes remain scoped. |
 | `TimeSinceFirstEventOfDay` | `TimeSinceFirstEventOfDay` | Clock state in the derivation. | Global AnyEvent: at or beyond the maximum accepted timestamp; explicit symbol/event routes remain scoped. |
 
@@ -207,6 +208,7 @@ Public lookup/read methods are `last_timestamp`, `feature_vector`,
 | `VolumePriceTrend` | Previous price and cumulative value | `VptFeature` |
 | `TradeCountTimed<R>` | `R::Item = CountBucket` | `TradeCountTimedFeature` |
 | `RollingTradeVolumeTimed<R, WINDOWS>` | `R::Item = TradeVolumeBucket` | `TradeVolumeTimedFeature` |
+| `VolumeWeightedAveragePriceTimed<R, WINDOWS>` | `R::Item = VwapBucket` | `VwapTimedFeature` |
 
 Standalone indicators can use stack-backed history when capacity is known at
 compile time. Compiled feature derivations use heap-backed history because
