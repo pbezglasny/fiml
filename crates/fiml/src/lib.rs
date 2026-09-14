@@ -1,5 +1,48 @@
 //! Allocation-conscious streaming financial indicators and feature-vector pipelines for ML inference.
 //!
+//! Define features with [`FeatureKey`], build a [`FeatureExtractor`] with caller-provided
+//! storage, and feed it market [`Event`]s. The extractor updates the same output storage
+//! as events arrive; [`FeatureVector::values`] borrows its values as an `&[f64]` for
+//! use by your model integration.
+//!
+//! # Example
+//!
+//! Compute a three-sample simple moving average from price events. With
+//! [`WarmupPolicy::FullWindow`], the output stays `NaN` until all three samples arrive.
+//! [`ArrayFeatureVector`] stores the output inline; extractor construction still allocates
+//! its internal state.
+//!
+//! ```rust
+//! use fiml::{
+//!     ArrayFeatureVector, Event, EventField, FeatureDefinition, FeatureExtractor,
+//!     FeatureKey, FeatureSource, FeatureVector, Symbol, WarmupPolicy,
+//! };
+//!
+//! # fn main() -> fiml::Result<()> {
+//! let btc = Symbol::new("BTCUSDT")?;
+//! let mut extractor = FeatureExtractor::builder(ArrayFeatureVector::<1>::new())
+//!     .add_feature(FeatureDefinition::with_default_id(FeatureKey::Sma {
+//!         symbol: btc,
+//!         source: FeatureSource::Field(EventField::Price),
+//!         window: 3,
+//!         warmup_policy: WarmupPolicy::FullWindow,
+//!     }))
+//!     .build()?;
+//!
+//! // Feed events in timestamp order for each symbol.
+//! extractor.handle_event(Event::price(btc, 100.0, 0))?;
+//! extractor.handle_event(Event::price(btc, 102.0, 1_000))?;
+//! assert!(extractor.feature_vector().values()[0].is_nan());
+//!
+//! extractor.handle_event(Event::price(btc, 104.0, 2_000))?;
+//!
+//! // Borrow the model input without allocating or copying a vector.
+//! let model_input: &[f64] = extractor.feature_vector().values();
+//! assert_eq!(model_input, &[102.0]);
+//! # Ok(())
+//! # }
+//! ```
+//!
 pub mod event;
 pub mod features;
 pub mod indicators;
