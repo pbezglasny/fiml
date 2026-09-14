@@ -107,6 +107,12 @@ where
         }
     }
 
+    /// Adds a window containing `period` simple returns.
+    ///
+    /// # Errors
+    ///
+    /// Rejects additions after data has arrived or once `WINDOWS` windows are configured. Also
+    /// rejects zero periods or periods exceeding history capacity.
     pub fn add_window(&mut self, period: usize) -> Result<()> {
         if self.window_count >= WINDOWS {
             return Err(FimlError::InvalidArgument(
@@ -139,6 +145,9 @@ where
         Ok(())
     }
 
+    /// Records a value and updates volatility using its simple return from the previous value.
+    /// The first value, or a zero previous value, only establishes a new baseline.
+    /// The caller must supply finite values.
     pub fn update(&mut self, value: f64) {
         let Some(previous_value) = self.previous_value.replace(value) else {
             return;
@@ -162,6 +171,8 @@ where
         }
     }
 
+    /// Returns the zero-based window's value, or `None` if absent or still warming up.
+    /// Also returns `None` when no return observations are available.
     pub fn value_at(&self, index: usize) -> Option<f64> {
         self.is_ready_at(index)
             .then(|| {
@@ -172,6 +183,8 @@ where
             .flatten()
     }
 
+    /// Reports whether the zero-based window has met its warm-up policy; false if absent.
+    /// Readiness does not guarantee a value when no returns are available.
     pub fn is_ready_at(&self, index: usize) -> bool {
         if index >= self.window_count {
             return false;
@@ -183,10 +196,12 @@ where
         }
     }
 
+    /// Returns true when at least one window exists and all windows meet their warm-up policy.
     pub fn is_ready(&self) -> bool {
         self.window_count > 0 && (0..self.window_count).all(|index| self.is_ready_at(index))
     }
 
+    /// Returns window values in insertion order, with `NaN` for unused or unavailable slots.
     pub fn values(&self) -> [f64; WINDOWS] {
         let mut values = [f64::NAN; WINDOWS];
         for (index, value) in values.iter_mut().enumerate().take(self.window_count) {
@@ -201,12 +216,22 @@ where
 impl<const PERIODS: usize, const WINDOWS: usize>
     RollingVolatility<StackRingBuffer<PERIODS, f64>, WINDOWS>
 {
+    /// Creates an empty indicator with inline history; add windows before updating.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the compile-time history capacity is zero.
     pub fn new_stack(warmup_policy: WarmupPolicy) -> Self {
         Self::new(new_stack_ring_buffer(), warmup_policy)
     }
 }
 
 impl<const WINDOWS: usize> RollingVolatility<HeapRingBuffer<f64>, WINDOWS> {
+    /// Creates an empty indicator with heap-allocated history; add windows before updating.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `periods` is zero.
     pub fn new_heap(periods: usize, warmup_policy: WarmupPolicy) -> Self {
         Self::new(new_heap_ring_buffer(periods), warmup_policy)
     }
@@ -279,6 +304,12 @@ where
         })
     }
 
+    /// Adds a window spanning `periods` aggregation buckets.
+    ///
+    /// # Errors
+    ///
+    /// Rejects zero periods, periods at least as large as history capacity, durations
+    /// outside `i64` milliseconds, additions after data, or more than `WINDOWS` windows.
     pub fn add_window_with_periods(&mut self, periods: usize) -> Result<()> {
         if self.window_count >= WINDOWS {
             return Err(FimlError::InvalidArgument(
@@ -324,6 +355,12 @@ where
         Ok(())
     }
 
+    /// Adds a duration-based window before receiving data.
+    ///
+    /// # Errors
+    ///
+    /// The duration must use whole `i64` milliseconds and be a positive multiple of
+    /// aggregation. The window-count and capacity limits of [`Self::add_window_with_periods`] apply.
     pub fn add_window_with_duration(&mut self, window: Duration) -> Result<()> {
         if !window.subsec_nanos().is_multiple_of(1_000_000) {
             return Err(FimlError::InvalidArgument(
@@ -398,6 +435,10 @@ where
         true
     }
 
+    /// Records a value and updates volatility using its simple return from the previous value.
+    /// The first value, or a zero previous value, only establishes a new baseline.
+    /// The caller must supply finite values. Timestamps are epoch milliseconds and must
+    /// be nondecreasing; this method does not validate their ordering.
     pub fn update(&mut self, value: f64, timestamp: i64) {
         if self.first_timestamp.is_none() {
             self.first_timestamp = Some(timestamp);
@@ -453,6 +494,8 @@ where
         }
     }
 
+    /// Returns the zero-based window's value, or `None` if absent or still warming up.
+    /// Also returns `None` when no return observations are available.
     pub fn value_at(&self, index: usize) -> Option<f64> {
         self.is_ready_at(index)
             .then(|| {
@@ -463,14 +506,18 @@ where
             .flatten()
     }
 
+    /// Reports whether the zero-based window has met its warm-up policy; false if absent.
+    /// Readiness does not guarantee a value when no returns are available.
     pub fn is_ready_at(&self, index: usize) -> bool {
         index < self.window_count && unsafe { self.windows[index].assume_init_ref() }.ready
     }
 
+    /// Returns true when at least one window exists and all windows meet their warm-up policy.
     pub fn is_ready(&self) -> bool {
         self.window_count > 0 && (0..self.window_count).all(|index| self.is_ready_at(index))
     }
 
+    /// Returns window values in insertion order, with `NaN` for unused or unavailable slots.
     pub fn values(&self) -> [f64; WINDOWS] {
         let mut values = [f64::NAN; WINDOWS];
         for (index, value) in values.iter_mut().enumerate().take(self.window_count) {
@@ -485,6 +532,12 @@ where
 impl<const PERIODS: usize, const WINDOWS: usize>
     RollingVolatilityTimed<StackRingBuffer<PERIODS, VolatilityBucket>, WINDOWS>
 {
+    /// Creates an empty indicator with inline history; add windows before updating.
+    ///
+    /// # Errors
+    ///
+    /// Rejects zero capacity or an aggregation that is not positive whole milliseconds
+    /// representable as `i64`. Reserve more history slots than the largest window's bucket count.
     pub fn new_stack(aggregation: Duration, warmup_policy: WarmupPolicy) -> Result<Self> {
         if PERIODS == 0 {
             return Err(FimlError::InvalidArgument(
@@ -496,6 +549,12 @@ impl<const PERIODS: usize, const WINDOWS: usize>
 }
 
 impl<const WINDOWS: usize> RollingVolatilityTimed<HeapRingBuffer<VolatilityBucket>, WINDOWS> {
+    /// Creates an empty indicator with heap-allocated history; add windows before updating.
+    ///
+    /// # Errors
+    ///
+    /// Rejects zero capacity or an aggregation that is not positive whole milliseconds
+    /// representable as `i64`. Reserve more history slots than the largest window's bucket count.
     pub fn new_heap(
         aggregation: Duration,
         capacity: usize,

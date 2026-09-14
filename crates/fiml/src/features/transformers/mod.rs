@@ -21,20 +21,32 @@ const WINDOW_MAX_SIZE: usize = 10_000;
 #[derive(Debug, Clone, PartialEq)]
 pub enum TransformerDefinition {
     /// Copies one input scalar without changing its value.
-    Identity { input: FeatureId, output: FeatureId },
+    Identity {
+        /// ID to read from the preceding stage's layout.
+        input: FeatureId,
+        /// Unique, non-reserved ID assigned to this output.
+        output: FeatureId,
+    },
     /// Emits the input scalar from `lag_window` accepted events earlier.
     /// The window must be in `1..=10_000`; output remains NaN until enough history exists.
     /// Definitions for the same input share one runtime history buffer.
     Lagged {
+        /// ID to read from the preceding stage's layout.
         input: FeatureId,
+        /// Unique, non-reserved ID assigned to this output.
         output: FeatureId,
+        /// Number of accepted events to look back, in `1..=10_000`.
         lag_window: usize,
     },
     /// Applies `(input - mean) / scale` to one input scalar.
     StandardScale {
+        /// ID to read from the preceding stage's layout.
         input: FeatureId,
+        /// Unique, non-reserved ID assigned to this output.
         output: FeatureId,
+        /// Finite centering value.
         mean: f64,
+        /// Positive finite divisor whose reciprocal must also be finite.
         scale: f64,
     },
 }

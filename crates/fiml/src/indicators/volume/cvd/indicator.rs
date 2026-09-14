@@ -28,6 +28,11 @@ where
 }
 
 impl<const N: usize, const WINDOWS: usize> CumulativeVolumeDelta<StackRingBuffer<N, f64>, WINDOWS> {
+    /// Creates an empty indicator with inline history; add windows before updating.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the compile-time history capacity is zero.
     pub fn new_stack(warmup_policy: WarmupPolicy) -> Self {
         Self::new(
             new_stack_ring_buffer(),
@@ -38,6 +43,11 @@ impl<const N: usize, const WINDOWS: usize> CumulativeVolumeDelta<StackRingBuffer
 }
 
 impl<const WINDOWS: usize> CumulativeVolumeDelta<HeapRingBuffer<f64>, WINDOWS> {
+    /// Creates an empty indicator with heap-allocated history; add windows before updating.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `periods` is zero.
     pub fn new_heap(periods: usize, warmup_policy: WarmupPolicy) -> Self {
         Self::new(
             new_heap_ring_buffer(periods),
@@ -64,6 +74,12 @@ where
         }
     }
 
+    /// Adds a rolling window with a positive sample period.
+    ///
+    /// # Errors
+    ///
+    /// Rejects additions after data has arrived or once `WINDOWS` windows are configured. Also
+    /// rejects zero periods or periods exceeding history capacity.
     pub fn add_window(&mut self, period: usize) -> Result<()> {
         if self.window_count >= WINDOWS {
             return Err(FimlError::InvalidArgument(
@@ -98,6 +114,8 @@ where
         Ok(())
     }
 
+    /// Adds one signed trade volume to every window, evicting expired deltas.
+    /// The caller must supply finite volume; this method currently always returns `Ok(())`.
     pub fn update(&mut self, volume: f64, trade_side: TradeSide) -> Result<()> {
         self.update_inner(volume, trade_side);
         Ok(())
@@ -118,6 +136,7 @@ where
         self.data.push_back(delta);
     }
 
+    /// Returns the zero-based window's value, or `None` if absent or still warming up.
     pub fn value_at(&self, index: usize) -> Option<f64> {
         if !self.is_ready_at(index) {
             return None;
@@ -126,6 +145,7 @@ where
         Some(window.current_value)
     }
 
+    /// Reports whether the zero-based window has met its warm-up policy; false if absent.
     pub fn is_ready_at(&self, index: usize) -> bool {
         if index >= self.window_count {
             return false;
@@ -137,10 +157,12 @@ where
         }
     }
 
+    /// Returns true when at least one window exists and all windows meet their warm-up policy.
     pub fn is_ready(&self) -> bool {
         self.window_count > 0 && (0..self.window_count).all(|index| self.is_ready_at(index))
     }
 
+    /// Returns window values in insertion order, with `NaN` for unused or unavailable slots.
     pub fn values(&self) -> [f64; WINDOWS] {
         let mut result = [f64::NAN; WINDOWS];
         for (index, value) in result.iter_mut().enumerate().take(self.window_count) {

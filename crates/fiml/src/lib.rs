@@ -77,59 +77,97 @@ pub use vectors::{ArrayFeatureVector, FeatureVector, VecFeatureVector};
 
 use crate::order_book::OrderBookUpdateError;
 
+/// Result returned by fallible construction and event processing.
 pub type Result<T> = std::result::Result<T, FimlError>;
 
+/// Validation, construction, and event-processing failures.
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum FimlError {
+    /// An argument failed validation.
     InvalidArgument(InvalidArgumentError),
+    /// The lower price bound is not below the upper bound.
     InvalidPriceRange {
+        /// Requested lower price bound.
         from_price: Decimal,
+        /// Requested upper price bound.
         to_price: Decimal,
     },
+    /// A feature definition failed compilation or construction.
     InvalidIndicatorDefinition {
+        /// Zero-based index of the invalid definition or stage.
         index: usize,
+        /// Indicator family being configured.
         indicator: IndicatorKind,
+        /// Underlying validation failure.
         reason: InvalidIndicatorDefinitionError,
     },
+    /// A scalar transformation has invalid inputs or parameters.
     InvalidTransformationDefinition {
+        /// Zero-based index of the invalid definition or stage.
         index: usize,
+        /// Underlying validation failure.
         reason: InvalidTransformationDefinitionError,
     },
     /// Cold-path stage validation includes layout and numeric diagnostics.
     InvalidPipelineStage {
+        /// Zero-based index of the invalid definition or stage.
         index: usize,
+        /// Underlying validation failure.
         reason: String,
     },
+    /// The output storage length differs from the compiled feature count.
     OutputCountMismatch {
+        /// Required count or capacity.
         expected: usize,
+        /// Supplied count or capacity.
         actual: usize,
     },
+    /// The output capacity differs from the specification.
     FeatureVectorCapacityMismatch {
+        /// Required count or capacity.
         expected: usize,
+        /// Supplied count or capacity.
         actual: usize,
     },
+    /// The model-input length differs from the pipeline specification.
     ModelVectorLengthMismatch {
+        /// Required count or capacity.
         expected: usize,
+        /// Supplied count or capacity.
         actual: usize,
     },
+    /// The model-input capacity differs from the pipeline specification.
     ModelVectorCapacityMismatch {
+        /// Required count or capacity.
         expected: usize,
+        /// Supplied count or capacity.
         actual: usize,
     },
+    /// An event predates the last accepted event for its symbol.
     TimestampOutOfOrder {
+        /// Market symbol associated with the failure.
         symbol: Symbol,
+        /// Kind of the rejected event.
         event_kind: EventKind,
+        /// Rejected timestamp in epoch milliseconds.
         timestamp: i64,
+        /// Last accepted timestamp for this symbol in epoch milliseconds.
         previous_timestamp: i64,
     },
+    /// An order-book update failed validation or synchronization.
     OrderBookUpdateError {
+        /// Underlying validation failure.
         reason: OrderBookUpdateError,
     },
+    /// A book-dependent feature has no configured order book.
     OrderBookNotConfigured {
+        /// Market symbol associated with the failure.
         symbol: Symbol,
     },
+    /// Multiple order books were supplied for one symbol.
     DuplicateOrderBook {
+        /// Market symbol associated with the failure.
         symbol: Symbol,
     },
 }
@@ -141,67 +179,115 @@ pub enum FimlError {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum InvalidArgumentError {
+    /// An order book was assigned the reserved global symbol.
     GlobalOrderBookSymbol,
+    /// An event field contains NaN or infinity.
     NonFiniteEventValue {
+        /// Argument or event field that failed validation.
         field: EventField,
     },
+    /// A scalar write targets an index outside the active length.
     FeatureVectorIndexOutOfBounds {
+        /// Zero-based destination index.
         index: usize,
+        /// Active destination length.
         length: usize,
     },
+    /// A range write requests more values than the source contains.
     SourceValuesTooShort {
+        /// Number of source values requested.
         requested: usize,
+        /// Number of values in the source slice.
         available: usize,
     },
+    /// The range start plus its size overflows `usize`.
     FeatureVectorRangeOverflow {
+        /// Inclusive destination start index.
         start: usize,
+        /// Number of cells to write.
         size: usize,
     },
+    /// A range write exceeds the destination capacity.
     FeatureVectorRangeOutOfBounds {
+        /// Inclusive destination start index.
         start: usize,
+        /// Exclusive destination end index.
         end: usize,
+        /// Available storage capacity.
         capacity: usize,
     },
+    /// A collection exceeds its supported representation limit.
     LimitExceeded {
+        /// Collection or integer representation whose limit was exceeded.
         target: LimitTarget,
+        /// Requested collection size.
         count: usize,
+        /// Maximum supported count.
         limit: usize,
     },
+    /// The active vector length exceeds its capacity.
     FeatureVectorCapacityTooSmall {
+        /// Available storage capacity.
         capacity: usize,
+        /// Requested number of active output cells.
         active_length: usize,
     },
+    /// A definition uses an ID reserved for internal output slots.
     ReservedFeatureId {
+        /// Zero-based index of the offending definition.
         definition_index: usize,
     },
+    /// An indicator requires a nonempty ring buffer.
     RingBufferCapacityZero,
+    /// The indicator already has its maximum number of windows.
     WindowLimitReached {
+        /// Maximum supported count.
         limit: usize,
     },
+    /// A window was added after the indicator began receiving data.
     WindowAddedAfterData,
+    /// A window must contain at least one sample or bucket.
     WindowPeriodZero,
+    /// A window exceeds the available history capacity.
     WindowPeriodExceedsCapacity {
+        /// Requested window period in samples or buckets.
         period: usize,
+        /// Available storage capacity.
         capacity: usize,
     },
+    /// A window leaves no extra history slot required by the indicator.
     WindowPeriodMustBeLessThanCapacity {
+        /// Requested window period in samples or buckets.
         period: usize,
+        /// Available storage capacity.
         capacity: usize,
     },
+    /// An aggregation interval is shorter than one millisecond.
     AggregationTooShort,
+    /// A duration has sub-millisecond precision.
     DurationPrecision {
+        /// Argument or event field that failed validation.
         field: DurationField,
     },
+    /// A duration cannot fit in signed 64-bit milliseconds.
     DurationOutOfRange {
+        /// Argument or event field that failed validation.
         field: DurationField,
     },
+    /// A window is shorter than one aggregation interval.
     WindowShorterThanAggregation,
+    /// A window is not an exact multiple of its aggregation interval.
     WindowNotMultipleOfAggregation,
+    /// A period cannot fit in the required integer type.
     WindowPeriodOutOfRange {
+        /// Collection or integer representation whose limit was exceeded.
         target: IntegerTarget,
     },
+    /// A window duration exceeds signed 64-bit milliseconds.
     WindowDurationOutOfRange,
+    /// A timed period exceeds the indicator's supported bounds.
     TimedPeriodTooLarge {
+        /// Indicator family being configured.
         indicator: IndicatorKind,
     },
 }
@@ -210,11 +296,17 @@ pub enum InvalidArgumentError {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum LimitTarget {
+    /// Interned market symbols.
     Symbols,
+    /// Compiled runtime indicator instances.
     RuntimeFeatures,
+    /// Per-symbol routing entries.
     SymbolRouters,
+    /// Subscribers across routing groups.
     Subscribers,
+    /// Subscribers in one routing group.
     SubscriberGroup,
+    /// Configured per-symbol order books.
     OrderBooks,
 }
 
@@ -222,8 +314,11 @@ pub enum LimitTarget {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum DurationField {
+    /// Duration of one aggregation bucket.
     Aggregation,
+    /// Total rolling-window duration.
     Window,
+    /// Durations used together to configure a timed window.
     TimedWindow,
 }
 
@@ -231,7 +326,9 @@ pub enum DurationField {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum IntegerTarget {
+    /// A signed 64-bit integer.
     Signed64,
+    /// A platform-sized unsigned integer.
     Usize,
 }
 
@@ -239,38 +336,71 @@ pub enum IntegerTarget {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum IndicatorKind {
+    /// Highest bid price.
     OrderBookBestBidPrice,
+    /// Size at the highest bid.
     OrderBookBestBidSize,
+    /// Lowest ask price.
     OrderBookBestAskPrice,
+    /// Size at the lowest ask.
     OrderBookBestAskSize,
+    /// Size at a specified side and price.
     OrderBookLevelSize,
+    /// Price at a one-based depth.
     OrderBookNthPrice,
+    /// Size at a one-based depth.
     OrderBookNthSize,
+    /// Cumulative size through an inclusive price threshold.
     OrderBookDepthUntilPrice,
+    /// First price used to reach a target size.
     OrderBookDepthUntilSizePriceFrom,
+    /// Last price used to reach a target size.
     OrderBookDepthUntilSizePriceTo,
+    /// Whole-level cumulative size used to reach a target.
     OrderBookDepthUntilSizeTotalSize,
+    /// Total size in a half-open price range.
     OrderBookVolumeBetweenPrices,
+    /// Midpoint of the best bid and ask.
     OrderBookMidPrice,
+    /// Best ask minus best bid.
     OrderBookSpread,
+    /// Spread relative to mid-price in basis points.
     OrderBookSpreadBps,
+    /// Best prices weighted by their own sizes.
     OrderBookWeightedMidPrice,
+    /// Best prices weighted by opposite-side sizes.
     OrderBookMicroprice,
+    /// Bid-minus-ask size divided by total size.
     OrderBookImbalance,
+    /// Sample-based simple moving average.
     Sma,
+    /// Sample-based exponential moving average.
     Ema,
+    /// Rolling aggressor buy volume minus sell volume.
     Cvd,
+    /// Fractional price change over a sample lag.
     SimpleReturn,
+    /// Natural logarithm of the price ratio over a sample lag.
     LogReturn,
+    /// Population standard deviation of simple returns.
     Volatility,
+    /// Simple moving average over time buckets.
     SmaTimed,
+    /// On-balance volume over time buckets.
     ObvTimed,
+    /// Population standard deviation of sample returns grouped into time buckets.
     VolatilityTimed,
+    /// Cumulative volume-price trend.
     Vpt,
+    /// Trade count over a rolling timed window.
     TradeCountTimed,
+    /// Total trade volume over a rolling timed window.
     TradeVolumeTimed,
+    /// Volume-weighted average trade price over a rolling timed window.
     VwapTimed,
+    /// UTC weekday derived from an event timestamp.
     DayOfWeek,
+    /// Elapsed time since the first observed event of the local day.
     TimeSinceFirstEventOfDay,
 }
 
@@ -278,45 +408,78 @@ pub enum IndicatorKind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum InvalidIndicatorDefinitionError {
+    /// An order-book query uses a negative price.
     OrderBookPriceNegative,
+    /// An order-book target size is zero or negative.
     OrderBookSizeNotPositive,
+    /// An order-book query has unordered or equal price bounds.
     OrderBookPriceRangeInvalid,
+    /// An order-book depth is zero instead of one-based.
     OrderBookDepthZero,
+    /// Compatible definitions exceed the outputs supported by one indicator.
     CompatibleGroupOutputLimitExceeded {
+        /// Maximum supported count.
         limit: usize,
     },
+    /// A scalar runtime derivation is requested more than once.
     DuplicateScalarDerivation,
+    /// Two definitions describe the same structural feature.
     DuplicateFeatureKey,
+    /// Two definitions use the same output ID.
     DuplicateFeatureId,
+    /// The indicator requires a scalar event field as input.
     ScalarEventFieldSourceRequired,
+    /// The indicator requires complete trade events as input.
     TradeEventSourceRequired,
+    /// A sample window or lag is zero.
     WindowTooShort,
+    /// A sample window or lag exceeds the supported maximum.
     WindowTooLarge,
+    /// An aggregation interval is shorter than one millisecond.
     AggregationTooShort,
+    /// A window is shorter than one aggregation interval.
     WindowShorterThanAggregation {
+        /// Configured bucket duration in milliseconds.
         aggregation_millis: i64,
+        /// Configured rolling duration in milliseconds.
         window_millis: i64,
     },
+    /// A window is not an exact multiple of its aggregation interval.
     WindowNotMultipleOfAggregation {
+        /// Configured bucket duration in milliseconds.
         aggregation_millis: i64,
+        /// Configured rolling duration in milliseconds.
         window_millis: i64,
     },
+    /// The number of aggregation buckets cannot fit in `usize`.
     BucketPeriodOutOfRange,
+    /// A duration has sub-millisecond precision.
     DurationPrecision {
+        /// Argument or event field that failed validation.
         field: DefinitionDurationField,
+        /// Duration supplied by the definition.
         duration: Duration,
     },
+    /// A duration cannot fit in signed 64-bit milliseconds.
     DurationOutOfRange {
+        /// Argument or event field that failed validation.
         field: DefinitionDurationField,
+        /// Duration supplied by the definition.
         duration: Duration,
     },
+    /// A calendar offset is outside -14 to +14 hours inclusive.
     UtcOffsetOutOfRange {
+        /// Requested UTC offset in milliseconds.
         offset_millis: i64,
     },
+    /// A calendar offset is not an exact number of minutes.
     UtcOffsetPrecision {
+        /// Requested UTC offset in milliseconds.
         offset_millis: i64,
     },
+    /// An argument failed validation.
     InvalidArgument(InvalidArgumentError),
+    /// Construction failed without a more specific validation reason.
     ConstructionFailed,
 }
 
@@ -324,14 +487,23 @@ pub enum InvalidIndicatorDefinitionError {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum InvalidTransformationDefinitionError {
+    /// The input ID is absent from the preceding layout.
     InputFeatureNotFound,
+    /// Two transformations use the same output ID.
     DuplicateOutputFeature,
+    /// An output ID is reserved for internal slots.
     ReservedOutputFeature,
+    /// A standard-scaler mean is NaN or infinite.
     MeanNotFinite,
+    /// A standard-scaler scale is NaN or infinite.
     ScaleNotFinite,
+    /// A standard-scaler scale is zero or negative.
     ScaleNotPositive,
+    /// The reciprocal of the scale is not finite.
     InverseScaleNotFinite,
+    /// A lag window is zero.
     LagWindowZero,
+    /// A lag window exceeds 10,000 accepted events.
     LagWindowTooLarge,
 }
 
@@ -339,7 +511,9 @@ pub enum InvalidTransformationDefinitionError {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum DefinitionDurationField {
+    /// Duration of one aggregation bucket.
     Aggregation,
+    /// Total rolling-window duration.
     Window,
 }
 

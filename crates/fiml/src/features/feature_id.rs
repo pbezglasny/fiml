@@ -16,16 +16,19 @@ use super::feature_source::FeatureSource;
 pub struct FeatureId(String);
 
 impl FeatureId {
+    /// Wraps a custom ID; duplicate and reserved IDs are rejected when compiling definitions.
     pub fn new(id: impl Into<String>) -> Self {
         Self(id.into())
     }
 
+    /// Allocates a canonical ID encoding the feature kind, source, and parameters.
     pub fn from_feature_key(key: &FeatureKey) -> Self {
         let mut id = String::with_capacity(128);
         write_feature_key(&mut id, key).expect("writing a feature ID to a String cannot fail");
         Self(id)
     }
 
+    /// Borrows the identifier without allocating.
     pub fn as_str(&self) -> &str {
         &self.0
     }

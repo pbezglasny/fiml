@@ -17,11 +17,15 @@ use super::book_side::BookSide;
 /// Whole-level price range and cumulative size needed to reach a target quantity.
 /// The final level is included in full, so `total_size` may exceed the target.
 pub struct DepthUntilSizeResult {
+    /// Best-side price at which accumulation starts.
     pub price_from: Decimal,
+    /// Price of the last whole level included in the result.
     pub price_to: Decimal,
+    /// Accumulated size, which may exceed the requested target.
     pub total_size: Decimal,
 }
 
+/// Sequence-continuity rule used when applying deltas and replaying snapshot history.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "serde", serde(rename_all = "snake_case"))]
@@ -44,27 +48,44 @@ pub enum OrderBookUpdateOutcome {
     Resynchronized,
 }
 
+/// Invalid market data or missing sequence history that prevents an update from applying.
 #[derive(Debug)]
 pub enum OrderBookUpdateError {
+    /// A contiguous feed skipped the next required delta.
     SequenceGap {
+        /// Next required sequence ID.
         expected: OrderBookUpdateId,
+        /// Sequence ID of the incoming delta.
         received: OrderBookUpdateId,
     },
+    /// Buffered history cannot bridge a snapshot to the subsequent deltas.
     SnapshotHistoryGap {
+        /// Latest sequence ID included in the snapshot.
         snapshot_update_id: OrderBookUpdateId,
+        /// Next delta required to replay the snapshot history.
         expected_next_id: OrderBookUpdateId,
+        /// Buffered delta ID found instead.
         received: OrderBookUpdateId,
     },
+    /// A pending delta cannot fit in the bounded replay buffer.
     BufferCapacityExceeded {
+        /// Configured maximum number of buffered deltas.
         capacity: usize,
     },
+    /// An incoming snapshot is not newer than the last accepted snapshot.
     StaleSnapshot {
+        /// Sequence ID of the last accepted snapshot.
         current_snapshot_update_id: OrderBookUpdateId,
+        /// Sequence ID of the rejected snapshot.
         received_snapshot_update_id: OrderBookUpdateId,
     },
+    /// A level contains a negative price or size.
     InvalidUpdate {
+        /// Side containing the invalid level.
         side: Side,
+        /// Supplied price.
         price: Decimal,
+        /// Supplied size.
         size: Decimal,
     },
 }
@@ -112,6 +133,7 @@ impl From<OrderBookUpdateError> for FimlError {
     }
 }
 
+/// Whether visible levels have been synchronized with the market-data stream.
 pub enum SyncState {
     /// No snapshot has been applied yet; incoming deltas are buffered.
     AwaitingSnapshot,
@@ -475,10 +497,12 @@ impl OrderBook {
         self.commit_update(prepared, update)
     }
 
+    /// Returns the last sequence ID applied to visible levels, or `None` before initialization.
     pub fn last_update_id(&self) -> Option<OrderBookUpdateId> {
         self.last_update_id
     }
 
+    /// Returns the last accepted snapshot ID, or `None` before the first snapshot.
     pub fn last_snapshot_update_id(&self) -> Option<OrderBookUpdateId> {
         self.last_snapshot_update_id
     }

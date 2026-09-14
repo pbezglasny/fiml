@@ -2,29 +2,37 @@
 //!
 use crate::{FimlError, InvalidArgumentError, Result};
 
-/// Abstraction layer for feature vector.
-/// It supposed to set and get feature values
+/// Indexed output storage shared by feature extraction and model-input pipelines.
+///
+/// Implementations expose a fixed capacity and an active length no greater than
+/// that capacity. Reads and unchecked writes may access reserved cells beyond
+/// the active length; checked scalar writes are limited to active cells.
 pub trait FeatureVector {
-    /// Return value value at index
-    /// Zero based indicies
+    /// Reads a zero-based storage index, returning `None` beyond capacity.
     fn value_at(&self, index: usize) -> Option<f64>;
 
-    /// Return all values of feature vector of capacity length
+    /// Borrows all storage cells, including reserved cells beyond the active length.
     fn values(&self) -> &[f64];
 
-    /// Return total capacity of feature vector
+    /// Returns the total number of storage cells.
     fn capacity(&self) -> usize;
 
-    /// Return length of underlying collection of feaures.
-    /// Len supposed to be less of equal capacity
+    /// Returns the active cell count, which must not exceed capacity.
     fn len(&self) -> usize;
 
+    /// Returns whether the active length is zero.
     fn is_empty(&self) -> bool {
         self.len() == 0
     }
 
+    /// Writes a storage cell, including reserved cells.
+    ///
+    /// # Panics
+    ///
+    /// Implementations may panic when `index` is outside capacity.
     fn set_value_at(&mut self, index: usize, value: f64);
 
+    /// Writes an active cell, returning an error without mutation if `index >= len()`.
     fn try_set_value_at(&mut self, index: usize, value: f64) -> Result<()> {
         if index >= self.len() {
             return Err(FimlError::InvalidArgument(
@@ -38,12 +46,21 @@ pub trait FeatureVector {
         Ok(())
     }
 
+    /// Copies the first `size` source values into consecutive storage cells.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the source is too short; invalid destination indices may panic
+    /// after earlier cells were written. Use [`Self::try_set_values_range`] to
+    /// validate the complete range before writing.
     fn set_values_range(&mut self, insert_index_start: usize, size: usize, values: &[f64]) {
         for (i, value) in values[..size].iter().enumerate() {
             self.set_value_at(insert_index_start + i, *value);
         }
     }
 
+    /// Copies a range after validating source length, index arithmetic, and capacity.
+    /// Reserved destination cells are allowed. Validation errors leave storage unchanged.
     fn try_set_values_range(
         &mut self,
         insert_index_start: usize,
@@ -80,6 +97,10 @@ pub trait FeatureVector {
     }
 }
 
+/// Inline feature storage with compile-time capacity and a configurable active length.
+///
+/// Construction initializes all `N` cells to zero without a heap allocation.
+/// Building an extractor resets its output cells to `NaN` for warm-up.
 pub struct ArrayFeatureVector<const N: usize> {
     data: [f64; N],
     length: usize,

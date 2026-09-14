@@ -52,6 +52,7 @@ impl<const WINDOWS: usize> Display for ExponentialMovingAverage<WINDOWS> {
 }
 
 impl<const WINDOWS: usize> ExponentialMovingAverage<WINDOWS> {
+    /// Creates an EMA with no windows and the chosen warm-up policy.
     pub fn new(warmup_policy: WarmupPolicy) -> Self {
         Self {
             windows: [const { MaybeUninit::<EmaWindow>::uninit() }; WINDOWS],
@@ -61,6 +62,12 @@ impl<const WINDOWS: usize> ExponentialMovingAverage<WINDOWS> {
         }
     }
 
+    /// Adds a rolling window with a positive sample period.
+    ///
+    /// # Errors
+    ///
+    /// Rejects additions after data has arrived or once `WINDOWS` windows are configured. Also
+    /// rejects zero or `usize::MAX` periods.
     pub fn add_window(&mut self, period: usize) -> Result<()> {
         if self.window_count >= WINDOWS {
             return Err(FimlError::InvalidArgument(
@@ -102,6 +109,8 @@ impl<const WINDOWS: usize> ExponentialMovingAverage<WINDOWS> {
         Ok(())
     }
 
+    /// Updates every EMA using `alpha = 2 / (period + 1)`; the first sample seeds each EMA.
+    /// The caller must supply a finite value.
     pub fn update(&mut self, value: f64) {
         self.update_count += 1;
         for i in 0..self.window_count {
@@ -115,6 +124,7 @@ impl<const WINDOWS: usize> ExponentialMovingAverage<WINDOWS> {
         }
     }
 
+    /// Returns the zero-based window's value, or `None` if absent or still warming up.
     pub fn value_at(&self, index: usize) -> Option<f64> {
         if !self.is_ready_at(index) {
             return None;
@@ -123,6 +133,7 @@ impl<const WINDOWS: usize> ExponentialMovingAverage<WINDOWS> {
         window.moving_avg
     }
 
+    /// Reports whether the zero-based window has met its warm-up policy; false if absent.
     pub fn is_ready_at(&self, index: usize) -> bool {
         if index >= self.window_count {
             return false;
@@ -134,10 +145,12 @@ impl<const WINDOWS: usize> ExponentialMovingAverage<WINDOWS> {
         }
     }
 
+    /// Returns true when at least one window exists and all windows meet their warm-up policy.
     pub fn is_ready(&self) -> bool {
         self.window_count > 0 && (0..self.window_count).all(|index| self.is_ready_at(index))
     }
 
+    /// Returns window values in insertion order, with `NaN` for unused or unavailable slots.
     pub fn values(&self) -> [f64; WINDOWS] {
         let mut result = [f64::NAN; WINDOWS];
         for (i, item) in result.iter_mut().enumerate().take(self.window_count) {

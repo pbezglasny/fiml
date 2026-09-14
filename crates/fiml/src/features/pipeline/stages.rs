@@ -12,56 +12,86 @@ pub enum FittedStage {
     /// Independent scalar outputs reading IDs from the preceding stage.
     /// Use successive stages when one scalar must consume another scalar's output.
     Scalar {
+        /// Scalar definitions in output order, each reading the preceding stage.
         transformations: Vec<TransformerDefinition>,
     },
     /// Ordered column selection preserving retained input IDs.
     Select {
+        /// Selected input IDs in the same order as `input_indices`.
         outputs: Vec<FeatureId>,
+        /// Strictly increasing zero-based input indices matching the selected output IDs.
         input_indices: Vec<usize>,
     },
     /// Per-column centering and scaling, preserving input IDs.
     StandardScale {
+        /// Input IDs preserved unchanged and in the same order.
         outputs: Vec<FeatureId>,
+        /// Finite per-input centering values, in input order.
         mean: Vec<f64>,
+        /// Positive finite divisor per input column; each reciprocal must also be finite.
         scale: Vec<f64>,
     },
     /// Per-column sklearn MinMaxScaler coefficients and optional output clipping.
     MinMaxScale {
+        /// Input IDs preserved unchanged and in the same order.
         outputs: Vec<FeatureId>,
+        /// Positive finite multiplier per input column.
         scale: Vec<f64>,
+        /// Finite per-input offsets added after multiplication by `scale`.
         min: Vec<f64>,
+        /// Optional finite, strictly increasing lower and upper output bounds.
         clip: Option<(f64, f64)>,
     },
     /// Per-column Box-Cox or Yeo-Johnson transform followed by effective scaling.
     PowerTransform {
+        /// Input IDs preserved unchanged and in the same order.
         outputs: Vec<FeatureId>,
+        /// Power transform algorithm: `"box-cox"` or `"yeo-johnson"`.
         method: String,
+        /// Finite fitted power parameter for each input column.
         lambdas: Vec<f64>,
+        /// Finite per-input centering values, in input order.
         mean: Vec<f64>,
+        /// Positive finite divisor per input column; each reciprocal must also be finite.
         scale: Vec<f64>,
     },
     /// Per-column fitted quantile tables and output-distribution boundary behavior.
     QuantileTransform {
+        /// Input IDs preserved unchanged and in the same order.
         outputs: Vec<FeatureId>,
+        /// Quantile output distribution: `"uniform"` or `"normal"`.
         output_distribution: String,
+        /// Quantile rows by input columns; finite and nondecreasing down each column.
         quantiles: Vec<Vec<f64>>,
+        /// Strictly increasing probabilities from 0 to 1, one per quantile row; a single row uses 0.
         references: Vec<f64>,
+        /// Sorted, unique input indices whose fitting data contained only NaNs.
         all_nan_input_indices: Vec<usize>,
+        /// Finite nonnegative tolerance used to identify distribution boundaries.
         bounds_threshold: f64,
+        /// Finite increasing output bounds, required for normal output and absent for uniform output.
         normal_clip: Option<(f64, f64)>,
     },
     /// Replaces NaNs in retained columns and optionally appends fitted missing indicators.
     SimpleImpute {
+        /// Retained input IDs followed by unique IDs for the appended missing indicators.
         outputs: Vec<FeatureId>,
+        /// Sorted, unique input indices retained before missing indicators are appended.
         retained_input_indices: Vec<usize>,
+        /// Finite replacement for each retained input's NaN, in retained-column order.
         replacement_values: Vec<f64>,
+        /// Sorted, unique input indices for appended binary missing-value indicators.
         indicator_input_indices: Vec<usize>,
     },
     /// Row-major principal axes, with effective whitening divisors (ones if disabled).
     Pca {
+        /// Unique IDs for the projected components, in component order.
         outputs: Vec<FeatureId>,
+        /// Finite per-input centering values, in input order.
         mean: Vec<f64>,
+        /// Finite principal axes: one row per output, one coefficient per input.
         components: Vec<Vec<f64>>,
+        /// Positive finite divisor per component; use ones when whitening is disabled.
         output_scale: Vec<f64>,
     },
 }

@@ -10,17 +10,22 @@ use crate::{
 /// Number of [`EventKind`] variants.
 pub(crate) const EVENT_KIND_COUNT: usize = 6;
 
-/// Kind tag of an [`Event`]. Discriminants must stay in
-/// `0..EVENT_KIND_COUNT` so feature routing can use them as array indexes.
+/// Identifies the payload and routing category of an [`Event`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum EventKind {
+    /// A standalone price update.
     Price,
+    /// A standalone volume update.
     Volume,
+    /// A trade carrying price, volume, and optional aggressor side.
     Trade,
+    /// An incremental order-book update.
     OrderBookDelta,
+    /// A complete order-book snapshot.
     OrderBookSnapshot,
+    /// A clock tick routed through the global symbol.
     Time,
 }
 
@@ -42,38 +47,50 @@ impl fmt::Display for EventKind {
 
 /// A price tick.
 pub struct PriceUpdate {
+    /// Market symbol this update belongs to.
     pub symbol: Symbol,
+    /// Observed price.
     pub value: f64,
+    /// Event time in milliseconds since the Unix epoch.
     pub timestamp: i64,
 }
 
 /// A volume tick.
 pub struct VolumeUpdate {
+    /// Market symbol this update belongs to.
     pub symbol: Symbol,
+    /// Observed volume.
     pub value: f64,
+    /// Event time in milliseconds since the Unix epoch.
     pub timestamp: i64,
 }
 
-// Who was aggressor in a trade: the buyer or the seller.
-// If buyer was aggressor, the trade was a buy (ask) and the price is the ask price.
-// If seller was aggressor, the trade was a sell (bid) and the price is the bid price.
+/// Identifies the side that initiated a trade by taking resting liquidity.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TradeSide {
+    /// The buyer initiated the trade by taking ask liquidity.
     AggressorBuy,
+    /// The seller initiated the trade by taking bid liquidity.
     AggressorSell,
 }
 
 /// A trade tick carrying price and volume.
 pub struct TradeUpdate {
+    /// Market symbol this update belongs to.
     pub symbol: Symbol,
+    /// Executed trade price.
     pub price: f64,
+    /// Executed trade volume.
     pub volume: f64,
+    /// Event time in milliseconds since the Unix epoch.
     pub timestamp: i64,
+    /// Initiating side, or `None` when unknown.
     pub side: Option<TradeSide>,
 }
 
 /// A wall-clock tick carrying no market data.
 pub struct TimeUpdate {
+    /// Event time in milliseconds since the Unix epoch.
     pub timestamp: i64,
 }
 
@@ -114,12 +131,22 @@ impl OrderBookSnapshotEvent {
 }
 
 /// An incoming change. Each variant carries only the payload its kind needs.
+///
+/// Constructors package the supplied values without validation. The extractor
+/// rejects non-finite numeric payloads and enforces timestamp ordering when
+/// handling events. All timestamps use epoch milliseconds.
 pub enum Event {
+    /// A standalone price update.
     Price(PriceUpdate),
+    /// A standalone volume update.
     Volume(VolumeUpdate),
+    /// A trade carrying price, volume, and optional aggressor side.
     Trade(TradeUpdate),
+    /// An incremental order-book update.
     OrderBookDelta(OrderBookDeltaEvent),
+    /// A complete order-book snapshot.
     OrderBookSnapshot(OrderBookSnapshotEvent),
+    /// A clock tick routed through the global symbol.
     Time(TimeUpdate),
 }
 
@@ -203,6 +230,7 @@ impl Event {
         }
     }
 
+    /// Creates a standalone price tick at an epoch-millisecond timestamp.
     pub fn price(symbol: Symbol, value: f64, timestamp: i64) -> Self {
         Event::Price(PriceUpdate {
             symbol,
@@ -211,6 +239,7 @@ impl Event {
         })
     }
 
+    /// Creates a standalone volume tick at an epoch-millisecond timestamp.
     pub fn volume(symbol: Symbol, value: f64, timestamp: i64) -> Self {
         Event::Volume(VolumeUpdate {
             symbol,
@@ -219,6 +248,7 @@ impl Event {
         })
     }
 
+    /// Creates a trade at an epoch-millisecond timestamp; `side` may be unknown.
     pub fn trade(
         symbol: Symbol,
         price: f64,
@@ -235,6 +265,7 @@ impl Event {
         })
     }
 
+    /// Wraps a delta with its symbol and epoch-millisecond event timestamp.
     pub fn order_book_delta(symbol: Symbol, timestamp: i64, delta: OrderBookDelta) -> Self {
         Event::OrderBookDelta(OrderBookDeltaEvent {
             symbol,
@@ -243,6 +274,7 @@ impl Event {
         })
     }
 
+    /// Wraps a snapshot with its symbol and epoch-millisecond event timestamp.
     pub fn order_book_snapshot(
         symbol: Symbol,
         timestamp: i64,
@@ -255,6 +287,7 @@ impl Event {
         })
     }
 
+    /// Creates a global clock tick at an epoch-millisecond timestamp.
     pub fn time(timestamp: i64) -> Self {
         Event::Time(TimeUpdate { timestamp })
     }

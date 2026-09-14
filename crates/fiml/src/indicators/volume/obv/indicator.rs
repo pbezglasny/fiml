@@ -19,6 +19,7 @@ struct ObvWindowTimed {
     front_offset: usize,
 }
 
+/// One time bucket of close price and signed volume, used as OBV ring-buffer storage.
 pub struct ObvBucket {
     timestamp: i64,
     close_price: f64,
@@ -55,6 +56,12 @@ where
 impl<const N: usize, const WINDOWS: usize>
     OnBalanceVolumeTimed<StackRingBuffer<N, ObvBucket>, WINDOWS>
 {
+    /// Creates an empty indicator with inline history; add windows before updating.
+    ///
+    /// # Errors
+    ///
+    /// Rejects zero capacity or an aggregation that is not positive whole milliseconds
+    /// representable as `i64`. Reserve more history slots than the largest window's bucket count.
     pub fn new_stack(aggregation: Duration, warmup_policy: WarmupPolicy) -> Result<Self> {
         if N == 0 {
             return Err(FimlError::InvalidArgument(
@@ -67,6 +74,12 @@ impl<const N: usize, const WINDOWS: usize>
 }
 
 impl<const WINDOWS: usize> OnBalanceVolumeTimed<HeapRingBuffer<ObvBucket>, WINDOWS> {
+    /// Creates an empty indicator with heap-allocated history; add windows before updating.
+    ///
+    /// # Errors
+    ///
+    /// Rejects zero capacity or an aggregation that is not positive whole milliseconds
+    /// representable as `i64`. Reserve more history slots than the largest window's bucket count.
     pub fn new_heap(
         aggregation: Duration,
         capacity: usize,
@@ -126,6 +139,12 @@ where
         })
     }
 
+    /// Adds a window spanning `periods` aggregation buckets.
+    ///
+    /// # Errors
+    ///
+    /// Rejects zero periods, periods at least as large as history capacity, durations
+    /// outside `i64` milliseconds, additions after data, or more than `WINDOWS` windows.
     pub fn add_window_with_periods(&mut self, periods: usize) -> Result<()> {
         if self.window_count >= WINDOWS {
             return Err(FimlError::InvalidArgument(
@@ -315,6 +334,13 @@ where
         }
     }
 
+    /// Records a trade using the current system time in epoch milliseconds.
+    /// Use event ingestion through the extractor for historical timestamps.
+    /// The caller must supply finite price and volume.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the system time precedes the Unix epoch.
     pub fn update(&mut self, price: f64, volume: f64) {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -323,6 +349,7 @@ where
         self.update_inner(price, volume, now);
     }
 
+    /// Returns the zero-based window's value, or `None` if absent or still warming up.
     pub fn window_value(&self, window_idx: usize) -> Option<f64> {
         if !self.is_ready_at(window_idx) {
             return None;
@@ -331,6 +358,7 @@ where
         Some(window.value)
     }
 
+    /// Reports whether the zero-based window has met its warm-up policy; false if absent.
     pub fn is_ready_at(&self, index: usize) -> bool {
         if index >= self.window_count {
             return false;
@@ -339,6 +367,7 @@ where
         window.ready
     }
 
+    /// Returns true when at least one window exists and all windows meet their warm-up policy.
     pub fn is_ready(&self) -> bool {
         self.window_count > 0 && (0..self.window_count).all(|index| self.is_ready_at(index))
     }

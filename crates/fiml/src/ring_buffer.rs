@@ -2,6 +2,8 @@
 //!
 use std::{collections::VecDeque, mem::MaybeUninit};
 
+/// Fixed-capacity history that evicts the oldest item when a new item fills the buffer.
+/// Front-relative indices start at the oldest item; back-relative indices start at the newest.
 pub trait RingBuffer {
     /// Type of items stored in buffer
     type Item;
@@ -29,24 +31,29 @@ pub trait RingBuffer {
     /// Return a reference to the front item of the buffer without removing it. If buffer is empty,
     /// return None.
     fn peek_front(&self) -> Option<&Self::Item>;
-    /// Return a reference to the back item of the buffer without removing it. If buffer is empty,
-    /// return
+    /// Borrows the newest item, or returns `None` when empty.
     fn peek_back(&self) -> Option<&Self::Item>;
 
-    /// Return a reference to the item at the given index from the back of the buffer without
-    /// removing
-    /// Zero-based index, where 0 is the back item, 1 is the second to last item, and so on. If
-    /// index
+    /// Borrows an item by zero-based distance from the newest item.
+    /// Returns `None` when `index >= len()`.
     fn peek_back_at(&self, index: usize) -> Option<&Self::Item>;
 
-    /// Return a reference to the item at the given index from the front of the buffer without
+    /// Borrows an item by zero-based distance from the oldest item.
+    /// Returns `None` when `index >= len()`.
     fn peek_front_at(&self, index: usize) -> Option<&Self::Item>;
 }
 
+/// Creates an empty ring buffer with inline storage for `N` items.
+///
+/// # Panics
+///
+/// Panics if `N` is zero.
 pub const fn new_stack_ring_buffer<const N: usize, T>() -> StackRingBuffer<N, T> {
     StackRingBuffer::new()
 }
 
+/// Ring buffer with inline storage and no heap allocation for its slots.
+/// Construct with [`new_stack_ring_buffer`]; capacity `N` must be positive.
 pub struct StackRingBuffer<const N: usize, T> {
     data: [MaybeUninit<T>; N],
     head: usize,
@@ -162,16 +169,28 @@ impl<const N: usize, T> Drop for StackRingBuffer<N, T> {
     }
 }
 
+/// Allocates an empty ring buffer with capacity for `size` items.
+///
+/// # Panics
+///
+/// Panics if `size` is zero.
 pub fn new_heap_ring_buffer<T>(size: usize) -> HeapRingBuffer<T> {
     HeapRingBuffer::new(size)
 }
 
+/// Ring buffer whose storage is allocated once at a runtime-selected capacity.
+/// Pushing into a full buffer replaces the oldest item without growing storage.
 pub struct HeapRingBuffer<T> {
     data: VecDeque<T>,
     size: usize,
 }
 
 impl<T> HeapRingBuffer<T> {
+    /// Allocates storage for `size` items, initially empty.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `size` is zero.
     pub fn new(size: usize) -> Self {
         assert!(size > 0, "Ring buffer size must be greater than 0");
         Self {

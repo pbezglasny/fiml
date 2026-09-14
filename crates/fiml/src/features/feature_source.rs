@@ -2,14 +2,12 @@
 //!
 use crate::{Event, EventKind};
 
-/// Source of value to calculate feature
-/// Each event could provide multiple sources or
-/// could be entire source of feature.
-/// E.g. Trade can provide trade price, trade volume,
-/// or could be use whole
+/// Selects the scalar field or complete event consumed by a feature.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum FeatureSource {
+    /// One numeric field, delivered only by its corresponding event kind.
     Field(EventField),
+    /// Complete events of the selected kind, such as trades with price and volume.
     Event(EventKind),
     /// Every kind for the configured symbol. Global calendar features follow
     /// the maximum accepted timestamp across all symbols.
@@ -37,10 +35,10 @@ impl FeatureSource {
 macro_rules! define_event_field {
       (
           $(
-              $source:ident => $event:ident.$field:ident
+              $(#[$meta:meta])* $source:ident => $event:ident.$field:ident
           ),+ $(,)?
       ) => {
-          /// Use next field of event as argument of indicator
+          /// A numeric market-event field usable as an indicator input.
           #[derive(
               Debug,
               Clone,
@@ -54,11 +52,13 @@ macro_rules! define_event_field {
           #[repr(u8)]
           pub enum EventField {
               $(
+                  $(#[$meta])*
                   $source,
               )+
           }
 
           impl EventField {
+              /// Returns the event kind that carries this field.
               pub const fn event_kind(self) -> EventKind {
                   match self {
                       $(
@@ -67,6 +67,7 @@ macro_rules! define_event_field {
                   }
               }
 
+              /// Reads the field, or returns `None` when the event kind does not match.
               pub fn extract(self, event: &Event) -> Option<f64>
               {
                   match (self, event) {
@@ -84,8 +85,12 @@ macro_rules! define_event_field {
   }
 
 define_event_field! {
+    /// Price from a standalone price update.
     Price => Price.value,
+    /// Volume from a standalone volume update.
     Volume => Volume.value,
+    /// Execution price from a trade.
     TradePrice => Trade.price,
+    /// Executed volume from a trade.
     TradeVolume => Trade.volume
 }
