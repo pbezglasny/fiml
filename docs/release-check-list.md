@@ -12,7 +12,7 @@ documentation, and Python distribution still need work.
 - [x] Rust workspace tests: 220 passed
 - [x] Python tests: 380 passed
 - [x] Notebook execution
-- [x] `cargo package -p fiml`: 70 files, 118.9 KiB compressed
+- [x] `cargo package -p fiml`: 80 files, 133.8 KiB compressed
 - [x] Current GitHub `main` build
 - [x] No existing `fiml` package was found on crates.io or PyPI on 2026-09-12
 - [ ] Strict Rust documentation check; `missing_docs` currently reports many
@@ -22,11 +22,10 @@ documentation, and Python distribution still need work.
 
 ### 1. Define the release scope
 
-- [ ] Decide whether `v0.1.0` includes both the Rust crate and Python package.
-- [ ] Decide which Python operating systems and architectures are supported.
-  The current local build produces only a Linux x86-64 wheel.
-- [ ] Define the minimum supported Rust version, or explicitly state that only
-  the current stable Rust toolchain is supported.
+- [x] `v0.1.0` includes both the Rust crate and Python package.
+- [x] Support Linux x86-64/AArch64, macOS x86-64/AArch64, and Windows x86-64
+  Python wheels.
+- [x] Set the minimum supported Rust version to 1.89.
 
 ### 2. Complete the first-release indicator set
 
@@ -97,7 +96,7 @@ package dry run:
 
 - [ ] Add `CHANGELOG.md` with the `0.1.0` features, limitations, and breaking
   change policy.
-- [ ] Ensure the Rust and Python package versions are both `0.1.0`.
+- [x] Ensure the Rust and Python package versions are both `0.1.0`.
 - [ ] Prepare concise GitHub release notes.
 - [ ] Update the GitHub repository description and topics.
 
@@ -107,7 +106,7 @@ package dry run:
 - [ ] Configure PyPI Trusted Publishing with GitHub Actions instead of storing
   a long-lived PyPI token:
   <https://docs.pypi.org/trusted-publishers/>.
-- [ ] Add a Python release workflow that builds wheels for every supported
+- [x] Add a Python release workflow that builds wheels for every supported
   platform.
 - [ ] Verify the exact files included in both Rust and Python artifacts.
 - [ ] Confirm that the `fiml` names are still available immediately before
