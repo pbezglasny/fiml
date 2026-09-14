@@ -1,4 +1,5 @@
 import json
+from copy import deepcopy
 from pathlib import Path
 
 import pytest
@@ -150,6 +151,37 @@ def test_schema_accepts_grouped_trade_volume_and_core_round_trips_it():
     document = json.loads(spec.to_json())
     assert not list(VALIDATOR.iter_errors(document))
     assert json.loads(fiml.FeatureExtractorSpec.from_json(json.dumps(document)).to_json()) == document
+
+
+def test_schema_accepts_grouped_vwap_and_core_round_trips_it():
+    spec = fiml.FeatureExtractorSpec().vwap_timed("BTCUSDT", "1s", ["2s", "5s"])
+    document = json.loads(spec.to_json())
+    assert not list(VALIDATOR.iter_errors(document))
+    assert json.loads(fiml.FeatureExtractorSpec.from_json(json.dumps(document)).to_json()) == document
+
+
+def test_schema_and_core_reject_invalid_vwap_wire_shapes():
+    valid = json.loads(
+        fiml.FeatureExtractorSpec().vwap_timed("BTCUSDT", "1s", ["2s"]).to_json()
+    )
+    for mutate in [
+        lambda indicator: indicator.pop("warmup_policy"),
+        lambda indicator: indicator.pop("options"),
+        lambda indicator: indicator.pop("outputs"),
+        lambda indicator: indicator.update(options={}),
+        lambda indicator: indicator.update(
+            source={"type": "field", "event": "trade", "field": "price"}
+        ),
+        lambda indicator: indicator.update(outputs=[{"window": 2}]),
+        lambda indicator: indicator.update(outputs=[{}]),
+        lambda indicator: indicator.update(outputs=[{"window": "2s", "lag": 1}]),
+        lambda indicator: indicator.update(outputs=[{"window": "2s"}] * 17),
+    ]:
+        document = deepcopy(valid)
+        mutate(document["features"][0]["indicators"][0])
+        assert list(VALIDATOR.iter_errors(document))
+        with pytest.raises(ValueError):
+            fiml.FeatureExtractorSpec.from_json(json.dumps(document))
 
 
 @pytest.mark.parametrize("kind", [

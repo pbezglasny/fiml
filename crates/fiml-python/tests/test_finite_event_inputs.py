@@ -10,6 +10,9 @@ def build_runtime(pipeline):
     raw.sma_timed(
         "BTCUSDT", aggregation="1s", windows=["2s"],
         warmup=fiml.WarmupPolicy.FIRST_VALUE,
+    ).vwap_timed(
+        "BTCUSDT", aggregation="1s", windows=["2s"],
+        warmup=fiml.WarmupPolicy.FIRST_VALUE,
     ).time_since_first_event_of_day()
     if not pipeline:
         return fiml.FeatureExtractor(raw)

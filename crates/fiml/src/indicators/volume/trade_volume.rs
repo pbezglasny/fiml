@@ -5,14 +5,14 @@ use crate::ring_buffer::{HeapRingBuffer, RingBuffer, StackRingBuffer};
 use crate::{Result, WarmupPolicy};
 
 /// One fixed-duration bucket of summed trade volume.
-pub type TradeVolumeBucket = TimedSumBucket;
+pub type TradeVolumeBucket = TimedSumBucket<1>;
 
 /// Rolling trade-volume sums over fixed-duration, time-bucketed windows.
 pub struct RollingTradeVolumeTimed<R, const WINDOWS: usize>
 where
     R: RingBuffer<Item = TradeVolumeBucket>,
 {
-    sum: RollingTimedSum<R, WINDOWS>,
+    sum: RollingTimedSum<R, WINDOWS, 1>,
 }
 
 impl<const N: usize, const WINDOWS: usize>
@@ -50,7 +50,7 @@ where
 
     /// Records trade `volume` at `timestamp` in epoch milliseconds.
     pub(crate) fn update_inner(&mut self, volume: f64, timestamp: i64) {
-        self.sum.update(volume, timestamp);
+        self.sum.update([volume], timestamp);
     }
 
     /// Records trade `volume` at the current system time.
@@ -69,7 +69,7 @@ where
 
     /// Returns the rolling volume for a configured window when it is ready.
     pub fn window_value(&self, index: usize) -> Option<f64> {
-        self.sum.window_value(index)
+        self.sum.window_value(index, 0)
     }
 
     /// Returns whether one configured window has completed warm-up.

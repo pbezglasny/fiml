@@ -46,6 +46,7 @@ def check_capacity():
         ("sma_timed", {"aggregation": "1s", "windows": ["2s"]}),
         ("obv_timed", {"aggregation": "1s", "windows": ["2s"]}),
         ("trade_volume_timed", {"aggregation": "1s", "windows": ["2s"]}),
+        ("vwap_timed", {"aggregation": "1s", "windows": ["2s"]}),
         ("vpt", {}),
         ("trade_count_timed", {"aggregation": "1s", "window": "2s"}),
     ]:

@@ -268,6 +268,12 @@ The sum of trade volume in one or more rolling time windows, grouped into
 fixed-duration buckets. The builder and serialized indicator name are
 `trade_volume_timed`.
 
+### Timed VWAP
+
+The sum of trade price multiplied by trade volume divided by total trade
+volume in one or more rolling time windows. It is exposed as `vwap_timed` and
+is unavailable while its window is warming up or contains no trades.
+
 ## Serialization and contributor concepts
 
 ### Feature group

@@ -252,6 +252,7 @@ enum IndicatorIdentity {
     Vpt(FeatureSource),
     TradeCountTimed(FeatureSource, Duration, Duration, WarmupPolicy),
     TradeVolumeTimed(FeatureSource, Duration, WarmupPolicy),
+    VwapTimed(FeatureSource, Duration, WarmupPolicy),
     DayOfWeek(FeatureSource),
     TimeSinceFirstEventOfDay(FeatureSource, i64),
 }
@@ -573,6 +574,24 @@ fn serialize_definition(
             }),
             Some(WindowWire::Duration(format_duration(window)?)),
         ),
+        FeatureKey::VwapTimed {
+            source,
+            aggregation,
+            window,
+            warmup_policy,
+            ..
+        } => (
+            IndicatorIdentity::VwapTimed(source, aggregation, warmup_policy),
+            "vwap_timed",
+            source,
+            Some(warmup_policy),
+            Some(OptionsWire {
+                aggregation: Some(format_duration(aggregation)?),
+                utc_offset: None,
+                ..OptionsWire::default()
+            }),
+            Some(WindowWire::Duration(format_duration(window)?)),
+        ),
         FeatureKey::DayOfWeek { source, .. } => (
             IndicatorIdentity::DayOfWeek(source),
             "day_of_week",
@@ -840,7 +859,7 @@ fn deserialize_indicator(
                 definitions.push(definition_from_output(key, output.id));
             }
         }
-        "sma_timed" | "obv_timed" | "trade_count_timed" | "trade_volume_timed"
+        "sma_timed" | "obv_timed" | "trade_count_timed" | "trade_volume_timed" | "vwap_timed"
         | "volatility_timed" => {
             let warmup = required_warmup(&indicator)?;
             if options.utc_offset.is_some() {
@@ -893,6 +912,13 @@ fn deserialize_indicator(
                         warmup_policy: warmup,
                     },
                     "trade_volume_timed" => FeatureKey::TradeVolumeTimed {
+                        symbol,
+                        source,
+                        aggregation,
+                        window,
+                        warmup_policy: warmup,
+                    },
+                    "vwap_timed" => FeatureKey::VwapTimed {
                         symbol,
                         source,
                         aggregation,
@@ -1364,6 +1390,7 @@ fn symbol_of(key: &FeatureKey) -> Symbol {
         | FeatureKey::Vpt { symbol, .. }
         | FeatureKey::TradeCountTimed { symbol, .. }
         | FeatureKey::TradeVolumeTimed { symbol, .. }
+        | FeatureKey::VwapTimed { symbol, .. }
         | FeatureKey::DayOfWeek { symbol, .. }
         | FeatureKey::TimeSinceFirstEventOfDay { symbol, .. } => *symbol,
     }
@@ -1378,7 +1405,7 @@ fn validate_scope_and_source(
     let valid = match kind {
         "sma" | "ema" | "simple_return" | "log_return" | "sma_timed" | "volatility"
         | "volatility_timed" => !global && matches!(source, FeatureSource::Field(_)),
-        "cvd" | "obv_timed" | "vpt" | "trade_count_timed" | "trade_volume_timed" => {
+        "cvd" | "obv_timed" | "vpt" | "trade_count_timed" | "trade_volume_timed" | "vwap_timed" => {
             !global && source == FeatureSource::Event(EventKind::Trade)
         }
         "day_of_week" | "time_since_first_event_of_day" => {
@@ -1796,6 +1823,36 @@ mod tests {
         let value = serde_json::to_value(&spec).unwrap();
         let indicator = &value["features"][0]["indicators"][0];
         assert_eq!(indicator["kind"], "trade_volume_timed");
+        assert_eq!(indicator["outputs"].as_array().unwrap().len(), 2);
+        assert_eq!(
+            serde_json::from_value::<FeatureExtractorSpec>(value).unwrap(),
+            spec
+        );
+    }
+
+    #[test]
+    fn grouped_vwap_round_trips() {
+        let btc = Symbol::new("BTCUSDT").unwrap();
+        let spec = FeatureExtractorSpec::new([
+            default(FeatureKey::VwapTimed {
+                symbol: btc,
+                source: FeatureSource::Event(EventKind::Trade),
+                aggregation: Duration::from_secs(1),
+                window: Duration::from_secs(2),
+                warmup_policy: WarmupPolicy::FullWindow,
+            }),
+            default(FeatureKey::VwapTimed {
+                symbol: btc,
+                source: FeatureSource::Event(EventKind::Trade),
+                aggregation: Duration::from_secs(1),
+                window: Duration::from_secs(5),
+                warmup_policy: WarmupPolicy::FullWindow,
+            }),
+        ])
+        .unwrap();
+        let value = serde_json::to_value(&spec).unwrap();
+        let indicator = &value["features"][0]["indicators"][0];
+        assert_eq!(indicator["kind"], "vwap_timed");
         assert_eq!(indicator["outputs"].as_array().unwrap().len(), 2);
         assert_eq!(
             serde_json::from_value::<FeatureExtractorSpec>(value).unwrap(),

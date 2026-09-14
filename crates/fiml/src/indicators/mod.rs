@@ -19,5 +19,6 @@ pub use returns::{ReturnKind, SampleReturns};
 pub use volatility::{RollingVolatility, RollingVolatilityTimed, VolatilityBucket};
 pub use volume::{
     CumulativeVolumeDelta, ObvBucket, OnBalanceVolumeTimed, RollingTradeVolumeTimed,
-    TradeVolumeBucket, VolumePriceTrend, cvd, obv_timed, trade_volume_timed, vpt,
+    TradeVolumeBucket, VolumePriceTrend, VolumeWeightedAveragePriceTimed, VwapBucket, cvd,
+    obv_timed, trade_volume_timed, vpt, vwap_timed,
 };

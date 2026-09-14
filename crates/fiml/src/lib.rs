@@ -224,6 +224,7 @@ pub enum IndicatorKind {
     Vpt,
     TradeCountTimed,
     TradeVolumeTimed,
+    VwapTimed,
     DayOfWeek,
     TimeSinceFirstEventOfDay,
 }
@@ -541,6 +542,7 @@ impl Display for IndicatorKind {
             Self::Vpt => "VPT",
             Self::TradeCountTimed => "timed trade count",
             Self::TradeVolumeTimed => "timed trade volume",
+            Self::VwapTimed => "timed VWAP",
             Self::DayOfWeek => "day of week",
             Self::TimeSinceFirstEventOfDay => "time since first event of day",
         })
