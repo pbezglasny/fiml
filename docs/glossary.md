@@ -260,8 +260,13 @@ aggregation buckets and retained for one or more time windows.
 ### Timed trade count
 
 The number of trades in a rolling time window, grouped into fixed-duration
-buckets. The builder and serialized indicator name are `trade_count_timed`;
-generated feature names use the shorter `count_timed` segment.
+buckets. The builder and serialized indicator name are `trade_count_timed`.
+
+### Timed trade volume
+
+The sum of trade volume in one or more rolling time windows, grouped into
+fixed-duration buckets. The builder and serialized indicator name are
+`trade_volume_timed`.
 
 ## Serialization and contributor concepts
 

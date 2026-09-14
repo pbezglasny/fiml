@@ -491,6 +491,38 @@ impl FeatureExtractorSpec {
         Ok(slf)
     }
 
+    /// Grouped rolling trade-volume sums over timed windows.
+    #[pyo3(signature = (
+        symbol,
+        aggregation,
+        windows,
+        *,
+        warmup=PyWarmupPolicy::FullWindow
+    ))]
+    fn trade_volume_timed<'py>(
+        mut slf: PyRefMut<'py, Self>,
+        symbol: &str,
+        aggregation: &str,
+        windows: Vec<String>,
+        warmup: PyWarmupPolicy,
+    ) -> PyResult<PyRefMut<'py, Self>> {
+        Self::require_windows(&windows)?;
+        let symbol = intern_symbol(symbol)?;
+        let aggregation = parse_duration("aggregation", aggregation)?;
+        let windows = parse_durations("windows", windows)?;
+        let warmup_policy = warmup.into();
+        slf.add_group(windows.into_iter().map(|window| {
+            definition(FeatureKey::TradeVolumeTimed {
+                symbol,
+                source: FeatureSource::Event(EventKind::Trade),
+                aggregation,
+                window,
+                warmup_policy,
+            })
+        }))?;
+        Ok(slf)
+    }
+
     /// Cumulative volume-price trend over trades for one symbol.
     fn vpt<'py>(mut slf: PyRefMut<'py, Self>, symbol: &str) -> PyResult<PyRefMut<'py, Self>> {
         slf.add_group([definition(FeatureKey::Vpt {

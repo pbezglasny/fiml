@@ -143,6 +143,15 @@ def test_schema_accepts_returns_and_core_round_trips_them(kind):
             fiml.FeatureExtractorSpec.from_json(json.dumps(document))
 
 
+def test_schema_accepts_grouped_trade_volume_and_core_round_trips_it():
+    spec = fiml.FeatureExtractorSpec().trade_volume_timed(
+        "BTCUSDT", "1s", ["2s", "5s"]
+    )
+    document = json.loads(spec.to_json())
+    assert not list(VALIDATOR.iter_errors(document))
+    assert json.loads(fiml.FeatureExtractorSpec.from_json(json.dumps(document)).to_json()) == document
+
+
 @pytest.mark.parametrize("kind", [
     "order_book_mid_price", "order_book_spread", "order_book_spread_bps",
     "order_book_weighted_mid_price", "order_book_microprice", "order_book_imbalance",

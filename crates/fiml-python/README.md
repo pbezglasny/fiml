@@ -104,6 +104,7 @@ spec = (fiml.FeatureExtractorSpec()
       .sma("BTCUSDT", [12, 24], source="trade_price")
       .ema("BTCUSDT", [12], source="trade_price")
       .obv_timed("BTCUSDT", aggregation="1ms", windows=["30s", "60s"])
+      .trade_volume_timed("BTCUSDT", aggregation="1ms", windows=["30s", "60s"])
       .trade_count_timed("BTCUSDT", aggregation="1ms", window="60s")
       .day_of_week())
 
@@ -177,12 +178,12 @@ Serialized specs also include a canonical `required_events` list of concrete
 
 Builder methods: `simple_returns`, `log_returns`, `sma`, `ema`, `cvd`,
 `volatility`, `sma_timed`, `obv_timed`, `volatility_timed`, `vpt`,
-`trade_count_timed`, `day_of_week`, and `time_since_first_event_of_day`
-(fixed-offset `tz`, default `"UTC"`). SMA, EMA, CVD, timed SMA, and timed OBV
-accept ordered window lists; each list becomes one runtime indicator with
-adjacent output cells. Durations are strings (`"500ms"`, `"1s"`, `"5m"`,
-`"1h"`). Every window builder accepts a keyword-only `warmup` enum; its default
-is `fiml.WarmupPolicy.FULL_WINDOW`.
+`trade_count_timed`, `trade_volume_timed`, `day_of_week`, and
+`time_since_first_event_of_day` (fixed-offset `tz`, default `"UTC"`). SMA, EMA,
+CVD, timed SMA, timed OBV, and timed trade volume accept ordered window lists;
+each list becomes one runtime indicator with adjacent output cells. Durations
+are strings (`"500ms"`, `"1s"`, `"5m"`, `"1h"`). Every window builder accepts a
+keyword-only `warmup` enum; its default is `fiml.WarmupPolicy.FULL_WINDOW`.
 `vpt` consumes trade price and volume, starts at zero, and emits its cumulative
 value from the first trade.
 
@@ -515,7 +516,7 @@ To guarantee identical output between Python (batch) and Rust (live):
    warm-up policies, symbol names, and feature order.
 3. **Replay the full event stream in the same order with the same millisecond
    timestamps.** Do not downsample or skip rows: timed indicators (`SmaTimed`,
-   `ObvTimed`, `TradeCountTimed`) bucket by timestamp.
+   `ObvTimed`, `TradeCountTimed`, `TradeVolumeTimed`) bucket by timestamp.
 4. **Use the same trade-side classifications.** CVD ignores trades without a
    side and uses positive volume for `SIDE_AGGRESSOR_BUY`, negative volume for
    `SIDE_AGGRESSOR_SELL`.

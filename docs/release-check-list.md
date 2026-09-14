@@ -36,7 +36,7 @@ ML fundamentals, then stop:
 - [x] Simple and log returns over configurable sample lags.
 - [x] Rolling volatility as the standard deviation of returns over
   configurable windows.
-- [ ] Rolling trade volume over timed windows.
+- [x] Rolling trade volume over timed windows.
 - [ ] VWAP from trade price and volume over timed windows.
 
 For every added indicator:

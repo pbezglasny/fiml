@@ -7,6 +7,7 @@
 pub mod averages;
 pub mod counts;
 pub mod returns;
+mod timed_sum;
 pub mod volatility;
 pub mod volume;
 
@@ -17,5 +18,6 @@ pub use counts::{CountBucket, TradeCountTimed, trade_count_timed};
 pub use returns::{ReturnKind, SampleReturns};
 pub use volatility::{RollingVolatility, RollingVolatilityTimed, VolatilityBucket};
 pub use volume::{
-    CumulativeVolumeDelta, ObvBucket, OnBalanceVolumeTimed, VolumePriceTrend, cvd, obv_timed, vpt,
+    CumulativeVolumeDelta, ObvBucket, OnBalanceVolumeTimed, RollingTradeVolumeTimed,
+    TradeVolumeBucket, VolumePriceTrend, cvd, obv_timed, trade_volume_timed, vpt,
 };

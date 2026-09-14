@@ -310,6 +310,21 @@ fn write_feature_key(id: &mut String, key: &FeatureKey) -> fmt::Result {
             window.as_nanos(),
             *warmup_policy,
         ),
+        FeatureKey::TradeVolumeTimed {
+            symbol,
+            source,
+            aggregation,
+            window,
+            warmup_policy,
+        } => write_timed_window(
+            id,
+            "trade_volume_timed",
+            *symbol,
+            *source,
+            aggregation.as_nanos(),
+            window.as_nanos(),
+            *warmup_policy,
+        ),
         FeatureKey::DayOfWeek { symbol, source } => {
             write_prefix(id, "day_of_week", *symbol, source.canonical_name())
         }
@@ -415,6 +430,21 @@ mod tests {
         assert_eq!(
             FeatureId::from(&key).as_str(),
             "obv_timed:symbol=6:ethusd:source=event.trade:aggregation_ns=100000000:window_ns=5000000000:warmup=first_value"
+        );
+    }
+
+    #[test]
+    fn creates_canonical_id_for_timed_trade_volume() {
+        let key = FeatureKey::TradeVolumeTimed {
+            symbol: Symbol::new("ETHUSD").unwrap(),
+            source: FeatureSource::Event(crate::EventKind::Trade),
+            aggregation: std::time::Duration::from_millis(100),
+            window: std::time::Duration::from_secs(5),
+            warmup_policy: WarmupPolicy::FirstValue,
+        };
+        assert_eq!(
+            FeatureId::from(&key).as_str(),
+            "trade_volume_timed:symbol=6:ethusd:source=event.trade:aggregation_ns=100000000:window_ns=5000000000:warmup=first_value"
         );
     }
 

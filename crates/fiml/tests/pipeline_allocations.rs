@@ -171,6 +171,50 @@ fn returns_and_rolling_volatility_updates_do_not_allocate() {
 }
 
 #[test]
+fn rolling_trade_volume_updates_do_not_allocate() {
+    let symbol = Symbol::new("trade-volume-allocations").unwrap();
+    let mut extractor = FeatureExtractorSpec::new([
+        FeatureDefinition::with_default_id(FeatureKey::TradeVolumeTimed {
+            symbol,
+            source: FeatureSource::Event(fiml::EventKind::Trade),
+            aggregation: Duration::from_millis(1),
+            window: Duration::from_millis(4),
+            warmup_policy: WarmupPolicy::FirstValue,
+        }),
+        FeatureDefinition::with_default_id(FeatureKey::TradeVolumeTimed {
+            symbol,
+            source: FeatureSource::Event(fiml::EventKind::Trade),
+            aggregation: Duration::from_millis(1),
+            window: Duration::from_millis(8),
+            warmup_policy: WarmupPolicy::FirstValue,
+        }),
+    ])
+    .unwrap()
+    .build(ArrayFeatureVector::<2>::new())
+    .unwrap();
+
+    assert_eq!(
+        count_allocations(|| {
+            for timestamp in 0..128 {
+                black_box(
+                    extractor
+                        .handle_event(Event::trade(
+                            symbol,
+                            100.0,
+                            timestamp as f64 + 1.0,
+                            timestamp,
+                            None,
+                        ))
+                        .unwrap(),
+                );
+            }
+        }),
+        0
+    );
+    assert_eq!(extractor.feature_vector().values(), &[506.0, 996.0]);
+}
+
+#[test]
 fn fitted_stages_do_not_allocate_during_warmup_or_steady_state() {
     use fiml::FittedStage;
     let raw = FeatureExtractorSpec::new([FeatureDefinition::new(
