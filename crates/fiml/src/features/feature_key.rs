@@ -151,6 +151,14 @@ pub enum FeatureKey {
         window: Duration,
         warmup_policy: WarmupPolicy,
     },
+    /// Sum of trade volume over a time-bucketed rolling window.
+    TradeVolumeTimed {
+        symbol: Symbol,
+        source: FeatureSource,
+        aggregation: Duration,
+        window: Duration,
+        warmup_policy: WarmupPolicy,
+    },
     DayOfWeek {
         symbol: Symbol,
         source: FeatureSource,

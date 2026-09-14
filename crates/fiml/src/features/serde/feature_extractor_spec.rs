@@ -328,6 +328,21 @@ fn canonical_sort_key(key: &FeatureKey) -> (bool, String, u8, u8, u8, u128, u128
             window.as_nanos(),
             0,
         ),
+        FeatureKey::TradeVolumeTimed {
+            symbol,
+            source,
+            aggregation,
+            warmup_policy,
+            ..
+        } => (
+            *symbol,
+            31,
+            source_rank(*source),
+            warmup_rank(*warmup_policy),
+            aggregation.as_nanos(),
+            0,
+            0,
+        ),
         FeatureKey::DayOfWeek { symbol, source } => (*symbol, 1, source_rank(*source), 0, 0, 0, 0),
         FeatureKey::TimeSinceFirstEventOfDay {
             symbol,

@@ -62,6 +62,7 @@ spec = (fiml.FeatureExtractorSpec()
       .sma("BTCUSDT", [12, 24], source="trade_price")
       .ema("BTCUSDT", [12], source="trade_price")
       .obv_timed("BTCUSDT", aggregation="1s", windows=["2s"])
+      .trade_volume_timed("BTCUSDT", aggregation="1s", windows=["2s", "5s"])
       .day_of_week())
 
 extractor = fiml.FeatureExtractor(spec)
@@ -183,7 +184,7 @@ all-or-nothing. See the dated contract linked above for the complete rules.
 2. **Same `FeatureExtractorSpec`** — same periods, durations, symbol names, feature order.
 3. **Replay the full stream in the same order with the same millisecond
    timestamps.** Do not downsample or skip rows: timed indicators (`SmaTimed`,
-   `ObvTimed`, `TradeCountTimed`) bucket by timestamp.
+   `ObvTimed`, `TradeCountTimed`, `TradeVolumeTimed`) bucket by timestamp.
 4. **Intern the same symbol strings** on both sides.
 5. **One canonical timestamp unit end-to-end.** Time-derived features (§11a) are
    unit-sensitive — they compute calendar/session values from the raw timestamp.

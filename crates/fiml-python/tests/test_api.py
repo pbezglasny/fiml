@@ -41,6 +41,14 @@ def count_name(symbol):
     )
 
 
+def timed_name(kind, symbol, aggregation, window, warmup="full_window"):
+    normalized = symbol.lower()
+    return (
+        f"{kind}:symbol={len(normalized)}:{normalized}:source=event.trade:"
+        f"aggregation_ns={aggregation}:window_ns={window}:warmup={warmup}"
+    )
+
+
 def trade_counts(*symbols):
     feature_extractor_spec = fiml.FeatureExtractorSpec()
     for symbol in symbols:
@@ -165,6 +173,43 @@ def test_sample_and_timed_volatility_use_population_stddev_of_simple_returns():
         equal_nan=True,
         atol=1e-12,
     )
+
+
+def test_grouped_trade_volume_timed_sums_volume_and_respects_warmup():
+    spec = fiml.FeatureExtractorSpec().trade_volume_timed(
+        "BTCUSDT", aggregation="1s", windows=["2s", "3s"]
+    )
+    assert spec.indicator_count() == 1
+    assert spec.output_count() == 2
+    extractor = fiml.FeatureExtractor(spec)
+    btc = extractor.symbol("BTCUSDT")
+    values = extractor.transform(
+        np.full(4, fiml.KIND_TRADE, dtype=np.uint8),
+        np.full(4, btc, dtype=np.int64),
+        np.array([0, 1_000, 2_000, 3_000], dtype=np.int64),
+        price=np.ones(4),
+        volume=np.array([1.0, 2.0, 4.0, 8.0]),
+    )
+
+    assert extractor.feature_names() == [
+        timed_name("trade_volume_timed", "BTCUSDT", 1_000_000_000, 2_000_000_000),
+        timed_name("trade_volume_timed", "BTCUSDT", 1_000_000_000, 3_000_000_000),
+    ]
+    np.testing.assert_equal(
+        values,
+        [[np.nan, np.nan], [np.nan, np.nan], [6.0, np.nan], [12.0, 14.0]],
+    )
+
+
+def test_trade_volume_timed_validates_windows():
+    with pytest.raises(ValueError, match="windows must not be empty"):
+        fiml.FeatureExtractorSpec().trade_volume_timed("BTCUSDT", "1s", [])
+
+    spec = fiml.FeatureExtractorSpec().trade_volume_timed(
+        "BTCUSDT", "1s", ["1500ms"]
+    )
+    with pytest.raises(ValueError, match="multiple of aggregation"):
+        fiml.FeatureExtractor(spec)
 
 
 def test_simple_and_log_returns_use_configured_sample_lags():
