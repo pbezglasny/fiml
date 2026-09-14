@@ -83,7 +83,7 @@ package dry run:
 
 - [ ] Decide which modules and types are intentionally public; make
   implementation details private before users depend on them.
-- [ ] Add crate-level documentation with a minimal end-to-end example.
+- [x] Add crate-level documentation with a minimal end-to-end example.
 - [ ] Document the supported public types, traits, methods, errors, and limits.
 - [ ] Add a CI documentation check once the public surface is documented:
 
