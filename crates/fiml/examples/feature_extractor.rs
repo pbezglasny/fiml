@@ -8,11 +8,11 @@ use rust_decimal::dec;
 
 use fiml::{
     ArrayFeatureVector, Event, EventField, FeatureDefinition, FeatureExtractor, FeatureKey,
-    FeatureSource, FeatureVector, WarmupPolicy, symbols,
+    FeatureSource, FeatureVector, Symbol, WarmupPolicy,
 };
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let btc = symbols::intern("BTCUSDT")?;
+    let btc = Symbol::new("BTCUSDT")?;
     let source = FeatureSource::Field(EventField::Price);
     let mut extractor = FeatureExtractor::builder(ArrayFeatureVector::<7>::new())
         .add_order_book(btc, OrderBook::new(UpdatePolicy::Contiguous, 8))

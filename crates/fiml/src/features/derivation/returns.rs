@@ -62,11 +62,11 @@ pub(crate) fn build(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{ArrayFeatureVector, FeatureVector, symbols};
+    use crate::{ArrayFeatureVector, FeatureVector, Symbol};
 
     #[test]
     fn grouped_returns_write_adjacent_outputs() {
-        let symbol = symbols::intern("AAPL").unwrap();
+        let symbol = Symbol::new("AAPL").unwrap();
         let mut feature =
             match build(symbol, EventField::Price, ReturnKind::Simple, &[1, 2]).unwrap() {
                 FeatureDerivation::Returns(feature) => feature,

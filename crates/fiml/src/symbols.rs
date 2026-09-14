@@ -2,8 +2,8 @@
 //!
 //! New names return a capacity error once all slots are used. Existing names
 //! remain usable, including case variants and [`Symbol::GLOBAL`].
-//! [`Symbol::new`], [`intern`], and string `TryFrom` conversions return
-//! [`crate::Result`]; callers can propagate capacity errors with `?`.
+//! [`Symbol::new`] and string `TryFrom` conversions return [`crate::Result`];
+//! callers can propagate capacity errors with `?`.
 
 use std::{
     borrow::Cow,
@@ -36,6 +36,7 @@ impl Symbol {
         intern(name)
     }
 
+    /// Resolves the canonical lowercase name, allocating the returned string.
     pub fn resolve_as_string(&self) -> String {
         resolve(*self).unwrap()
     }
@@ -143,13 +144,11 @@ fn normalize_name(symbol_name: &str) -> Cow<'_, str> {
     }
 }
 
-/// Interns a name without changing the interner if capacity is exhausted.
-/// Existing names are returned even at capacity; normalization folds ASCII case.
-pub fn intern(symbol_name: &str) -> crate::Result<Symbol> {
+fn intern(symbol_name: &str) -> crate::Result<Symbol> {
     SYMBOL_INTERNER.lock().unwrap().intern(symbol_name)
 }
 
-pub fn resolve(symbol: Symbol) -> Option<String> {
+fn resolve(symbol: Symbol) -> Option<String> {
     SYMBOL_INTERNER
         .lock()
         .unwrap()

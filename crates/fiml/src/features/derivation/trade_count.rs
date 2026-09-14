@@ -62,7 +62,7 @@ pub(crate) fn build(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{ArrayFeatureVector, FeatureVector, symbols};
+    use crate::{ArrayFeatureVector, FeatureVector, Symbol};
 
     fn approx_eq(a: f64, b: f64) -> bool {
         (a - b).abs() < 1e-9
@@ -70,8 +70,8 @@ mod tests {
 
     #[test]
     fn counts_only_trades_for_its_symbol() {
-        let aapl = symbols::intern("AAPL").unwrap();
-        let googl = symbols::intern("GOOGL").unwrap();
+        let aapl = Symbol::new("AAPL").unwrap();
+        let googl = Symbol::new("GOOGL").unwrap();
         let mut fv: ArrayFeatureVector<1> = ArrayFeatureVector::new();
         let counter = TradeCountTimed::<HeapRingBuffer<CountBucket>>::new_heap(
             Duration::from_millis(1_000),

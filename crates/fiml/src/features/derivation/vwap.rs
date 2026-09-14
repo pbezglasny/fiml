@@ -75,11 +75,11 @@ pub(crate) fn build_timed(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{ArrayFeatureVector, FeatureVector, symbols};
+    use crate::{ArrayFeatureVector, FeatureVector, Symbol};
 
     #[test]
     fn consumes_matching_trades_and_observes_other_events() {
-        let aapl = symbols::intern("AAPL").unwrap();
+        let aapl = Symbol::new("AAPL").unwrap();
         let mut output = ArrayFeatureVector::<2>::new();
         let mut feature = build_timed(
             aapl,

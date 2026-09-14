@@ -35,7 +35,7 @@ pub(crate) fn build() -> FeatureDerivation {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{ArrayFeatureVector, FeatureVector, symbols};
+    use crate::{ArrayFeatureVector, FeatureVector, Symbol};
 
     fn approx_eq(a: f64, b: f64) -> bool {
         (a - b).abs() < 1e-9
@@ -43,7 +43,7 @@ mod tests {
 
     #[test]
     fn day_of_week_reacts_to_any_event() {
-        let aapl = symbols::intern("AAPL").unwrap();
+        let aapl = Symbol::new("AAPL").unwrap();
         let mut fv: ArrayFeatureVector<1> = ArrayFeatureVector::new();
         let mut feat = DayOfWeek;
         let output_range = OutputRange { start: 0, count: 1 };

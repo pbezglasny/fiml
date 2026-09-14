@@ -15,7 +15,7 @@ use std::time::Duration;
 
 use fiml::{
     Event, EventField, EventKind, FeatureDefinition, FeatureExtractor, FeatureKey, FeatureSource,
-    FeatureVector, Symbol, TradeSide, VecFeatureVector, WarmupPolicy, symbols,
+    FeatureVector, Symbol, TradeSide, VecFeatureVector, WarmupPolicy,
 };
 
 const INPUT_HEADER: &str = "timestamp,symbol,price,quantity,aggressor_side";
@@ -53,7 +53,7 @@ where
         .into());
     }
 
-    let feature_symbol = symbols::intern(FEATURE_SYMBOL)?;
+    let feature_symbol = Symbol::new(FEATURE_SYMBOL)?;
     let mut extractor = build_extractor(feature_symbol)?;
     write!(output, "{INPUT_HEADER}")?;
     for id in extractor.feature_ids() {

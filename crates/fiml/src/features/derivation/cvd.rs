@@ -57,12 +57,12 @@ pub(crate) fn build(
 mod tests {
     use super::*;
     use crate::event::TradeSide;
-    use crate::{ArrayFeatureVector, FeatureVector, symbols};
+    use crate::{ArrayFeatureVector, FeatureVector, Symbol};
 
     #[test]
     fn grouped_cvd_uses_trade_side_and_ignores_unclassified_trades() {
-        let aapl = symbols::intern("AAPL").unwrap();
-        let googl = symbols::intern("GOOGL").unwrap();
+        let aapl = Symbol::new("AAPL").unwrap();
+        let googl = Symbol::new("GOOGL").unwrap();
         let mut feature = match build(aapl, &[1, 2], WarmupPolicy::FirstValue).unwrap() {
             FeatureDerivation::Cvd(feature) => feature,
             _ => unreachable!(),

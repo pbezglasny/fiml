@@ -134,11 +134,11 @@ pub(crate) fn build_timed(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{ArrayFeatureVector, FeatureVector, symbols};
+    use crate::{ArrayFeatureVector, FeatureVector, Symbol};
 
     #[test]
     fn grouped_volatility_writes_adjacent_outputs() {
-        let symbol = symbols::intern("AAPL").unwrap();
+        let symbol = Symbol::new("AAPL").unwrap();
         let mut feature =
             match build(symbol, EventField::Price, &[2, 3], WarmupPolicy::FirstValue).unwrap() {
                 FeatureDerivation::Volatility(feature) => feature,

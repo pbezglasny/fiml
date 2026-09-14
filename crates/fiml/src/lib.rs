@@ -14,8 +14,8 @@ use std::{error::Error, fmt::Display, time::Duration};
 use rust_decimal::Decimal;
 
 pub use event::{
-    EVENT_KIND_COUNT, Event, EventKind, OrderBookDeltaEvent, OrderBookSnapshotEvent, PriceUpdate,
-    TimeUpdate, TradeSide, TradeUpdate, VolumeUpdate,
+    Event, EventKind, OrderBookDeltaEvent, OrderBookSnapshotEvent, PriceUpdate, TimeUpdate,
+    TradeSide, TradeUpdate, VolumeUpdate,
 };
 pub use features::{
     EventField, FeatureDefinition, FeatureExtractor, FeatureExtractorBuilder, FeatureExtractorSpec,
