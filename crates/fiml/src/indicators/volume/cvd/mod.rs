@@ -48,9 +48,9 @@ mod tests {
     #[test]
     fn cvd_returns_final_rolling_delta() {
         let trades = [
-            (10.0, TradeSide::AgressorBuy),
-            (3.0, TradeSide::AgressorSell),
-            (7.0, TradeSide::AgressorBuy),
+            (10.0, TradeSide::AggressorBuy),
+            (3.0, TradeSide::AggressorSell),
+            (7.0, TradeSide::AggressorBuy),
         ];
 
         let result = cvd(&trades, 2, WarmupPolicy::FullWindow);
@@ -62,7 +62,7 @@ mod tests {
     fn cvd_rejects_zero_window_length() {
         assert!(
             cvd(
-                &[(1.0, TradeSide::AgressorBuy)],
+                &[(1.0, TradeSide::AggressorBuy)],
                 0,
                 WarmupPolicy::FirstValue
             )

@@ -71,12 +71,12 @@ mod tests {
         let output_range = OutputRange { start: 0, count: 2 };
 
         feature.update(
-            &Event::trade(aapl, 100.0, 10.0, 0, Some(TradeSide::AgressorBuy)),
+            &Event::trade(aapl, 100.0, 10.0, 0, Some(TradeSide::AggressorBuy)),
             output_range,
             &mut output,
         );
         feature.update(
-            &Event::trade(aapl, 99.0, 3.0, 1, Some(TradeSide::AgressorSell)),
+            &Event::trade(aapl, 99.0, 3.0, 1, Some(TradeSide::AggressorSell)),
             output_range,
             &mut output,
         );
@@ -86,12 +86,12 @@ mod tests {
             &mut output,
         );
         feature.update(
-            &Event::trade(googl, 200.0, 80.0, 3, Some(TradeSide::AgressorBuy)),
+            &Event::trade(googl, 200.0, 80.0, 3, Some(TradeSide::AggressorBuy)),
             output_range,
             &mut output,
         );
         feature.update(
-            &Event::trade(aapl, 102.0, 2.0, 4, Some(TradeSide::AgressorBuy)),
+            &Event::trade(aapl, 102.0, 2.0, 4, Some(TradeSide::AggressorBuy)),
             output_range,
             &mut output,
         );

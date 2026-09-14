@@ -344,6 +344,12 @@ mod tests {
         use super::*;
 
         #[test]
+        #[should_panic(expected = "Ring buffer size must be greater than 0")]
+        fn rejects_zero_capacity() {
+            HeapRingBuffer::<i32>::new(0);
+        }
+
+        #[test]
         fn new_buffer_is_empty() {
             let buf: HeapRingBuffer<i32> = HeapRingBuffer::new(4);
             assert_eq!(buf.capacity(), 4);

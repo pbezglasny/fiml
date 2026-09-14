@@ -91,8 +91,16 @@ impl<const N: usize> ArrayFeatureVector<N> {
         Self::new_of_length(N)
     }
 
-    /// Create new feature vector of capacity of N and provided length
+    /// Creates a vector with compile-time capacity `N` and the provided active length.
+    ///
+    /// # Panics
+    ///
+    /// Panics when `length` exceeds `N`.
     pub fn new_of_length(length: usize) -> Self {
+        assert!(
+            length <= N,
+            "feature vector length must not exceed capacity"
+        );
         Self {
             data: [0.0; N],
             length,
@@ -191,6 +199,12 @@ mod tests {
         values.set_value_at(1, 4.0);
 
         assert_eq!(values.value_at(1), Some(4.0));
+    }
+
+    #[test]
+    #[should_panic(expected = "feature vector length must not exceed capacity")]
+    fn array_feature_vector_rejects_length_beyond_capacity() {
+        ArrayFeatureVector::<2>::new_of_length(3);
     }
 
     #[test]

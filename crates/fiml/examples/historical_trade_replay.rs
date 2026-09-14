@@ -181,8 +181,8 @@ fn parse_trade(line: &str, line_number: usize) -> Result<Trade<'_>, io::Error> {
     let price = parse_positive_f64(price, "price", line_number)?;
     let quantity = parse_positive_f64(quantity, "quantity", line_number)?;
     let side = match side {
-        "buy" => TradeSide::AgressorBuy,
-        "sell" => TradeSide::AgressorSell,
+        "buy" => TradeSide::AggressorBuy,
+        "sell" => TradeSide::AggressorSell,
         _ => {
             return Err(invalid_data(format!(
                 "line {line_number} aggressor_side must be `buy` or `sell`"
@@ -225,8 +225,8 @@ fn parse_positive_f64(value: &str, name: &str, line_number: usize) -> Result<f64
 
 fn side_name(side: TradeSide) -> &'static str {
     match side {
-        TradeSide::AgressorBuy => "buy",
-        TradeSide::AgressorSell => "sell",
+        TradeSide::AggressorBuy => "buy",
+        TradeSide::AggressorSell => "sell",
     }
 }
 

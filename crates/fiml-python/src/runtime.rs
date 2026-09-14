@@ -440,8 +440,8 @@ pub(crate) fn values_to_pyarray(py: Python<'_>, dtype: OutputDtype, values: &[f6
 
 fn parse_trade_side(side: u8) -> PyResult<TradeSide> {
     match side {
-        SIDE_AGGRESSOR_BUY => Ok(TradeSide::AgressorBuy),
-        SIDE_AGGRESSOR_SELL => Ok(TradeSide::AgressorSell),
+        SIDE_AGGRESSOR_BUY => Ok(TradeSide::AggressorBuy),
+        SIDE_AGGRESSOR_SELL => Ok(TradeSide::AggressorSell),
         _ => Err(PyValueError::new_err(format!(
             "invalid `side` {side}; expected SIDE_AGGRESSOR_BUY \
              ({SIDE_AGGRESSOR_BUY}) or SIDE_AGGRESSOR_SELL ({SIDE_AGGRESSOR_SELL})"
