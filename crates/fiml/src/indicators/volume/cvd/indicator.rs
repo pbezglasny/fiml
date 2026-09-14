@@ -105,8 +105,8 @@ where
 
     pub(crate) fn update_inner(&mut self, volume: f64, trade_side: TradeSide) {
         let delta = match trade_side {
-            TradeSide::AgressorBuy => volume,
-            TradeSide::AgressorSell => -volume,
+            TradeSide::AggressorBuy => volume,
+            TradeSide::AggressorSell => -volume,
         };
         for window in 0..self.window_count {
             let window = unsafe { self.windows[window].assume_init_mut() };
@@ -166,10 +166,10 @@ mod tests {
         let mut cvd = new_cvd::<4, 1>();
         cvd.add_window(4).unwrap();
 
-        cvd.update(10.0, TradeSide::AgressorBuy).unwrap();
+        cvd.update(10.0, TradeSide::AggressorBuy).unwrap();
         assert_eq!(cvd.value_at(0), Some(10.0));
 
-        cvd.update(3.0, TradeSide::AgressorSell).unwrap();
+        cvd.update(3.0, TradeSide::AggressorSell).unwrap();
         assert_eq!(cvd.value_at(0), Some(7.0));
     }
 
@@ -180,14 +180,14 @@ mod tests {
         cvd.add_window(2).unwrap();
         cvd.add_window(3).unwrap();
 
-        cvd.update(10.0, TradeSide::AgressorBuy).unwrap();
+        cvd.update(10.0, TradeSide::AggressorBuy).unwrap();
         assert_eq!(cvd.value_at(0), None);
 
-        cvd.update(3.0, TradeSide::AgressorSell).unwrap();
+        cvd.update(3.0, TradeSide::AggressorSell).unwrap();
         assert_eq!(cvd.value_at(0), Some(7.0));
         assert_eq!(cvd.value_at(1), None);
 
-        cvd.update(2.0, TradeSide::AgressorBuy).unwrap();
+        cvd.update(2.0, TradeSide::AggressorBuy).unwrap();
         assert!(cvd.is_ready());
         assert_eq!(cvd.value_at(1), Some(9.0));
     }
@@ -197,11 +197,11 @@ mod tests {
         let mut cvd = new_cvd::<3, 1>();
         cvd.add_window(2).unwrap();
 
-        cvd.update(10.0, TradeSide::AgressorBuy).unwrap();
-        cvd.update(3.0, TradeSide::AgressorSell).unwrap();
+        cvd.update(10.0, TradeSide::AggressorBuy).unwrap();
+        cvd.update(3.0, TradeSide::AggressorSell).unwrap();
         assert_eq!(cvd.value_at(0), Some(7.0));
 
-        cvd.update(7.0, TradeSide::AgressorBuy).unwrap();
+        cvd.update(7.0, TradeSide::AggressorBuy).unwrap();
         assert_eq!(cvd.value_at(0), Some(4.0));
     }
 
@@ -211,11 +211,11 @@ mod tests {
         cvd.add_window(3).unwrap();
 
         for volume in [1.0, 2.0, 3.0] {
-            cvd.update(volume, TradeSide::AgressorBuy).unwrap();
+            cvd.update(volume, TradeSide::AggressorBuy).unwrap();
         }
         assert_eq!(cvd.value_at(0), Some(6.0));
 
-        cvd.update(4.0, TradeSide::AgressorBuy).unwrap();
+        cvd.update(4.0, TradeSide::AggressorBuy).unwrap();
         assert_eq!(cvd.value_at(0), Some(9.0));
     }
 
@@ -226,11 +226,11 @@ mod tests {
         cvd.add_window(4).unwrap();
 
         for (volume, side) in [
-            (10.0, TradeSide::AgressorBuy),
-            (3.0, TradeSide::AgressorSell),
-            (7.0, TradeSide::AgressorBuy),
-            (2.0, TradeSide::AgressorSell),
-            (5.0, TradeSide::AgressorBuy),
+            (10.0, TradeSide::AggressorBuy),
+            (3.0, TradeSide::AggressorSell),
+            (7.0, TradeSide::AggressorBuy),
+            (2.0, TradeSide::AggressorSell),
+            (5.0, TradeSide::AggressorBuy),
         ] {
             cvd.update(volume, side).unwrap();
         }
@@ -250,7 +250,7 @@ mod tests {
     fn add_window_errors_after_data() {
         let mut cvd = new_cvd::<3, 2>();
         cvd.add_window(1).unwrap();
-        cvd.update(1.0, TradeSide::AgressorBuy).unwrap();
+        cvd.update(1.0, TradeSide::AggressorBuy).unwrap();
 
         assert!(cvd.add_window(2).is_err());
     }

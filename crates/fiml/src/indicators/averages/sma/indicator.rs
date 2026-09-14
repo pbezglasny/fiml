@@ -224,21 +224,21 @@ impl<const N: usize, const WINDOWS: usize>
     SimpleMovingAverageTimed<StackRingBuffer<N, (i64, f64)>, WINDOWS>
 {
     ///Create new SimpleMovingAverageTimed with stack ring buffer.
-    pub fn new_stack(aggeregation: Duration, warmup_policy: WarmupPolicy) -> Result<Self> {
+    pub fn new_stack(aggregation: Duration, warmup_policy: WarmupPolicy) -> Result<Self> {
         if N == 0 {
             return Err(FimlError::InvalidArgument(
                 InvalidArgumentError::RingBufferCapacityZero,
             ));
         }
         let stack_data = new_stack_ring_buffer::<N, (i64, f64)>();
-        Self::new_with_buffer(stack_data, aggeregation, N, warmup_policy)
+        Self::new_with_buffer(stack_data, aggregation, N, warmup_policy)
     }
 }
 
 impl<const WINDOWS: usize> SimpleMovingAverageTimed<HeapRingBuffer<(i64, f64)>, WINDOWS> {
     /// Create new SimpleMovingAverageTimed with heap ring buffer.
     pub fn new_heap(
-        aggeregation: Duration,
+        aggregation: Duration,
         capacity: usize,
         warmup_policy: WarmupPolicy,
     ) -> Result<Self> {
@@ -248,7 +248,7 @@ impl<const WINDOWS: usize> SimpleMovingAverageTimed<HeapRingBuffer<(i64, f64)>, 
             ));
         }
         let heap_data = new_heap_ring_buffer::<(i64, f64)>(capacity);
-        Self::new_with_buffer(heap_data, aggeregation, capacity, warmup_policy)
+        Self::new_with_buffer(heap_data, aggregation, capacity, warmup_policy)
     }
 }
 
@@ -258,7 +258,7 @@ where
 {
     fn new_with_buffer(
         data: R,
-        aggeregation: Duration,
+        aggregation: Duration,
         capacity: usize,
         warmup_policy: WarmupPolicy,
     ) -> Result<Self> {
@@ -267,13 +267,13 @@ where
                 InvalidArgumentError::RingBufferCapacityZero,
             ));
         }
-        let aggregation_millis = aggeregation.as_millis();
+        let aggregation_millis = aggregation.as_millis();
         if aggregation_millis == 0 {
             return Err(FimlError::InvalidArgument(
                 InvalidArgumentError::AggregationTooShort,
             ));
         }
-        if !aggeregation.subsec_nanos().is_multiple_of(1_000_000) {
+        if !aggregation.subsec_nanos().is_multiple_of(1_000_000) {
             return Err(FimlError::InvalidArgument(
                 InvalidArgumentError::DurationPrecision {
                     field: DurationField::Aggregation,

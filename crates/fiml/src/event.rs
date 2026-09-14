@@ -54,13 +54,13 @@ pub struct VolumeUpdate {
     pub timestamp: i64,
 }
 
-// Who was agressor in a trade: the buyer or the seller.
-// If buyer was agressor, the trade was a buy (ask) and the price is the ask price.
-// If seller was agressor, the trade was a sell (bid) and the price is the bid price.
+// Who was aggressor in a trade: the buyer or the seller.
+// If buyer was aggressor, the trade was a buy (ask) and the price is the ask price.
+// If seller was aggressor, the trade was a sell (bid) and the price is the bid price.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TradeSide {
-    AgressorBuy,
-    AgressorSell,
+    AggressorBuy,
+    AggressorSell,
 }
 
 /// A trade tick carrying price and volume.
@@ -328,7 +328,7 @@ mod tests {
     #[test]
     fn trade_event_has_trade_kind_and_payload() {
         let aapl = Symbol::new("AAPL").unwrap();
-        let event = Event::trade(aapl, 42.0, 100.0, 123, Some(TradeSide::AgressorSell));
+        let event = Event::trade(aapl, 42.0, 100.0, 123, Some(TradeSide::AggressorSell));
 
         assert_eq!(event.kind(), EventKind::Trade);
         if let Event::Trade(trade) = event {
@@ -336,7 +336,7 @@ mod tests {
             assert_eq!(trade.price, 42.0);
             assert_eq!(trade.volume, 100.0);
             assert_eq!(trade.timestamp, 123);
-            assert!(matches!(trade.side, Some(TradeSide::AgressorSell)));
+            assert!(matches!(trade.side, Some(TradeSide::AggressorSell)));
         } else {
             unreachable!("trade constructor should return Event::Trade");
         }
