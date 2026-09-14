@@ -10,6 +10,7 @@ from jsonschema import Draft202012Validator
 SCHEMA_PATH = Path(__file__).parents[3] / "docs" / "feature-extractor-spec.schema.json"
 SCHEMA = json.loads(SCHEMA_PATH.read_text())
 VALIDATOR = Draft202012Validator(SCHEMA)
+SOURCE_VALIDATOR = Draft202012Validator(SCHEMA["$defs"]["source"])
 
 
 def document_with_source(source):
@@ -47,12 +48,16 @@ def document_with_source(source):
     }
 
 
+def only_indicator(document):
+    return document["features"][0]["indicators"][0]
+
+
 def assert_valid_source(source):
-    assert not list(VALIDATOR.iter_errors(document_with_source(source)))
+    assert not list(SOURCE_VALIDATOR.iter_errors(source))
 
 
 def assert_invalid_source(source):
-    assert list(VALIDATOR.iter_errors(document_with_source(source)))
+    assert list(SOURCE_VALIDATOR.iter_errors(source))
 
 
 def test_feature_extractor_spec_schema_is_valid_draft_2020_12():
@@ -104,6 +109,115 @@ def test_schema_still_accepts_whole_event_sources(event):
 
 def test_schema_still_accepts_any_event_source():
     assert_valid_source({"type": "any_event"})
+
+
+def test_schema_accepts_every_non_book_indicator_contract():
+    spec = (
+        fiml.FeatureExtractorSpec()
+        .sma("BTCUSDT", [2])
+        .ema("BTCUSDT", [2])
+        .cvd("BTCUSDT", [2])
+        .simple_returns("BTCUSDT", [1])
+        .log_returns("BTCUSDT", [1])
+        .volatility("BTCUSDT", [2])
+        .sma_timed("BTCUSDT", "1s", ["2s"])
+        .obv_timed("BTCUSDT", "1s", ["2s"])
+        .volatility_timed("BTCUSDT", "1s", ["2s"])
+        .vpt("BTCUSDT")
+        .trade_count_timed("BTCUSDT", "1s", "2s")
+        .trade_volume_timed("BTCUSDT", "1s", ["2s"])
+        .vwap_timed("BTCUSDT", "1s", ["2s"])
+        .day_of_week()
+        .time_since_first_event_of_day()
+    )
+    document = json.loads(spec.to_json())
+    assert not list(VALIDATOR.iter_errors(document))
+    assert json.loads(fiml.FeatureExtractorSpec.from_json(spec.to_json()).to_json()) == document
+
+
+@pytest.mark.parametrize(
+    ("spec", "mutate"),
+    [
+        (
+            lambda: fiml.FeatureExtractorSpec().ema("btc", [2]),
+            lambda document: only_indicator(document).pop("warmup_policy"),
+        ),
+        (
+            lambda: fiml.FeatureExtractorSpec().sma("btc", [2]),
+            lambda document: only_indicator(document).update(
+                source={"type": "event", "event": "trade"}
+            ),
+        ),
+        (
+            lambda: fiml.FeatureExtractorSpec().cvd("btc", [2]),
+            lambda document: only_indicator(document).update(
+                source={"type": "field", "event": "trade", "field": "volume"}
+            ),
+        ),
+        (
+            lambda: fiml.FeatureExtractorSpec().volatility("btc", [2]),
+            lambda document: only_indicator(document)["outputs"][0].update(
+                window="2s"
+            ),
+        ),
+        (
+            lambda: fiml.FeatureExtractorSpec().sma_timed("btc", "1s", ["2s"]),
+            lambda document: only_indicator(document).pop("options"),
+        ),
+        (
+            lambda: fiml.FeatureExtractorSpec().volatility_timed(
+                "btc", "1s", ["2s"]
+            ),
+            lambda document: only_indicator(document)["outputs"][0].update(window=2),
+        ),
+        (
+            lambda: fiml.FeatureExtractorSpec().obv_timed("btc", "1s", ["2s"]),
+            lambda document: only_indicator(document).update(
+                source={"type": "field", "event": "trade", "field": "price"}
+            ),
+        ),
+        (
+            lambda: fiml.FeatureExtractorSpec().trade_count_timed(
+                "btc", "1s", "2s"
+            ),
+            lambda document: only_indicator(document)["outputs"].append(
+                {"window": "3s"}
+            ),
+        ),
+        (
+            lambda: fiml.FeatureExtractorSpec().trade_volume_timed(
+                "btc", "1s", ["2s"]
+            ),
+            lambda document: only_indicator(document).pop("warmup_policy"),
+        ),
+        (
+            lambda: fiml.FeatureExtractorSpec().vpt("btc"),
+            lambda document: only_indicator(document).update(
+                warmup_policy="full_window"
+            ),
+        ),
+        (
+            lambda: fiml.FeatureExtractorSpec().day_of_week(),
+            lambda document: document["features"][0].update(symbol="btc"),
+        ),
+        (
+            lambda: fiml.FeatureExtractorSpec().time_since_first_event_of_day(),
+            lambda document: only_indicator(document).pop("options"),
+        ),
+        (
+            lambda: fiml.FeatureExtractorSpec().simple_returns("btc", [1]),
+            lambda document: only_indicator(document).update(
+                source={"type": "event", "event": "trade"}
+            ),
+        ),
+    ],
+)
+def test_schema_and_reader_reject_invalid_non_book_indicator_contracts(spec, mutate):
+    document = json.loads(spec().to_json())
+    mutate(document)
+    assert list(VALIDATOR.iter_errors(document))
+    with pytest.raises(ValueError):
+        fiml.FeatureExtractorSpec.from_json(json.dumps(document))
 
 
 def test_schema_accepts_vpt_and_core_round_trips_it():
