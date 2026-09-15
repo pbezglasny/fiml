@@ -12,10 +12,30 @@ its first value with the raw input, OBV buckets by timestamp, and float
 summation order matters. One implementation removes that whole class of
 train/serve skew.
 
+## Install from PyPI
+
+Requires **CPython 3.12 or newer**. These commands apply once `v0.1.0` is
+published to PyPI; until then, use [source installation](#install-from-source).
+
+```bash
+python3 -m venv .venv
+```
+
+Activate it with `source .venv/bin/activate` on Linux or macOS, or
+`.\.venv\Scripts\Activate.ps1` in Windows PowerShell, then install:
+
+```bash
+python -m pip install "fiml[pandas]"
+```
+
+Omit `[pandas]` for the NumPy-only API. To also fit supported scikit-learn
+transformations, install `"fiml[pandas,sklearn]"` instead.
+Installing a compatible wheel requires no Rust toolchain; building from
+source requires the tools listed below.
+
 ## Install from source
 
-Publishing to PyPI is planned; for now the package is installed from this
-repository. You need:
+To build the package from this repository, you need:
 
 - a Rust toolchain (`rustup` — <https://rustup.rs>)
 - Python ≥ 3.12
@@ -69,7 +89,7 @@ ways to get there:
 
 ```bash
 source .venv/bin/activate
-pip install "./crates/fiml-python[pandas]" jupyterlab
+python -m pip install "fiml[pandas]" jupyterlab
 jupyter lab
 ```
 
@@ -77,7 +97,7 @@ jupyter lab
 
 ```bash
 source .venv/bin/activate
-pip install "./crates/fiml-python[pandas]" ipykernel
+python -m pip install "fiml[pandas]" ipykernel
 python -m ipykernel install --user --name fiml --display-name "Python (fiml)"
 ```
 
@@ -85,7 +105,7 @@ then pick the *Python (fiml)* kernel in the notebook UI. Alternatively, install
 directly from a notebook cell into whatever kernel is running:
 
 ```python
-%pip install /path/to/repo/crates/fiml-python
+%pip install "fiml[pandas]"
 ```
 
 > **Note:** `fiml` is a compiled extension module. After rebuilding the Rust

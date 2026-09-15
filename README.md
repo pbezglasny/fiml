@@ -106,13 +106,16 @@ for supported estimator options and restrictions.
 Installation
 --------
 
+The registry commands below apply once `v0.1.0` is published to crates.io and
+PyPI. Until then, install from source using the linked instructions.
+
 ### Rust
 
 Requires Rust **1.89 or newer** and a native linker for your platform.
-From your application's directory, add Fiml directly from Git:
+From your application's directory, add Fiml from crates.io:
 
 ```bash
-cargo add fiml --git https://github.com/pbezglasny/fiml --features serde
+cargo add fiml --features serde
 cargo add serde_json --features float_roundtrip
 ```
 
@@ -122,39 +125,42 @@ specifications. `serde_json` reads and writes those specifications;
 For a Rust-only application that does not exchange JSON, omit `--features serde`
 and the `serde_json` dependency.
 
-### Python
-
-Requires **CPython 3.12 or newer**. Installing from source also requires the
-Rust toolchain and linker described above. Clone the repository, then create
-a virtual environment:
+To install from Git before the first release:
 
 ```bash
-git clone https://github.com/pbezglasny/fiml.git
-cd fiml
+cargo add fiml --git https://github.com/pbezglasny/fiml --features serde
+```
+
+### Python
+
+Requires **CPython 3.12 or newer**. Create a virtual environment:
+
+```bash
 python3 -m venv .venv
 ```
 
 Activate it with `source .venv/bin/activate` on Linux or macOS, or
-`.\.venv\Scripts\Activate.ps1` in Windows PowerShell. From the repository root:
+`.\.venv\Scripts\Activate.ps1` in Windows PowerShell. Install from PyPI:
 
 ```bash
-python -m pip install "./crates/fiml-python[pandas]"
-python crates/fiml-python/examples/quickstart.py
+python -m pip install "fiml[pandas]"
 ```
 
-The installation builds the Rust extension automatically and installs NumPy.
+Installing a compatible wheel requires no Rust toolchain. If pip builds from
+source, it requires the Rust toolchain and linker described above.
+The installation also installs NumPy.
 The optional `pandas` extra enables DataFrame input and output; omit `[pandas]`
 when using only the NumPy API.
 
 To also fit supported scikit-learn transformations:
 
 ```bash
-python -m pip install "./crates/fiml-python[pandas,sklearn]"
+python -m pip install "fiml[pandas,sklearn]"
 ```
 
 The `sklearn` extra currently requires scikit-learn `>=1.9,<1.10`.
 See the [Python installation guide](crates/fiml-python/README.md#install-from-source)
-for development setup and troubleshooting.
+for source installation, development setup, and troubleshooting.
 
 Simple example
 ------
