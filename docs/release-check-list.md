@@ -75,7 +75,7 @@ package dry run:
   classifiers to `crates/fiml-python/pyproject.toml`.
 - [x] Replace the `<repo-url>` placeholder in
   `crates/fiml-python/README.md`.
-- [ ] Replace the statement that PyPI publishing is only planned.
+- [x] Replace the statement that PyPI publishing is only planned.
 - [ ] Build the supported wheels and a source distribution.
 - [ ] Install and test the generated artifacts in fresh virtual environments.
 
