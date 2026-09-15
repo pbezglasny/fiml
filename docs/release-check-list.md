@@ -142,10 +142,15 @@ from the repository:
 
 ## Publish and verify
 
-- [ ] Publish `fiml` to crates.io.
-- [ ] Publish the Python wheels and source distribution to PyPI.
-- [ ] Tag the published commit as `v0.1.0`.
-- [ ] Create the GitHub release from that tag.
+Pushing the release tag starts `release.yml`, which publishes to both
+registries and then creates the GitHub release. Do not upload the packages
+manually before pushing the tag.
+
+- [ ] Tag the validated release commit as `v0.1.0` and push the tag.
+- [ ] Verify that the workflow publishes `fiml` to crates.io.
+- [ ] Verify that the workflow publishes the Python wheels and source
+  distribution to PyPI.
+- [ ] Verify that the workflow creates the GitHub release from that tag.
 - [ ] Verify fresh `cargo add fiml` and `pip install fiml` installations.
 - [ ] Verify the published documentation and package metadata.
 
