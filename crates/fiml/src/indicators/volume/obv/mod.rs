@@ -44,7 +44,7 @@ pub fn obv_timed(
         OnBalanceVolumeTimed::new_heap(aggregation, capacity, warmup_policy)?;
     calculator.add_window_with_periods(window_periods)?;
     for &(timestamp, price, volume) in trades {
-        calculator.update_inner(price, volume, timestamp);
+        calculator.update(price, volume, timestamp);
     }
     Ok(calculator.window_value(0))
 }

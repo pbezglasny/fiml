@@ -39,7 +39,7 @@ impl TradeVolumeTimedFeature {
             return;
         }
         if let Event::Trade(trade) = event {
-            self.volume.update_inner(trade.volume, trade.timestamp);
+            self.volume.update(trade.volume, trade.timestamp);
         } else if !self.volume.observe(event.timestamp()) {
             return;
         }

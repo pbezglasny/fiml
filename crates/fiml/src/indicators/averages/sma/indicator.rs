@@ -10,7 +10,7 @@ use crate::ring_buffer::{
 use crate::{DurationField, FimlError, IntegerTarget, InvalidArgumentError, Result, WarmupPolicy};
 
 /// Represents a single Simple Moving Average (SMA) window, which tracks the period
-pub struct SmaWindow {
+struct SmaWindow {
     period: usize,
     sum: f64,
     moving_avg: f64,
@@ -464,12 +464,11 @@ where
         }
     }
 
-    /// Advance the indicator to `now` without recording a new input value.
-    ///
-    /// This expires old buckets and may complete full-window warm-up when an
-    /// non-matching event advances the configured symbol’s event time. Returns `true` when the
-    /// timestamp was newly observed, or `false` when it was already processed.
-    pub(crate) fn observe(&mut self, now: i64) -> bool {
+    /// Advances expiry and warm-up to an epoch-millisecond timestamp without adding data.
+    /// Returns `true` for a newly observed timestamp, or `false` for a repeated timestamp.
+    /// Supply nondecreasing timestamps across calls to `observe` and [`Self::update`];
+    /// this method does not validate their ordering. Warm-up starts with the first update.
+    pub fn observe(&mut self, now: i64) -> bool {
         if self.last_observed_timestamp == Some(now) {
             return false;
         }
@@ -483,7 +482,8 @@ where
     }
 
     /// Records a finite value at an epoch-millisecond timestamp and updates bucket means.
-    /// Supply nondecreasing timestamps; this method does not validate their ordering.
+    /// Supply nondecreasing timestamps across calls to `update` and [`Self::observe`];
+    /// this method does not validate their ordering.
     pub fn update(&mut self, value: f64, event_timestamp: i64) {
         if self.first_timestamp.is_none() {
             self.first_timestamp = Some(event_timestamp);

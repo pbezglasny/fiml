@@ -5,8 +5,7 @@ mod book_side;
 
 pub(crate) use book::PreparedOrderBookUpdate;
 pub use book::{
-    DepthUntilSizeResult, OrderBook, OrderBookUpdateError, OrderBookUpdateOutcome, SyncState,
-    UpdatePolicy,
+    DepthUntilSizeResult, OrderBook, OrderBookUpdateError, OrderBookUpdateOutcome, UpdatePolicy,
 };
 use rust_decimal::Decimal;
 

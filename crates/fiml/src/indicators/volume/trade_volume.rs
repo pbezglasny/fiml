@@ -51,21 +51,17 @@ where
     }
 
     /// Records trade `volume` at `timestamp` in epoch milliseconds.
-    pub(crate) fn update_inner(&mut self, volume: f64, timestamp: i64) {
+    /// Supply finite inputs and nondecreasing timestamps across calls to `update`
+    /// and [`Self::observe`]; these preconditions are not validated.
+    pub fn update(&mut self, volume: f64, timestamp: i64) {
         self.sum.update([volume], timestamp);
     }
 
-    /// Records trade `volume` at the current system time.
-    pub fn update(&mut self, volume: f64) {
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .expect("time went backwards")
-            .as_millis() as i64;
-        self.update_inner(volume, now);
-    }
-
-    /// Advances window expiry and warm-up without recording a trade.
-    pub(crate) fn observe(&mut self, timestamp: i64) -> bool {
+    /// Advances expiry and warm-up to an epoch-millisecond timestamp without adding data.
+    /// Returns `true` for a newly observed timestamp, or `false` for a repeated timestamp.
+    /// Supply nondecreasing timestamps across calls to `observe` and [`Self::update`];
+    /// this method does not validate their ordering. Warm-up starts with the first update.
+    pub fn observe(&mut self, timestamp: i64) -> bool {
         self.sum.observe(timestamp)
     }
 
@@ -97,13 +93,13 @@ mod tests {
         volume.add_window_with_periods(2).unwrap();
         volume.add_window_with_periods(3).unwrap();
 
-        volume.update_inner(1.5, 0);
-        volume.update_inner(2.5, 500);
-        volume.update_inner(4.0, 1_000);
+        volume.update(1.5, 0);
+        volume.update(2.5, 500);
+        volume.update(4.0, 1_000);
         assert_eq!(volume.window_value(0), Some(8.0));
         assert_eq!(volume.window_value(1), Some(8.0));
 
-        volume.update_inner(8.0, 2_000);
+        volume.update(8.0, 2_000);
         assert_eq!(volume.window_value(0), Some(12.0));
         assert_eq!(volume.window_value(1), Some(16.0));
     }
@@ -114,7 +110,7 @@ mod tests {
             RollingTradeVolumeTimed::new_heap(Duration::from_secs(1), 3, WarmupPolicy::FullWindow)
                 .unwrap();
         volume.add_window_with_periods(2).unwrap();
-        volume.update_inner(3.0, 0);
+        volume.update(3.0, 0);
         assert_eq!(volume.window_value(0), None);
         volume.observe(2_000);
         assert_eq!(volume.window_value(0), Some(0.0));

@@ -6,7 +6,7 @@ use std::mem::MaybeUninit;
 use crate::{FimlError, IntegerTarget, InvalidArgumentError, Result, WarmupPolicy};
 
 /// Represents a single Exponential Moving Average (EMA) window.
-pub struct EmaWindow {
+struct EmaWindow {
     period: usize,
     multiplier: f64,
     moving_avg: Option<f64>,

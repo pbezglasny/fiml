@@ -3,6 +3,10 @@
 //! Direct callers must supply finite numeric inputs; indicator updates do not
 //! validate NaN or infinity and can retain poisoned state. Event ingestion via
 //! [`crate::FeatureExtractor`] or [`crate::Pipeline`] rejects these inputs.
+//!
+//! Timed indicators take explicit epoch-millisecond timestamps in `update`.
+//! Call `observe` to advance expiry and warm-up without adding data; reads do
+//! not advance time. Timestamps must be nondecreasing across both operations.
 
 pub mod averages;
 pub mod counts;
