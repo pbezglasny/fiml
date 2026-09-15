@@ -107,9 +107,12 @@ Before publishing, replace `Unreleased` in the changelog with the release date.
 ### 7. Prepare publishing
 
 - [ ] Create and verify the crates.io account and publishing token.
-- [ ] Configure PyPI Trusted Publishing with GitHub Actions instead of storing
+- [x] Configure PyPI Trusted Publishing with GitHub Actions instead of storing
   a long-lived PyPI token:
   <https://docs.pypi.org/trusted-publishers/>.
+  Pending publisher and GitHub environment `pypi` configured; `release.yml`
+  publishes wheels and the source distribution using OIDC. The first upload
+  remains to be verified.
 - [x] Add a Python release workflow that builds wheels for every supported
   platform.
 - [ ] Verify the exact files included in both Rust and Python artifacts.
