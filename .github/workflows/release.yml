@@ -1,6 +1,7 @@
 name: Release
 
 on:
+  workflow_dispatch:
   push:
     tags: ["v*"]
 
@@ -9,7 +10,7 @@ permissions:
 
 jobs:
   validate:
-    name: Validate tag
+    name: Validate release version
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
@@ -18,7 +19,7 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
-      - name: Match tag and package versions
+      - name: Match package versions and release tag
         id: version
         shell: bash
         run: |
@@ -28,6 +29,9 @@ jobs:
           import tomllib
 
           tag = os.environ["GITHUB_REF_NAME"]
+          if os.environ["GITHUB_EVENT_NAME"] == "workflow_dispatch":
+              with open("crates/fiml/Cargo.toml", "rb") as manifest_file:
+                  tag = "v" + tomllib.load(manifest_file)["package"]["version"]
           match = re.fullmatch(r"v(\d+\.\d+\.\d+)", tag)
           if match is None:
               raise SystemExit(f"release tag must match vX.Y.Z, got {tag!r}")
@@ -139,8 +143,25 @@ jobs:
           path: dist/*.tar.gz
           if-no-files-found: error
 
+  crates-io:
+    name: Publish to crates.io
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: [validate, crate, wheels, sdist]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@b4f984c1e7daae8e175614de3e73a8411a20333c # 1.89.0
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - name: Publish Rust crate
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          test -n "$CARGO_REGISTRY_TOKEN"
+          cargo publish -p fiml --locked
+
   pypi:
     name: Publish to PyPI
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     needs: [validate, crate, wheels, sdist]
     runs-on: ubuntu-latest
     environment:
@@ -163,7 +184,8 @@ jobs:
 
   release:
     name: Publish GitHub Release
-    needs: [validate, crate, wheels, sdist, pypi]
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: [validate, crate, wheels, sdist, crates-io, pypi]
     runs-on: ubuntu-latest
     permissions:
       contents: write
