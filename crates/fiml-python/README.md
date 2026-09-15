@@ -38,7 +38,7 @@ trade-DataFrame `compute_features` API; low-level NumPy users can omit it.
 Installing straight from git also works:
 
 ```bash
-pip install "fiml @ git+https://<repo-url>#subdirectory=crates/fiml-python"
+pip install "fiml @ git+https://github.com/pbezglasny/fiml.git#subdirectory=crates/fiml-python"
 ```
 
 ### For development (editable)

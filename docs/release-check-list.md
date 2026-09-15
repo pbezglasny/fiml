@@ -73,7 +73,7 @@ package dry run:
 
 - [x] Add the license, project URLs, maintainers, and supported Python-version
   classifiers to `crates/fiml-python/pyproject.toml`.
-- [ ] Replace the `<repo-url>` placeholder in
+- [x] Replace the `<repo-url>` placeholder in
   `crates/fiml-python/README.md`.
 - [ ] Replace the statement that PyPI publishing is only planned.
 - [ ] Build the supported wheels and a source distribution.
