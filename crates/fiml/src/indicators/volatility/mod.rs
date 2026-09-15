@@ -411,8 +411,11 @@ where
         }
     }
 
-    /// Advances timed windows without recording a new source value.
-    pub(crate) fn observe(&mut self, now: i64) -> bool {
+    /// Advances expiry and warm-up to an epoch-millisecond timestamp without adding data.
+    /// Returns `true` for a newly observed timestamp, or `false` for a repeated timestamp.
+    /// Supply nondecreasing timestamps across calls to `observe` and [`Self::update`];
+    /// this method does not validate their ordering. Warm-up starts with the first update.
+    pub fn observe(&mut self, now: i64) -> bool {
         if self.last_observed_timestamp == Some(now) {
             return false;
         }
@@ -438,7 +441,8 @@ where
     /// Records a value and updates volatility using its simple return from the previous value.
     /// The first value, or a zero previous value, only establishes a new baseline.
     /// The caller must supply finite values. Timestamps are epoch milliseconds and must
-    /// be nondecreasing; this method does not validate their ordering.
+    /// be nondecreasing across calls to `update` and [`Self::observe`];
+    /// this method does not validate their ordering.
     pub fn update(&mut self, value: f64, timestamp: i64) {
         if self.first_timestamp.is_none() {
             self.first_timestamp = Some(timestamp);

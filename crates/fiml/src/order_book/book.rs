@@ -134,7 +134,7 @@ impl From<OrderBookUpdateError> for FimlError {
 }
 
 /// Whether visible levels have been synchronized with the market-data stream.
-pub enum SyncState {
+enum SyncState {
     /// No snapshot has been applied yet; incoming deltas are buffered.
     AwaitingSnapshot,
     /// The visible order book is synchronized.

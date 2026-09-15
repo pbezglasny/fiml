@@ -51,21 +51,17 @@ where
     }
 
     /// Records a trade at `timestamp` in epoch milliseconds.
-    pub(crate) fn update_inner(&mut self, price: f64, volume: f64, timestamp: i64) {
+    /// Supply finite inputs and nondecreasing timestamps across calls to `update`
+    /// and [`Self::observe`]; these preconditions are not validated.
+    pub fn update(&mut self, price: f64, volume: f64, timestamp: i64) {
         self.sum.update([price * volume, volume], timestamp);
     }
 
-    /// Records a trade at the current system time.
-    pub fn update(&mut self, price: f64, volume: f64) {
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .expect("time went backwards")
-            .as_millis() as i64;
-        self.update_inner(price, volume, now);
-    }
-
-    /// Advances window expiry and warm-up without recording a trade.
-    pub(crate) fn observe(&mut self, timestamp: i64) -> bool {
+    /// Advances expiry and warm-up to an epoch-millisecond timestamp without adding data.
+    /// Returns `true` for a newly observed timestamp, or `false` for a repeated timestamp.
+    /// Supply nondecreasing timestamps across calls to `observe` and [`Self::update`];
+    /// this method does not validate their ordering. Warm-up starts with the first update.
+    pub fn observe(&mut self, timestamp: i64) -> bool {
         self.sum.observe(timestamp)
     }
 
@@ -103,12 +99,12 @@ mod tests {
         vwap.add_window_with_periods(2).unwrap();
         vwap.add_window_with_periods(3).unwrap();
 
-        vwap.update_inner(10.0, 1.0, 0);
-        vwap.update_inner(20.0, 3.0, 1_000);
+        vwap.update(10.0, 1.0, 0);
+        vwap.update(20.0, 3.0, 1_000);
         assert_eq!(vwap.window_value(0), Some(17.5));
         assert_eq!(vwap.window_value(1), Some(17.5));
 
-        vwap.update_inner(30.0, 2.0, 2_000);
+        vwap.update(30.0, 2.0, 2_000);
         assert_eq!(vwap.window_value(0), Some(24.0));
         assert_eq!(vwap.window_value(1), Some(130.0 / 6.0));
     }
@@ -123,7 +119,7 @@ mod tests {
             )
             .unwrap();
         vwap.add_window_with_periods(2).unwrap();
-        vwap.update_inner(10.0, 1.0, 0);
+        vwap.update(10.0, 1.0, 0);
         assert_eq!(vwap.window_value(0), None);
         vwap.observe(2_000);
         assert_eq!(vwap.window_value(0), None);
@@ -140,9 +136,9 @@ mod tests {
             )
             .unwrap();
         vwap.add_window_with_periods(3).unwrap();
-        vwap.update_inner(100.0, 1.0, 0);
-        vwap.update_inner(101.0, 0.1, 1_000);
-        vwap.update_inner(102.0, 0.2, 2_000);
+        vwap.update(100.0, 1.0, 0);
+        vwap.update(101.0, 0.1, 1_000);
+        vwap.update(102.0, 0.2, 2_000);
 
         vwap.observe(5_000);
 

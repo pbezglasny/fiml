@@ -9,7 +9,7 @@ documentation, and Python distribution still need work.
 
 - [x] `cargo fmt --all -- --check`
 - [x] `cargo clippy --workspace --all-targets --all-features -- -D warnings`
-- [x] Rust workspace tests: 220 passed
+- [x] Rust workspace tests: 254 passed, plus 1 doctest
 - [x] Python tests: 380 passed
 - [x] Notebook execution
 - [x] `cargo package -p fiml`: 81 files, 134.0 KiB compressed
@@ -81,8 +81,9 @@ package dry run:
 
 ### 5. Audit and document the public Rust API
 
-- [ ] Decide which modules and types are intentionally public; make
+- [x] Decide which modules and types are intentionally public; make
   implementation details private before users depend on them.
+  Resolved findings and accepted boundary: [public-api-audit.md](public-api-audit.md).
 - [x] Add crate-level documentation with a minimal end-to-end example.
 - [x] Document the supported public types, traits, methods, errors, and limits.
 - [x] Add a CI documentation check once the public surface is documented:

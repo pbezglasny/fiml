@@ -4,7 +4,7 @@ use crate::{FeatureVector, HeapRingBuffer, RingBuffer};
 
 /// Emits multiple event lags of one raw feature using one shared history buffer.
 /// A lag of `N` first writes on call `N + 1`; until then its output is untouched.
-pub struct LaggedFeature {
+pub(crate) struct LaggedFeature {
     input_index: usize,
     // Each pair contains a positive lag window and its output index.
     outputs: Box<[(usize, usize)]>,
@@ -14,7 +14,11 @@ pub struct LaggedFeature {
 impl LaggedFeature {
     /// Allocates history for the largest window and preserves window/output pairs.
     /// Panics for empty windows, zero lags, or mismatched window/output counts.
-    pub fn new(input_index: usize, windows: Vec<usize>, output_indices: Box<[usize]>) -> Self {
+    pub(super) fn new(
+        input_index: usize,
+        windows: Vec<usize>,
+        output_indices: Box<[usize]>,
+    ) -> Self {
         assert!(!windows.is_empty(), "At least one lag window is required");
         assert_eq!(
             windows.len(),
@@ -34,7 +38,7 @@ impl LaggedFeature {
         }
     }
 
-    pub fn apply<V: FeatureVector>(&mut self, input_values: &[f64], output_vector: &mut V) {
+    pub(super) fn apply<V: FeatureVector>(&mut self, input_values: &[f64], output_vector: &mut V) {
         for (window, output_idx) in &self.outputs {
             if let Some(value) = self.buffer.peek_back_at(*window - 1) {
                 output_vector.set_value_at(*output_idx, *value);

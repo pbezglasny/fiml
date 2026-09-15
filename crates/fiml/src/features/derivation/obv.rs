@@ -35,8 +35,7 @@ impl ObvTimedFeature {
             return;
         }
         if let Event::Trade(trade) = event {
-            self.obv
-                .update_inner(trade.price, trade.volume, trade.timestamp);
+            self.obv.update(trade.price, trade.volume, trade.timestamp);
         } else if !self.obv.observe(event.timestamp()) {
             return;
         }

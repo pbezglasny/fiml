@@ -34,7 +34,7 @@ pub fn trade_volume_timed(
         RollingTradeVolumeTimed::new_heap(aggregation, capacity, warmup_policy)?;
     calculator.add_window_with_periods(window_periods)?;
     for &(timestamp, volume) in trades {
-        calculator.update_inner(volume, timestamp);
+        calculator.update(volume, timestamp);
     }
     Ok(calculator.window_value(0))
 }
@@ -57,7 +57,7 @@ pub fn vwap_timed(
         VolumeWeightedAveragePriceTimed::new_heap(aggregation, capacity, warmup_policy)?;
     calculator.add_window_with_periods(window_periods)?;
     for &(timestamp, price, volume) in trades {
-        calculator.update_inner(price, volume, timestamp);
+        calculator.update(price, volume, timestamp);
     }
     Ok(calculator.window_value(0))
 }

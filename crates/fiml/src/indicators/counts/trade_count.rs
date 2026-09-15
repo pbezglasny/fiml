@@ -45,12 +45,17 @@ where
     R: RingBuffer<Item = CountBucket>,
 {
     /// Record one trade at `now` (epoch milliseconds).
-    pub(crate) fn update(&mut self, now: i64) {
+    /// Supply nondecreasing timestamps across calls to `update` and [`Self::observe`];
+    /// this method does not validate their ordering.
+    pub fn update(&mut self, now: i64) {
         self.sum.update([1.0], now);
     }
 
-    /// Advance the indicator to `now` without recording a trade.
-    pub(crate) fn observe(&mut self, now: i64) -> bool {
+    /// Advances expiry and warm-up to an epoch-millisecond timestamp without adding data.
+    /// Returns `true` for a newly observed timestamp, or `false` for a repeated timestamp.
+    /// Supply nondecreasing timestamps across calls to `observe` and [`Self::update`];
+    /// this method does not validate their ordering. Warm-up starts with the first update.
+    pub fn observe(&mut self, now: i64) -> bool {
         self.sum.observe(now)
     }
 

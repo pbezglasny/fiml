@@ -278,12 +278,11 @@ where
         }
     }
 
-    /// Advance the indicator to `now` without recording a new trade.
-    ///
-    /// This expires old buckets and may complete full-window warm-up when an
-    /// non-matching event advances the configured symbol’s event time. Returns `true` when the
-    /// timestamp was newly observed, or `false` when it was already processed.
-    pub(crate) fn observe(&mut self, now: i64) -> bool {
+    /// Advances expiry and warm-up to an epoch-millisecond timestamp without adding data.
+    /// Returns `true` for a newly observed timestamp, or `false` for a repeated timestamp.
+    /// Supply nondecreasing timestamps across calls to `observe` and [`Self::update`];
+    /// this method does not validate their ordering. Warm-up starts with the first update.
+    pub fn observe(&mut self, now: i64) -> bool {
         if self.last_observed_timestamp == Some(now) {
             return false;
         }
@@ -293,7 +292,10 @@ where
         true
     }
 
-    pub(crate) fn update_inner(&mut self, price: f64, volume: f64, now: i64) {
+    /// Records finite price and volume at `now` in epoch milliseconds.
+    /// Supply nondecreasing timestamps across calls to `update` and [`Self::observe`];
+    /// input finiteness and timestamp ordering are not validated.
+    pub fn update(&mut self, price: f64, volume: f64, now: i64) {
         if self.first_timestamp.is_none() {
             self.first_timestamp = Some(now);
             self.update_readiness(now);
@@ -332,21 +334,6 @@ where
             }
             self.add_delta_to_windows(volume * sign);
         }
-    }
-
-    /// Records a trade using the current system time in epoch milliseconds.
-    /// Use event ingestion through the extractor for historical timestamps.
-    /// The caller must supply finite price and volume.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the system time precedes the Unix epoch.
-    pub fn update(&mut self, price: f64, volume: f64) {
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .expect("Time went backwards")
-            .as_millis() as i64;
-        self.update_inner(price, volume, now);
     }
 
     /// Returns the zero-based window's value, or `None` if absent or still warming up.
@@ -392,7 +379,7 @@ mod tests {
             .unwrap();
         obv.add_window_with_periods(2).unwrap();
 
-        obv.update_inner(100.0, 10.0, 0);
+        obv.update(100.0, 10.0, 0);
 
         assert!(approx_eq(obv.window_value(0).unwrap(), 0.0));
     }
@@ -408,8 +395,8 @@ mod tests {
             .unwrap();
         obv.add_window_with_periods(2).unwrap();
 
-        obv.update_inner(100.0, 10.0, 0);
-        obv.update_inner(101.0, 7.0, 1_000);
+        obv.update(100.0, 10.0, 0);
+        obv.update(101.0, 7.0, 1_000);
         assert!(obv.observe(1_999));
         assert!(!obv.is_ready());
         assert_eq!(obv.window_value(0), None);
@@ -434,10 +421,10 @@ mod tests {
             .unwrap();
         obv.add_window_with_periods(4).unwrap();
 
-        obv.update_inner(100.0, 10.0, 0);
-        obv.update_inner(101.0, 7.0, 1_000);
-        obv.update_inner(101.0, 99.0, 2_000);
-        obv.update_inner(99.0, 3.0, 3_000);
+        obv.update(100.0, 10.0, 0);
+        obv.update(101.0, 7.0, 1_000);
+        obv.update(101.0, 99.0, 2_000);
+        obv.update(99.0, 3.0, 3_000);
 
         assert!(approx_eq(obv.window_value(0).unwrap(), 4.0));
     }
@@ -453,9 +440,9 @@ mod tests {
             .unwrap();
         obv.add_window_with_periods(2).unwrap();
 
-        obv.update_inner(100.0, 10.0, 0);
-        obv.update_inner(101.0, 7.0, 100);
-        obv.update_inner(102.0, 5.0, 900);
+        obv.update(100.0, 10.0, 0);
+        obv.update(101.0, 7.0, 100);
+        obv.update(102.0, 5.0, 900);
 
         assert!(approx_eq(obv.window_value(0).unwrap(), 0.0));
     }
@@ -471,12 +458,12 @@ mod tests {
             .unwrap();
         obv.add_window_with_periods(2).unwrap();
 
-        obv.update_inner(100.0, 10.0, 0);
-        obv.update_inner(102.0, 2.0, 900);
-        obv.update_inner(100.0, 5.0, 1_000);
+        obv.update(100.0, 10.0, 0);
+        obv.update(102.0, 2.0, 900);
+        obv.update(100.0, 5.0, 1_000);
         assert!(approx_eq(obv.window_value(0).unwrap(), -5.0));
 
-        obv.update_inner(104.0, 3.0, 1_500);
+        obv.update(104.0, 3.0, 1_500);
         assert!(approx_eq(obv.window_value(0).unwrap(), 8.0));
     }
 
@@ -491,9 +478,9 @@ mod tests {
             .unwrap();
         obv.add_window_with_periods(2).unwrap();
 
-        obv.update_inner(100.0, 1.0, 0);
-        obv.update_inner(90.0, 1.0, 900);
-        obv.update_inner(92.0, 5.0, 1_000);
+        obv.update(100.0, 1.0, 0);
+        obv.update(90.0, 1.0, 900);
+        obv.update(92.0, 5.0, 1_000);
 
         assert!(approx_eq(obv.window_value(0).unwrap(), 5.0));
     }
@@ -509,10 +496,10 @@ mod tests {
             .unwrap();
         obv.add_window_with_periods(2).unwrap();
 
-        obv.update_inner(100.0, 10.0, 0);
-        obv.update_inner(101.0, 7.0, 1_000);
-        obv.update_inner(102.0, 5.0, 2_000);
-        obv.update_inner(103.0, 3.0, 3_000);
+        obv.update(100.0, 10.0, 0);
+        obv.update(101.0, 7.0, 1_000);
+        obv.update(102.0, 5.0, 2_000);
+        obv.update(103.0, 3.0, 3_000);
 
         assert!(approx_eq(obv.window_value(0).unwrap(), 8.0));
     }
@@ -529,10 +516,10 @@ mod tests {
         obv.add_window_with_periods(1).unwrap();
         obv.add_window_with_periods(3).unwrap();
 
-        obv.update_inner(100.0, 10.0, 0);
-        obv.update_inner(101.0, 7.0, 1_000);
-        obv.update_inner(102.0, 5.0, 2_000);
-        obv.update_inner(99.0, 2.0, 3_000);
+        obv.update(100.0, 10.0, 0);
+        obv.update(101.0, 7.0, 1_000);
+        obv.update(102.0, 5.0, 2_000);
+        obv.update(99.0, 2.0, 3_000);
 
         assert!(approx_eq(obv.window_value(0).unwrap(), -2.0));
         assert!(approx_eq(obv.window_value(1).unwrap(), 10.0));
@@ -555,7 +542,7 @@ mod tests {
         // Strictly rising price => every bucket after the first signs its volume
         // positively. Distinct volumes make double-counting observable.
         for (i, volume) in [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0].into_iter().enumerate() {
-            obv.update_inner(100.0 + i as f64, volume, i as i64 * 1_000);
+            obv.update(100.0 + i as f64, volume, i as i64 * 1_000);
         }
 
         // 2-period window keeps the last two buckets: 6 + 7.
@@ -575,8 +562,8 @@ mod tests {
             .unwrap();
         obv.add_window_with_periods(2).unwrap();
 
-        obv.update_inner(100.0, 10.0, 0);
-        obv.update_inner(101.0, 7.0, 1_000);
+        obv.update(100.0, 10.0, 0);
+        obv.update(101.0, 7.0, 1_000);
 
         assert!(obv.add_window_with_periods(3).is_err());
     }

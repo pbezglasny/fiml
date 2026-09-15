@@ -39,8 +39,7 @@ impl VwapTimedFeature {
             return;
         }
         if let Event::Trade(trade) = event {
-            self.vwap
-                .update_inner(trade.price, trade.volume, trade.timestamp);
+            self.vwap.update(trade.price, trade.volume, trade.timestamp);
         } else if !self.vwap.observe(event.timestamp()) {
             return;
         }
