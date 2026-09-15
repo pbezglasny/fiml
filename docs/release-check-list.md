@@ -53,7 +53,7 @@ proper OHLC/bar event model.
 
 ### 3. Complete Rust package metadata
 
-- [ ] Add a root `README.md` containing:
+- [x] Add a root `README.md` containing:
   - purpose and development status;
   - installation and a minimal example;
   - supported indicators and transformations;
