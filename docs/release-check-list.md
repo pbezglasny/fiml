@@ -95,11 +95,14 @@ package dry run:
 
 ### 6. Prepare release records
 
-- [ ] Add `CHANGELOG.md` with the `0.1.0` features, limitations, and breaking
+- [x] Add [CHANGELOG.md](../CHANGELOG.md) with the `0.1.0` features, limitations, and breaking
   change policy.
 - [x] Ensure the Rust and Python package versions are both `0.1.0`.
-- [ ] Prepare concise GitHub release notes.
-- [ ] Update the GitHub repository description and topics.
+- [x] Prepare concise [GitHub release notes](releases/v0.1.0.md).
+  The release workflow uses the notes matching the tag as the release body.
+- [x] Update the GitHub repository description and topics.
+
+Before publishing, replace `Unreleased` in the changelog with the release date.
 
 ### 7. Prepare publishing
 
