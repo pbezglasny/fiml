@@ -83,7 +83,7 @@ fn min_max_stage_preserves_nans_and_clips_only_when_configured() {
     #[cfg(feature = "serde")]
     {
         let mut document = serde_json::to_value(&spec).unwrap();
-        assert_eq!(document["version"], "2.2");
+        assert_eq!(document["version"], "3.0");
         assert_eq!(
             serde_json::from_value::<PipelineSpec>(document.clone()).unwrap(),
             spec
@@ -93,7 +93,7 @@ fn min_max_stage_preserves_nans_and_clips_only_when_configured() {
             serde_json::from_value::<PipelineSpec>(document)
                 .unwrap_err()
                 .to_string()
-                .contains("MinMaxScaler stages require version 2.2")
+                .contains("unsupported model-input spec version")
         );
     }
 }
@@ -127,7 +127,7 @@ fn selection_copies_only_retained_columns_and_round_trips() {
     #[cfg(feature = "serde")]
     {
         let mut document = serde_json::to_value(&spec).unwrap();
-        assert_eq!(document["version"], "2.5");
+        assert_eq!(document["version"], "3.0");
         assert_eq!(
             document["model_input"]["stages"][0]["input_indices"],
             serde_json::json!([0])
@@ -141,7 +141,7 @@ fn selection_copies_only_retained_columns_and_round_trips() {
             serde_json::from_value::<PipelineSpec>(document)
                 .unwrap_err()
                 .to_string()
-                .contains("selection stages require version 2.5")
+                .contains("unsupported model-input spec version")
         );
     }
 }
@@ -254,7 +254,7 @@ fn power_transform_stage_handles_limits_domains_and_overflow() {
     #[cfg(feature = "serde")]
     {
         let mut document = serde_json::to_value(&box_cox).unwrap();
-        assert_eq!(document["version"], "2.4");
+        assert_eq!(document["version"], "3.0");
         assert_eq!(
             serde_json::from_value::<PipelineSpec>(document.clone()).unwrap(),
             box_cox
@@ -264,7 +264,7 @@ fn power_transform_stage_handles_limits_domains_and_overflow() {
             serde_json::from_value::<PipelineSpec>(document)
                 .unwrap_err()
                 .to_string()
-                .contains("PowerTransformer stages require version 2.4")
+                .contains("unsupported model-input spec version")
         );
     }
 }
@@ -324,7 +324,7 @@ fn quantile_transform_stage_interpolates_ties_clips_normal_tails_and_round_trips
     #[cfg(feature = "serde")]
     {
         let mut document = serde_json::to_value(&normal_spec).unwrap();
-        assert_eq!(document["version"], "2.6");
+        assert_eq!(document["version"], "3.0");
         assert_eq!(
             serde_json::from_value::<PipelineSpec>(document.clone()).unwrap(),
             normal_spec
@@ -334,7 +334,7 @@ fn quantile_transform_stage_interpolates_ties_clips_normal_tails_and_round_trips
             serde_json::from_value::<PipelineSpec>(document)
                 .unwrap_err()
                 .to_string()
-                .contains("QuantileTransformer stages require version 2.6")
+                .contains("unsupported model-input spec version")
         );
     }
 }
@@ -411,7 +411,7 @@ fn simple_imputer_replaces_only_nans_and_appends_fitted_indicators() {
     #[cfg(feature = "serde")]
     {
         let mut document = serde_json::to_value(&spec).unwrap();
-        assert_eq!(document["version"], "2.3");
+        assert_eq!(document["version"], "3.0");
         assert_eq!(
             serde_json::from_value::<PipelineSpec>(document.clone()).unwrap(),
             spec
@@ -421,7 +421,7 @@ fn simple_imputer_replaces_only_nans_and_appends_fitted_indicators() {
             serde_json::from_value::<PipelineSpec>(document)
                 .unwrap_err()
                 .to_string()
-                .contains("SimpleImputer stages require version 2.3")
+                .contains("unsupported model-input spec version")
         );
     }
 }
@@ -552,7 +552,7 @@ fn scalar_stages_chain_after_pca_and_share_lags_without_leaking_scratch() {
     #[cfg(feature = "serde")]
     {
         let document = serde_json::to_value(&spec).unwrap();
-        assert_eq!(document["version"], "2.1");
+        assert_eq!(document["version"], "3.0");
         assert_eq!(
             serde_json::from_value::<PipelineSpec>(document.clone()).unwrap(),
             spec
@@ -563,7 +563,7 @@ fn scalar_stages_chain_after_pca_and_share_lags_without_leaking_scratch() {
             serde_json::from_value::<PipelineSpec>(old_version)
                 .unwrap_err()
                 .to_string()
-                .contains("scalar stages require version 2.1")
+                .contains("unsupported model-input spec version")
         );
     }
 }
@@ -734,7 +734,7 @@ fn stage_numeric_and_layout_validation_is_shared_by_construction_and_json() {
 
 #[cfg(feature = "serde")]
 #[test]
-fn json_migrates_v1_and_strictly_validates_v2_stages() {
+fn json_rejects_legacy_and_strictly_validates_current_stages() {
     let (raw, definitions) = base();
     let base = PipelineSpec::new(raw, definitions).unwrap();
     let mut legacy = serde_json::to_value(&base).unwrap();
@@ -743,9 +743,7 @@ fn json_migrates_v1_and_strictly_validates_v2_stages() {
         .as_object_mut()
         .unwrap()
         .remove("stages");
-    let restored: PipelineSpec = serde_json::from_value(legacy.clone()).unwrap();
-    assert_eq!(restored, base);
-    assert_eq!(serde_json::to_value(restored).unwrap()["version"], "2.0");
+    assert!(serde_json::from_value::<PipelineSpec>(legacy.clone()).is_err());
     legacy["model_input"]["stages"] = serde_json::json!([]);
     assert!(serde_json::from_value::<PipelineSpec>(legacy).is_err());
 

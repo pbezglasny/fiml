@@ -7,38 +7,26 @@
 //!
 //! # Example
 //!
-//! Compute a three-sample simple moving average from price events. With
-//! [`WarmupPolicy::FullWindow`], the output stays `NaN` until all three samples arrive.
-//! [`ArrayFeatureVector`] stores the output inline; extractor construction still allocates
-//! its internal state.
+//! Extract price and compute a three-observation moving average. Construction allocates
+//! history once; event processing writes into caller-owned storage.
 //!
 //! ```rust
-//! use fiml::{
-//!     ArrayFeatureVector, Event, EventField, FeatureDefinition, FeatureExtractor,
-//!     FeatureKey, FeatureSource, FeatureVector, Symbol, WarmupPolicy,
-//! };
-//!
+//! use fiml::{ArrayFeatureVector, Event, EventField, FeatureDefinition,
+//!     FeatureExtractorSpec, FeatureId, FeatureKey, PipelineSpec, Symbol,
+//!     TransformerDefinition, WarmupPolicy};
 //! # fn main() -> fiml::Result<()> {
 //! let btc = Symbol::new("BTCUSDT")?;
-//! let mut extractor = FeatureExtractor::builder(ArrayFeatureVector::<1>::new())
-//!     .add_feature(FeatureDefinition::with_default_id(FeatureKey::Sma {
-//!         symbol: btc,
-//!         source: FeatureSource::Field(EventField::Price),
-//!         window: 3,
-//!         warmup_policy: WarmupPolicy::FullWindow,
-//!     }))
-//!     .build()?;
-//!
-//! // Feed events in timestamp order for each symbol.
-//! extractor.handle_event(Event::price(btc, 100.0, 0))?;
-//! extractor.handle_event(Event::price(btc, 102.0, 1_000))?;
-//! assert!(extractor.feature_vector().values()[0].is_nan());
-//!
-//! extractor.handle_event(Event::price(btc, 104.0, 2_000))?;
-//!
-//! // Borrow the model input without allocating or copying a vector.
-//! let model_input: &[f64] = extractor.feature_vector().values();
-//! assert_eq!(model_input, &[102.0]);
+//! let raw = FeatureExtractorSpec::new([FeatureDefinition::new(
+//!     FeatureKey::Field { symbol: btc, field: EventField::Price }, FeatureId::new("price"),
+//! )])?;
+//! let mut pipeline = PipelineSpec::new(raw, [TransformerDefinition::sma(
+//!     FeatureId::new("price"), FeatureId::new("sma3"), 3, WarmupPolicy::FullWindow,
+//! )])?.build(ArrayFeatureVector::<1>::new(), ArrayFeatureVector::<1>::new())?;
+//! pipeline.handle_event(Event::price(btc, 10.0, 0))?;
+//! assert!(pipeline.values()[0].is_nan());
+//! pipeline.handle_event(Event::price(btc, 12.0, 1))?;
+//! pipeline.handle_event(Event::price(btc, 14.0, 2))?;
+//! assert_eq!(pipeline.values(), &[12.0]);
 //! # Ok(())
 //! # }
 //! ```
@@ -336,6 +324,8 @@ pub enum IntegerTarget {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum IndicatorKind {
+    /// Raw scalar event field.
+    Field,
     /// Highest bid price.
     OrderBookBestBidPrice,
     /// Size at the highest bid.
@@ -487,6 +477,10 @@ pub enum InvalidIndicatorDefinitionError {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum InvalidTransformationDefinitionError {
+    /// Sample windows must be positive.
+    WindowZero,
+    /// Compatible averages exceed the calculator output limit.
+    TooManyAverageOutputs,
     /// The input ID is absent from the preceding layout.
     InputFeatureNotFound,
     /// Two transformations use the same output ID.
@@ -749,6 +743,7 @@ impl Display for IndicatorKind {
             Self::OrderBookWeightedMidPrice => "order-book weighted mid-price",
             Self::OrderBookMicroprice => "order-book microprice",
             Self::OrderBookImbalance => "order-book imbalance",
+            Self::Field => "field",
             Self::Sma => "SMA",
             Self::Ema => "EMA",
             Self::Cvd => "CVD",
@@ -843,6 +838,8 @@ impl Display for InvalidTransformationDefinitionError {
             Self::ScaleNotFinite => "standard-scaler scale must be finite",
             Self::ScaleNotPositive => "standard-scaler scale must be positive",
             Self::InverseScaleNotFinite => "standard-scaler inverse scale must be finite",
+            Self::WindowZero => "average window must be positive",
+            Self::TooManyAverageOutputs => "too many compatible average outputs (maximum 16)",
             Self::LagWindowZero => "lag window must be positive",
             Self::LagWindowTooLarge => "lag window exceeds the maximum of 10000 values",
         })

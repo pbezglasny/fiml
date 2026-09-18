@@ -14,12 +14,7 @@ import fiml
 
 raw_spec = (
     fiml.FeatureExtractorSpec(checksum="raw-features-v1")
-    .sma(
-        "BTCUSDT",
-        [2],
-        source="trade_price",
-        warmup=fiml.WarmupPolicy.FIRST_VALUE,
-    )
+    .field("BTCUSDT", source="trade_price", id="price")
     .day_of_week()
 )
 
@@ -30,11 +25,18 @@ scaler = SimpleNamespace(
     scale_=np.array([2.0, 2.0]),
 )
 model_spec = fiml.PipelineSpec(raw_spec, checksum="model-input-v1")
+for feature_id in raw_spec.feature_ids():
+    if feature_id == "price":
+        model_spec.sma(feature_id, window=2, warmup=fiml.WarmupPolicy.FIRST_VALUE)
+    else:
+        model_spec.identity(feature_id)
+scaling = fiml.ScalarStage()
 for feature_id, mean, scale in zip(
     raw_spec.feature_ids(), scaler.mean_, scaler.scale_, strict=True
 ):
-    model_spec.standard_scale(feature_id, mean=float(mean), scale=float(scale))
+    scaling.standard_scale(feature_id, mean=float(mean), scale=float(scale))
 
+model_spec.scalar_stage(scaling)
 pipeline = fiml.ModelInputPipeline.from_json(model_spec.to_json())
 btc = pipeline.symbol("BTCUSDT")
 features = pipeline.transform(

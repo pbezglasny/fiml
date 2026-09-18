@@ -95,47 +95,19 @@ def test_compute_features_returns_one_multi_symbol_snapshot_per_trade():
 
 
 def test_grouped_sma_and_ema_can_consume_trade_price_and_volume():
-    feature_extractor_spec = (
-        fiml.FeatureExtractorSpec()
-        .sma(
-            "BTCUSDT",
-            [2, 3],
-            source="trade_price",
-            warmup=fiml.WarmupPolicy.FIRST_VALUE,
-        )
-        .ema(
-            "BTCUSDT",
-            [2],
-            source="trade_volume",
-            warmup=fiml.WarmupPolicy.FIRST_VALUE,
-        )
-    )
-    assert feature_extractor_spec.indicator_count() == 2
-    assert feature_extractor_spec.output_count() == 3
-    extractor = fiml.FeatureExtractor(feature_extractor_spec)
-    source = pd.DataFrame(
-        {
-            "symbol": ["BTCUSDT"] * 4,
-            "ts": np.array([1_000, 1_001, 1_002, 1_003], dtype=np.int64),
-            "price": [1.0, 1.1, 1.2, 1.0],
-            "volume": [3, 4, 3, 2],
-        }
-    )
-
+    raw = (fiml.FeatureExtractorSpec().field("BTCUSDT", source="trade_price", id="price")
+           .field("BTCUSDT", source="trade_volume", id="volume"))
+    spec = (fiml.PipelineSpec(raw)
+            .ema("volume", window=2, warmup=fiml.WarmupPolicy.FIRST_VALUE, output="ema")
+            .sma("price", window=2, warmup=fiml.WarmupPolicy.FIRST_VALUE, output="sma2")
+            .sma("price", window=3, warmup=fiml.WarmupPolicy.FIRST_VALUE, output="sma3"))
+    extractor = fiml.ModelInputPipeline(spec)
+    source = pd.DataFrame(dict(symbol=["BTCUSDT"]*4, ts=np.arange(4, dtype=np.int64),
+                               price=[1., 1.1, 1.2, 1.], volume=[3., 4., 3., 2.]))
     result = extractor.compute_features(source)
-
-    assert extractor.feature_names() == [
-        sample_name("ema", "BTCUSDT", "trade_volume", 2, "first_value"),
-        sample_name("sma", "BTCUSDT", "trade_price", 2, "first_value"),
-        sample_name("sma", "BTCUSDT", "trade_price", 3, "first_value"),
-    ]
-    np.testing.assert_allclose(
-        result[sample_name("sma", "BTCUSDT", "trade_price", 2, "first_value")],
-        [1.0, 1.05, 1.15, 1.1],
-    )
-    assert not result[
-        sample_name("ema", "BTCUSDT", "trade_volume", 2, "first_value")
-    ].isna().any()
+    assert extractor.feature_names() == ["ema", "sma2", "sma3"]
+    np.testing.assert_allclose(result["sma2"], [1., 1.05, 1.15, 1.1])
+    assert not result["ema"].isna().any()
 
 
 def test_sample_and_timed_volatility_use_population_stddev_of_simple_returns():
@@ -302,19 +274,12 @@ def test_returns_validate_lags_sources_and_log_domain():
 
 
 def test_feature_names_keep_canonical_source_order():
-    extractor = fiml.FeatureExtractor(
-        fiml.FeatureExtractorSpec()
-        .sma("BTCUSDT", [2], source="volume")
-        .sma("BTCUSDT", [2], source="trade_volume")
-        .sma("BTCUSDT", [2], source="trade_price")
-        .sma("BTCUSDT", [2], source="price")
-    )
-
-    assert extractor.feature_names() == [
-        sample_name("sma", "BTCUSDT", "price", 2),
-        sample_name("sma", "BTCUSDT", "trade_price", 2),
-        sample_name("sma", "BTCUSDT", "trade_volume", 2),
-        sample_name("sma", "BTCUSDT", "volume", 2),
+    spec = fiml.FeatureExtractorSpec()
+    for source in ["volume", "trade_volume", "trade_price", "price"]:
+        spec.field("BTCUSDT", source=source)
+    assert spec.feature_ids() == [
+        f"field:symbol=7:btcusdt:source=field.{source}"
+        for source in ["price", "trade_price", "trade_volume", "volume"]
     ]
 
 
@@ -365,28 +330,11 @@ def test_invalid_trade_side_is_rejected_before_dispatch():
 
 def test_python_warmup_enum_matches_default_and_first_value_policies():
     assert fiml.WarmupPolicy.FIRST_VALUE != fiml.WarmupPolicy.FULL_WINDOW
-
-    default_extractor = fiml.FeatureExtractor(
-        fiml.FeatureExtractorSpec().sma("BTCUSDT", [2], source="trade_price")
-    )
-    partial_extractor = fiml.FeatureExtractor(
-        fiml.FeatureExtractorSpec().sma(
-            "BTCUSDT",
-            [2],
-            source="trade_price",
-            warmup=fiml.WarmupPolicy.FIRST_VALUE,
-        )
-    )
-    btc = default_extractor.symbol("BTCUSDT")
-    partial_btc = partial_extractor.symbol("BTCUSDT")
-
-    default_extractor.update(fiml.KIND_TRADE, btc, 0, price=10.0, volume=1.0)
-    partial_extractor.update(
-        fiml.KIND_TRADE, partial_btc, 0, price=10.0, volume=1.0
-    )
-
-    assert np.isnan(default_extractor.values()[0])
-    assert partial_extractor.values()[0] == 10.0
+    raw = fiml.FeatureExtractorSpec().field("BTCUSDT", source="trade_price", id="price")
+    for warmup, missing in [(fiml.WarmupPolicy.FULL_WINDOW, True), (fiml.WarmupPolicy.FIRST_VALUE, False)]:
+        pipeline = fiml.ModelInputPipeline(fiml.PipelineSpec(raw).sma("price", window=2, warmup=warmup))
+        pipeline.update(fiml.KIND_TRADE, pipeline.symbol("BTCUSDT"), 0, price=10., volume=1.)
+        assert np.isnan(pipeline.values()[0]) == missing
 
 
 def test_moving_average_source_is_validated():
@@ -394,23 +342,16 @@ def test_moving_average_source_is_validated():
         ValueError,
         match='expected "price", "volume", "trade_price", or "trade_volume"',
     ):
-        fiml.FeatureExtractorSpec().sma("BTCUSDT", [2], source="orderbook")
+        fiml.FeatureExtractorSpec().field("BTCUSDT", source="orderbook")
 
 
 def test_compatible_feature_calls_are_grouped_and_empty_windows_are_rejected():
-    compatible = (
-        fiml.FeatureExtractorSpec()
-        .sma("BTCUSDT", [2], source="trade_price")
-        .sma("BTCUSDT", [3], source="trade_price")
-    )
-    extractor = fiml.FeatureExtractor(compatible)
-    assert extractor.feature_names() == [
-        sample_name("sma", "BTCUSDT", "trade_price", 2),
-        sample_name("sma", "BTCUSDT", "trade_price", 3),
-    ]
-
-    with pytest.raises(ValueError, match="windows must not be empty"):
-        fiml.FeatureExtractorSpec().ema("BTCUSDT", [])
+    raw = fiml.FeatureExtractorSpec().field("BTCUSDT", source="trade_price", id="price")
+    spec = fiml.PipelineSpec(raw).sma("price", window=2, output="sma2").sma("price", window=3, output="sma3")
+    assert spec.feature_ids() == ["sma2", "sma3"]
+    with pytest.raises(ValueError, match="window must be positive"):
+        fiml.PipelineSpec(raw).ema("price", window=0)
+    assert not hasattr(raw, "sma") and not hasattr(raw, "ema")
 
 
 def test_global_clock_features_have_no_symbol():

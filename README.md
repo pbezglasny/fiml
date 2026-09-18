@@ -180,8 +180,8 @@ import fiml
 import numpy as np
 from sklearn.preprocessing import StandardScaler
 
-raw = fiml.FeatureExtractorSpec().sma("BTCUSDT", [3], source="price")
-spec = fiml.PipelineSpec(raw).identity(raw.feature_ids()[0], output="sma3")
+raw = fiml.FeatureExtractorSpec().field("BTCUSDT", source="price", id="price")
+spec = fiml.PipelineSpec(raw).sma("price", window=3, output="sma3")
 pipeline = fiml.ModelInputPipeline(spec).add_transformation(
     StandardScaler(), name="scale"
 )
@@ -218,7 +218,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let json = std::fs::read_to_string("pipeline.json")?;
     let spec: PipelineSpec = serde_json::from_str(&json)?;
     let mut pipeline = spec.build(
-        ArrayFeatureVector::<1>::new(), // One raw SMA value.
+        ArrayFeatureVector::<1>::new(), // One raw price value.
         ArrayFeatureVector::<1>::new(), // One scaled model input.
     )?;
     let btc = Symbol::new("BTCUSDT")?;

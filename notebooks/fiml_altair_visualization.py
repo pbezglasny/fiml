@@ -43,21 +43,14 @@ def _(load_binance_trades):
 def _(fiml, trades):
     feature_extractor_spec = (
         fiml.FeatureExtractorSpec()
-        .sma(
-            "BTCUSDT",
-            [5],
-            source="trade_price",
-            warmup=fiml.WarmupPolicy.FIRST_VALUE,
-        )
-        .ema(
-            "BTCUSDT",
-            [5],
-            source="trade_price",
-            warmup=fiml.WarmupPolicy.FIRST_VALUE,
-        )
+        .field("BTCUSDT", source="trade_price", id="price")
         .cvd("BTCUSDT", [10], warmup=fiml.WarmupPolicy.FIRST_VALUE)
     )
-    extractor = fiml.FeatureExtractor(feature_extractor_spec, output_dtype="float64")
+    cvd_id = feature_extractor_spec.feature_ids()[0]
+    pipeline_spec = (fiml.PipelineSpec(feature_extractor_spec).identity(cvd_id)
+        .ema("price", window=5, warmup=fiml.WarmupPolicy.FIRST_VALUE, output="ema:5")
+        .sma("price", window=5, warmup=fiml.WarmupPolicy.FIRST_VALUE, output="sma:5"))
+    extractor = fiml.ModelInputPipeline(pipeline_spec, output_dtype="float64")
     features = extractor.compute_features(trades, side="side")
     cvd_name, ema_name, sma_name = extractor.feature_names()
 

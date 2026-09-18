@@ -6,7 +6,7 @@ import pytest
 def build_runtime(pipeline):
     raw = fiml.FeatureExtractorSpec(capacity=7)
     for source in ["price", "volume", "trade_price", "trade_volume"]:
-        raw.sma("BTCUSDT", [2], source=source, warmup=fiml.WarmupPolicy.FIRST_VALUE)
+        raw.field("BTCUSDT", source=source)
     raw.sma_timed(
         "BTCUSDT", aggregation="1s", windows=["2s"],
         warmup=fiml.WarmupPolicy.FIRST_VALUE,

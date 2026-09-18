@@ -1,8 +1,8 @@
 {
   "pipeline": {
-    "version": "2.0",
+    "version": "3.0",
     "feature_extractor": {
-      "version": "1.1",
+      "version": "2.0",
       "capacity": 21,
       "length": 20,
       "required_events": [

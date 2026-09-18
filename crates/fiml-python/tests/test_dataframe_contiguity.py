@@ -8,8 +8,8 @@ import pytest
 def runtime_factory(request):
     spec = (
         fiml.FeatureExtractorSpec()
-        .sma("BTCUSDT", [2], source="trade_price")
-        .sma("BTCUSDT", [2], source="trade_volume")
+        .field("BTCUSDT", source="trade_price")
+        .field("BTCUSDT", source="trade_volume")
         .cvd("BTCUSDT", [2])
     )
     if request.param is fiml.ModelInputPipeline:

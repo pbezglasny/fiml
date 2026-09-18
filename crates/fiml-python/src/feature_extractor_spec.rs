@@ -248,63 +248,23 @@ impl FeatureExtractorSpec {
         core_feature_ids(&self.core)
     }
 
-    /// Grouped simple moving averages over ordered sample windows.
-    #[pyo3(signature = (
-        symbol,
-        windows,
-        *,
-        source="price",
-        warmup=PyWarmupPolicy::FullWindow
-    ))]
-    fn sma<'py>(
+    /// Copy the latest matching scalar event field.
+    #[pyo3(signature = (symbol, *, source="price", id=None))]
+    fn field<'py>(
         mut slf: PyRefMut<'py, Self>,
         symbol: &str,
-        windows: Vec<usize>,
         source: &str,
-        warmup: PyWarmupPolicy,
+        id: Option<&str>,
     ) -> PyResult<PyRefMut<'py, Self>> {
-        Self::require_windows(&windows)?;
-        let symbol = intern_symbol(symbol)?;
-        let field = parse_value_source("source", source)?;
-        let warmup_policy = warmup.into();
-        slf.add_group(windows.into_iter().map(|window| {
-            definition(FeatureKey::Sma {
-                symbol,
-                source: FeatureSource::Field(field),
-                window,
-                warmup_policy,
-            })
-        }))?;
-        Ok(slf)
-    }
-
-    /// Grouped exponential moving averages over ordered sample windows.
-    #[pyo3(signature = (
-        symbol,
-        windows,
-        *,
-        source="price",
-        warmup=PyWarmupPolicy::FullWindow
-    ))]
-    fn ema<'py>(
-        mut slf: PyRefMut<'py, Self>,
-        symbol: &str,
-        windows: Vec<usize>,
-        source: &str,
-        warmup: PyWarmupPolicy,
-    ) -> PyResult<PyRefMut<'py, Self>> {
-        Self::require_windows(&windows)?;
-        let symbol = intern_symbol(symbol)?;
-        let field = parse_value_source("source", source)?;
-        let warmup_policy = warmup.into();
-        slf.add_group(windows.into_iter().map(|window| {
-            definition(FeatureKey::Ema {
-                symbol,
-                source: FeatureSource::Field(field),
-                window,
-                warmup_policy,
-            })
-        }))?;
+        let key = FeatureKey::Field {
+            symbol: intern_symbol(symbol)?,
+            field: parse_value_source("source", source)?,
+        };
+        let feature = match id {
+            Some(id) => FeatureDefinition::new(key, fiml::FeatureId::new(id)),
+            None => definition(key),
+        };
+        slf.add_group([feature])?;
         Ok(slf)
     }
 

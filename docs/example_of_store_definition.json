@@ -1,8 +1,8 @@
 {
-  "version": "2.0",
+  "version": "3.0",
   "checksum": "opaque model metadata",
   "feature_extractor": {
-    "version": "1.1",
+    "version": "2.0",
     "capacity": 8,
     "length": 5,
     "required_events": [
@@ -45,19 +45,12 @@
         "symbol": "btcusd",
         "indicators": [
           {
-            "kind": "sma",
+            "kind": "field",
             "source": {
               "type": "field",
               "event": "trade",
               "field": "price"
-            },
-            "warmup_policy": "full_window",
-            "outputs": [
-              {
-                "window": 5,
-                "id": "raw_sma"
-              }
-            ]
+            }
           },
           {
             "kind": "order_book_mid_price",
@@ -91,36 +84,69 @@
     ]
   },
   "model_input": {
-    "stages": [],
+    "stages": [
+      {
+        "type": "scalar",
+        "transformations": [
+          {
+            "type": "identity",
+            "input": "raw_day",
+            "output": "day"
+          },
+          {
+            "type": "standard_scale",
+            "input": "raw_sma",
+            "output": "scaled_sma",
+            "mean": 4.0,
+            "scale": 2.0
+          },
+          {
+            "type": "identity",
+            "input": "raw_mid_price",
+            "output": "mid_price"
+          },
+          {
+            "type": "identity",
+            "input": "raw_imbalance_1",
+            "output": "imbalance_1"
+          },
+          {
+            "type": "identity",
+            "input": "raw_imbalance_5",
+            "output": "imbalance_5"
+          }
+        ]
+      }
+    ],
     "capacity": 8,
     "length": 5,
     "transformations": [
       {
+        "type": "sma",
+        "input": "field:symbol=6:btcusd:source=field.trade_price",
+        "output": "raw_sma",
+        "window": 5,
+        "warmup_policy": "full_window"
+      },
+      {
         "type": "identity",
         "input": "raw_day",
-        "output": "day"
-      },
-      {
-        "type": "standard_scale",
-        "input": "raw_sma",
-        "output": "scaled_sma",
-        "mean": 4.0,
-        "scale": 2.0
-      },
-      {
-        "type": "identity",
-        "input": "raw_mid_price",
-        "output": "mid_price"
+        "output": "raw_day"
       },
       {
         "type": "identity",
         "input": "raw_imbalance_1",
-        "output": "imbalance_1"
+        "output": "raw_imbalance_1"
       },
       {
         "type": "identity",
         "input": "raw_imbalance_5",
-        "output": "imbalance_5"
+        "output": "raw_imbalance_5"
+      },
+      {
+        "type": "identity",
+        "input": "raw_mid_price",
+        "output": "raw_mid_price"
       }
     ]
   }

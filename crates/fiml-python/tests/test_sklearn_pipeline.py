@@ -22,15 +22,13 @@ from sklearn.preprocessing import (
 
 
 def base_spec(*, capacity=None, full_window=False, lag=False):
-    raw = fiml.FeatureExtractorSpec(capacity=4).sma(
-        "BTCUSDT", [1, 2, 4], source="trade_price",
-        warmup=fiml.WarmupPolicy.FULL_WINDOW if full_window else fiml.WarmupPolicy.FIRST_VALUE,
-    )
+    raw = fiml.FeatureExtractorSpec(capacity=4).field("BTCUSDT", source="trade_price", id="price")
     spec = fiml.PipelineSpec(raw, capacity=capacity, checksum="training-test")
-    for name in raw.feature_ids():
-        spec.identity(name)
+    warmup = fiml.WarmupPolicy.FULL_WINDOW if full_window else fiml.WarmupPolicy.FIRST_VALUE
+    for window in [1, 2, 4]:
+        spec.sma("price", window=window, warmup=warmup, output=f"sma{window}")
     if lag:
-        spec.lagged(raw.feature_ids()[0], lag_window=2, output="lag2")
+        spec.lagged("price", lag_window=2, output="lag2")
     return spec
 
 
@@ -55,24 +53,13 @@ def base_matrix(spec, data):
 
 
 def variance_spec(*, capacity=None, full_window=False):
-    raw = (
-        fiml.FeatureExtractorSpec()
-        .sma(
-            "BTCUSDT",
-            [1, 4],
-            source="trade_price",
-            warmup=(
-                fiml.WarmupPolicy.FULL_WINDOW
-                if full_window
-                else fiml.WarmupPolicy.FIRST_VALUE
-            ),
-        )
-        .sma("BTCUSDT", [1], source="trade_volume")
-    )
-    spec = fiml.PipelineSpec(raw, capacity=capacity)
-    for feature_id in raw.feature_ids():
-        spec.identity(feature_id)
-    return spec
+    raw = (fiml.FeatureExtractorSpec().field("BTCUSDT", source="trade_price", id="price")
+           .field("BTCUSDT", source="trade_volume", id="volume"))
+    warmup = fiml.WarmupPolicy.FULL_WINDOW if full_window else fiml.WarmupPolicy.FIRST_VALUE
+    return (fiml.PipelineSpec(raw, capacity=capacity)
+            .sma("price", window=1, warmup=warmup, output="sma1")
+            .sma("price", window=4, warmup=warmup, output="sma4")
+            .identity("volume"))
 
 
 def test_variance_threshold_removes_constants_preserves_layout_nans_and_json():
@@ -99,7 +86,7 @@ def test_variance_threshold_removes_constants_preserves_layout_nans_and_json():
 
     document = json.loads(pipeline.to_json())
     stage = document["model_input"]["stages"][0]
-    assert document["version"] == "2.5"
+    assert document["version"] == "3.0"
     assert stage == {
         "type": "select",
         "outputs": np.asarray(spec.feature_ids())[support].tolist(),
@@ -192,7 +179,7 @@ def test_simple_imputer_strategies_indicators_and_json_reload(strategy, fill_val
 
     document = json.loads(pipeline.to_json())
     stage = document["model_input"]["stages"][0]
-    assert document["version"] == "2.3"
+    assert document["version"] == "3.0"
     assert stage["type"] == "simple_impute"
     assert stage["retained_input_indices"] == [0, 1, 2]
     assert stage["indicator_input_indices"] == [1, 2]
@@ -268,9 +255,7 @@ def test_simple_imputer_replaces_new_inference_nans_without_new_indicators():
 
 
 def test_simple_imputer_rejects_infinity_and_zero_output_atomically():
-    raw = fiml.FeatureExtractorSpec().sma(
-        "BTCUSDT", [1], source="trade_price"
-    )
+    raw = fiml.FeatureExtractorSpec().field("BTCUSDT", source="trade_price")
     input_id = raw.feature_ids()[0]
     overflow = fiml.PipelineSpec(raw).standard_scale(
         input_id, mean=-1e308, scale=1.0, output="overflow"
@@ -285,11 +270,8 @@ def test_simple_imputer_rejects_infinity_and_zero_output_atomically():
     with pytest.raises(ValueError, match="not fitted"):
         pipeline.to_json()
 
-    empty_raw = fiml.FeatureExtractorSpec().sma(
-        "BTCUSDT", [4], source="trade_price",
-        warmup=fiml.WarmupPolicy.FULL_WINDOW,
-    )
-    empty_spec = fiml.PipelineSpec(empty_raw).identity(empty_raw.feature_ids()[0])
+    empty_raw = fiml.FeatureExtractorSpec().field("BTCUSDT", source="trade_price")
+    empty_spec = fiml.PipelineSpec(empty_raw).sma(empty_raw.feature_ids()[0], window=4)
     empty = fiml.ModelInputPipeline(empty_spec).add_transformation(
         SimpleImputer(), name="impute"
     )
@@ -356,8 +338,8 @@ def test_fit_export_and_replay_match_sklearn(whiten, dtype):
     assert pipeline.feature_names() == ["pca__pc0", "pca__pc1"]
     assert pipeline.active_feature_count() == pipeline.n_features() == 2
     document = json.loads(pipeline.to_json())
-    assert document["version"] == "2.0"
-    assert document["feature_extractor"]["version"] == "1.1"
+    assert document["version"] == "3.0"
+    assert document["feature_extractor"]["version"] == "2.0"
     assert document["checksum"] == "training-test"
     assert document["model_input"]["length"] == document["model_input"]["capacity"] == 2
     assert set(document["model_input"]["stages"][1]) == {"type", "outputs", "mean", "components", "output_scale"}
@@ -455,7 +437,7 @@ def test_min_max_scaler_range_clipping_constants_and_nans(options, clip):
 
     document = json.loads(pipeline.to_json())
     stage = document["model_input"]["stages"][0]
-    assert document["version"] == "2.2"
+    assert document["version"] == "3.0"
     assert stage["type"] == "min_max_scale"
     np.testing.assert_array_equal(stage["scale"], fitted.scale_)
     np.testing.assert_array_equal(stage["min"], fitted.min_)
@@ -468,11 +450,11 @@ def test_min_max_scaler_range_clipping_constants_and_nans(options, clip):
 @pytest.mark.parametrize("clip", [False, True])
 def test_max_abs_scaler_signed_constants_zeros_clipping_and_reload(clip):
     raw = (fiml.FeatureExtractorSpec()
-           .sma("BTCUSDT", [4], source="trade_price", warmup=fiml.WarmupPolicy.FULL_WINDOW)
-           .sma("BTCUSDT", [1], source="trade_volume"))
+           .field("BTCUSDT", source="trade_price")
+           .field("BTCUSDT", source="trade_volume"))
     spec = fiml.PipelineSpec(raw)
     price, volume = raw.feature_ids()
-    spec.identity(price).identity(volume)
+    spec.sma(price, window=4).identity(volume)
     scalar = (fiml.ScalarStage()
               .standard_scale(price, mean=14.0, scale=1.0, output="signed")
               .identity(volume, output="constant")
@@ -504,7 +486,7 @@ def test_max_abs_scaler_signed_constants_zeros_clipping_and_reload(clip):
 
     document = json.loads(pipeline.to_json())
     stage = document["model_input"]["stages"][1]
-    assert document["version"] == ("2.2" if clip else "2.1")
+    assert document["version"] == "3.0"
     assert stage["type"] == ("min_max_scale" if clip else "standard_scale")
     if clip:
         np.testing.assert_array_equal(stage["scale"], np.reciprocal(fitted.scale_))
@@ -536,7 +518,7 @@ def test_fitted_component_count_and_pca_without_scaling(n_components, solver):
 
 @pytest.mark.parametrize("solver", ["full", "covariance_eigh"])
 def test_rank_deficient_whitening_has_bounded_roundoff_and_exact_reload(solver):
-    raw = fiml.FeatureExtractorSpec().sma("BTCUSDT", [1], source="trade_price")
+    raw = fiml.FeatureExtractorSpec().field("BTCUSDT", source="trade_price")
     raw_id = raw.feature_ids()[0]
     spec = fiml.PipelineSpec(raw)
     for name in ("a", "b", "c"):
@@ -785,7 +767,7 @@ def test_power_transformer_matches_sklearn_and_json_reload(method, standardize):
     np.testing.assert_array_equal(np.isnan(actual), np.isnan(matrix))
     document = json.loads(pipeline.to_json())
     stage = document["model_input"]["stages"][-1]
-    assert document["version"] == "2.4"
+    assert document["version"] == "3.0"
     assert stage["type"] == "power_transform"
     assert stage["method"] == method
     np.testing.assert_array_equal(stage["lambdas"], fitted.lambdas_)
@@ -809,7 +791,7 @@ def test_power_transformer_constants_and_box_cox_runtime_domain():
         "lambdas"
     ] == [1.0, 1.0, 1.0]
 
-    raw = fiml.FeatureExtractorSpec().sma("BTCUSDT", [1], source="trade_price")
+    raw = fiml.FeatureExtractorSpec().field("BTCUSDT", source="trade_price")
     feature_id = raw.feature_ids()[0]
     box_cox_spec = fiml.PipelineSpec(raw).identity(feature_id)
     signed = fiml.ScalarStage().standard_scale(
@@ -879,7 +861,7 @@ def test_quantile_transformer_matches_sklearn_boundaries_nans_and_json(
 
     document = json.loads(pipeline.to_json())
     stage = document["model_input"]["stages"][0]
-    assert document["version"] == "2.6"
+    assert document["version"] == "3.0"
     assert stage["type"] == "quantile_transform"
     assert stage["output_distribution"] == output_distribution
     assert stage["bounds_threshold"] == 1e-7
@@ -1013,7 +995,7 @@ handle = pipeline.symbol('BTCUSDT')
 pipeline.update(fiml.KIND_TRADE, handle, 0, price=10., volume=1.)
 assert pipeline.n_features() == 2
 import numpy as np
-raw = fiml.FeatureExtractorSpec().sma('BTCUSDT', [1], source='trade_price')
+raw = fiml.FeatureExtractorSpec().field('BTCUSDT', source='trade_price')
 base = fiml.PipelineSpec(raw).identity(raw.feature_ids()[0], output='price')
 recipe = (fiml.ModelInputPipeline(base)
           .add_transformation(fiml.ScalarStage().lagged('price', lag_window=1), name='lag')
@@ -1077,7 +1059,7 @@ def test_scalar_stages_between_estimators_preserve_excluded_event_history():
     assert np.isnan(actual[:, 3:]).all()
     assert pipeline.feature_names() == ["scaled_lag", "now", "lag2", "__reserved_3", "__reserved_4"]
     document = pipeline.to_json()
-    assert json.loads(document)["version"] == "2.1"
+    assert json.loads(document)["version"] == "3.0"
     restored = fiml.ModelInputPipeline.from_json(document)
     events(restored)
     np.testing.assert_array_equal(restored.transform(**data), actual)
@@ -1105,7 +1087,7 @@ def test_scalar_selection_can_remove_warmup_before_fitting():
 
 
 def test_training_prefix_can_be_wider_than_explicit_final_capacity():
-    raw = fiml.FeatureExtractorSpec().sma("BTCUSDT", [1], source="trade_price")
+    raw = fiml.FeatureExtractorSpec().field("BTCUSDT", source="trade_price")
     spec = fiml.PipelineSpec(raw, capacity=1).identity(raw.feature_ids()[0], output="price")
     pipeline = (fiml.ModelInputPipeline(spec)
                 .add_transformation(fiml.ScalarStage()

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "fiml PipelineSpec 2.6 (with 1.0 through 2.5 read compatibility)",
+  "title": "fiml PipelineSpec 3.0",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -9,51 +9,16 @@
     "model_input"
   ],
   "properties": {
-    "version": { "enum": ["1.0", "2.0", "2.1", "2.2", "2.3", "2.4", "2.5", "2.6"] },
+    "version": { "const": "3.0" },
     "checksum": { "type": "string" },
     "feature_extractor": { "$ref": "feature-extractor-spec.schema.json" },
     "model_input": { "$ref": "#/$defs/model_input" }
   },
-  "allOf": [{
-    "if": { "properties": { "version": { "enum": ["2.0", "2.1", "2.2", "2.3", "2.4", "2.5", "2.6"] } } },
-    "then": { "properties": { "model_input": { "required": ["stages"] } } },
-    "else": { "properties": { "model_input": { "not": { "required": ["stages"] } } } }
-  }, {
-    "if": { "properties": { "version": { "const": "2.0" } } },
-    "then": { "properties": { "model_input": { "properties": {
-      "stages": { "items": { "not": { "properties": { "type": { "const": "scalar" } }, "required": ["type"] } } }
-    } } } }
-  }, {
-    "if": { "properties": { "version": { "enum": ["2.0", "2.1"] } } },
-    "then": { "properties": { "model_input": { "properties": {
-      "stages": { "items": { "not": { "properties": { "type": { "const": "min_max_scale" } }, "required": ["type"] } } }
-    } } } }
-  }, {
-    "if": { "properties": { "version": { "enum": ["2.0", "2.1", "2.2"] } } },
-    "then": { "properties": { "model_input": { "properties": {
-      "stages": { "items": { "not": { "properties": { "type": { "const": "simple_impute" } }, "required": ["type"] } } }
-    } } } }
-  }, {
-    "if": { "properties": { "version": { "enum": ["2.0", "2.1", "2.2", "2.3"] } } },
-    "then": { "properties": { "model_input": { "properties": {
-      "stages": { "items": { "not": { "properties": { "type": { "const": "power_transform" } }, "required": ["type"] } } }
-    } } } }
-  }, {
-    "if": { "properties": { "version": { "enum": ["2.0", "2.1", "2.2", "2.3", "2.4"] } } },
-    "then": { "properties": { "model_input": { "properties": {
-      "stages": { "items": { "not": { "properties": { "type": { "const": "select" } }, "required": ["type"] } } }
-    } } } }
-  }, {
-    "if": { "properties": { "version": { "enum": ["2.0", "2.1", "2.2", "2.3", "2.4", "2.5"] } } },
-    "then": { "properties": { "model_input": { "properties": {
-      "stages": { "items": { "not": { "properties": { "type": { "const": "quantile_transform" } }, "required": ["type"] } } }
-    } } } }
-  }],
   "$defs": {
     "model_input": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["capacity", "length", "transformations"],
+      "required": ["capacity", "length", "transformations", "stages"],
       "properties": {
         "capacity": { "type": "integer", "minimum": 0 },
         "length": { "type": "integer", "minimum": 0 },
@@ -66,10 +31,22 @@
     },
     "transformation": {
       "oneOf": [
+        { "$ref": "#/$defs/average" },
         { "$ref": "#/$defs/identity" },
         { "$ref": "#/$defs/lagged" },
         { "$ref": "#/$defs/standard_scale" }
       ]
+    },
+    "average": {
+      "type": "object", "additionalProperties": false,
+      "required": ["type", "input", "output", "window", "warmup_policy"],
+      "properties": {
+        "type": { "enum": ["sma", "ema"] },
+        "input": { "$ref": "#/$defs/feature_id" },
+        "output": { "$ref": "#/$defs/output_feature_id" },
+        "window": { "type": "integer", "minimum": 1 },
+        "warmup_policy": { "enum": ["first_value", "full_window"] }
+      }
     },
     "identity": {
       "type": "object",

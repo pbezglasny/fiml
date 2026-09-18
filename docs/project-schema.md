@@ -128,8 +128,7 @@ the router. Temporary maps are dropped before event processing.
 
 | `FeatureKey` variant | Runtime derivation | Calculation state | Route |
 |---|---|---|---|
-| `Sma` | `SmaFeature` | `SimpleMovingAverage<HeapRingBuffer<f64>, 16>` | Event kind selected by `EventField` and the configured symbol. |
-| `Ema` | `EmaFeature` | `ExponentialMovingAverage<16>` | Event kind selected by `EventField` and the configured symbol. |
+| `Field` | `Field(EventField)` | Latest scalar in output storage | Event kind selected by `EventField` and the configured symbol. |
 | `Cvd` | `CvdFeature` | `CumulativeVolumeDelta<HeapRingBuffer<f64>, 16>` | Trade events for the configured symbol. |
 | `SmaTimed` | `SmaTimedFeature` | `SimpleMovingAverageTimed<HeapRingBuffer<(i64, f64)>, 16>` | Every event for the configured symbol, including kinds without matching samples. |
 | `ObvTimed` | `ObvTimedFeature` | `OnBalanceVolumeTimed<HeapRingBuffer<ObvBucket>, 16>` | Every event for the configured symbol. |
@@ -198,11 +197,11 @@ Public lookup/read methods are `last_timestamp`, `feature_vector`,
 
 ## Standalone indicators
 
-| Standalone type | History/state | Extractor derivation |
+| Standalone type | History/state | Runtime consumer |
 |---|---|---|
-| `SimpleMovingAverage<R, WINDOWS>` | `R::Item = f64`; inline window array | `SmaFeature` |
+| `SimpleMovingAverage<R, WINDOWS>` | `R::Item = f64`; inline window array | SMA scalar transformer |
 | `SimpleMovingAverageTimed<R, WINDOWS>` | `R::Item = (i64, f64)` | `SmaTimedFeature` |
-| `ExponentialMovingAverage<WINDOWS>` | Inline EMA window array | `EmaFeature` |
+| `ExponentialMovingAverage<WINDOWS>` | Inline EMA window array | EMA scalar transformer |
 | `CumulativeVolumeDelta<R, WINDOWS>` | `R::Item = f64` | `CvdFeature` |
 | `OnBalanceVolumeTimed<R, WINDOWS>` | `R::Item = ObvBucket` | `ObvTimedFeature` |
 | `VolumePriceTrend` | Previous price and cumulative value | `VptFeature` |

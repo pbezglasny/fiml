@@ -169,7 +169,7 @@ def test_pipeline_spec_rejects_duplicate_outputs_and_strict_json_errors():
         spec.identity(raw_id)
 
     document = json.loads(spec.to_json())
-    document["version"] = "3.0"
+    document["version"] = "2.6"
     with pytest.raises(ValueError, match="unsupported model-input spec version"):
         fiml.PipelineSpec.from_json(json.dumps(document))
     with pytest.raises(ValueError):
@@ -177,16 +177,10 @@ def test_pipeline_spec_rejects_duplicate_outputs_and_strict_json_errors():
 
 
 def trade_model_spec(*, raw_capacity=2, final_capacity=3):
-    raw = fiml.FeatureExtractorSpec(capacity=raw_capacity).sma(
-        "BTCUSDT",
-        [2],
-        source="trade_price",
-        warmup=fiml.WarmupPolicy.FULL_WINDOW,
-    )
+    raw = fiml.FeatureExtractorSpec(capacity=raw_capacity).field("BTCUSDT", source="trade_price")
     raw_id = raw.feature_ids()[0]
-    return fiml.PipelineSpec(raw, capacity=final_capacity).standard_scale(
-        raw_id, mean=10.0, scale=2.0, output="scaled_price"
-    )
+    return (fiml.PipelineSpec(raw, capacity=final_capacity).sma(raw_id, window=2)
+            .scalar_stage(fiml.ScalarStage().standard_scale(raw_id, mean=10.0, scale=2.0, output="scaled_price")))
 
 
 def trade_frame():

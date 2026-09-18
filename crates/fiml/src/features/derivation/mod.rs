@@ -7,7 +7,6 @@ use crate::vectors::FeatureVector;
 
 pub(crate) mod cvd;
 pub(crate) mod day_of_week;
-pub(crate) mod ema;
 pub(crate) mod obv;
 pub(crate) mod order_book;
 pub(crate) mod returns;
@@ -21,10 +20,9 @@ pub(crate) mod vwap;
 
 use cvd::CvdFeature;
 use day_of_week::DayOfWeek;
-use ema::EmaFeature;
 use obv::ObvTimedFeature;
 use returns::ReturnsFeature;
-use sma::{SmaFeature, SmaTimedFeature};
+use sma::SmaTimedFeature;
 use time_since_first_event_of_day::TimeSinceFirstEventOfDay;
 use trade_count::TradeCountTimedFeature;
 use trade_volume::TradeVolumeTimedFeature;
@@ -40,8 +38,7 @@ use vwap::VwapTimedFeature;
 /// calls, with no `Box` or vtable.
 pub(crate) enum FeatureDerivation {
     Cvd(CvdFeature),
-    Sma(SmaFeature),
-    Ema(EmaFeature),
+    Field(crate::EventField),
     SmaTimed(SmaTimedFeature),
     ObvTimed(ObvTimedFeature),
     TradeCountTimed(TradeCountTimedFeature),
@@ -65,8 +62,11 @@ impl FeatureDerivation {
     ) {
         match self {
             Self::Cvd(cvd) => cvd.update(event, output_range, output),
-            Self::Sma(sma) => sma.update(event, output_range, output),
-            Self::Ema(ema) => ema.update(event, output_range, output),
+            Self::Field(field) => {
+                if let Some(value) = field.extract(event) {
+                    output.set_value_at(output_range.start, value);
+                }
+            }
             Self::SmaTimed(sma) => sma.update(event, output_range, output),
             Self::ObvTimed(obv) => obv.update(event, output_range, output),
             Self::TradeCountTimed(count) => count.update(event, output_range, output),
@@ -99,8 +99,7 @@ impl FeatureDerivation {
                 true
             }
             Self::Cvd(_)
-            | Self::Sma(_)
-            | Self::Ema(_)
+            | Self::Field(_)
             | Self::SmaTimed(_)
             | Self::ObvTimed(_)
             | Self::TradeCountTimed(_)

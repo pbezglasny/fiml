@@ -121,8 +121,7 @@ import fiml
 spec = (fiml.FeatureExtractorSpec()
       .simple_returns("BTCUSDT", [1, 5], source="trade_price")
       .log_returns("BTCUSDT", [1, 5], source="trade_price")
-      .sma("BTCUSDT", [12, 24], source="trade_price")
-      .ema("BTCUSDT", [12], source="trade_price")
+      .field("BTCUSDT", source="trade_price")
       .obv_timed("BTCUSDT", aggregation="1ms", windows=["30s", "60s"])
       .trade_volume_timed("BTCUSDT", aggregation="1ms", windows=["30s", "60s"])
       .vwap_timed("BTCUSDT", aggregation="1ms", windows=["30s", "60s"])
@@ -178,8 +177,8 @@ Rust serving. Author it fluently, serialize it once, and load that same JSON in
 either language:
 
 ```python
-spec = fiml.FeatureExtractorSpec(capacity=128, checksum="model-v7").sma(
-    "BTCUSDT", [12, 24], source="trade_price"
+spec = fiml.FeatureExtractorSpec(capacity=128, checksum="model-v7").field(
+    "BTCUSDT", source="trade_price", id="price"
 )
 json_text = spec.to_json()
 
@@ -197,11 +196,10 @@ calculated or verified.
 Serialized specs also include a canonical `required_events` list of concrete
 `symbol`/`event` pairs that callers must feed to the extractor.
 
-Builder methods: `simple_returns`, `log_returns`, `sma`, `ema`, `cvd`,
+Builder methods: `field`, `simple_returns`, `log_returns`, `cvd`,
 `volatility`, `sma_timed`, `obv_timed`, `volatility_timed`, `vpt`,
 `trade_count_timed`, `trade_volume_timed`, `vwap_timed`, `day_of_week`, and
-`time_since_first_event_of_day` (fixed-offset `tz`, default `"UTC"`). SMA, EMA,
-CVD, timed SMA, timed OBV, timed trade volume, and timed VWAP accept ordered
+`time_since_first_event_of_day` (fixed-offset `tz`, default `"UTC"`). CVD, timed SMA, timed OBV, timed trade volume, and timed VWAP accept ordered
 window lists;
 each list becomes one runtime indicator with adjacent output cells. Durations
 are strings (`"500ms"`, `"1s"`, `"5m"`, `"1h"`). Every window builder accepts a
@@ -209,7 +207,7 @@ keyword-only `warmup` enum; its default is `fiml.WarmupPolicy.FULL_WINDOW`.
 `vpt` consumes trade price and volume, starts at zero, and emits its cumulative
 value from the first trade.
 
-Moving averages accept a keyword-only `source` of `"price"`, `"volume"`,
+Raw fields and timed SMA accept a keyword-only `source` of `"price"`, `"volume"`,
 `"trade_price"`, or `"trade_volume"` (default `"price"`). Use a trade source
 with `compute_features`. Output names are generated canonically at compilation,
 from each structural feature key; arbitrary aliases are accepted only when
@@ -232,8 +230,8 @@ transformations in authored order, and serializes the canonical artifact read by
 the Rust `PipelineSpec`:
 
 ```python
-raw_spec = fiml.FeatureExtractorSpec(checksum="raw-v1").sma(
-    "BTCUSDT", [12, 24], source="trade_price"
+raw_spec = fiml.FeatureExtractorSpec(checksum="raw-v1").field(
+    "BTCUSDT", source="trade_price", id="price"
 )
 model_spec = fiml.PipelineSpec(raw_spec, checksum="model-v1")
 
@@ -247,6 +245,19 @@ for feature_id, mean, scale in zip(
 
 pipeline = fiml.ModelInputPipeline(model_spec, output_dtype="float64")
 ```
+
+Sample averages belong to `PipelineSpec` and `ScalarStage`:
+
+```python
+raw = fiml.FeatureExtractorSpec().field("BTCUSDT", source="trade_price", id="price")
+spec = (fiml.PipelineSpec(raw)
+        .sma("price", window=20, output="sma20")
+        .ema("price", window=10, output="ema10"))
+```
+
+Both methods accept `warmup=fiml.WarmupPolicy.FULL_WINDOW` and `output=None`.
+The default output ID is the input ID. Use successive scalar stages to compose
+scaling, averages, and lags. See [the migration guide](../../docs/sample-average-migration.md).
 
 `identity(input, *, output=None)`, `lagged(input, *, lag_window, output=None)`, and
 `standard_scale(input, *, mean, scale, output=None)` append one final scalar and
@@ -394,13 +405,10 @@ variances or training statistics. Inference preserves NaNs in retained columns
 and ignores discarded columns. Positive thresholds depend on input scale;
 VarianceThreshold is neither correlation-based nor supervised feature selection.
 
-JSON writers emit pipeline version `2.6` for `QuantileTransformer`, `2.5` for `VarianceThreshold` selection stages,
-`2.4` for `PowerTransformer`, `2.3` for `SimpleImputer`, `2.2` for
-`MinMaxScaler` and clipped `MaxAbsScaler` stages, `2.1` when scalar stages are
-present, and `2.0` otherwise.
-Readers also accept strict scalar-only `1.0`. Scalar stages serialize as
-`{"type": "scalar", "transformations": [...]}` within `model_input.stages`, with
-the same transformation fields used by the base layout. The nested extractor stays at `1.0`.
+JSON writers and readers use pipeline version `3.0` and nested extractor version `2.0`.
+Earlier artifacts are rejected with migration guidance. Scalar stages serialize as
+`{"type": "scalar", "transformations": [...]}` within the required `model_input.stages` array.
+They use the same transformation fields as the base layout.
 Rust consumers should enable `serde_json`'s `float_roundtrip` feature to preserve
 every fitted `f64` on load, as the Python bindings do. No sklearn or matrix-library
 dependency is needed in Rust.

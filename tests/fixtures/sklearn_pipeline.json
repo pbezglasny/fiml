@@ -1,10 +1,10 @@
 {
   "pipeline": {
-    "version": "2.6",
+    "version": "3.0",
     "feature_extractor": {
-      "version": "1.1",
+      "version": "2.0",
       "capacity": 3,
-      "length": 3,
+      "length": 1,
       "required_events": [
         {
           "symbol": "btcusdt",
@@ -16,24 +16,12 @@
           "symbol": "btcusdt",
           "indicators": [
             {
-              "kind": "sma",
+              "kind": "field",
               "source": {
                 "type": "field",
                 "event": "trade",
                 "field": "price"
-              },
-              "warmup_policy": "full_window",
-              "outputs": [
-                {
-                  "window": 1
-                },
-                {
-                  "window": 3
-                },
-                {
-                  "window": 5
-                }
-              ]
+              }
             }
           ]
         }
@@ -44,28 +32,54 @@
       "length": 2,
       "transformations": [
         {
-          "type": "identity",
-          "input": "sma:symbol=7:btcusdt:source=field.trade_price:window=1:warmup=full_window",
-          "output": "sma:symbol=7:btcusdt:source=field.trade_price:window=1:warmup=full_window"
+          "type": "sma",
+          "input": "field:symbol=7:btcusdt:source=field.trade_price",
+          "output": "sma:symbol=7:btcusdt:source=field.trade_price:window=1:warmup=full_window",
+          "window": 1,
+          "warmup_policy": "full_window"
         },
         {
-          "type": "identity",
-          "input": "sma:symbol=7:btcusdt:source=field.trade_price:window=3:warmup=full_window",
-          "output": "sma:symbol=7:btcusdt:source=field.trade_price:window=3:warmup=full_window"
+          "type": "sma",
+          "input": "field:symbol=7:btcusdt:source=field.trade_price",
+          "output": "sma:symbol=7:btcusdt:source=field.trade_price:window=3:warmup=full_window",
+          "window": 3,
+          "warmup_policy": "full_window"
         },
         {
-          "type": "identity",
-          "input": "sma:symbol=7:btcusdt:source=field.trade_price:window=5:warmup=full_window",
-          "output": "sma:symbol=7:btcusdt:source=field.trade_price:window=5:warmup=full_window"
-        },
-        {
-          "type": "lagged",
-          "input": "sma:symbol=7:btcusdt:source=field.trade_price:window=1:warmup=full_window",
-          "output": "lag2",
-          "lag_window": 2
+          "type": "sma",
+          "input": "field:symbol=7:btcusdt:source=field.trade_price",
+          "output": "sma:symbol=7:btcusdt:source=field.trade_price:window=5:warmup=full_window",
+          "window": 5,
+          "warmup_policy": "full_window"
         }
       ],
       "stages": [
+        {
+          "type": "scalar",
+          "transformations": [
+            {
+              "type": "identity",
+              "input": "sma:symbol=7:btcusdt:source=field.trade_price:window=1:warmup=full_window",
+              "output": "sma:symbol=7:btcusdt:source=field.trade_price:window=1:warmup=full_window"
+            },
+            {
+              "type": "identity",
+              "input": "sma:symbol=7:btcusdt:source=field.trade_price:window=3:warmup=full_window",
+              "output": "sma:symbol=7:btcusdt:source=field.trade_price:window=3:warmup=full_window"
+            },
+            {
+              "type": "identity",
+              "input": "sma:symbol=7:btcusdt:source=field.trade_price:window=5:warmup=full_window",
+              "output": "sma:symbol=7:btcusdt:source=field.trade_price:window=5:warmup=full_window"
+            },
+            {
+              "type": "lagged",
+              "input": "sma:symbol=7:btcusdt:source=field.trade_price:window=1:warmup=full_window",
+              "output": "lag2",
+              "lag_window": 2
+            }
+          ]
+        },
         {
           "type": "simple_impute",
           "outputs": [
@@ -163,14 +177,78 @@
           ],
           "output_distribution": "uniform",
           "quantiles": [
-            [0.4, 0.49253731343283585, 0.5865384615384615, 0.43478260869565216, 0.0, 0.0, 0.0],
-            [0.46285714285714286, 0.5756929637526653, 0.6854395604395604, 0.5031055900621118, 0.0, 0.0, 0.0],
-            [0.5314285714285715, 0.6886993603411514, 0.7898351648351647, 0.577639751552795, 0.0, 0.0, 0.0],
-            [0.6285714285714286, 0.7334754797441366, 0.7980769230769231, 0.6677018633540373, 0.0, 0.0, 0.0],
-            [0.6914285714285715, 0.7590618336886995, 0.7980769230769231, 0.6801242236024845, 0.0, 0.0, 0.0],
-            [0.7542857142857142, 0.8038379530916845, 0.8063186813186813, 0.732919254658385, 0.0, 0.8571428571428559, 0.0],
-            [0.8514285714285715, 0.886993603411514, 0.907967032967033, 0.8198757763975155, 0.4285714285714288, 1.0, 0.4285714285714288],
-            [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
+            [
+              0.4,
+              0.49253731343283585,
+              0.5865384615384615,
+              0.43478260869565216,
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.46285714285714286,
+              0.5756929637526653,
+              0.6854395604395604,
+              0.5031055900621118,
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.5314285714285715,
+              0.6886993603411514,
+              0.7898351648351647,
+              0.577639751552795,
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.6285714285714286,
+              0.7334754797441366,
+              0.7980769230769231,
+              0.6677018633540373,
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.6914285714285715,
+              0.7590618336886995,
+              0.7980769230769231,
+              0.6801242236024845,
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.7542857142857142,
+              0.8038379530916845,
+              0.8063186813186813,
+              0.732919254658385,
+              0.0,
+              0.8571428571428559,
+              0.0
+            ],
+            [
+              0.8514285714285715,
+              0.886993603411514,
+              0.907967032967033,
+              0.8198757763975155,
+              0.4285714285714288,
+              1.0,
+              0.4285714285714288
+            ],
+            [
+              1.0,
+              1.0,
+              1.0,
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ]
           ],
           "references": [
             0.0,

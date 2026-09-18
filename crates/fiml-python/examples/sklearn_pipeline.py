@@ -14,14 +14,11 @@ from sklearn.preprocessing import MaxAbsScaler, QuantileTransformer
 
 def train():
     """Return a fitted pipeline, replay events, and an independent sklearn oracle."""
-    raw = fiml.FeatureExtractorSpec().sma(
-        "BTCUSDT", [1, 3, 5], source="trade_price",
-        warmup=fiml.WarmupPolicy.FULL_WINDOW,
-    )
+    raw = fiml.FeatureExtractorSpec().field("BTCUSDT", source="trade_price", id="price")
     spec = fiml.PipelineSpec(raw)
-    for name in raw.feature_ids():
-        spec.identity(name)
-    spec.lagged(raw.feature_ids()[0], lag_window=2, output="lag2")
+    for window in [1, 3, 5]:
+        spec.sma("price", window=window, output=f"sma{window}")
+    spec.lagged("price", lag_window=2, output="lag2")
     pipeline = (fiml.ModelInputPipeline(spec)
                 .add_transformation(SimpleImputer(strategy="median", add_indicator=True), name="impute")
                 .add_transformation(MaxAbsScaler(clip=True), name="scale")

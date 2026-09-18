@@ -6,7 +6,7 @@ use fiml::{
 };
 use pyo3::{exceptions::PyValueError, prelude::*};
 
-use crate::feature_extractor_spec::FeatureExtractorSpec;
+use crate::feature_extractor_spec::{FeatureExtractorSpec, PyWarmupPolicy};
 
 /// Authors one group of scalar outputs whose inputs are resolved against the preceding stage.
 /// Resolution is deferred until fitting because PCA output IDs may not exist yet.
@@ -18,6 +18,44 @@ pub struct ScalarStage {
 
 #[pymethods]
 impl ScalarStage {
+    /// Average finite source observations using the existing EMA calculator.
+    #[pyo3(signature = (input, *, window, warmup=PyWarmupPolicy::FullWindow, output=None))]
+    fn ema<'py>(
+        mut slf: PyRefMut<'py, Self>,
+        input: &str,
+        window: usize,
+        warmup: PyWarmupPolicy,
+        output: Option<&str>,
+    ) -> PyRefMut<'py, Self> {
+        let definition = TransformerDefinition::ema(
+            FeatureId::new(input),
+            FeatureId::new(output.unwrap_or(input)),
+            window,
+            warmup.into(),
+        );
+        slf.definitions.push(definition);
+        slf
+    }
+
+    /// Average finite source observations using the existing SMA calculator.
+    #[pyo3(signature = (input, *, window, warmup=PyWarmupPolicy::FullWindow, output=None))]
+    fn sma<'py>(
+        mut slf: PyRefMut<'py, Self>,
+        input: &str,
+        window: usize,
+        warmup: PyWarmupPolicy,
+        output: Option<&str>,
+    ) -> PyRefMut<'py, Self> {
+        let definition = TransformerDefinition::sma(
+            FeatureId::new(input),
+            FeatureId::new(output.unwrap_or(input)),
+            window,
+            warmup.into(),
+        );
+        slf.definitions.push(definition);
+        slf
+    }
+
     #[new]
     fn new() -> Self {
         Self::default()
@@ -149,6 +187,44 @@ impl PipelineSpec {
 
 #[pymethods]
 impl PipelineSpec {
+    /// Average finite source observations using the existing EMA calculator.
+    #[pyo3(signature = (input, *, window, warmup=PyWarmupPolicy::FullWindow, output=None))]
+    fn ema<'py>(
+        mut slf: PyRefMut<'py, Self>,
+        input: &str,
+        window: usize,
+        warmup: PyWarmupPolicy,
+        output: Option<&str>,
+    ) -> PyResult<PyRefMut<'py, Self>> {
+        let definition = TransformerDefinition::ema(
+            FeatureId::new(input),
+            FeatureId::new(output.unwrap_or(input)),
+            window,
+            warmup.into(),
+        );
+        slf.add_transformation(definition)?;
+        Ok(slf)
+    }
+
+    /// Average finite source observations using the existing SMA calculator.
+    #[pyo3(signature = (input, *, window, warmup=PyWarmupPolicy::FullWindow, output=None))]
+    fn sma<'py>(
+        mut slf: PyRefMut<'py, Self>,
+        input: &str,
+        window: usize,
+        warmup: PyWarmupPolicy,
+        output: Option<&str>,
+    ) -> PyResult<PyRefMut<'py, Self>> {
+        let definition = TransformerDefinition::sma(
+            FeatureId::new(input),
+            FeatureId::new(output.unwrap_or(input)),
+            window,
+            warmup.into(),
+        );
+        slf.add_transformation(definition)?;
+        Ok(slf)
+    }
+
     /// Allow temporary training prefixes to exceed the configured final capacity.
     fn _fit_candidate(&self) -> Self {
         Self {

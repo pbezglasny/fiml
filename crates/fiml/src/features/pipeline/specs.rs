@@ -205,6 +205,7 @@ impl PipelineSpec {
             feature_extractor,
             operations,
             stages: StageRuntime::new(&self.transformation_definitions, &self.stages),
+            observations: vec![false; model_vector.capacity()].into_boxed_slice(),
             model_vector,
             output_ids,
         })

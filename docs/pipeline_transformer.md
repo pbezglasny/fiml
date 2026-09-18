@@ -79,14 +79,11 @@ from sklearn.preprocessing import RobustScaler
 
 import fiml
 
-raw_spec = fiml.FeatureExtractorSpec().sma(
-    "BTCUSDT", [2, 5, 10],
-    source="trade_price",
-    warmup=fiml.WarmupPolicy.FIRST_VALUE,
-)
+raw_spec = fiml.FeatureExtractorSpec().field("BTCUSDT", source="trade_price", id="price")
 base_spec = fiml.PipelineSpec(raw_spec)
-for feature_id in raw_spec.feature_ids():
-    base_spec.identity(feature_id)
+for window in [2, 5, 10]:
+    base_spec.sma("price", window=window, warmup=fiml.WarmupPolicy.FIRST_VALUE,
+                  output=f"sma{window}")
 
 pipeline = (
     fiml.ModelInputPipeline(base_spec)
@@ -373,22 +370,13 @@ stage fusion. Benchmark representative dimensions before adding those.
 
 ## JSON format and validation
 
-Introduce pipeline format `2.0`, keeping the nested feature extractor at `1.0`.
-New readers should accept existing strict `1.0` artifacts as having no stages;
-writers emit `2.0` for these fitted-only sequences. Scalar stages require `2.1`,
-which readers also accept. Their representation is
-`{"type": "scalar", "transformations": [...]}`, reusing the base transformation
-wire format. A `2.0` artifact containing a scalar stage is rejected.
-MinMaxScaler and clipped MaxAbsScaler stages use `2.2`; older versions reject
-the reused stage tag.
-SimpleImputer stages use `2.3`; older versions reject the stage tag.
-PowerTransformer stages use `2.4`; older versions reject the stage tag.
-VarianceThreshold selection stages use `2.5`; older versions reject the stage tag.
-QuantileTransformer stages use `2.6`; older versions reject the stage tag.
-Do not reinterpret `1.0`, whose reader currently requires final length to equal
-the scalar transformation count.
+Pipeline format `3.0` requires nested extractor format `2.0`. Readers reject earlier
+versions with migration guidance; there is no automatic conversion. Scalar stages
+use `{"type": "scalar", "transformations": [...]}`, including `sma` and `ema`.
+Both average transformations carry `input`, `output`, `window`, and `warmup_policy`.
+See [sample-average migration](sample-average-migration.md) for observation semantics.
 
-`2.0` `model_input` fragment, assuming raw IDs `raw_a` and `raw_b`:
+`model_input` fragment, assuming raw IDs `raw_a` and `raw_b`:
 
 ```json
 {
@@ -422,7 +410,7 @@ the preceding layout. Explicit fitted stage output IDs
 freeze the layout across export/import. The example has two base outputs and
 one final output; base scratch width must not be taken from final `capacity`.
 
-Require `stages` in `2.0` through `2.6`, permitting an empty list. Derive base
+Require `stages` in `3.0`, permitting an empty list. Derive base
 width from scalar definitions, each stage width from its validated arrays and outputs, and final
 active length from the last stage (or base width if empty). Final `capacity`
 must cover that final length; it may be smaller than an intermediate width.

@@ -42,10 +42,15 @@ def _(fiml, np):
     feature_extractor_spec = (fiml.FeatureExtractorSpec()
         .obv_timed("BTCUSDT", aggregation="1ms", windows=["60s"])
         .trade_count_timed("BTCUSDT", aggregation="1ms", window="60s")
-        .sma("BTCUSDT", [2], source="trade_price", warmup=fiml.WarmupPolicy.FIRST_VALUE)
-        .ema("BTCUSDT", [2], source="trade_price", warmup=fiml.WarmupPolicy.FIRST_VALUE)
+        .field("BTCUSDT", source="trade_price", id="price")
         .day_of_week())
-    extractor = fiml.FeatureExtractor(feature_extractor_spec, output_dtype=np.float32)
+    pipeline_spec = fiml.PipelineSpec(feature_extractor_spec)
+    for feature_id in feature_extractor_spec.feature_ids():
+        if feature_id != "price":
+            pipeline_spec.identity(feature_id)
+    pipeline_spec.sma("price", window=2, warmup=fiml.WarmupPolicy.FIRST_VALUE, output="sma:2")
+    pipeline_spec.ema("price", window=2, warmup=fiml.WarmupPolicy.FIRST_VALUE, output="ema:2")
+    extractor = fiml.ModelInputPipeline(pipeline_spec, output_dtype=np.float32)
     return (extractor,)
 
 

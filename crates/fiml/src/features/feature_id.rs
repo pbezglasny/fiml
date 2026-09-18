@@ -211,18 +211,12 @@ fn write_feature_key(id: &mut String, key: &FeatureKey) -> fmt::Result {
             write_prefix(id, "order_book_imbalance", *symbol, "order_book")?;
             write!(id, ":n_levels={n_levels}")
         }
-        FeatureKey::Sma {
-            symbol,
-            source,
-            window,
-            warmup_policy,
-        } => write_sample_window(id, "sma", *symbol, *source, *window, *warmup_policy),
-        FeatureKey::Ema {
-            symbol,
-            source,
-            window,
-            warmup_policy,
-        } => write_sample_window(id, "ema", *symbol, *source, *window, *warmup_policy),
+        FeatureKey::Field { symbol, field } => write_prefix(
+            id,
+            "field",
+            *symbol,
+            FeatureSource::Field(*field).canonical_name(),
+        ),
         FeatureKey::Cvd {
             symbol,
             source,
@@ -423,17 +417,15 @@ mod tests {
     use crate::features::feature_source::EventField;
 
     #[test]
-    fn creates_canonical_id_for_sample_window_feature() {
-        let key = FeatureKey::Sma {
+    fn creates_canonical_id_for_field() {
+        let key = FeatureKey::Field {
             symbol: Symbol::new("BTCUSD").unwrap(),
-            source: FeatureSource::Field(EventField::TradePrice),
-            window: 20,
-            warmup_policy: WarmupPolicy::FullWindow,
+            field: EventField::TradePrice,
         };
 
         assert_eq!(
             FeatureId::from_feature_key(&key).as_str(),
-            "sma:symbol=6:btcusd:source=field.trade_price:window=20:warmup=full_window"
+            "field:symbol=6:btcusd:source=field.trade_price"
         );
     }
 

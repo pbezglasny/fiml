@@ -544,3 +544,73 @@ fn steady_state_standard_scale_pipeline_events_do_not_allocate() {
 
     assert_eq!(allocations, 0);
 }
+
+#[test]
+fn grouped_averages_and_staged_averages_never_allocate_during_updates() {
+    use fiml::FittedStage;
+    for staged in [false, true] {
+        let raw = FeatureExtractorSpec::new([FeatureDefinition::new(
+            FeatureKey::Field {
+                symbol: Symbol::GLOBAL,
+                field: fiml::EventField::Price,
+            },
+            FeatureId::new("price"),
+        )])
+        .unwrap();
+        let definitions = [
+            TransformerDefinition::sma(
+                FeatureId::new("price"),
+                FeatureId::new("short"),
+                2,
+                WarmupPolicy::FullWindow,
+            ),
+            TransformerDefinition::sma(
+                FeatureId::new("price"),
+                FeatureId::new("long"),
+                8,
+                WarmupPolicy::FullWindow,
+            ),
+        ];
+        let stages = if staged {
+            vec![FittedStage::Scalar {
+                transformations: vec![
+                    TransformerDefinition::ema(
+                        FeatureId::new("short"),
+                        FeatureId::new("short"),
+                        3,
+                        WarmupPolicy::FullWindow,
+                    ),
+                    TransformerDefinition::ema(
+                        FeatureId::new("long"),
+                        FeatureId::new("long"),
+                        3,
+                        WarmupPolicy::FullWindow,
+                    ),
+                ],
+            }]
+        } else {
+            vec![]
+        };
+        let mut pipeline = PipelineSpec::with_stages(raw, definitions, stages, 2, None)
+            .unwrap()
+            .build(
+                ArrayFeatureVector::<1>::new(),
+                ArrayFeatureVector::<2>::new(),
+            )
+            .unwrap();
+        assert_eq!(
+            count_allocations(|| {
+                for timestamp in 0..128 {
+                    black_box(
+                        pipeline
+                            .handle_event(Event::price(Symbol::GLOBAL, timestamp as f64, timestamp))
+                            .unwrap(),
+                    );
+                    black_box(pipeline.handle_event(Event::time(timestamp)).unwrap());
+                }
+            }),
+            0
+        );
+        assert!(pipeline.values().iter().all(|value| value.is_finite()));
+    }
+}

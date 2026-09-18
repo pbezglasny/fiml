@@ -11,7 +11,9 @@ bindings, and the feature-vector spec JSON format. Code identifiers are shown in
 The stable, globally unique name generated for one [feature cell](#feature-cell)
 during compilation. Its colon-separated segments describe the cell's scope,
 input, indicator, and output parameters, for example
-`btcusdt:trade_price:sma:12`. Users cannot assign aliases.
+`field:symbol=7:btcusdt:source=field.trade_price`. Rust `FeatureDefinition` and
+Python `field(..., id=...)` can supply explicit IDs; scalar transformations
+assign their output IDs independently.
 
 ### Canonical order
 
@@ -289,8 +291,8 @@ is a separate concept from a serialized feature group.
 ### Feature-vector spec format version
 
 The version of the serialized feature-vector spec contract. It is independent of the
-Rust crate or Python package version. Writers emit exact version `1.1`; readers
-accept only `1.1` until another version is explicitly supported.
+Rust crate or Python package version. Extractor writers and readers use version `2.0`; pipelines use `3.0`. Earlier
+artifacts require explicit migration; see [the migration guide](sample-average-migration.md).
 
 ### Parity artifact
 

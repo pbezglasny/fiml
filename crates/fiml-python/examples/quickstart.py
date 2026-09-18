@@ -20,18 +20,16 @@ import fiml
 T0 = 1_609_459_200_000
 
 
-def build_feature_extractor_spec() -> fiml.FeatureExtractorSpec:
-    return (
-        fiml.FeatureExtractorSpec()
-        .sma("BTCUSDT", [3])
-        .ema("BTCUSDT", [3])
-        .day_of_week()
-    )
+def build_feature_extractor_spec() -> fiml.PipelineSpec:
+    raw = fiml.FeatureExtractorSpec().field("BTCUSDT", id="price").day_of_week()
+    day = raw.feature_ids()[0]
+    return (fiml.PipelineSpec(raw).sma("price", window=3, output="sma")
+            .ema("price", window=3, output="ema").identity(day))
 
 
 def main() -> None:
     spec = build_feature_extractor_spec()
-    extractor = fiml.FeatureExtractor(spec)
+    extractor = fiml.ModelInputPipeline(spec)
     btc = extractor.symbol("BTCUSDT")
 
     prices = np.array([10.0, 11.0, 9.0, 12.0, 13.0, 12.5], dtype=np.float64)
@@ -44,7 +42,7 @@ def main() -> None:
     batch = extractor.transform(kind, symbol, timestamp, price=prices)
 
     # Streaming path: a fresh extractor stepped one event at a time.
-    streaming_extractor = fiml.FeatureExtractor(build_feature_extractor_spec())
+    streaming_extractor = fiml.ModelInputPipeline(build_feature_extractor_spec())
     streaming_extractor.symbol("BTCUSDT")
     streaming = np.empty_like(batch)
     for i in range(n):
@@ -86,8 +84,7 @@ def check_compute_features() -> None:
 
     feature_extractor_spec = (
         fiml.FeatureExtractorSpec()
-        .sma("BTCUSDT", [3], source="trade_price")
-        .ema("BTCUSDT", [3], source="trade_price")
+        .field("BTCUSDT", source="trade_price")
         .obv_timed("BTCUSDT", aggregation="1s", windows=["60s"])
         .trade_count_timed("BTCUSDT", aggregation="1s", window="60s")
         .day_of_week()
@@ -105,8 +102,7 @@ def check_compute_features() -> None:
 def check_event_kinds() -> None:
     """Each event kind reads only the keyword columns it needs.
 
-    KIND_TRADE uses ``price`` + ``volume``; KIND_ORDERBOOK uses ``bid`` + ``ask``
-    (it dispatches fine even though no builtin feature subscribes to it yet). A
+    KIND_TRADE uses ``price`` + ``volume``; KIND_PRICE uses ``price``. A
     kind whose required column is missing raises ``ValueError`` without
     mutating extractor state (rows are validated before any dispatch).
     """
@@ -120,20 +116,18 @@ def check_event_kinds() -> None:
     )
     btc = extractor.symbol("BTCUSDT")
 
-    kind = np.array([fiml.KIND_TRADE, fiml.KIND_ORDERBOOK], dtype=np.uint8)
+    kind = np.array([fiml.KIND_TRADE, fiml.KIND_PRICE], dtype=np.uint8)
     symbol = np.full(2, btc, dtype=np.int64)
     timestamp = T0 + np.arange(2, dtype=np.int64) * 1_000
-    price = np.array([10.0, 0.0], dtype=np.float64)
+    price = np.array([10.0, 11.0], dtype=np.float64)
     volume = np.array([1.0, 0.0], dtype=np.float64)
-    bid = np.array([0.0, 9.5], dtype=np.float64)
-    ask = np.array([0.0, 10.5], dtype=np.float64)
 
     out = extractor.transform(
-        kind, symbol, timestamp, price=price, volume=volume, bid=bid, ask=ask
+        kind, symbol, timestamp, price=price, volume=volume
     )
     assert out.shape == (2, extractor.n_features())
     assert out[0, 0] == 1.0 and out[1, 0] == 1.0, "trade count should see one trade"
-    print("OK: trade + orderbook rows dispatched")
+    print("OK: trade + price rows dispatched")
 
     # KIND_TRADE needs a `price` column; omitting it is a ValueError.
     try:

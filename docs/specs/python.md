@@ -59,8 +59,7 @@ delegates canonical ordering and conversion to the Rust `FeatureExtractorSpec`.
 
 ```python
 spec = (fiml.FeatureExtractorSpec()
-      .sma("BTCUSDT", [12, 24], source="trade_price")
-      .ema("BTCUSDT", [12], source="trade_price")
+      .field("BTCUSDT", source="trade_price")
       .obv_timed("BTCUSDT", aggregation="1s", windows=["2s"])
       .trade_volume_timed("BTCUSDT", aggregation="1s", windows=["2s", "5s"])
       .vwap_timed("BTCUSDT", aggregation="1s", windows=["2s", "5s"])
@@ -69,12 +68,11 @@ spec = (fiml.FeatureExtractorSpec()
 extractor = fiml.FeatureExtractor(spec)
 ```
 
-Builder methods mirror the grouped `IndicatorSpec` variants. Each call appends
-one runtime indicator definition, and its ordered windows own adjacent output
-cells. Durations are strings (`"500ms"`, `"1s"`, `"5m"`, `"1h"`). Output names
-are generated canonically during compilation; user aliases are not accepted.
+Builder methods add extractor definitions; windowed indicators group compatible
+windows into adjacent output cells. Durations are strings (`"500ms"`, `"1s"`, `"5m"`, `"1h"`). Output names
+are generated canonically during compilation; `field(..., id="price")` can assign an explicit ID.
 
-Moving averages accept `source="price"|"volume"|"trade_price"|"trade_volume"`,
+Raw fields and timed SMA accept `source="price"|"volume"|"trade_price"|"trade_volume"`,
 defaulting to `"price"`. Trade DataFrames require a trade source; the source is
 part of the feature identity.
 

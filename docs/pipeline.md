@@ -2,7 +2,7 @@
 
 Status: in progress
 
-Last updated: 2026-09-12
+Last updated: 2026-09-18
 
 The pipeline runtime, model-input serialization, and Python interface are
 implemented, including Python-fitted sklearn `SimpleImputer`, `StandardScaler`,
@@ -34,7 +34,7 @@ fitted missing-indicator inputs.
 `FittedStage::PowerTransform` applies Box-Cox or Yeo-Johnson and effective scaling.
 `FittedStage::Select` copies retained columns by prevalidated numeric index.
 `FittedStage::Pca` projects to named components and supports whitening.
-`FittedStage::Scalar` selects, renames, scales, or lags columns from the preceding
+`FittedStage::Scalar` selects, renames, scales, averages, or lags columns from the preceding
 layout. Definitions within a scalar stage are independent; dependent operations
 belong in successive stages. Intermediate widths may exceed final capacity.
 General transformation graphs are not supported.
@@ -67,10 +67,10 @@ The canonical artifact has three ownership levels:
 
 ```json
 {
-  "version": "2.0",
+  "version": "3.0",
   "checksum": "optional model metadata",
   "feature_extractor": {
-    "version": "1.1",
+    "version": "2.0",
     "capacity": 2,
     "length": 2,
     "required_events": [],
@@ -87,10 +87,9 @@ The canonical artifact has three ownership levels:
 
 `feature_extractor` owns the raw-vector layout. `model_input` owns the final
 vector layout, scalar base transformations, and fitted vector stages. Writers
-emit `2.5` for VarianceThreshold selection, `2.4` for PowerTransformer,
-`2.3` for SimpleImputer, `2.2` for MinMaxScaler or clipped MaxAbsScaler,
-`2.1` for scalar stages, and `2.0` otherwise; readers also accept strict `1.0`
-artifacts without stages.
+emit pipeline `3.0` with extractor `2.0`; readers accept only these versions.
+[Sample-average migration](sample-average-migration.md) describes replacing extractor
+SMA/EMA with field extraction and scalar transformations.
 The envelope above illustrates ownership; populated feature/transform arrays
 must agree with the declared lengths. `required_events` is the canonical,
 deduplicated list of concrete symbol/event inputs consumed by the extractor.

@@ -28,7 +28,7 @@ def document_with_source(source):
             "event": event,
         }]
     return {
-        "version": "1.1",
+        "version": "2.0",
         "capacity": 1,
         "length": 1,
         "required_events": required_events,
@@ -37,10 +37,8 @@ def document_with_source(source):
                 "symbol": "BTCUSDT",
                 "indicators": [
                     {
-                        "kind": "sma",
+                        "kind": "field",
                         "source": source,
-                        "warmup_policy": "first_value",
-                        "outputs": [{"window": 1}],
                     }
                 ],
             }
@@ -114,8 +112,7 @@ def test_schema_still_accepts_any_event_source():
 def test_schema_accepts_every_non_book_indicator_contract():
     spec = (
         fiml.FeatureExtractorSpec()
-        .sma("BTCUSDT", [2])
-        .ema("BTCUSDT", [2])
+        .field("BTCUSDT")
         .cvd("BTCUSDT", [2])
         .simple_returns("BTCUSDT", [1])
         .log_returns("BTCUSDT", [1])
@@ -139,11 +136,11 @@ def test_schema_accepts_every_non_book_indicator_contract():
     ("spec", "mutate"),
     [
         (
-            lambda: fiml.FeatureExtractorSpec().ema("btc", [2]),
-            lambda document: only_indicator(document).pop("warmup_policy"),
+            lambda: fiml.FeatureExtractorSpec().field("btc"),
+            lambda document: only_indicator(document).update(warmup_policy="full_window"),
         ),
         (
-            lambda: fiml.FeatureExtractorSpec().sma("btc", [2]),
+            lambda: fiml.FeatureExtractorSpec().field("btc"),
             lambda document: only_indicator(document).update(
                 source={"type": "event", "event": "trade"}
             ),
@@ -333,7 +330,7 @@ def test_order_book_definitions_validate_and_round_trip(kind):
     {"source": {"type": "order_book", "event": "order_book_delta"}},
     {"source": {"type": "order_book", "field": "price"}},
     {"source": {"type": "event", "event": "order_book_snapshot"}},
-    {"kind": "sma"},
+    {"kind": "field"},
     {"warmup_policy": "full_window"},
     {"options": {"aggregation": "1s"}},
 ])

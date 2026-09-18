@@ -1,6 +1,6 @@
 use fiml::{
-    ArrayFeatureVector, Event, EventField, FeatureDefinition, FeatureExtractor, FeatureKey,
-    FeatureSource, FeatureVector, Symbol, WarmupPolicy,
+    ArrayFeatureVector, Event, EventField, FeatureDefinition, FeatureExtractorSpec, FeatureId,
+    FeatureKey, PipelineSpec, Symbol, TransformerDefinition, WarmupPolicy,
 };
 use futures::StreamExt;
 use serde::Deserialize;
@@ -36,21 +36,34 @@ async fn main() -> anyhow::Result<()> {
     let symbol_name = stream_symbol.to_uppercase();
     let symbol = Symbol::new(&symbol_name)?;
 
-    let source = FeatureSource::Field(EventField::TradePrice);
-    let mut extractor = FeatureExtractor::builder(ArrayFeatureVector::<2>::new())
-        .add_feature(FeatureDefinition::with_default_id(FeatureKey::Ema {
+    let raw = FeatureExtractorSpec::new([FeatureDefinition::new(
+        FeatureKey::Field {
             symbol,
-            source,
-            window: 12,
-            warmup_policy: WarmupPolicy::FullWindow,
-        }))
-        .add_feature(FeatureDefinition::with_default_id(FeatureKey::Sma {
-            symbol,
-            source,
-            window: 12,
-            warmup_policy: WarmupPolicy::FullWindow,
-        }))
-        .build()?;
+            field: EventField::TradePrice,
+        },
+        FeatureId::new("price"),
+    )])?;
+    let mut extractor = PipelineSpec::new(
+        raw,
+        [
+            TransformerDefinition::ema(
+                FeatureId::new("price"),
+                FeatureId::new("ema_12"),
+                12,
+                WarmupPolicy::FullWindow,
+            ),
+            TransformerDefinition::sma(
+                FeatureId::new("price"),
+                FeatureId::new("sma_12"),
+                12,
+                WarmupPolicy::FullWindow,
+            ),
+        ],
+    )?
+    .build(
+        ArrayFeatureVector::<1>::new(),
+        ArrayFeatureVector::<2>::new(),
+    )?;
 
     let url = format!("{BINANCE_STREAM_URL}/{stream_symbol}@trade");
     let (mut ws_stream, _) = connect_async(&url).await?;
@@ -68,7 +81,7 @@ async fn main() -> anyhow::Result<()> {
                         trade.trade_time,
                         None,
                     ))?;
-                    let values = extractor.feature_vector().values();
+                    let values = extractor.values();
 
                     println!(
                         "{},{},{},{:.8},{:.8},{:.8},{:.8}",
