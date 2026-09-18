@@ -13,8 +13,8 @@ TRADES_PATH = REPOSITORY_ROOT / "notebooks" / "trades.csv"
 def build_feature_extractor_spec(symbols):
     feature_extractor_spec = fiml.FeatureExtractorSpec()
     for symbol in symbols:
-        feature_extractor_spec.sma(symbol, [2], source="trade_price")
-        feature_extractor_spec.ema(symbol, [3], source="trade_volume")
+        feature_extractor_spec.field(symbol, source="trade_price")
+        feature_extractor_spec.field(symbol, source="trade_volume")
         feature_extractor_spec.sma_timed(
             symbol, aggregation="10ms", windows=["20ms"], source="trade_price"
         )

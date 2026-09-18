@@ -16,7 +16,14 @@ impl IdentityTransformer {
         }
     }
 
-    pub(crate) fn apply<V: FeatureVector>(&self, raw_values: &[f64], model_vector: &mut V) {
+    pub(crate) fn apply<V: FeatureVector>(
+        &self,
+        raw_values: &[f64],
+        observed: &[bool],
+        model_vector: &mut V,
+        output_observed: &mut [bool],
+    ) {
+        output_observed[self.output_index] = observed[self.input_index];
         model_vector.set_value_at(self.output_index, raw_values[self.input_index]);
     }
 }

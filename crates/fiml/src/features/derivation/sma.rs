@@ -1,4 +1,4 @@
-//! Adapts sample and timed simple moving averages to compiled feature outputs.
+//! Adapts timed simple moving averages to compiled feature outputs.
 //!
 use std::time::Duration;
 
@@ -6,46 +6,12 @@ use crate::event::Event;
 use crate::features::MAX_OUTPUTS_PER_INDICATOR;
 use crate::features::compiler::OutputRange;
 use crate::features::derivation::{FeatureDerivation, write_outputs};
-use crate::indicators::{SimpleMovingAverage, SimpleMovingAverageTimed};
+use crate::indicators::SimpleMovingAverageTimed;
 use crate::vectors::FeatureVector;
 use crate::{
     EventField, FimlError, HeapRingBuffer, IndicatorKind, InvalidArgumentError, Result, Symbol,
     WarmupPolicy,
 };
-
-pub(crate) struct SmaFeature {
-    symbol: Symbol,
-    source: EventField,
-    sma: SimpleMovingAverage<HeapRingBuffer<f64>, MAX_OUTPUTS_PER_INDICATOR>,
-}
-
-impl SmaFeature {
-    pub(crate) fn new(
-        symbol: Symbol,
-        source: EventField,
-        sma: SimpleMovingAverage<HeapRingBuffer<f64>, MAX_OUTPUTS_PER_INDICATOR>,
-    ) -> Self {
-        Self {
-            symbol,
-            source,
-            sma,
-        }
-    }
-
-    pub(crate) fn update<O: FeatureVector>(
-        &mut self,
-        event: &Event,
-        output_range: OutputRange,
-        output: &mut O,
-    ) {
-        if event.symbol() == self.symbol
-            && let Some(value) = self.source.extract(event)
-        {
-            self.sma.update(value);
-            write_outputs(output_range, output, |index| self.sma.value_at(index));
-        }
-    }
-}
 
 pub(crate) struct SmaTimedFeature {
     symbol: Symbol,
@@ -85,23 +51,6 @@ impl SmaTimedFeature {
     }
 }
 
-pub(crate) fn build(
-    symbol: Symbol,
-    source: EventField,
-    windows: &[usize],
-    warmup_policy: WarmupPolicy,
-) -> Result<FeatureDerivation> {
-    let max_window = windows.iter().copied().max().unwrap_or(0);
-    let mut sma = SimpleMovingAverage::<HeapRingBuffer<f64>, MAX_OUTPUTS_PER_INDICATOR>::new_heap(
-        max_window,
-        warmup_policy,
-    );
-    for &window in windows {
-        sma.add_window(window)?;
-    }
-    Ok(FeatureDerivation::Sma(SmaFeature::new(symbol, source, sma)))
-}
-
 pub(crate) fn build_timed(
     symbol: Symbol,
     source: EventField,
@@ -125,64 +74,4 @@ pub(crate) fn build_timed(
     Ok(FeatureDerivation::SmaTimed(SmaTimedFeature::new(
         symbol, source, sma,
     )))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::{ArrayFeatureVector, FeatureVector, Symbol};
-
-    fn approx_eq(a: f64, b: f64) -> bool {
-        (a - b).abs() < 1e-9
-    }
-
-    #[test]
-    fn grouped_sma_writes_adjacent_outputs() {
-        let symbol = Symbol::new("AAPL").unwrap();
-        let mut feature =
-            match build(symbol, EventField::Price, &[2, 3], WarmupPolicy::FullWindow).unwrap() {
-                FeatureDerivation::Sma(feature) => feature,
-                _ => unreachable!(),
-            };
-        let mut output = ArrayFeatureVector::<2>::new();
-        let output_range = OutputRange { start: 0, count: 2 };
-
-        for value in [1.0, 2.0, 3.0] {
-            feature.update(&Event::price(symbol, value, 0), output_range, &mut output);
-        }
-
-        assert!(approx_eq(output.values()[0], 2.5));
-        assert!(approx_eq(output.values()[1], 2.0));
-    }
-
-    #[test]
-    fn sma_can_consume_trade_volume() {
-        let symbol = Symbol::new("AAPL").unwrap();
-        let mut feature = match build(
-            symbol,
-            EventField::TradeVolume,
-            &[2],
-            WarmupPolicy::FullWindow,
-        )
-        .unwrap()
-        {
-            FeatureDerivation::Sma(feature) => feature,
-            _ => unreachable!(),
-        };
-        let mut output = ArrayFeatureVector::<1>::new();
-        let output_range = OutputRange { start: 0, count: 1 };
-
-        feature.update(
-            &Event::trade(symbol, 100.0, 4.0, 0, None),
-            output_range,
-            &mut output,
-        );
-        feature.update(
-            &Event::trade(symbol, 101.0, 6.0, 1, None),
-            output_range,
-            &mut output,
-        );
-
-        assert!(approx_eq(output.values()[0], 5.0));
-    }
 }

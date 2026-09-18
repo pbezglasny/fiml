@@ -1,11 +1,11 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "fiml FeatureExtractorSpec 1.1",
+  "title": "fiml FeatureExtractorSpec 2.0",
   "type": "object",
   "additionalProperties": false,
   "required": ["version", "capacity", "length", "required_events", "features"],
   "properties": {
-    "version": { "const": "1.1" },
+    "version": { "const": "2.0" },
     "capacity": { "type": "integer", "minimum": 0 },
     "length": { "type": "integer", "minimum": 0 },
     "required_events": {
@@ -57,7 +57,7 @@
       "type": "object", "additionalProperties": false,
       "required": ["kind", "source"],
       "properties": {
-        "kind": { "enum": ["sma", "ema", "cvd", "simple_return", "log_return", "volatility", "sma_timed", "obv_timed", "volatility_timed", "vpt", "trade_count_timed", "trade_volume_timed", "vwap_timed", "day_of_week", "time_since_first_event_of_day", "order_book_mid_price", "order_book_spread", "order_book_spread_bps", "order_book_weighted_mid_price", "order_book_microprice", "order_book_imbalance", "order_book_best_bid_price", "order_book_best_bid_size", "order_book_best_ask_price", "order_book_best_ask_size", "order_book_level_size", "order_book_nth_price", "order_book_nth_size", "order_book_depth_until_price", "order_book_depth_until_size_price_from", "order_book_depth_until_size_price_to", "order_book_depth_until_size_total_size", "order_book_volume_between_prices"] },
+        "kind": { "enum": ["field", "cvd", "simple_return", "log_return", "volatility", "sma_timed", "obv_timed", "volatility_timed", "vpt", "trade_count_timed", "trade_volume_timed", "vwap_timed", "day_of_week", "time_since_first_event_of_day", "order_book_mid_price", "order_book_spread", "order_book_spread_bps", "order_book_weighted_mid_price", "order_book_microprice", "order_book_imbalance", "order_book_best_bid_price", "order_book_best_bid_size", "order_book_best_ask_price", "order_book_best_ask_size", "order_book_level_size", "order_book_nth_price", "order_book_nth_size", "order_book_depth_until_price", "order_book_depth_until_size_price_from", "order_book_depth_until_size_price_to", "order_book_depth_until_size_total_size", "order_book_volume_between_prices"] },
         "source": { "$ref": "#/$defs/source" },
         "warmup_policy": { "enum": ["first_value", "full_window"] },
         "options": { "$ref": "#/$defs/options" },
@@ -121,7 +121,7 @@
           "else": { "properties": { "outputs": { "items": { "not": { "required": ["lag"] } } } } }
         },
         {
-          "if": { "properties": { "kind": { "enum": ["sma", "ema", "cvd", "volatility"] } } },
+          "if": { "properties": { "kind": { "enum": ["cvd", "volatility"] } } },
           "then": {
             "required": ["warmup_policy", "outputs"],
             "properties": {
@@ -161,7 +161,7 @@
           "then": { "properties": { "outputs": { "maxItems": 1 } } }
         },
         {
-          "if": { "properties": { "kind": { "enum": ["vpt", "day_of_week"] } } },
+          "if": { "properties": { "kind": { "enum": ["field", "vpt", "day_of_week"] } } },
           "then": {
             "properties": {
               "warmup_policy": false,
@@ -186,7 +186,7 @@
           }
         },
         {
-          "if": { "properties": { "kind": { "enum": ["sma", "ema", "simple_return", "log_return", "volatility", "sma_timed", "volatility_timed"] } } },
+          "if": { "properties": { "kind": { "enum": ["field", "simple_return", "log_return", "volatility", "sma_timed", "volatility_timed"] } } },
           "then": { "properties": { "source": { "properties": { "type": { "const": "field" } } } } }
         },
         {

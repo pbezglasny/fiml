@@ -38,6 +38,18 @@ impl LaggedFeature {
         }
     }
 
+    pub(super) fn apply_observed<V: FeatureVector>(
+        &mut self,
+        input: &[f64],
+        output: &mut V,
+        observed: &mut [bool],
+    ) {
+        for &(_, index) in &self.outputs {
+            observed[index] = true;
+        }
+        self.apply(input, output);
+    }
+
     pub(super) fn apply<V: FeatureVector>(&mut self, input_values: &[f64], output_vector: &mut V) {
         for (window, output_idx) in &self.outputs {
             if let Some(value) = self.buffer.peek_back_at(*window - 1) {

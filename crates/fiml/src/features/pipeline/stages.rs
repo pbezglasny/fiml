@@ -530,7 +530,47 @@ impl CompiledStage {
         }
     }
 
-    fn apply<V: FeatureVector>(&mut self, input: &[f64], output: &mut V) {
+    fn apply<V: FeatureVector>(
+        &mut self,
+        input: &[f64],
+        observed: &[bool],
+        output: &mut V,
+        output_observed: &mut [bool],
+    ) {
+        output_observed.fill(false);
+        match self {
+            Self::Scalar { .. } => {}
+            Self::Select { input_indices } => {
+                for (i, &source) in input_indices.iter().enumerate() {
+                    output_observed[i] = observed[source];
+                }
+            }
+            Self::SimpleImpute {
+                retained_input_indices,
+                indicator_input_indices,
+                ..
+            } => {
+                for (i, &source) in retained_input_indices
+                    .iter()
+                    .chain(indicator_input_indices.iter())
+                    .enumerate()
+                {
+                    output_observed[i] = observed[source];
+                }
+            }
+            Self::Pca {
+                input_width,
+                output_scale,
+                ..
+            } => {
+                output_observed[..output_scale.len()]
+                    .fill(observed[..*input_width].iter().any(|&flag| flag));
+            }
+            _ => {
+                let width = input.len().min(output_observed.len());
+                output_observed[..width].copy_from_slice(&observed[..width]);
+            }
+        }
         match self {
             Self::Scalar {
                 operations,
@@ -541,7 +581,7 @@ impl CompiledStage {
                     output.set_value_at(index, f64::NAN);
                 }
                 for operation in operations {
-                    operation.apply(input, output);
+                    operation.apply(input, observed, output, output_observed);
                 }
             }
             Self::Select { input_indices } => {
@@ -841,6 +881,8 @@ fn polynomial(argument: f64, coefficients: &[f64; 8]) -> f64 {
 /// Scratch and compiled stages owned by a pipeline only when vector stages exist.
 pub(super) struct StageRuntime {
     pub(super) input: VecFeatureVector,
+    pub(super) observations: Box<[bool]>,
+    scratch_observations: Box<[bool]>,
     base_width: usize,
     scratch: VecFeatureVector,
     stages: Box<[CompiledStage]>,
@@ -869,6 +911,8 @@ impl StageRuntime {
             .collect::<Box<[_]>>();
         Some(Self {
             base_width,
+            observations: vec![false; width].into_boxed_slice(),
+            scratch_observations: vec![false; width].into_boxed_slice(),
             input: VecFeatureVector::new(width),
             scratch: VecFeatureVector::new(if stages.len() > 1 { width } else { 0 }),
             stages,
@@ -876,6 +920,7 @@ impl StageRuntime {
     }
 
     pub(super) fn prepare_input(&mut self) {
+        self.observations.fill(false);
         // Lags leave unavailable outputs untouched. Reused intermediate storage
         // must not leak the preceding event's transformed values into warm-up.
         for index in 0..self.base_width {
@@ -883,15 +928,26 @@ impl StageRuntime {
         }
     }
 
-    pub(super) fn apply<V: FeatureVector>(&mut self, output: &mut V) {
+    pub(super) fn apply<V: FeatureVector>(&mut self, output: &mut V, output_observed: &mut [bool]) {
         let (last, preceding) = self
             .stages
             .split_last_mut()
             .expect("nonempty stage sequence");
         for stage in preceding {
-            stage.apply(self.input.values(), &mut self.scratch);
+            stage.apply(
+                self.input.values(),
+                &self.observations,
+                &mut self.scratch,
+                &mut self.scratch_observations,
+            );
+            std::mem::swap(&mut self.observations, &mut self.scratch_observations);
             std::mem::swap(&mut self.input, &mut self.scratch);
         }
-        last.apply(self.input.values(), output);
+        last.apply(
+            self.input.values(),
+            &self.observations,
+            output,
+            output_observed,
+        );
     }
 }

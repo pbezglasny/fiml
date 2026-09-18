@@ -5,7 +5,7 @@ use ::serde::{Deserialize, Deserializer, Serialize, Serializer};
 use super::{FeatureExtractorSpec, serialization::deserialize_present_option};
 use crate::{FeatureId, FittedStage, PipelineSpec, TransformerDefinition};
 
-const FORMAT_VERSION: &str = "2.6";
+const FORMAT_VERSION: &str = "3.0";
 
 /// Private versioned storage representation for a complete model-input layout.
 #[derive(Serialize, Deserialize)]
@@ -282,6 +282,18 @@ impl From<StageWire> for FittedStage {
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 enum TransformationWire {
+    Ema {
+        input: String,
+        output: String,
+        window: usize,
+        warmup_policy: crate::WarmupPolicy,
+    },
+    Sma {
+        input: String,
+        output: String,
+        window: usize,
+        warmup_policy: crate::WarmupPolicy,
+    },
     Identity {
         input: String,
         output: String,
@@ -321,46 +333,7 @@ impl<'de> Deserialize<'de> for PipelineSpec {
 impl From<&PipelineSpec> for PipelineSpecWire {
     fn from(spec: &PipelineSpec) -> Self {
         Self {
-            version: if spec
-                .stages()
-                .iter()
-                .any(|stage| matches!(stage, FittedStage::QuantileTransform { .. }))
-            {
-                FORMAT_VERSION
-            } else if spec
-                .stages()
-                .iter()
-                .any(|stage| matches!(stage, FittedStage::Select { .. }))
-            {
-                "2.5"
-            } else if spec
-                .stages()
-                .iter()
-                .any(|stage| matches!(stage, FittedStage::PowerTransform { .. }))
-            {
-                "2.4"
-            } else if spec
-                .stages()
-                .iter()
-                .any(|stage| matches!(stage, FittedStage::SimpleImpute { .. }))
-            {
-                "2.3"
-            } else if spec
-                .stages()
-                .iter()
-                .any(|stage| matches!(stage, FittedStage::MinMaxScale { .. }))
-            {
-                "2.2"
-            } else if spec
-                .stages()
-                .iter()
-                .any(|stage| matches!(stage, FittedStage::Scalar { .. }))
-            {
-                "2.1"
-            } else {
-                "2.0"
-            }
-            .to_owned(),
+            version: FORMAT_VERSION.to_owned(),
             checksum: spec.checksum().map(str::to_owned),
             feature_extractor: spec.raw_feature_extractor_spec().clone(),
             model_input: ModelInputWire {
@@ -380,6 +353,28 @@ impl From<&PipelineSpec> for PipelineSpecWire {
 impl From<&TransformerDefinition> for TransformationWire {
     fn from(definition: &TransformerDefinition) -> Self {
         match definition {
+            TransformerDefinition::Ema {
+                input,
+                output,
+                window,
+                warmup_policy,
+            } => Self::Ema {
+                input: input.as_str().to_owned(),
+                output: output.as_str().to_owned(),
+                window: *window,
+                warmup_policy: *warmup_policy,
+            },
+            TransformerDefinition::Sma {
+                input,
+                output,
+                window,
+                warmup_policy,
+            } => Self::Sma {
+                input: input.as_str().to_owned(),
+                output: output.as_str().to_owned(),
+                window: *window,
+                warmup_policy: *warmup_policy,
+            },
             TransformerDefinition::Identity { input, output } => Self::Identity {
                 input: input.as_str().to_owned(),
                 output: output.as_str().to_owned(),
@@ -412,75 +407,19 @@ impl TryFrom<PipelineSpecWire> for PipelineSpec {
     type Error = String;
 
     fn try_from(wire: PipelineSpecWire) -> Result<Self, Self::Error> {
-        if !matches!(
-            wire.version.as_str(),
-            "1.0" | "2.0" | "2.1" | "2.2" | "2.3" | "2.4" | "2.5" | FORMAT_VERSION
-        ) {
+        if wire.version != FORMAT_VERSION {
             return Err(format!(
-                "unsupported model-input spec version {:?}; expected 1.0, 2.0, 2.1, 2.2, 2.3, 2.4, 2.5 or {FORMAT_VERSION}",
+                "unsupported model-input spec version {:?}; expected {FORMAT_VERSION}; migrate sample averages to field extraction plus sma/ema transformations and re-export",
                 wire.version
             ));
         }
-        let stages = match (wire.version.as_str(), wire.model_input.stages) {
-            ("1.0", None) => Vec::new(),
-            ("1.0", Some(_)) => {
-                return Err("model_input.stages is not allowed in version 1.0".into());
-            }
-            (_, Some(stages)) => {
-                if wire.version == "2.0"
-                    && stages
-                        .iter()
-                        .any(|stage| matches!(stage, StageWire::Scalar { .. }))
-                {
-                    return Err("scalar stages require version 2.1".into());
-                }
-                if !matches!(wire.version.as_str(), "2.2" | "2.3" | "2.4" | "2.5" | "2.6")
-                    && stages
-                        .iter()
-                        .any(|stage| matches!(stage, StageWire::MinMaxScale { .. }))
-                {
-                    return Err("MinMaxScaler stages require version 2.2".into());
-                }
-                if !matches!(wire.version.as_str(), "2.3" | "2.4" | "2.5" | "2.6")
-                    && stages
-                        .iter()
-                        .any(|stage| matches!(stage, StageWire::SimpleImpute { .. }))
-                {
-                    return Err("SimpleImputer stages require version 2.3".into());
-                }
-                if !matches!(wire.version.as_str(), "2.4" | "2.5" | "2.6")
-                    && stages
-                        .iter()
-                        .any(|stage| matches!(stage, StageWire::PowerTransform { .. }))
-                {
-                    return Err("PowerTransformer stages require version 2.4".into());
-                }
-                if !matches!(wire.version.as_str(), "2.5" | "2.6")
-                    && stages
-                        .iter()
-                        .any(|stage| matches!(stage, StageWire::Select { .. }))
-                {
-                    return Err("selection stages require version 2.5".into());
-                }
-                if wire.version != "2.6"
-                    && stages
-                        .iter()
-                        .any(|stage| matches!(stage, StageWire::QuantileTransform { .. }))
-                {
-                    return Err("QuantileTransformer stages require version 2.6".into());
-                }
-                stages
-                    .into_iter()
-                    .map(FittedStage::from)
-                    .collect::<Vec<_>>()
-            }
-            (_, None) => {
-                return Err(format!(
-                    "missing field model_input.stages in version {}",
-                    wire.version
-                ));
-            }
-        };
+        let stages = wire
+            .model_input
+            .stages
+            .ok_or("missing field model_input.stages")?
+            .into_iter()
+            .map(FittedStage::from)
+            .collect::<Vec<_>>();
         let length = stages
             .last()
             .map_or(wire.model_input.transformations.len(), |stage| {
@@ -519,6 +458,28 @@ impl TryFrom<PipelineSpecWire> for PipelineSpec {
 impl From<TransformationWire> for TransformerDefinition {
     fn from(transformation: TransformationWire) -> Self {
         match transformation {
+            TransformationWire::Ema {
+                input,
+                output,
+                window,
+                warmup_policy,
+            } => Self::ema(
+                FeatureId::new(input),
+                FeatureId::new(output),
+                window,
+                warmup_policy,
+            ),
+            TransformationWire::Sma {
+                input,
+                output,
+                window,
+                warmup_policy,
+            } => Self::sma(
+                FeatureId::new(input),
+                FeatureId::new(output),
+                window,
+                warmup_policy,
+            ),
             TransformationWire::Identity { input, output } => {
                 Self::identity(FeatureId::new(input), FeatureId::new(output))
             }
@@ -568,9 +529,9 @@ mod tests {
 
     fn valid_model_spec() -> Value {
         json!({
-            "version": "2.0",
+            "version": "3.0",
             "feature_extractor": {
-                "version": "1.1",
+                "version": "2.0",
                 "capacity": 1,
                 "length": 1,
                 "required_events": [{"symbol":"__global__", "event":"time"}],
@@ -666,10 +627,10 @@ mod tests {
         assert_eq!(
             value,
             json!({
-                "version": "2.0",
+                "version": "3.0",
                 "checksum": "model-checksum",
                 "feature_extractor": {
-                    "version": "1.1",
+                    "version": "2.0",
                     "capacity": 3,
                     "length": 2,
                     "required_events": [{"symbol":"__global__", "event":"time"}],
@@ -746,11 +707,11 @@ mod tests {
     #[test]
     fn rejects_unsupported_versions_and_dimension_mismatches() {
         let mut value = valid_model_spec();
-        value["version"] = json!("3.0");
+        value["version"] = json!("2.6");
         assert!(error(value).contains("unsupported model-input spec version"));
 
         let mut value = valid_model_spec();
-        value["feature_extractor"]["version"] = json!("2.0");
+        value["feature_extractor"]["version"] = json!("1.1");
         assert!(error(value).contains("unsupported feature-vector spec version"));
 
         let mut value = valid_model_spec();

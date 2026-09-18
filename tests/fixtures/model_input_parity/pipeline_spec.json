@@ -1,7 +1,7 @@
 {
-  "version": "2.0",
+  "version": "3.0",
   "feature_extractor": {
-    "version": "1.1",
+    "version": "2.0",
     "capacity": 5,
     "length": 3,
     "required_events": [
@@ -49,45 +49,61 @@
         "symbol": "btcusdt",
         "indicators": [
           {
-            "kind": "sma",
+            "kind": "field",
             "source": {
               "type": "field",
               "event": "trade",
               "field": "price"
-            },
-            "warmup_policy": "full_window",
-            "outputs": [
-              {
-                "window": 2,
-                "id": "raw_sma"
-              }
-            ]
+            }
           }
         ]
       }
     ]
   },
   "model_input": {
-    "stages": [],
+    "stages": [
+      {
+        "type": "scalar",
+        "transformations": [
+          {
+            "type": "standard_scale",
+            "input": "raw_sma",
+            "output": "scaled_sma",
+            "mean": 10.0,
+            "scale": 2.0
+          },
+          {
+            "type": "identity",
+            "input": "raw_elapsed",
+            "output": "elapsed"
+          },
+          {
+            "type": "identity",
+            "input": "raw_day",
+            "output": "day"
+          }
+        ]
+      }
+    ],
     "capacity": 5,
     "length": 3,
     "transformations": [
       {
-        "type": "standard_scale",
-        "input": "raw_sma",
-        "output": "scaled_sma",
-        "mean": 10.0,
-        "scale": 2.0
-      },
-      {
-        "type": "identity",
-        "input": "raw_elapsed",
-        "output": "elapsed"
+        "type": "sma",
+        "input": "field:symbol=7:btcusdt:source=field.trade_price",
+        "output": "raw_sma",
+        "window": 2,
+        "warmup_policy": "full_window"
       },
       {
         "type": "identity",
         "input": "raw_day",
-        "output": "day"
+        "output": "raw_day"
+      },
+      {
+        "type": "identity",
+        "input": "raw_elapsed",
+        "output": "raw_elapsed"
       }
     ]
   }

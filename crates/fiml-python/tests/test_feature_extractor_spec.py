@@ -8,12 +8,9 @@ import fiml
 
 
 def configured_spec(capacity=4):
-    return fiml.FeatureExtractorSpec(capacity=capacity, checksum="opaque").sma(
-        "BTCUSDT",
-        [2, 3],
-        source="trade_price",
-        warmup=fiml.WarmupPolicy.FIRST_VALUE,
-    )
+    return (fiml.FeatureExtractorSpec(capacity=capacity, checksum="opaque")
+            .field("BTCUSDT", source="trade_price", id="price")
+            .field("BTCUSDT", source="trade_volume", id="volume"))
 
 
 def test_fluent_spec_uses_core_json_and_round_trips_metadata():
@@ -25,13 +22,12 @@ def test_fluent_spec_uses_core_json_and_round_trips_metadata():
     assert feature_extractor_spec.checksum == "opaque"
 
     document = json.loads(feature_extractor_spec.to_json())
-    assert document["version"] == "1.1"
+    assert document["version"] == "2.0"
     assert document["capacity"] == 4
     assert document["length"] == 2
     assert document["checksum"] == "opaque"
     assert document["required_events"] == [{"symbol": "btcusdt", "event": "trade"}]
-    assert [output["window"] for output in document["features"][0]["indicators"][0]["outputs"]] == [2, 3]
-    assert all("id" not in output for output in document["features"][0]["indicators"][0]["outputs"])
+    assert [i["kind"] for i in document["features"][0]["indicators"]] == ["field", "field"]
 
     restored = fiml.FeatureExtractorSpec.from_json(feature_extractor_spec.to_json())
     assert json.loads(restored.to_json()) == document
@@ -46,7 +42,7 @@ def test_feature_ids_returns_only_active_stable_ids():
 
 
 def test_omitted_capacity_tracks_outputs_and_explicit_capacity_is_fixed():
-    dynamic = fiml.FeatureExtractorSpec().sma("BTCUSDT", [2]).ema("BTCUSDT", [3, 4])
+    dynamic = fiml.FeatureExtractorSpec().field("BTCUSDT").field("BTCUSDT", source="volume").field("BTCUSDT", source="trade_price")
     assert dynamic.capacity == 3
     assert dynamic.active_feature_count == 3
 

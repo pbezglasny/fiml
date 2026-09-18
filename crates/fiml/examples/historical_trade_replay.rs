@@ -14,8 +14,9 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use fiml::{
-    Event, EventField, EventKind, FeatureDefinition, FeatureExtractor, FeatureKey, FeatureSource,
-    FeatureVector, Symbol, TradeSide, VecFeatureVector, WarmupPolicy,
+    Event, EventField, EventKind, FeatureDefinition, FeatureExtractorSpec, FeatureId, FeatureKey,
+    FeatureSource, Pipeline, PipelineSpec, Symbol, TradeSide, TransformerDefinition,
+    VecFeatureVector, WarmupPolicy,
 };
 
 const INPUT_HEADER: &str = "timestamp,symbol,price,quantity,aggressor_side";
@@ -56,7 +57,7 @@ where
     let feature_symbol = Symbol::new(FEATURE_SYMBOL)?;
     let mut extractor = build_extractor(feature_symbol)?;
     write!(output, "{INPUT_HEADER}")?;
-    for id in extractor.feature_ids() {
+    for id in extractor.output_ids() {
         write!(output, ",{}", id.as_str())?;
     }
     writeln!(output)?;
@@ -89,7 +90,7 @@ where
             trade.quantity,
             side_name(trade.side)
         )?;
-        for value in extractor.feature_vector().values() {
+        for value in extractor.values() {
             write!(output, ",{value}")?;
         }
         writeln!(output)?;
@@ -98,28 +99,18 @@ where
     Ok(())
 }
 
-fn build_extractor(symbol: Symbol) -> Result<FeatureExtractor<VecFeatureVector>, fiml::FimlError> {
-    let trade_price = FeatureSource::Field(EventField::TradePrice);
-    let trade_volume = FeatureSource::Field(EventField::TradeVolume);
+fn build_extractor(
+    symbol: Symbol,
+) -> Result<Pipeline<VecFeatureVector, VecFeatureVector>, fiml::FimlError> {
     let trade_event = FeatureSource::Event(EventKind::Trade);
     let definitions = [
-        FeatureKey::Sma {
+        FeatureKey::Field {
             symbol,
-            source: trade_price,
-            window: 3,
-            warmup_policy: WarmupPolicy::FullWindow,
+            field: EventField::TradePrice,
         },
-        FeatureKey::Ema {
+        FeatureKey::Field {
             symbol,
-            source: trade_price,
-            window: 3,
-            warmup_policy: WarmupPolicy::FullWindow,
-        },
-        FeatureKey::Sma {
-            symbol,
-            source: trade_volume,
-            window: 3,
-            warmup_policy: WarmupPolicy::FullWindow,
+            field: EventField::TradeVolume,
         },
         FeatureKey::Cvd {
             symbol,
@@ -136,15 +127,44 @@ fn build_extractor(symbol: Symbol) -> Result<FeatureExtractor<VecFeatureVector>,
         },
     ];
 
-    let mut output = VecFeatureVector::new(FEATURE_COUNT);
-    for index in 0..FEATURE_COUNT {
-        output.set_value_at(index, f64::NAN);
-    }
-    let mut builder = FeatureExtractor::builder(output);
-    for key in definitions {
-        builder = builder.add_feature(FeatureDefinition::with_default_id(key));
-    }
-    builder.build()
+    let raw = FeatureExtractorSpec::new(definitions.map(FeatureDefinition::with_default_id))?;
+    let price = FeatureId::from(&definitions[0]);
+    let volume = FeatureId::from(&definitions[1]);
+    PipelineSpec::new(
+        raw,
+        [
+            TransformerDefinition::sma(
+                price.clone(),
+                FeatureId::new("sma_price"),
+                3,
+                WarmupPolicy::FullWindow,
+            ),
+            TransformerDefinition::ema(
+                price,
+                FeatureId::new("ema_price"),
+                3,
+                WarmupPolicy::FullWindow,
+            ),
+            TransformerDefinition::sma(
+                volume,
+                FeatureId::new("sma_volume"),
+                3,
+                WarmupPolicy::FullWindow,
+            ),
+            TransformerDefinition::identity(
+                FeatureId::from(&definitions[2]),
+                FeatureId::from(&definitions[2]),
+            ),
+            TransformerDefinition::identity(
+                FeatureId::from(&definitions[3]),
+                FeatureId::from(&definitions[3]),
+            ),
+        ],
+    )?
+    .build(
+        VecFeatureVector::new(4),
+        VecFeatureVector::new(FEATURE_COUNT),
+    )
 }
 
 struct Trade<'a> {

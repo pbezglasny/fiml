@@ -1,8 +1,8 @@
 // A separate integration-test process keeps exhaustion out of other tests.
 use fiml::{
     ArrayFeatureVector, Event, EventField, FeatureDefinition, FeatureExtractorSpec, FeatureKey,
-    FeatureSource, FeatureVector, FimlError, InvalidArgumentError, LimitTarget, Symbol,
-    WarmupPolicy, symbols::MAX_SYMBOL_NUMBER,
+    FeatureVector, FimlError, InvalidArgumentError, LimitTarget, Symbol,
+    symbols::MAX_SYMBOL_NUMBER,
 };
 
 #[test]
@@ -15,11 +15,9 @@ fn capacity_errors_preserve_existing_symbols_and_runtime() {
         .map(|name| Symbol::new(name).unwrap())
         .collect();
     let first = symbols[0];
-    let spec = FeatureExtractorSpec::new([FeatureDefinition::with_default_id(FeatureKey::Sma {
+    let spec = FeatureExtractorSpec::new([FeatureDefinition::with_default_id(FeatureKey::Field {
         symbol: first,
-        source: FeatureSource::Field(EventField::Price),
-        window: 1,
-        warmup_policy: WarmupPolicy::FullWindow,
+        field: EventField::Price,
     })])
     .unwrap();
     let mut extractor = spec.build(ArrayFeatureVector::<1>::new()).unwrap();

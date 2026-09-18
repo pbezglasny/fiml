@@ -144,27 +144,12 @@ pub enum FeatureKey {
         /// Positive, one-based depth or number of levels to include.
         n_levels: usize,
     },
-    /// Sample-based simple moving average.
-    Sma {
-        /// Market symbol whose events or order book supply this output.
+    /// Latest selected scalar field, retained until the next matching event.
+    Field {
+        /// Market symbol supplying the observation.
         symbol: Symbol,
-        /// Must be `FeatureSource::Field` selecting a scalar event field.
-        source: FeatureSource,
-        /// Positive number of samples in the rolling window.
-        window: usize,
-        /// Controls when output becomes available while history fills.
-        warmup_policy: WarmupPolicy,
-    },
-    /// Sample-based exponential moving average.
-    Ema {
-        /// Market symbol whose events or order book supply this output.
-        symbol: Symbol,
-        /// Must be `FeatureSource::Field` selecting a scalar event field.
-        source: FeatureSource,
-        /// Positive smoothing period; alpha is `2 / (window + 1)`.
-        window: usize,
-        /// Controls when output becomes available while history fills.
-        warmup_policy: WarmupPolicy,
+        /// Scalar event field to copy.
+        field: crate::EventField,
     },
     /// Rolling aggressor buy volume minus sell volume.
     Cvd {

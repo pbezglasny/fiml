@@ -8,25 +8,16 @@ use rust_decimal::dec;
 
 use fiml::{
     ArrayFeatureVector, Event, EventField, FeatureDefinition, FeatureExtractor, FeatureKey,
-    FeatureSource, FeatureVector, Symbol, WarmupPolicy,
+    FeatureVector, Symbol,
 };
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let btc = Symbol::new("BTCUSDT")?;
-    let source = FeatureSource::Field(EventField::Price);
-    let mut extractor = FeatureExtractor::builder(ArrayFeatureVector::<7>::new())
+    let mut extractor = FeatureExtractor::builder(ArrayFeatureVector::<6>::new())
         .add_order_book(btc, OrderBook::new(UpdatePolicy::Contiguous, 8))
-        .add_feature(FeatureDefinition::with_default_id(FeatureKey::Ema {
+        .add_feature(FeatureDefinition::with_default_id(FeatureKey::Field {
             symbol: btc,
-            source,
-            window: 3,
-            warmup_policy: WarmupPolicy::FullWindow,
-        }))
-        .add_feature(FeatureDefinition::with_default_id(FeatureKey::Sma {
-            symbol: btc,
-            source,
-            window: 3,
-            warmup_policy: WarmupPolicy::FullWindow,
+            field: EventField::Price,
         }))
         .add_feature(FeatureDefinition::with_default_id(
             FeatureKey::OrderBookMidPrice { symbol: btc },

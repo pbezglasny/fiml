@@ -52,14 +52,13 @@ def _(Path, pd):
 def _(fiml, symbols):
     feature_extractor_spec = fiml.FeatureExtractorSpec()
     for symbol in symbols:
-        feature_extractor_spec.sma(symbol, [2, 4], source="trade_price")
-        feature_extractor_spec.ema(symbol, [2], source="trade_price")
+        feature_extractor_spec.field(symbol, source="trade_price")
         feature_extractor_spec.trade_count_timed(symbol, aggregation="1ms", window="60s")
 
     feature_extractor_spec.day_of_week()
 
-    assert feature_extractor_spec.indicator_count() == len(symbols) * 3 + 1
-    assert feature_extractor_spec.output_count() == len(symbols) * 4 + 1
+    assert feature_extractor_spec.indicator_count() == len(symbols) * 2 + 1
+    assert feature_extractor_spec.output_count() == len(symbols) * 2 + 1
     return (feature_extractor_spec,)
 
 

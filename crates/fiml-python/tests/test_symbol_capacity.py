@@ -15,7 +15,7 @@ def test_symbol_capacity_is_recoverable():
 
 
 def check_capacity():
-    raw = fiml.FeatureExtractorSpec().sma("capacity-0", [1])
+    raw = fiml.FeatureExtractorSpec().field("capacity-0")
     model = fiml.PipelineSpec(raw).identity(raw.feature_ids()[0])
     extractor = fiml.FeatureExtractor(raw)
     pipeline = fiml.ModelInputPipeline(model)
@@ -40,8 +40,7 @@ def check_capacity():
     assert pipeline.symbol("__global__") == 1
 
     for method, kwargs in [
-        ("sma", {"windows": [1]}),
-        ("ema", {"windows": [1]}),
+        ("field", {}),
         ("cvd", {"windows": [1]}),
         ("sma_timed", {"aggregation": "1s", "windows": ["2s"]}),
         ("obv_timed", {"aggregation": "1s", "windows": ["2s"]}),

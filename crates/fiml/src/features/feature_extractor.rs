@@ -310,6 +310,7 @@ where
     V: FeatureVector,
 {
     feature_vector: V,
+    observations: Box<[bool]>,
     /// Runtime features indexed by the event router.
     features: Box<[FeatureDerivation]>,
     /// Output spans corresponding one-to-one with [`Self::features`].
@@ -369,6 +370,7 @@ where
         }
 
         Ok(Self {
+            observations: vec![false; feature_vector.capacity()].into_boxed_slice(),
             feature_vector,
             features: compilation.features,
             output_ranges: compilation.output_ranges,
@@ -429,7 +431,10 @@ where
         let features_updated = Self::update_order_book_subscribers(
             &mut self.features,
             &self.output_ranges,
-            &mut self.feature_vector,
+            &mut ObservedVector {
+                vector: &mut self.feature_vector,
+                observations: &mut self.observations,
+            },
             subscribers,
             order_book,
             timestamp,
@@ -451,7 +456,10 @@ where
         Self::update_subscribers(
             &mut self.features,
             &self.output_ranges,
-            &mut self.feature_vector,
+            &mut ObservedVector {
+                vector: &mut self.feature_vector,
+                observations: &mut self.observations,
+            },
             any_features,
             event,
         );
@@ -465,7 +473,10 @@ where
         Self::update_subscribers(
             &mut self.features,
             &self.output_ranges,
-            &mut self.feature_vector,
+            &mut ObservedVector {
+                vector: &mut self.feature_vector,
+                observations: &mut self.observations,
+            },
             subscribed_features,
             event,
         );
@@ -521,6 +532,7 @@ where
             };
         }
 
+        self.observations.fill(false);
         let any_features_result = self.update_any_features(&event);
         let event_features_result = self.update_event_features(&event);
 
@@ -558,6 +570,10 @@ where
         self.symbol_timestamps[symbol.index()]
     }
 
+    pub(crate) fn observations(&self) -> &[bool] {
+        &self.observations
+    }
+
     /// Return feature vector
     pub fn feature_vector(&self) -> &V {
         &self.feature_vector
@@ -581,7 +597,7 @@ where
     fn update_subscribers(
         features: &mut [FeatureDerivation],
         output_ranges: &[OutputRange],
-        feature_vector: &mut V,
+        feature_vector: &mut impl FeatureVector,
         subscribers: &[u16],
         event: &Event,
     ) {
@@ -595,7 +611,7 @@ where
     fn update_order_book_subscribers(
         features: &mut [FeatureDerivation],
         output_ranges: &[OutputRange],
-        feature_vector: &mut V,
+        feature_vector: &mut impl FeatureVector,
         subscribers: &[u16],
         order_book: &OrderBook,
         timestamp: i64,
@@ -613,6 +629,30 @@ where
                 )
             })
             .count()
+    }
+}
+
+/// Records actual derivation writes without changing caller-owned vector interfaces.
+struct ObservedVector<'a, V> {
+    vector: &'a mut V,
+    observations: &'a mut [bool],
+}
+impl<V: FeatureVector> FeatureVector for ObservedVector<'_, V> {
+    fn value_at(&self, index: usize) -> Option<f64> {
+        self.vector.value_at(index)
+    }
+    fn values(&self) -> &[f64] {
+        self.vector.values()
+    }
+    fn capacity(&self) -> usize {
+        self.vector.capacity()
+    }
+    fn len(&self) -> usize {
+        self.vector.len()
+    }
+    fn set_value_at(&mut self, index: usize, value: f64) {
+        self.vector.set_value_at(index, value);
+        self.observations[index] = true;
     }
 }
 
@@ -635,11 +675,9 @@ mod tests {
         let unsubscribed = Symbol::new("finite-input-unsubscribed").unwrap();
         let build = || {
             FeatureExtractor::builder(ArrayFeatureVector::<2>::new())
-                .add_feature(FeatureDefinition::with_default_id(FeatureKey::Sma {
+                .add_feature(FeatureDefinition::with_default_id(FeatureKey::Field {
                     symbol,
-                    source: FeatureSource::Field(EventField::Price),
-                    window: 2,
-                    warmup_policy: WarmupPolicy::FirstValue,
+                    field: EventField::Price,
                 }))
                 .add_feature(FeatureDefinition::with_default_id(FeatureKey::SmaTimed {
                     symbol,
@@ -691,7 +729,7 @@ mod tests {
                             reference.feature_vector().values()
                         );
                     }
-                    assert_eq!(extractor.feature_vector().values()[0], 103.5);
+                    assert_eq!(extractor.feature_vector().values()[0], 104.0);
                     assert!(matches!(
                         extractor.handle_event(Event::price(symbol, f64::NAN, 0)),
                         Err(FimlError::TimestampOutOfOrder { .. })
@@ -707,75 +745,68 @@ mod tests {
     }
 
     #[test]
-    fn builder_and_spec_share_initial_values_and_warmup_behavior() {
-        for warmup_policy in [WarmupPolicy::FullWindow, WarmupPolicy::FirstValue] {
-            let definition = FeatureDefinition::with_default_id(FeatureKey::Sma {
-                symbol: Symbol::GLOBAL,
-                source: FeatureSource::Field(EventField::Price),
-                window: 2,
-                warmup_policy,
-            });
-            let spec = crate::FeatureExtractorSpec::with_capacity([definition.clone()], 3).unwrap();
-            for initial_value in [0.0, 42.0] {
-                let output = || {
-                    let mut output = ArrayFeatureVector::<3>::new_of_length(1);
-                    for index in 0..output.capacity() {
-                        output.set_value_at(index, initial_value);
-                    }
-                    output
-                };
-                for mut extractor in [
-                    FeatureExtractor::builder(output())
-                        .add_feature(definition.clone())
-                        .build()
-                        .unwrap(),
-                    spec.build(output()).unwrap(),
-                ] {
-                    assert_eq!(extractor.feature_vector().len(), 1);
-                    assert_eq!(extractor.feature_vector().capacity(), 3);
-                    assert_eq!(
-                        extractor.feature_ids(),
-                        std::slice::from_ref(&definition.id)
-                    );
-                    assert_eq!(extractor.last_timestamp(), None);
-                    assert!(
-                        extractor
-                            .feature_vector()
-                            .values()
-                            .iter()
-                            .all(|v| v.is_nan())
-                    );
-
-                    extractor.handle_event(Event::time(0)).unwrap();
-                    extractor
-                        .handle_event(Event::volume(Symbol::GLOBAL, 10.0, 1))
-                        .unwrap();
-                    assert!(
-                        extractor
-                            .feature_vector()
-                            .values()
-                            .iter()
-                            .all(|v| v.is_nan())
-                    );
-
-                    extractor
-                        .handle_event(Event::price(Symbol::GLOBAL, 10.0, 2))
-                        .unwrap();
-                    let first = extractor.feature_vector().values()[0];
-                    match warmup_policy {
-                        WarmupPolicy::FullWindow => assert!(first.is_nan()),
-                        WarmupPolicy::FirstValue => assert_eq!(first, 10.0),
-                    }
-                    extractor
-                        .handle_event(Event::price(Symbol::GLOBAL, 20.0, 3))
-                        .unwrap();
-                    assert_eq!(extractor.feature_vector().values()[0], 15.0);
-                    assert!(
-                        extractor.feature_vector().values()[1..]
-                            .iter()
-                            .all(|v| v.is_nan())
-                    );
+    fn builder_and_spec_share_initial_values_and_field_observations() {
+        let definition = FeatureDefinition::with_default_id(FeatureKey::Field {
+            symbol: Symbol::GLOBAL,
+            field: EventField::Price,
+        });
+        let spec = crate::FeatureExtractorSpec::with_capacity([definition.clone()], 3).unwrap();
+        for initial_value in [0.0, 42.0] {
+            let output = || {
+                let mut output = ArrayFeatureVector::<3>::new_of_length(1);
+                for index in 0..output.capacity() {
+                    output.set_value_at(index, initial_value);
                 }
+                output
+            };
+            for mut extractor in [
+                FeatureExtractor::builder(output())
+                    .add_feature(definition.clone())
+                    .build()
+                    .unwrap(),
+                spec.build(output()).unwrap(),
+            ] {
+                assert_eq!(extractor.feature_vector().len(), 1);
+                assert_eq!(extractor.feature_vector().capacity(), 3);
+                assert_eq!(
+                    extractor.feature_ids(),
+                    std::slice::from_ref(&definition.id)
+                );
+                assert_eq!(extractor.last_timestamp(), None);
+                assert!(
+                    extractor
+                        .feature_vector()
+                        .values()
+                        .iter()
+                        .all(|v| v.is_nan())
+                );
+
+                extractor.handle_event(Event::time(0)).unwrap();
+                extractor
+                    .handle_event(Event::volume(Symbol::GLOBAL, 10.0, 1))
+                    .unwrap();
+                assert!(
+                    extractor
+                        .feature_vector()
+                        .values()
+                        .iter()
+                        .all(|v| v.is_nan())
+                );
+
+                extractor
+                    .handle_event(Event::price(Symbol::GLOBAL, 10.0, 2))
+                    .unwrap();
+                let first = extractor.feature_vector().values()[0];
+                assert_eq!(first, 10.0);
+                extractor
+                    .handle_event(Event::price(Symbol::GLOBAL, 20.0, 3))
+                    .unwrap();
+                assert_eq!(extractor.feature_vector().values()[0], 20.0);
+                assert!(
+                    extractor.feature_vector().values()[1..]
+                        .iter()
+                        .all(|v| v.is_nan())
+                );
             }
         }
     }
@@ -783,17 +814,13 @@ mod tests {
     #[test]
     fn builder_compiles_definitions_and_routes_events() {
         let symbol = Symbol::new("extractor-builder").unwrap();
-        let first_key = FeatureKey::Sma {
+        let first_key = FeatureKey::Field {
             symbol,
-            source: FeatureSource::Field(EventField::Price),
-            window: 1,
-            warmup_policy: WarmupPolicy::FullWindow,
+            field: EventField::Price,
         };
-        let second_key = FeatureKey::Sma {
+        let second_key = FeatureKey::Field {
             symbol,
-            source: FeatureSource::Field(EventField::Price),
-            window: 2,
-            warmup_policy: WarmupPolicy::FullWindow,
+            field: EventField::TradePrice,
         };
         let first_id = FeatureId::from(&first_key);
         let second_id = FeatureId::from(&second_key);
@@ -823,6 +850,9 @@ mod tests {
             .handle_event(Event::price(symbol, 20.0, 2))
             .unwrap();
 
+        extractor
+            .handle_event(Event::trade(symbol, 15.0, 1.0, 3, None))
+            .unwrap();
         assert_eq!(extractor.feature_vector().values(), [20.0, 15.0]);
     }
 
@@ -1104,6 +1134,7 @@ mod tests {
 
         let mut vector = FeatureExtractor::<ArrayFeatureVector<2>> {
             feature_vector: ArrayFeatureVector::new(),
+            observations: vec![false; 2].into_boxed_slice(),
             features,
             output_ranges,
             feature_ids: vec![FeatureId::new("day")].into_boxed_slice(),

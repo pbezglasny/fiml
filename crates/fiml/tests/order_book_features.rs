@@ -485,7 +485,9 @@ fn book_json_rejects_inapplicable_parameters_and_invalid_depths() {
             .unwrap()
             .extend(invalid.as_object().unwrap().clone());
         let length = indicator["outputs"].as_array().map_or(1, Vec::len);
-        let document = json!({"version": "1.0", "capacity": length, "length": length,
+        let document = json!({"version": "2.0", "capacity": length, "length": length,
+            "required_events": [{"symbol":"btcusd", "event":"order_book_delta"}, {"symbol":"btcusd", "event":"order_book_snapshot"}],
+            "order_books": [{"symbol":"btcusd", "update_policy":"contiguous", "buffer_size":4}],
             "features": [{"symbol": "btcusd", "indicators": [indicator]}]});
         assert!(
             serde_json::from_value::<FeatureExtractorSpec>(document.clone()).is_err(),
@@ -494,9 +496,10 @@ fn book_json_rejects_inapplicable_parameters_and_invalid_depths() {
     }
 
     // An event indicator cannot silently accept the new output parameter.
-    let document = json!({"version": "1.0", "capacity": 1, "length": 1,
+    let document = json!({"version": "2.0", "capacity": 1, "length": 1,
+    "required_events": [{"symbol":"btcusd", "event":"trade"}],
     "features": [{"symbol": "btcusd", "indicators": [{
-        "kind": "sma", "source": {"type": "field", "event": "trade", "field": "price"},
+        "kind": "volatility", "source": {"type": "field", "event": "trade", "field": "price"},
         "warmup_policy": "full_window", "outputs": [{"window": 5, "n_levels": 1}]
     }]}]});
     assert!(serde_json::from_value::<FeatureExtractorSpec>(document).is_err());
@@ -509,7 +512,9 @@ fn book_json_rejects_inapplicable_parameters_and_invalid_depths() {
         .unwrap();
         assert!(serde_json::to_value(spec).is_err());
     }
-    let mut global = json!({"version": "1.0", "capacity": 1, "length": 1,
+    let mut global = json!({"version": "2.0", "capacity": 1, "length": 1,
+        "required_events": [{"symbol":"btcusd", "event":"order_book_delta"}, {"symbol":"btcusd", "event":"order_book_snapshot"}],
+        "order_books": [{"symbol":"btcusd", "update_policy":"contiguous", "buffer_size":4}],
         "features": [{"symbol": "__global__", "indicators": [base]}]});
     assert!(serde_json::from_value::<FeatureExtractorSpec>(global.clone()).is_err());
     global["features"][0]["symbol"] = json!("btcusd");

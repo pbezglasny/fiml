@@ -24,6 +24,7 @@ where
     operations: Box<[Transformer]>,
     stages: Option<StageRuntime>,
     model_vector: ModelV,
+    observations: Box<[bool]>,
     output_ids: Box<[FeatureId]>,
 }
 
@@ -39,16 +40,28 @@ where
     #[must_use = "event errors must be handled before using updated model-input values"]
     pub fn handle_event(&mut self, event: Event) -> Result<UpdateResult> {
         let update_result = self.feature_extractor.handle_event(event)?;
+        let observed = self.feature_extractor.observations();
+        self.observations.fill(false);
         let raw_values = self.feature_extractor.feature_vector().values();
         if let Some(stages) = &mut self.stages {
             stages.prepare_input();
             for operation in &mut self.operations {
-                operation.apply(raw_values, &mut stages.input);
+                operation.apply(
+                    raw_values,
+                    observed,
+                    &mut stages.input,
+                    &mut stages.observations,
+                );
             }
-            stages.apply(&mut self.model_vector);
+            stages.apply(&mut self.model_vector, &mut self.observations);
         } else {
             for operation in &mut self.operations {
-                operation.apply(raw_values, &mut self.model_vector);
+                operation.apply(
+                    raw_values,
+                    observed,
+                    &mut self.model_vector,
+                    &mut self.observations,
+                );
             }
         }
         Ok(update_result)
@@ -118,13 +131,11 @@ mod tests {
         )
     }
 
-    fn warming_sma(id: &str) -> FeatureDefinition {
+    fn price(id: &str) -> FeatureDefinition {
         FeatureDefinition::new(
-            FeatureKey::Sma {
+            FeatureKey::Field {
                 symbol: Symbol::GLOBAL,
-                source: FeatureSource::Field(EventField::Price),
-                window: 2,
-                warmup_policy: WarmupPolicy::FullWindow,
+                field: EventField::Price,
             },
             FeatureId::new(id),
         )
@@ -399,15 +410,25 @@ mod tests {
 
     #[test]
     fn warmup_nan_propagates_and_rejected_event_leaves_final_output_unchanged() {
-        let raw_spec = FeatureExtractorSpec::new([warming_sma("sma")]).unwrap();
-        let spec = PipelineSpec::new(
+        let raw_spec = FeatureExtractorSpec::new([price("sma")]).unwrap();
+        let spec = PipelineSpec::with_stages(
             raw_spec,
-            [TransformerDefinition::standard_scale(
+            [TransformerDefinition::sma(
                 FeatureId::new("sma"),
-                FeatureId::new("scaled_sma"),
-                10.0,
-                5.0,
+                FeatureId::new("sma"),
+                2,
+                WarmupPolicy::FullWindow,
             )],
+            [FittedStage::Scalar {
+                transformations: vec![TransformerDefinition::standard_scale(
+                    FeatureId::new("sma"),
+                    FeatureId::new("scaled_sma"),
+                    10.0,
+                    5.0,
+                )],
+            }],
+            1,
+            None,
         )
         .unwrap();
         let mut pipeline = spec
@@ -420,13 +441,13 @@ mod tests {
         pipeline
             .handle_event(Event::price(Symbol::GLOBAL, 10.0, 1))
             .unwrap();
-        assert!(pipeline.raw_values()[0].is_nan());
+        assert_eq!(pipeline.raw_values(), &[10.0]);
         assert!(pipeline.values()[0].is_nan());
 
         pipeline
             .handle_event(Event::price(Symbol::GLOBAL, 20.0, 2))
             .unwrap();
-        assert_eq!(pipeline.raw_values(), &[15.0]);
+        assert_eq!(pipeline.raw_values(), &[20.0]);
         assert_eq!(pipeline.values(), &[1.0]);
         let error = match pipeline.handle_event(Event::price(Symbol::GLOBAL, 100.0, 0)) {
             Err(error) => error,
@@ -434,7 +455,7 @@ mod tests {
         };
 
         assert!(matches!(error, FimlError::TimestampOutOfOrder { .. }));
-        assert_eq!(pipeline.raw_values(), &[15.0]);
+        assert_eq!(pipeline.raw_values(), &[20.0]);
         assert_eq!(pipeline.values(), &[1.0]);
         assert_eq!(pipeline.last_timestamp(), Some(2));
     }

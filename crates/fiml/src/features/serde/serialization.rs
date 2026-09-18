@@ -15,7 +15,7 @@ use crate::{
     Symbol, WarmupPolicy,
 };
 
-const FORMAT_VERSION: &str = "1.1";
+const FORMAT_VERSION: &str = "2.0";
 
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -243,8 +243,7 @@ where
 enum IndicatorIdentity {
     OrderBook(&'static str),
     OrderBookQuery(FeatureKey),
-    Sma(FeatureSource, WarmupPolicy),
-    Ema(FeatureSource, WarmupPolicy),
+    Field(EventField),
     Cvd(FeatureSource, WarmupPolicy),
     Returns(ReturnKind, FeatureSource),
     Volatility(FeatureSource, WarmupPolicy),
@@ -411,31 +410,13 @@ fn serialize_definition(
         | FeatureKey::OrderBookImbalance { .. } => {
             return serialize_order_book_definition(definition.key, id);
         }
-        FeatureKey::Sma {
-            source,
-            window,
-            warmup_policy,
-            ..
-        } => (
-            IndicatorIdentity::Sma(source, warmup_policy),
-            "sma",
-            source,
-            Some(warmup_policy),
+        FeatureKey::Field { field, .. } => (
+            IndicatorIdentity::Field(field),
+            "field",
+            FeatureSource::Field(field),
             None,
-            Some(WindowWire::Samples(window)),
-        ),
-        FeatureKey::Ema {
-            source,
-            window,
-            warmup_policy,
-            ..
-        } => (
-            IndicatorIdentity::Ema(source, warmup_policy),
-            "ema",
-            source,
-            Some(warmup_policy),
             None,
-            Some(WindowWire::Samples(window)),
+            None,
         ),
         FeatureKey::Cvd {
             source,
@@ -648,7 +629,7 @@ impl TryFrom<FeatureExtractorSpecWire> for FeatureExtractorSpec {
     fn try_from(wire: FeatureExtractorSpecWire) -> Result<Self, Self::Error> {
         if wire.version != FORMAT_VERSION {
             return Err(format!(
-                "unsupported feature-vector spec version {:?}; expected {FORMAT_VERSION:?}",
+                "unsupported feature-vector spec version {:?}; expected {FORMAT_VERSION:?}; migrate sample averages to field extraction plus sma/ema pipeline transformations",
                 wire.version
             ));
         }
@@ -791,6 +772,13 @@ fn deserialize_indicator(
     }
 
     match indicator.kind.as_str() {
+        "field" => {
+            reject_warmup(&indicator)?;
+            require_empty_options(&indicator.kind, &options)?;
+            let FeatureSource::Field(field) = source else { return Err("field requires a scalar field source".into()); };
+            definitions.push(scalar_definition(FeatureKey::Field { symbol, field }, outputs, &indicator.kind)?);
+        }
+        "sma" | "ema" => return Err("sample averages moved to transformers; use field extraction plus an sma/ema pipeline transformation".into()),
         "simple_return" | "log_return" => {
             reject_warmup(&indicator)?;
             require_empty_options(&indicator.kind, &options)?;
@@ -816,7 +804,7 @@ fn deserialize_indicator(
                 definitions.push(definition_from_output(key, output.id));
             }
         }
-        "sma" | "ema" | "cvd" | "volatility" => {
+        "cvd" | "volatility" => {
             let warmup = required_warmup(&indicator)?;
             require_empty_options(&indicator.kind, &options)?;
             for output in outputs {
@@ -833,18 +821,6 @@ fn deserialize_indicator(
                     }
                 };
                 let key = match indicator.kind.as_str() {
-                    "sma" => FeatureKey::Sma {
-                        symbol,
-                        source,
-                        window,
-                        warmup_policy: warmup,
-                    },
-                    "ema" => FeatureKey::Ema {
-                        symbol,
-                        source,
-                        window,
-                        warmup_policy: warmup,
-                    },
                     "cvd" => FeatureKey::Cvd {
                         symbol,
                         source,
@@ -1363,7 +1339,7 @@ fn require_empty_options(kind: &str, options: &OptionsWire) -> Result<(), String
 
 fn symbol_of(key: &FeatureKey) -> Symbol {
     match key {
-        FeatureKey::Sma { symbol, .. }
+        FeatureKey::Field { symbol, .. }
         | FeatureKey::OrderBookBestBidPrice { symbol, .. }
         | FeatureKey::OrderBookBestBidSize { symbol, .. }
         | FeatureKey::OrderBookBestAskPrice { symbol, .. }
@@ -1382,7 +1358,6 @@ fn symbol_of(key: &FeatureKey) -> Symbol {
         | FeatureKey::OrderBookWeightedMidPrice { symbol, .. }
         | FeatureKey::OrderBookMicroprice { symbol, .. }
         | FeatureKey::OrderBookImbalance { symbol, .. }
-        | FeatureKey::Ema { symbol, .. }
         | FeatureKey::Cvd { symbol, .. }
         | FeatureKey::Return { symbol, .. }
         | FeatureKey::Volatility { symbol, .. }
@@ -1405,7 +1380,7 @@ fn validate_scope_and_source(
 ) -> Result<(), String> {
     let global = symbol == Symbol::GLOBAL;
     let valid = match kind {
-        "sma" | "ema" | "simple_return" | "log_return" | "sma_timed" | "volatility"
+        "field" | "sma" | "ema" | "simple_return" | "log_return" | "sma_timed" | "volatility"
         | "volatility_timed" => !global && matches!(source, FeatureSource::Field(_)),
         "cvd" | "obv_timed" | "vpt" | "trade_count_timed" | "trade_volume_timed" | "vwap_timed" => {
             !global && source == FeatureSource::Event(EventKind::Trade)
@@ -1633,26 +1608,24 @@ mod tests {
                     window: Duration::from_secs(60),
                     warmup_policy: WarmupPolicy::FirstValue,
                 }),
-                default(FeatureKey::Sma {
+                default(FeatureKey::Volatility {
                     symbol: btc,
                     source: FeatureSource::Field(EventField::TradePrice),
                     window: 3,
                     warmup_policy: WarmupPolicy::FullWindow,
                 }),
                 FeatureDefinition::new(
-                    FeatureKey::Sma {
+                    FeatureKey::Volatility {
                         symbol: btc,
                         source: FeatureSource::Field(EventField::TradePrice),
                         window: 2,
                         warmup_policy: WarmupPolicy::FullWindow,
                     },
-                    FeatureId::new("custom_sma"),
+                    FeatureId::new("custom_volatility"),
                 ),
-                default(FeatureKey::Ema {
+                default(FeatureKey::Field {
                     symbol: btc,
-                    source: FeatureSource::Field(EventField::Volume),
-                    window: 4,
-                    warmup_policy: WarmupPolicy::FirstValue,
+                    field: EventField::Volume,
                 }),
                 default(FeatureKey::Cvd {
                     symbol: btc,
@@ -1718,7 +1691,7 @@ mod tests {
         let text = serde_json::to_string_pretty(&spec).unwrap();
         let value: Value = serde_json::from_str(&text).unwrap();
 
-        assert_eq!(value["version"], "1.1");
+        assert_eq!(value["version"], "2.0");
         assert_eq!(value["capacity"], 14);
         assert_eq!(value["length"], 14);
         assert_eq!(value["checksum"], "opaque-value");
@@ -1761,9 +1734,8 @@ mod tests {
             kinds,
             [
                 "cvd",
-                "ema",
                 "obv_timed",
-                "sma",
+                "field",
                 "sma_timed",
                 "trade_count_timed",
                 "vpt",
@@ -1773,18 +1745,18 @@ mod tests {
                 "log_return"
             ]
         );
-        let sma = indicators
+        let volatility = indicators
             .iter()
-            .find(|item| item["kind"] == "sma")
+            .find(|item| item["kind"] == "volatility" && item["source"]["event"] == "trade")
             .unwrap();
         assert_eq!(
-            sma["source"],
+            volatility["source"],
             json!({"type":"field","event":"trade","field":"price"})
         );
-        assert_eq!(sma["outputs"][0]["window"], 3);
-        assert!(sma["outputs"][0].get("id").is_none());
-        assert_eq!(sma["outputs"][1]["window"], 2);
-        assert_eq!(sma["outputs"][1]["id"], "custom_sma");
+        assert_eq!(volatility["outputs"][0]["window"], 3);
+        assert!(volatility["outputs"][0].get("id").is_none());
+        assert_eq!(volatility["outputs"][1]["window"], 2);
+        assert_eq!(volatility["outputs"][1]["id"], "custom_volatility");
         let timed = indicators
             .iter()
             .find(|item| item["kind"] == "sma_timed")
@@ -1866,23 +1838,17 @@ mod tests {
     fn standalone_price_and_volume_use_the_value_field_literal() {
         let symbol = Symbol::new("x").unwrap();
         let spec = FeatureExtractorSpec::new([
-            default(FeatureKey::Sma {
+            default(FeatureKey::Field {
                 symbol,
-                source: FeatureSource::Field(EventField::Price),
-                window: 1,
-                warmup_policy: WarmupPolicy::FirstValue,
+                field: EventField::Price,
             }),
-            default(FeatureKey::Sma {
+            default(FeatureKey::Field {
                 symbol,
-                source: FeatureSource::Field(EventField::Volume),
-                window: 1,
-                warmup_policy: WarmupPolicy::FirstValue,
+                field: EventField::Volume,
             }),
-            default(FeatureKey::Sma {
+            default(FeatureKey::Field {
                 symbol,
-                source: FeatureSource::Field(EventField::TradeVolume),
-                window: 1,
-                warmup_policy: WarmupPolicy::FirstValue,
+                field: EventField::TradeVolume,
             }),
         ])
         .unwrap();
@@ -1905,7 +1871,7 @@ mod tests {
 
     fn valid_day_set() -> Value {
         json!({
-            "version": "1.1",
+            "version": "2.0",
             "capacity": 1,
             "length": 1,
             "required_events": [{"symbol":"__global__", "event":"time"}],
@@ -1928,7 +1894,7 @@ mod tests {
     #[test]
     fn unsorted_input_is_accepted_and_reserialized_canonically() {
         let value = json!({
-            "version": "1.1",
+            "version": "2.0",
             "capacity": 3,
             "length": 3,
             "required_events": [
@@ -1937,7 +1903,7 @@ mod tests {
             ],
             "features": [
                 {"symbol":"z", "indicators":[{
-                    "kind":"sma", "source":{"type":"field","event":"trade","field":"price"},
+                    "kind":"volatility", "source":{"type":"field","event":"trade","field":"price"},
                     "warmup_policy":"full_window", "outputs":[{"window":3},{"window":2}]
                 }]},
                 {"symbol":"__global__", "indicators":[{
@@ -2007,11 +1973,11 @@ mod tests {
     #[test]
     fn rejects_duplicate_normalized_scopes_and_empty_groups() {
         let value = json!({
-            "version":"1.1", "capacity":2, "length":2,
+            "version":"2.0", "capacity":2, "length":2,
             "required_events":[{"symbol":"btc", "event":"price"}],
             "features":[
-                {"symbol":"BTC", "indicators":[{"kind":"sma","source":{"type":"field","event":"price","field":"value"},"warmup_policy":"first_value","outputs":[{"window":1}]}]},
-                {"symbol":"btc", "indicators":[{"kind":"ema","source":{"type":"field","event":"price","field":"value"},"warmup_policy":"first_value","outputs":[{"window":1}]}]}
+                {"symbol":"BTC", "indicators":[{"kind":"volatility","source":{"type":"field","event":"price","field":"value"},"warmup_policy":"first_value","outputs":[{"window":1}]}]},
+                {"symbol":"btc", "indicators":[{"kind":"volatility","source":{"type":"field","event":"price","field":"value"},"warmup_policy":"first_value","outputs":[{"window":1}]}]}
             ]
         });
         assert!(error(value).contains("duplicate normalized symbol group"));
@@ -2052,7 +2018,7 @@ mod tests {
     #[test]
     fn rejects_malformed_durations_and_structurally_invalid_outputs() {
         let value = json!({
-            "version":"1.1", "capacity":1, "length":1,
+            "version":"2.0", "capacity":1, "length":1,
             "required_events":[{"symbol":"btc", "event":"trade"}],
             "features":[{"symbol":"btc","indicators":[{
                 "kind":"trade_count_timed", "source":{"type":"event","event":"trade"},

@@ -5,12 +5,12 @@
     "active_ids": [
       "raw_day",
       "raw_elapsed",
-      "raw_sma"
+      "field:symbol=7:btcusdt:source=field.trade_price"
     ],
     "names": [
       "raw_day",
       "raw_elapsed",
-      "raw_sma",
+      "field:symbol=7:btcusdt:source=field.trade_price",
       "__reserved_3",
       "__reserved_4"
     ]
@@ -33,16 +33,52 @@
   },
   "snapshots": [
     {
-      "raw_values": [4.0, 0.0, null, null, null],
-      "model_values": [null, 0.0, 4.0, null, null]
+      "raw_values": [
+        4.0,
+        0.0,
+        10.0,
+        null,
+        null
+      ],
+      "model_values": [
+        null,
+        0.0,
+        4.0,
+        null,
+        null
+      ]
     },
     {
-      "raw_values": [4.0, 1.0, 12.0, null, null],
-      "model_values": [1.0, 1.0, 4.0, null, null]
+      "raw_values": [
+        4.0,
+        1.0,
+        14.0,
+        null,
+        null
+      ],
+      "model_values": [
+        1.0,
+        1.0,
+        4.0,
+        null,
+        null
+      ]
     },
     {
-      "raw_values": [4.0, 2.0, 12.0, null, null],
-      "model_values": [1.0, 2.0, 4.0, null, null]
+      "raw_values": [
+        4.0,
+        2.0,
+        14.0,
+        null,
+        null
+      ],
+      "model_values": [
+        1.0,
+        2.0,
+        4.0,
+        null,
+        null
+      ]
     }
   ]
 }

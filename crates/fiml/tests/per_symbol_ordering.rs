@@ -244,11 +244,9 @@ fn pipeline_lags_follow_arrival_order_and_expose_symbol_timestamps() {
     let btc = Symbol::new("pipeline-ordering-btc").unwrap();
     let eth = Symbol::new("pipeline-ordering-eth").unwrap();
     let spec = FeatureExtractorSpec::new([FeatureDefinition::new(
-        FeatureKey::Sma {
+        FeatureKey::Field {
             symbol: btc,
-            source: FeatureSource::Field(EventField::Price),
-            window: 1,
-            warmup_policy: WarmupPolicy::FirstValue,
+            field: EventField::Price,
         },
         FeatureId::new("price"),
     )])

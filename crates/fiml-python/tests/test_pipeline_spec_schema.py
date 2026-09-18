@@ -96,20 +96,11 @@ def test_schema_accepts_fitted_stages_and_versioned_migration():
     document = json.loads((DOCS.parent / "tests/fixtures/sklearn_pipeline.json").read_text())["pipeline"]
     assert not list(VALIDATOR.iter_errors(document))
     assert json.loads(fiml.PipelineSpec.from_json(json.dumps(document)).to_json()) == document
-    document["version"] = "1.0"
-    assert list(VALIDATOR.iter_errors(document))
-    with pytest.raises(ValueError, match="not allowed"):
-        fiml.PipelineSpec.from_json(json.dumps(document))
-    document = canonical_example()
-    document["version"] = "1.0"
-    del document["model_input"]["stages"]
-    assert not list(VALIDATOR.iter_errors(document))
-    upgraded = json.loads(fiml.PipelineSpec.from_json(json.dumps(document)).to_json())
-    assert upgraded == canonical_example()
-    document["version"] = "2.0"
-    assert list(VALIDATOR.iter_errors(document))
-    with pytest.raises(ValueError, match="missing field.*stages"):
-        fiml.PipelineSpec.from_json(json.dumps(document))
+    for version in ["1.0", "2.0", "2.1", "2.2", "2.3", "2.4", "2.5", "2.6"]:
+        document["version"] = version
+        assert list(VALIDATOR.iter_errors(document))
+        with pytest.raises(ValueError, match="unsupported model-input spec version"):
+            fiml.PipelineSpec.from_json(json.dumps(document))
 
 
 def test_scalar_stages_validate_and_round_trip_in_version_2_1():
@@ -118,14 +109,14 @@ def test_scalar_stages_validate_and_round_trip_in_version_2_1():
     spec.scalar_stage(fiml.ScalarStage().identity(input_id, output="selected"))
     spec.scalar_stage(fiml.ScalarStage().lagged("selected", lag_window=2, output="lag"))
     document = json.loads(spec.to_json())
-    assert document["version"] == "2.1"
+    assert document["version"] == "3.0"
     assert not list(VALIDATOR.iter_errors(document))
     assert json.loads(fiml.PipelineSpec.from_json(json.dumps(document)).to_json()) == document
     document["version"] = "2.0"
     assert list(VALIDATOR.iter_errors(document))
-    with pytest.raises(ValueError, match="require version 2.1"):
+    with pytest.raises(ValueError, match="unsupported model-input spec version"):
         fiml.PipelineSpec.from_json(json.dumps(document))
-    document["version"] = "2.1"
+    document["version"] = "3.0"
     document["model_input"]["stages"][0]["transformations"][0]["extra"] = True
     assert list(VALIDATOR.iter_errors(document))
     with pytest.raises(ValueError, match="unknown field"):
@@ -145,7 +136,7 @@ def test_scalar_stage_references_are_validated_atomically_against_previous_outpu
         fiml.ScalarStage().lagged("selected", lag_window=0),
         fiml.ScalarStage().standard_scale("selected", mean=0., scale=0.),
     ]:
-        with pytest.raises(ValueError, match="stage 1"):
+        with pytest.raises(ValueError, match="stage 2"):
             spec.scalar_stage(invalid)
         assert spec.to_json() == before
 
@@ -153,7 +144,7 @@ def test_scalar_stage_references_are_validated_atomically_against_previous_outpu
 def test_min_max_stage_requires_version_2_2_and_valid_state():
     document = canonical_example()
     outputs = [item["output"] for item in document["model_input"]["transformations"]]
-    document["version"] = "2.2"
+    document["version"] = "3.0"
     document["model_input"]["stages"] = [{
         "type": "min_max_scale", "outputs": outputs,
         "scale": [1.0] * len(outputs), "min": [0.0] * len(outputs),
@@ -166,7 +157,7 @@ def test_min_max_stage_requires_version_2_2_and_valid_state():
         invalid = json.loads(json.dumps(document))
         invalid["version"] = version
         assert list(VALIDATOR.iter_errors(invalid))
-        with pytest.raises(ValueError, match="require version 2.2"):
+        with pytest.raises(ValueError, match="unsupported model-input spec version"):
             fiml.PipelineSpec.from_json(json.dumps(invalid))
     for field, value in [("scale", [0.0] * len(outputs)),
                          ("min", [0.0]), ("clip", [2.0, 1.0])]:
@@ -183,7 +174,7 @@ def test_min_max_stage_requires_version_2_2_and_valid_state():
 def test_simple_imputer_stage_requires_version_2_3_and_valid_state():
     document = canonical_example()
     inputs = [item["output"] for item in document["model_input"]["transformations"]]
-    document["version"] = "2.3"
+    document["version"] = "3.0"
     document["model_input"]["length"] = len(inputs) + 1
     document["model_input"]["capacity"] = len(inputs) + 1
     document["model_input"]["stages"] = [{
@@ -199,7 +190,7 @@ def test_simple_imputer_stage_requires_version_2_3_and_valid_state():
     old = json.loads(json.dumps(document))
     old["version"] = "2.2"
     assert list(VALIDATOR.iter_errors(old))
-    with pytest.raises(ValueError, match="require version 2.3"):
+    with pytest.raises(ValueError, match="unsupported model-input spec version"):
         fiml.PipelineSpec.from_json(json.dumps(old))
 
     for field, value in [
@@ -216,7 +207,7 @@ def test_simple_imputer_stage_requires_version_2_3_and_valid_state():
 def test_power_transform_stage_requires_version_2_4_and_valid_state():
     document = canonical_example()
     outputs = [item["output"] for item in document["model_input"]["transformations"]]
-    document["version"] = "2.4"
+    document["version"] = "3.0"
     document["model_input"]["stages"] = [{
         "type": "power_transform",
         "outputs": outputs,
@@ -231,7 +222,7 @@ def test_power_transform_stage_requires_version_2_4_and_valid_state():
     old = json.loads(json.dumps(document))
     old["version"] = "2.3"
     assert list(VALIDATOR.iter_errors(old))
-    with pytest.raises(ValueError, match="require version 2.4"):
+    with pytest.raises(ValueError, match="unsupported model-input spec version"):
         fiml.PipelineSpec.from_json(json.dumps(old))
 
     for field, value in [
@@ -249,7 +240,7 @@ def test_power_transform_stage_requires_version_2_4_and_valid_state():
 def test_selection_stage_requires_version_2_5_and_valid_mapping():
     document = canonical_example()
     inputs = [item["output"] for item in document["model_input"]["transformations"]]
-    document["version"] = "2.5"
+    document["version"] = "3.0"
     document["model_input"]["length"] = 2
     document["model_input"]["stages"] = [{
         "type": "select",
@@ -262,7 +253,7 @@ def test_selection_stage_requires_version_2_5_and_valid_mapping():
     old = json.loads(json.dumps(document))
     old["version"] = "2.4"
     assert list(VALIDATOR.iter_errors(old))
-    with pytest.raises(ValueError, match="require version 2.5"):
+    with pytest.raises(ValueError, match="unsupported model-input spec version"):
         fiml.PipelineSpec.from_json(json.dumps(old))
 
     for outputs, indices in [
@@ -285,7 +276,7 @@ def test_selection_stage_requires_version_2_5_and_valid_mapping():
 def test_quantile_transform_stage_requires_version_2_6_and_valid_state():
     document = canonical_example()
     outputs = [item["output"] for item in document["model_input"]["transformations"]]
-    document["version"] = "2.6"
+    document["version"] = "3.0"
     document["model_input"]["stages"] = [{
         "type": "quantile_transform",
         "outputs": outputs,
@@ -302,7 +293,7 @@ def test_quantile_transform_stage_requires_version_2_6_and_valid_state():
     old = json.loads(json.dumps(document))
     old["version"] = "2.5"
     assert list(VALIDATOR.iter_errors(old))
-    with pytest.raises(ValueError, match="require version 2.6"):
+    with pytest.raises(ValueError, match="unsupported model-input spec version"):
         fiml.PipelineSpec.from_json(json.dumps(old))
 
     for field, value in [

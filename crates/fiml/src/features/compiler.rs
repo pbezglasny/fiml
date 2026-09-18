@@ -19,7 +19,7 @@ use crate::{
 
 /// Contiguous section of the output feature vector written by one derivation.
 ///
-/// Grouped derivations, such as an SMA with several windows, write one value
+/// Grouped derivations, such as volatility with several windows, write one value
 /// per cell. `start` is the first output-vector index and `count` is the number
 /// of grouped scalar outputs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -49,8 +49,8 @@ pub(crate) struct Compilation {
 
 /// Identity of one runtime derivation after removing its groupable output.
 ///
-/// For example, SMA definitions that differ only by `window` have the same
-/// `GroupKey` and can share one runtime SMA. Fields that alter calculation
+/// For example, volatility definitions that differ only by `window` have the same
+/// `GroupKey` and can share one runtime volatility calculator. Fields that alter calculation
 /// state or event subscription remain part of the key.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 enum GroupKey {
@@ -126,15 +126,9 @@ enum GroupKey {
     OrderBookImbalance {
         symbol: Symbol,
     },
-    Sma {
+    Field {
         symbol: Symbol,
-        source: EventField,
-        warmup_policy: WarmupPolicy,
-    },
-    Ema {
-        symbol: Symbol,
-        source: EventField,
-        warmup_policy: WarmupPolicy,
+        field: EventField,
     },
     Cvd {
         symbol: Symbol,
@@ -206,7 +200,7 @@ enum GroupKey {
 impl GroupKey {
     fn symbol(&self) -> Symbol {
         match self {
-            Self::Sma { symbol, .. }
+            Self::Field { symbol, .. }
             | Self::OrderBookBestBidPrice { symbol, .. }
             | Self::OrderBookBestBidSize { symbol, .. }
             | Self::OrderBookBestAskPrice { symbol, .. }
@@ -225,7 +219,6 @@ impl GroupKey {
             | Self::OrderBookWeightedMidPrice { symbol, .. }
             | Self::OrderBookMicroprice { symbol, .. }
             | Self::OrderBookImbalance { symbol, .. }
-            | Self::Ema { symbol, .. }
             | Self::Cvd { symbol, .. }
             | Self::Returns { symbol, .. }
             | Self::Volatility { symbol, .. }
@@ -261,8 +254,7 @@ impl GroupKey {
             | Self::OrderBookWeightedMidPrice { .. }
             | Self::OrderBookMicroprice { .. }
             | Self::OrderBookImbalance { .. } => FeatureRoute::OrderBook,
-            Self::Sma { source, .. }
-            | Self::Ema { source, .. }
+            Self::Field { field: source, .. }
             | Self::Returns { source, .. }
             | Self::Volatility { source, .. } => FeatureRoute::Kind(source.event_kind()),
             Self::Cvd { source, .. }
@@ -699,37 +691,8 @@ fn group_key(index: usize, key: &FeatureKey) -> Result<(GroupKey, GroupOutput)> 
                 GroupOutput::BookDepth(n_levels),
             ))
         }
-        FeatureKey::Sma {
-            symbol,
-            source,
-            window,
-            warmup_policy,
-        } => {
-            validate_sample_window(index, key, window, true)?;
-            Ok((
-                GroupKey::Sma {
-                    symbol,
-                    source: scalar_source(index, key, source)?,
-                    warmup_policy,
-                },
-                GroupOutput::SampleWindow(window),
-            ))
-        }
-        FeatureKey::Ema {
-            symbol,
-            source,
-            window,
-            warmup_policy,
-        } => {
-            validate_sample_window(index, key, window, false)?;
-            Ok((
-                GroupKey::Ema {
-                    symbol,
-                    source: scalar_source(index, key, source)?,
-                    warmup_policy,
-                },
-                GroupOutput::SampleWindow(window),
-            ))
+        FeatureKey::Field { symbol, field } => {
+            Ok((GroupKey::Field { symbol, field }, GroupOutput::Scalar))
         }
         FeatureKey::Cvd {
             symbol,
@@ -1074,22 +1037,9 @@ fn build_group(group: &FeatureGroup) -> Result<FeatureDerivation> {
                 indicator: OrderBookIndicator::Imbalance(grouped_depths),
             }))
         }
-        (
-            GroupKey::Sma {
-                symbol,
-                source,
-                warmup_policy,
-            },
-            GroupOutputs::SampleWindows(windows),
-        ) => derivation::sma::build(*symbol, *source, windows, *warmup_policy),
-        (
-            GroupKey::Ema {
-                symbol,
-                source,
-                warmup_policy,
-            },
-            GroupOutputs::SampleWindows(windows),
-        ) => derivation::ema::build(*symbol, *source, windows, *warmup_policy),
+        (GroupKey::Field { field, .. }, GroupOutputs::Scalar) => {
+            Ok(FeatureDerivation::Field(*field))
+        }
         (
             GroupKey::Cvd {
                 symbol,
@@ -1384,8 +1334,7 @@ fn group_kind(key: &GroupKey) -> IndicatorKind {
         GroupKey::OrderBookWeightedMidPrice { .. } => IndicatorKind::OrderBookWeightedMidPrice,
         GroupKey::OrderBookMicroprice { .. } => IndicatorKind::OrderBookMicroprice,
         GroupKey::OrderBookImbalance { .. } => IndicatorKind::OrderBookImbalance,
-        GroupKey::Sma { .. } => IndicatorKind::Sma,
-        GroupKey::Ema { .. } => IndicatorKind::Ema,
+        GroupKey::Field { .. } => IndicatorKind::Field,
         GroupKey::Cvd { .. } => IndicatorKind::Cvd,
         GroupKey::Returns { kind, .. } => match kind {
             ReturnKind::Simple => IndicatorKind::SimpleReturn,
@@ -1432,8 +1381,7 @@ fn group_kind_from_feature_key(key: &FeatureKey) -> IndicatorKind {
         FeatureKey::OrderBookWeightedMidPrice { .. } => IndicatorKind::OrderBookWeightedMidPrice,
         FeatureKey::OrderBookMicroprice { .. } => IndicatorKind::OrderBookMicroprice,
         FeatureKey::OrderBookImbalance { .. } => IndicatorKind::OrderBookImbalance,
-        FeatureKey::Sma { .. } => IndicatorKind::Sma,
-        FeatureKey::Ema { .. } => IndicatorKind::Ema,
+        FeatureKey::Field { .. } => IndicatorKind::Field,
         FeatureKey::Cvd { .. } => IndicatorKind::Cvd,
         FeatureKey::Return { kind, .. } => match kind {
             ReturnKind::Simple => IndicatorKind::SimpleReturn,
@@ -1483,19 +1431,19 @@ mod tests {
     #[test]
     fn groups_compatible_non_adjacent_definitions() {
         let symbol = Symbol::new("compiler-grouped").unwrap();
-        let sma_one = FeatureKey::Sma {
+        let volatility_one = FeatureKey::Volatility {
             symbol,
             source: FeatureSource::Field(EventField::Price),
             window: 1,
             warmup_policy: WarmupPolicy::FullWindow,
         };
-        let ema_two = FeatureKey::Ema {
+        let cvd_two = FeatureKey::Cvd {
             symbol,
-            source: FeatureSource::Field(EventField::Price),
+            source: FeatureSource::Event(EventKind::Trade),
             window: 2,
             warmup_policy: WarmupPolicy::FullWindow,
         };
-        let sma_two = FeatureKey::Sma {
+        let volatility_two = FeatureKey::Volatility {
             symbol,
             source: FeatureSource::Field(EventField::Price),
             window: 2,
@@ -1504,9 +1452,9 @@ mod tests {
 
         let compilation = compile(
             vec![
-                definition(sma_one),
-                definition(ema_two),
-                definition(sma_two),
+                definition(volatility_one),
+                definition(cvd_two),
+                definition(volatility_two),
             ],
             3,
         )
@@ -1520,9 +1468,9 @@ mod tests {
                 OutputRange { start: 2, count: 1 },
             ]
         );
-        assert_eq!(compilation.feature_ids[0], FeatureId::from(&sma_one));
-        assert_eq!(compilation.feature_ids[1], FeatureId::from(&sma_two));
-        assert_eq!(compilation.feature_ids[2], FeatureId::from(&ema_two));
+        assert_eq!(compilation.feature_ids[0], FeatureId::from(&volatility_one));
+        assert_eq!(compilation.feature_ids[1], FeatureId::from(&volatility_two));
+        assert_eq!(compilation.feature_ids[2], FeatureId::from(&cvd_two));
     }
 
     #[test]
@@ -1552,8 +1500,8 @@ mod tests {
     }
 
     #[test]
-    fn rejects_non_scalar_moving_average_source() {
-        let definition = definition(FeatureKey::Sma {
+    fn rejects_non_scalar_volatility_source() {
+        let definition = definition(FeatureKey::Volatility {
             symbol: Symbol::new("compiler-source").unwrap(),
             source: FeatureSource::Event(EventKind::Trade),
             window: 2,

@@ -196,30 +196,11 @@ fn canonical_sort_key(key: &FeatureKey) -> (bool, String, u8, u8, u8, u128, u128
         FeatureKey::OrderBookWeightedMidPrice { symbol, .. } => (*symbol, 11, 32, 0, 0, 0, 0),
         FeatureKey::OrderBookMicroprice { symbol, .. } => (*symbol, 12, 32, 0, 0, 0, 0),
         FeatureKey::OrderBookImbalance { symbol, .. } => (*symbol, 13, 32, 0, 0, 0, 0),
-        FeatureKey::Sma {
-            symbol,
-            source,
-            warmup_policy,
-            ..
-        } => (
+        FeatureKey::Field { symbol, field } => (
             *symbol,
             4,
-            source_rank(*source),
-            warmup_rank(*warmup_policy),
+            source_rank(FeatureSource::Field(*field)),
             0,
-            0,
-            0,
-        ),
-        FeatureKey::Ema {
-            symbol,
-            source,
-            warmup_policy,
-            ..
-        } => (
-            *symbol,
-            2,
-            source_rank(*source),
-            warmup_rank(*warmup_policy),
             0,
             0,
             0,
