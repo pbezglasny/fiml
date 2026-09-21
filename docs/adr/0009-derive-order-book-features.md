@@ -209,3 +209,16 @@ values and timestamp remain unchanged by a rejected row. Existing numeric/trade
 batch prevalidation remains unchanged. Book payload construction and batch output
 allocation occur at the Python boundary; derivation and transformation remain
 allocation-free, with book storage retaining its existing allocation behavior.
+
+
+## Follow-up: configured dense storage (2026-09-21)
+
+An `order_books` entry may include `"dense": {"tick_size": "0.01", "min_price": "90", "max_price": "110"}`.
+These exact decimal strings select a preallocated, inclusive tick grid. Rust uses
+`OrderBookConfig::new(symbol, policy, buffer_size).with_dense(tick_size, min_price, max_price)`.
+The same JSON works through Rust and Python spec readers, including pipeline specs.
+Omitting `dense` preserves BTreeMap storage and the existing serialized format.
+Grid validity is checked when configuring or deserializing a spec; allocation
+occurs when building the runtime. Off-grid and out-of-range updates are rejected
+before mutation. Dense storage does not allocate during level insertion, deletion,
+or snapshot replacement; BTreeMap storage may allocate when inserting new levels.

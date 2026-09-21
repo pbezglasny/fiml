@@ -1,6 +1,6 @@
 //! Stores the canonical feature-extractor specification independently of runtime state.
 //!
-use crate::order_book::{OrderBook, OrderBookConfig};
+use crate::order_book::OrderBookConfig;
 use crate::{
     FeatureDefinition, FeatureExtractor, FeatureSource, FeatureVector, FimlError,
     InvalidArgumentError,
@@ -71,7 +71,7 @@ impl FeatureExtractorSpec {
         })
     }
 
-    /// Replaces book construction parameters, rejecting duplicate/global symbols.
+    /// Replaces book construction parameters, rejecting duplicate/global symbols and invalid grids.
     /// Required-book validation occurs at build time, after all definitions exist.
     pub fn with_order_books(
         mut self,
@@ -89,6 +89,9 @@ impl FeatureExtractorSpec {
                 return Err(FimlError::DuplicateOrderBook {
                     symbol: config.symbol,
                 });
+            }
+            if let Some(grid) = config.dense {
+                grid.level_count()?;
             }
         }
         self.order_books = configs;
@@ -161,13 +164,8 @@ impl FeatureExtractorSpec {
         let books = self
             .order_books
             .iter()
-            .map(|config| {
-                (
-                    config.symbol,
-                    OrderBook::new(config.update_policy, config.buffer_size),
-                )
-            })
-            .collect();
+            .map(|config| config.build().map(|book| (config.symbol, book)))
+            .collect::<Result<Vec<_>, _>>()?;
         FeatureExtractor::new(output_vector, compilation, books)
     }
 }

@@ -14,6 +14,7 @@ use crate::{
 };
 
 use super::book_side::BookSide;
+use super::{BookSideStorage, DenseBookSide};
 /// Whole-level price range and cumulative size needed to reach a target quantity.
 /// The final level is included in full, so `total_size` may exceed the target.
 pub struct DepthUntilSizeResult {
@@ -79,7 +80,18 @@ pub enum OrderBookUpdateError {
         /// Sequence ID of the rejected snapshot.
         received_snapshot_update_id: OrderBookUpdateId,
     },
-    /// A level contains a negative price or size.
+    /// Dense bounds or tick size do not define a representable nonnegative price grid.
+    InvalidDenseConfiguration {
+        /// Requested tick size, which must be positive.
+        tick_size: Decimal,
+        /// Inclusive lower bound, which must be a nonnegative tick multiple.
+        min_price: Decimal,
+        /// Inclusive upper bound, which must be a tick multiple at least as large as the lower bound.
+        max_price: Decimal,
+    },
+    /// The requested dense vector could not be allocated.
+    DenseCapacityExceeded,
+    /// A level contains a negative price or size, or a price outside the dense tick grid.
     InvalidUpdate {
         /// Side containing the invalid level.
         side: Side,
@@ -93,6 +105,17 @@ pub enum OrderBookUpdateError {
 impl fmt::Display for OrderBookUpdateError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::InvalidDenseConfiguration {
+                tick_size,
+                min_price,
+                max_price,
+            } => write!(
+                f,
+                "invalid dense order-book grid: tick {tick_size}, range [{min_price}, {max_price}]"
+            ),
+            Self::DenseCapacityExceeded => {
+                f.write_str("dense order-book price range cannot be allocated")
+            }
             Self::SequenceGap { expected, received } => {
                 write!(f, "expected update ID {expected}, received {received}")
             }
@@ -164,40 +187,6 @@ fn has_contiguous_gap(
     }
 }
 
-fn validate_level_update_deltas(update_delta: &OrderBookDelta) -> Result<(), OrderBookUpdateError> {
-    for delta in &update_delta.changes {
-        if delta.price < Decimal::ZERO || delta.size < Decimal::ZERO {
-            return Err(OrderBookUpdateError::InvalidUpdate {
-                side: delta.side,
-                price: delta.price,
-                size: delta.size,
-            });
-        }
-    }
-    Ok(())
-}
-
-fn validate_snapshot_update(snapshot: &OrderBookSnapshot) -> Result<(), OrderBookUpdateError> {
-    fn validate_side(
-        side_levels: &[OrderBookLevel],
-        side: Side,
-    ) -> Result<(), OrderBookUpdateError> {
-        for level in side_levels {
-            if level.price < Decimal::ZERO || level.size < Decimal::ZERO {
-                return Err(OrderBookUpdateError::InvalidUpdate {
-                    side,
-                    price: level.price,
-                    size: level.size,
-                });
-            }
-        }
-        Ok(())
-    }
-    validate_side(&snapshot.bids, Side::Bid)?;
-    validate_side(&snapshot.asks, Side::Ask)?;
-    Ok(())
-}
-
 /// Order book implementation.
 /// It supposed to store monotonic updates, updates that come out of order will be rejected
 ///
@@ -259,9 +248,57 @@ impl OrderBook {
     ///  * buffer_size - size of history buffer to store delta updates, order book updates
     ///    return error if buffer will be full
     pub fn new(update_policy: UpdatePolicy, buffer_size: usize) -> Self {
+        Self::with_sides(
+            update_policy,
+            buffer_size,
+            BookSide::new(Side::Bid),
+            BookSide::new(Side::Ask),
+        )
+    }
+
+    /// Creates a dense book with one preallocated size slot per tick on each side.
+    /// Both inclusive price bounds must be nonnegative multiples of the positive tick size.
+    /// Updates outside this range or off the tick grid are rejected atomically.
+    /// Storage uses O((max_price - min_price) / tick_size) memory per side.
+    ///
+    /// ```
+    /// use fiml::order_book::{OrderBook, UpdatePolicy};
+    /// use rust_decimal::Decimal;
+    ///
+    /// let book = OrderBook::new_dense(
+    ///     UpdatePolicy::Contiguous, 128,
+    ///     Decimal::new(1, 2), // Tick size: 0.01.
+    ///     Decimal::from(90), Decimal::from(110),
+    /// )?;
+    /// assert!(book.best_bid().is_none());
+    /// # Ok::<(), fiml::order_book::OrderBookUpdateError>(())
+    /// ```
+    pub fn new_dense(
+        update_policy: UpdatePolicy,
+        buffer_size: usize,
+        tick_size: Decimal,
+        min_price: Decimal,
+        max_price: Decimal,
+    ) -> Result<Self, OrderBookUpdateError> {
+        let bids = DenseBookSide::new(Side::Bid, tick_size, min_price, max_price)?;
+        let asks = DenseBookSide::new(Side::Ask, tick_size, min_price, max_price)?;
+        Ok(Self::with_sides(
+            update_policy,
+            buffer_size,
+            BookSide::Dense(bids),
+            BookSide::Dense(asks),
+        ))
+    }
+
+    fn with_sides(
+        update_policy: UpdatePolicy,
+        buffer_size: usize,
+        bids: BookSide,
+        asks: BookSide,
+    ) -> Self {
         Self {
-            bids: BookSide::new(Side::Bid),
-            asks: BookSide::new(Side::Ask),
+            bids,
+            asks,
             sync_state: SyncState::AwaitingSnapshot,
             policy: update_policy,
             update_buffer: VecDeque::with_capacity(buffer_size),
@@ -344,7 +381,10 @@ impl OrderBook {
     }
 
     fn prepare_delta_update(&self, delta: &OrderBookDelta) -> PreparedOrderBookUpdate {
-        if let Err(error) = validate_level_update_deltas(delta) {
+        if let Err(error) = delta.changes.iter().try_for_each(|level| {
+            self.book_side(level.side)
+                .validate_level(level.price, level.size)
+        }) {
             return PreparedOrderBookUpdate::reject(error, RejectedUpdateAction::None);
         }
 
@@ -400,7 +440,17 @@ impl OrderBook {
     }
 
     fn prepare_snapshot_update(&self, snapshot: &OrderBookSnapshot) -> PreparedOrderBookUpdate {
-        if let Err(error) = validate_snapshot_update(snapshot) {
+        if let Err(error) = snapshot
+            .bids
+            .iter()
+            .try_for_each(|level| self.bids.validate_level(level.price, level.size))
+            .and_then(|()| {
+                snapshot
+                    .asks
+                    .iter()
+                    .try_for_each(|level| self.asks.validate_level(level.price, level.size))
+            })
+        {
             return PreparedOrderBookUpdate::reject(error, RejectedUpdateAction::None);
         }
         if let Some(previous_snapshot_id) = self.last_snapshot_update_id

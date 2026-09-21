@@ -37,7 +37,17 @@
       "properties": {
         "symbol": { "type": "string", "minLength": 1, "not": { "const": "__global__" } },
         "update_policy": { "enum": ["monotonic", "contiguous"] },
-        "buffer_size": { "type": "integer", "minimum": 0 }
+        "buffer_size": { "type": "integer", "minimum": 0 },
+        "dense": { "$ref": "#/$defs/denseBookConfig" }
+      }
+    },
+    "denseBookConfig": {
+      "type": "object", "additionalProperties": false,
+      "required": ["tick_size", "min_price", "max_price"],
+      "properties": {
+        "tick_size": { "type": "string", "pattern": "^\\+?(?=.*[1-9])(?:[0-9]+(?:\\.[0-9]*)?|\\.[0-9]+)$" },
+        "min_price": { "type": "string", "pattern": "^\\+?(?:[0-9]+(?:\\.[0-9]*)?|\\.[0-9]+)$" },
+        "max_price": { "type": "string", "pattern": "^\\+?(?:[0-9]+(?:\\.[0-9]*)?|\\.[0-9]+)$" }
       }
     },
     "group": {
