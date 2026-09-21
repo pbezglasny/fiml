@@ -198,3 +198,56 @@ fn book_configurations_validate_before_constructing_runtime_state() {
         None
     );
 }
+
+#[test]
+fn dense_configuration_round_trips_and_rejects_invalid_grids() {
+    use fiml::order_book::{OrderBookConfig, UpdatePolicy};
+    use fiml::{FeatureDefinition, FeatureKey};
+    use rust_decimal::dec;
+
+    let symbol = Symbol::new("dense-config").unwrap();
+    let base = FeatureExtractorSpec::new([FeatureDefinition::with_default_id(
+        FeatureKey::OrderBookBestBidPrice { symbol },
+    )])
+    .unwrap();
+    let config = OrderBookConfig::new(symbol, UpdatePolicy::Contiguous, 4);
+    let tree = base.clone().with_order_books([config]).unwrap();
+    assert!(
+        serde_json::to_value(&tree).unwrap()["order_books"][0]
+            .get("dense")
+            .is_none()
+    );
+    let spec = base
+        .clone()
+        .with_order_books([config.with_dense(dec!(0.0100), dec!(99.0), dec!(102.0))])
+        .unwrap();
+    let document = serde_json::to_value(&spec).unwrap();
+    assert_eq!(
+        document["order_books"][0]["dense"],
+        serde_json::json!({
+            "tick_size": "0.01", "min_price": "99", "max_price": "102",
+        })
+    );
+    assert_eq!(
+        serde_json::from_value::<FeatureExtractorSpec>(document.clone()).unwrap(),
+        spec
+    );
+    for invalid in [
+        serde_json::Value::Null,
+        serde_json::json!({"tick_size": 0.01, "min_price": "99", "max_price": "102"}),
+        serde_json::json!({"tick_size": "0.01", "min_price": "99"}),
+        serde_json::json!({"tick_size": "0.01", "min_price": "99", "max_price": "102", "extra": 1}),
+        serde_json::json!({"tick_size": "0", "min_price": "99", "max_price": "102"}),
+        serde_json::json!({"tick_size": "0.01", "min_price": "102", "max_price": "99"}),
+        serde_json::json!({"tick_size": "0.03", "min_price": "99", "max_price": "100"}),
+        serde_json::json!({"tick_size": "0.00000000000000000000000000001", "min_price": "99", "max_price": "102"}),
+    ] {
+        let mut document = document.clone();
+        document["order_books"][0]["dense"] = invalid;
+        assert!(serde_json::from_value::<FeatureExtractorSpec>(document).is_err());
+    }
+    assert!(
+        base.with_order_books([config.with_dense(dec!(0), dec!(99), dec!(102))])
+            .is_err()
+    );
+}

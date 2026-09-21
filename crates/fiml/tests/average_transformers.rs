@@ -178,11 +178,7 @@ fn book_missing_outputs_preserve_history_and_ignore_buffered_updates() {
         id("book"),
     )])
     .unwrap()
-    .with_order_books([OrderBookConfig {
-        symbol,
-        update_policy: UpdatePolicy::Contiguous,
-        buffer_size: 4,
-    }])
+    .with_order_books([OrderBookConfig::new(symbol, UpdatePolicy::Contiguous, 4)])
     .unwrap();
     let mut pipeline = PipelineSpec::new(
         raw,

@@ -188,9 +188,10 @@ flowchart LR
 
 `FeatureExtractor<V>` is the single runtime owner. It uses static dispatch
 through the closed `FeatureDerivation` enum; there are no boxed feature
-trait objects. `handle_event` performs no allocation: it validates the global
-timestamp watermark, runs symbol/kind subscribers, runs always-subscribers,
-and writes directly into `V`.
+trait objects. `handle_event` validates timestamps, runs symbol/kind subscribers,
+runs always-subscribers, and writes directly into `V`. Feature computation reuses
+preallocated storage. BTreeMap order books may allocate for new levels; configured
+dense books preallocate their tick grid and do not allocate during level updates.
 
 Public lookup/read methods are `last_timestamp`, `feature_vector`,
 `feature_ids`, and `feature_index`.

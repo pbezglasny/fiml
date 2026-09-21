@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use rust_decimal::Decimal;
 
-use crate::order_book::{OrderBookConfig, Side, UpdatePolicy};
+use crate::order_book::{DenseBookConfig, OrderBookConfig, Side, UpdatePolicy};
 
 use ::serde::{Deserialize, Deserializer, Serialize, Serializer};
 
@@ -50,6 +50,21 @@ struct OrderBookConfigWire {
     symbol: String,
     update_policy: UpdatePolicy,
     buffer_size: usize,
+    #[serde(
+        default,
+        deserialize_with = "deserialize_present_option",
+        skip_serializing_if = "Option::is_none"
+    )]
+    dense: Option<DenseBookConfigWire>,
+}
+
+/// Exact decimal strings prevent a dense grid from being rounded through floating point.
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DenseBookConfigWire {
+    tick_size: String,
+    min_price: String,
+    max_price: String,
 }
 
 impl FeatureExtractorSpecWire {
@@ -352,6 +367,11 @@ impl TryFrom<&FeatureExtractorSpec> for FeatureExtractorSpecWire {
                     symbol: config.symbol.resolve_as_string(),
                     update_policy: config.update_policy,
                     buffer_size: config.buffer_size,
+                    dense: config.dense.map(|grid| DenseBookConfigWire {
+                        tick_size: grid.tick_size.normalize().to_string(),
+                        min_price: grid.min_price.normalize().to_string(),
+                        max_price: grid.max_price.normalize().to_string(),
+                    }),
                 })
                 .collect(),
         })
@@ -698,11 +718,21 @@ impl TryFrom<FeatureExtractorSpecWire> for FeatureExtractorSpec {
                 if config.symbol.is_empty() {
                     return Err("order-book symbol must not be empty".to_owned());
                 }
-                Ok(OrderBookConfig::new(
-                    Symbol::new(&config.symbol).map_err(|error| error.to_string())?,
-                    config.update_policy,
-                    config.buffer_size,
-                ))
+                Ok(OrderBookConfig {
+                    symbol: Symbol::new(&config.symbol).map_err(|error| error.to_string())?,
+                    update_policy: config.update_policy,
+                    buffer_size: config.buffer_size,
+                    dense: config
+                        .dense
+                        .map(|grid| -> Result<_, String> {
+                            Ok(DenseBookConfig {
+                                tick_size: parse_book_decimal(Some(&grid.tick_size), "tick_size")?,
+                                min_price: parse_book_decimal(Some(&grid.min_price), "min_price")?,
+                                max_price: parse_book_decimal(Some(&grid.max_price), "max_price")?,
+                            })
+                        })
+                        .transpose()?,
+                })
             })
             .collect::<Result<Vec<_>, String>>()?;
         FeatureExtractorSpec::with_metadata(definitions, wire.capacity, wire.checksum)

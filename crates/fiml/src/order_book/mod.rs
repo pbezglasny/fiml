@@ -2,6 +2,10 @@
 
 mod book;
 mod book_side;
+mod dense_book_side;
+
+pub use book_side::{BTreeBookSide, BookSideStorage};
+pub use dense_book_side::{DenseBookConfig, DenseBookSide};
 
 pub(crate) use book::PreparedOrderBookUpdate;
 pub use book::{
@@ -150,6 +154,8 @@ pub struct OrderBookConfig {
     pub update_policy: UpdatePolicy,
     /// Maximum number of deltas retained for synchronization and snapshot replay.
     pub buffer_size: usize,
+    /// Optional preallocated tick grid; omission selects BTreeMap storage.
+    pub dense: Option<DenseBookConfig>,
 }
 
 impl OrderBookConfig {
@@ -163,6 +169,36 @@ impl OrderBookConfig {
             symbol,
             update_policy,
             buffer_size,
+            dense: None,
+        }
+    }
+
+    /// Selects dense storage; grid validity is checked when attaching this configuration to a spec.
+    pub const fn with_dense(
+        mut self,
+        tick_size: Decimal,
+        min_price: Decimal,
+        max_price: Decimal,
+    ) -> Self {
+        self.dense = Some(DenseBookConfig {
+            tick_size,
+            min_price,
+            max_price,
+        });
+        self
+    }
+
+    /// Constructs fresh storage and synchronization state using this configuration.
+    pub fn build(&self) -> Result<OrderBook, OrderBookUpdateError> {
+        match self.dense {
+            Some(grid) => OrderBook::new_dense(
+                self.update_policy,
+                self.buffer_size,
+                grid.tick_size,
+                grid.min_price,
+                grid.max_price,
+            ),
+            None => Ok(OrderBook::new(self.update_policy, self.buffer_size)),
         }
     }
 }

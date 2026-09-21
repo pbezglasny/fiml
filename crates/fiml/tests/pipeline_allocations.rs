@@ -614,3 +614,88 @@ fn grouped_averages_and_staged_averages_never_allocate_during_updates() {
         assert!(pipeline.values().iter().all(|value| value.is_finite()));
     }
 }
+
+#[test]
+fn dense_book_inserts_deletes_and_snapshots_do_not_allocate_in_extractor() {
+    use fiml::{
+        FeatureExtractor,
+        order_book::{
+            OrderBook, OrderBookConfig, OrderBookDelta, OrderBookLevel, OrderBookLevelUpdate,
+            OrderBookSnapshot, Side, UpdatePolicy,
+        },
+    };
+    use rust_decimal::dec;
+
+    let symbol = Symbol::new("dense-book-allocations").unwrap();
+    let book =
+        OrderBook::new_dense(UpdatePolicy::Contiguous, 4, dec!(0.01), dec!(99), dec!(102)).unwrap();
+    let extractor = FeatureExtractor::builder(ArrayFeatureVector::<1>::new())
+        .add_order_book(symbol, book)
+        .add_feature(FeatureDefinition::with_default_id(
+            FeatureKey::OrderBookBestBidPrice { symbol },
+        ))
+        .build()
+        .unwrap();
+    let spec = FeatureExtractorSpec::new([FeatureDefinition::with_default_id(
+        FeatureKey::OrderBookBestBidPrice { symbol },
+    )])
+    .unwrap()
+    .with_order_books([
+        OrderBookConfig::new(symbol, UpdatePolicy::Contiguous, 4).with_dense(
+            dec!(0.01),
+            dec!(99),
+            dec!(102),
+        ),
+    ])
+    .unwrap();
+    let extractors = vec![
+        extractor,
+        spec.build(ArrayFeatureVector::<1>::new()).unwrap(),
+    ];
+    #[cfg(feature = "serde")]
+    let extractors = {
+        let mut extractors = extractors;
+        let restored: FeatureExtractorSpec =
+            serde_json::from_str(&serde_json::to_string(&spec).unwrap()).unwrap();
+        assert_eq!(restored, spec);
+        extractors.push(restored.build(ArrayFeatureVector::<1>::new()).unwrap());
+        extractors
+    };
+    for mut extractor in extractors {
+        let events = [
+            Event::order_book_snapshot(
+                symbol,
+                0,
+                OrderBookSnapshot::new(0, vec![OrderBookLevel::new(dec!(100), dec!(2))], vec![]),
+            ),
+            Event::order_book_delta(
+                symbol,
+                1,
+                OrderBookDelta::new(
+                    1,
+                    vec![OrderBookLevelUpdate::new(Side::Bid, dec!(101), dec!(3))],
+                ),
+            ),
+            Event::order_book_delta(
+                symbol,
+                2,
+                OrderBookDelta::new(
+                    2,
+                    vec![OrderBookLevelUpdate::new(Side::Bid, dec!(101), dec!(0))],
+                ),
+            ),
+            Event::order_book_snapshot(
+                symbol,
+                3,
+                OrderBookSnapshot::new(3, vec![OrderBookLevel::new(dec!(99), dec!(1))], vec![]),
+            ),
+        ];
+        let allocations = count_allocations(|| {
+            for (event, expected) in events.into_iter().zip([100.0, 101.0, 100.0, 99.0]) {
+                extractor.handle_event(event).unwrap();
+                assert_eq!(extractor.feature_vector().values(), &[expected]);
+            }
+        });
+        assert_eq!(allocations, 0);
+    }
+}

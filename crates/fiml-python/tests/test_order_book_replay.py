@@ -222,3 +222,34 @@ def test_missing_duplicate_and_global_configuration_fail_before_replay():
         with pytest.raises(ValueError):
             spec.configure_order_book(symbol, update_policy=policy, buffer_size=1)
         assert spec.to_json() == before
+
+
+@pytest.mark.parametrize("model", [False, True])
+def test_dense_json_configuration_selects_storage_and_preserves_grid(model):
+    from jsonschema import Draft202012Validator
+
+    spec = (fiml.FeatureExtractorSpec()
+            .configure_order_book("btc", update_policy="contiguous", buffer_size=4)
+            .order_book_best_bid_price("btc"))
+    document = json.loads(spec.to_json())
+    grid = {"tick_size": "0.01", "min_price": "99", "max_price": "102"}
+    document["order_books"][0]["dense"] = grid
+    schema = json.loads((Path(__file__).parents[3] / "docs/feature-extractor-spec.schema.json").read_text())
+    validator = Draft202012Validator(schema)
+    validator.validate(document)
+    restored = fiml.FeatureExtractorSpec.from_json(json.dumps(document))
+    assert json.loads(restored.to_json())["order_books"][0]["dense"] == grid
+    instance = (fiml.ModelInputPipeline(fiml.PipelineSpec(restored).identity(restored.feature_ids()[0]))
+                if model else fiml.FeatureExtractor(restored))
+    instance.update_order_book(fiml.OrderBookEvent.snapshot("btc", 0, 0, [("100", "2")], []))
+    instance.update_order_book(fiml.OrderBookEvent.delta("btc", 1, 1, [("bid", "101", "3")]))
+    np.testing.assert_equal(instance.values(), [101])
+    for price in ["101.001", "103"]:
+        with pytest.raises(ValueError, match="invalid Bid level"):
+            instance.update_order_book(fiml.OrderBookEvent.delta("btc", 2, 2, [("bid", price, "1")]))
+        np.testing.assert_equal(instance.values(), [101])
+    for invalid in [None, {}, {**grid, "tick_size": 0.01}, {**grid, "tick_size": "0"}, {**grid, "extra": 1}]:
+        document["order_books"][0]["dense"] = invalid
+        assert list(validator.iter_errors(document))
+        with pytest.raises(ValueError):
+            fiml.FeatureExtractorSpec.from_json(json.dumps(document))
