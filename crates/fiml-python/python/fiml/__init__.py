@@ -22,8 +22,10 @@ from ._fiml import (
 )
 from ._fiml import FeatureExtractor as _FeatureExtractor
 from ._fiml import ModelInputPipeline as _ModelInputPipeline
+from ._targets import future_value
 
 __all__ = [
+    "future_value",
     "FeatureExtractor",
     "FeatureExtractorSpec",
     "OrderBookEvent",

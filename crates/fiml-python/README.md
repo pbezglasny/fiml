@@ -53,7 +53,8 @@ pip install "./crates/fiml-python[pandas]"
 `pip` invokes the maturin build backend declared in `pyproject.toml`, compiles
 the Rust extension, and installs the `fiml` package with its only runtime
 dependency (`numpy`). The `pandas` extra installs pandas ≥ 2.0 for the
-trade-DataFrame `compute_features` API; low-level NumPy users can omit it.
+trade-DataFrame `compute_features` and time-horizon `future_value` APIs;
+low-level NumPy users can omit it.
 
 Installing straight from git also works:
 
@@ -169,6 +170,90 @@ aggressors. The complete frame is validated before the extractor changes.
 `numpy.float64` and applies to `values`, `transform`, and feature DataFrame
 columns. Calculation state remains `float64`. The property can be changed until
 the first event is processed and is then locked.
+
+## Time-horizon training targets
+
+`fiml.future_value` generates offline labels separately from feature replay.
+Pass one instrument/state stream, sorted by timestamp, at a time. For a row
+at `t`, the default `direction="backward"` selects the last observed value
+at or before `t + horizon`. Use `direction="forward"` explicitly for the first
+event at or after that time. These are elapsed-time lookups, not row shifts.
+
+```python
+import numpy as np
+import pandas as pd
+import fiml
+
+# Work within one chronological dataset partition and one instrument.
+trades = pd.DataFrame({
+    "symbol": ["BTCUSDT"] * 5,
+    "ts": [0, 200, 490, 700, 1100],  # Unix milliseconds
+    "price": [100.0, 100.1, 100.2, 100.4, 100.3],
+    "volume": [1.0] * 5,
+})
+raw = fiml.FeatureExtractorSpec().field(
+    "BTCUSDT", source="trade_price", id="price",
+)
+spec = fiml.PipelineSpec(raw).sma("price", window=2, output="sma2")
+pipeline = fiml.ModelInputPipeline(spec)
+features = pipeline.compute_features(trades)
+future = fiml.future_value(
+    trades, timestamp_column="ts", value_column="price", horizon="500ms",
+)
+target_change = future - trades["price"]
+target_return = future / trades["price"] - 1
+target_log_return = np.log(future / trades["price"])
+
+epsilon = 0.001
+target_class = (
+    (target_return > epsilon).astype(float)
+    - (target_return < -epsilon).astype(float)
+).where(target_return.notna())  # Keep unavailable labels missing.
+
+# Explicitly select model inputs; targets never enter the feature spec.
+X = features[pipeline.feature_names()]
+valid = target_return.notna() & X.notna().all(axis=1)
+X_train, y_train = X.loc[valid], target_return.loc[valid]
+# model.fit(X_train, y_train)
+```
+
+The returned Series is named `future_value` and preserves the original index,
+including duplicate index labels. The input is never modified. Unsorted or
+null timestamps are rejected. Timestamp columns may contain pandas datetimes
+(including timezones), or integer Unix timestamps with `timestamp_unit="s"`,
+`"ms"` (default), `"us"`, or `"ns"`. Lookup retains nanosecond precision;
+floating-point/string timestamps are rejected. Horizons and tolerances accept
+nonnegative duration strings or timedelta objects. Out-of-range datetime
+arithmetic raises an error instead of wrapping.
+
+For duplicate timestamps, backward lookup chooses the last input row and
+forward lookup chooses the first, including exact matches and zero horizons.
+Matched null values stay null. A target time beyond the stream's last timestamp
+is missing in both modes, even when backward lookup could reuse an older value.
+Use `tolerance="100ms"` to reject stale backward matches or distant forward
+matches. Observation coverage is defined by the input's first/last timestamps.
+
+Inspect matches or generate several horizons with the same primitive:
+
+```python
+details = fiml.future_value(
+    trades, timestamp_column="ts", value_column="price", horizon="500ms",
+    tolerance="100ms", return_details=True,
+)
+# Columns: timestamp (original), target_time, matched_timestamp, future_value.
+# Lookup timestamps are datetimes; invalid matches have NaT and a missing value.
+targets = pd.DataFrame({
+    f"target_return_{horizon}": fiml.future_value(
+        trades, timestamp_column="ts", value_column="price", horizon=horizon,
+    ) / trades["price"] - 1
+    for horizon in ["100ms", "500ms", "1s"]
+})
+```
+
+Generate targets within each chronological training/validation/test partition
+so training labels cannot reach into a later partition. Fit preprocessing only
+on training rows. For multiple instruments, call the helper on each instrument's
+stream separately; it does not infer grouping from a symbol column.
 
 ## Feature-vector specs
 
