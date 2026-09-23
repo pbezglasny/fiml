@@ -621,6 +621,37 @@ See `examples/order_book_replay.py` for a runnable serialized pipeline example;
 `tests/fixtures/order_book_replay.json` is replayed by both Rust and Python tests
 with exact float64 expectations, including errors and missing values.
 
+### Binance depth stream example
+
+[`examples/binance_depth.py`](examples/binance_depth.py) loads the included real
+BTCUSDT recording, converts messages to `OrderBookEvent.snapshot`, and builds a
+`ModelInputPipeline` with mid-price, spread, spread in basis points, microprice,
+imbalance at 1/5/20 levels, best bid size, and previous-snapshot imbalance.
+Run from the repository root; output is a CSV feature matrix:
+
+```sh
+uv run --with ./crates/fiml-python python crates/fiml-python/examples/binance_depth.py
+```
+
+To record 30 fresh messages and replay the saved file:
+
+```sh
+uv run --with ./crates/fiml-python --with websockets python crates/fiml-python/examples/binance_depth.py --capture 30 --file /tmp/depth.jsonl
+uv run --with ./crates/fiml-python python crates/fiml-python/examples/binance_depth.py --file /tmp/depth.jsonl
+```
+
+Capture refuses to overwrite an existing file. `websockets` is needed only for
+capture. Each JSONL record preserves the source URL and raw payload plus
+`received_at_ms` (local receive time, since partial depth has no exchange time).
+Prices and quantities remain decimal strings. Replay keeps file order and skips
+repeated/older update IDs; the first lagged output is `NaN`.
+
+The [Binance partial-depth stream](https://github.com/binance/binance-spot-api-docs/blob/master/web-socket-streams.md#partial-book-depth-streams)
+`btcusdt@depth20@100ms` replaces the top 20 bids and asks on each update. Features
+therefore describe only those levels. This example uses snapshots with no delta
+buffer. Full-book replay requires the separate diff-depth stream, a REST snapshot,
+and validation of Binance's `U`/`u` update ranges before applying deltas.
+
 ## Determinism rules (read these)
 
 To guarantee identical output between Python (batch) and Rust (live):
