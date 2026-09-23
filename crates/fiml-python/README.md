@@ -692,3 +692,66 @@ warm-up without supplying a sample; other symbols and global Time ticks leave
 them unchanged. Global calendar/session features use the maximum accepted
 timestamp, so older events for another symbol cannot move their day backward.
 Pipeline transformations run in accepted-event arrival order.
+
+## Externally supplied context
+
+Register precomputed values alongside live features. Context names must be
+nonempty; use `"__global__"` for shared context or a market symbol for per-market
+values. Custom IDs are optional; updates always address registered feature IDs.
+
+```python
+raw = (fiml.FeatureExtractorSpec()
+       .field("BTCUSDT", source="trade_price", id="price")
+       .context("BTCUSDT", "previous_day_high", id="previous_day_high")
+       .context("__global__", "previous_day_volume", id="previous_day_volume"))
+extractor = fiml.FeatureExtractor(raw)
+extractor.update_context({"previous_day_high": 105.0, "previous_day_volume": 2000.0})
+```
+
+`FeatureExtractor` and `ModelInputPipeline` both expose `update_context(dict)`.
+Each call is an atomic partial replacement: omitted IDs retain their values,
+`None` clears a value to NaN, and an empty dictionary does nothing. Unknown IDs,
+non-context IDs, and non-finite numbers are rejected before any writes. Context
+starts as NaN and is retained across market events. A nonempty successful update
+locks runtime configuration just as event processing does.
+
+Pipeline values refresh immediately through stateless transformations, including
+scaling, selection, imputation, and PCA. Context updates leave timestamps, order
+books, indicators, and stateful transformer outputs unchanged. Context never
+counts as an SMA/EMA observation. Event lags sample the held context on actual
+events; context updates themselves do not advance lags. Supply averages of daily
+context snapshots as additional precomputed context values.
+
+For NumPy replay, supply an optional schedule to `transform`,
+`transform_order_book`, `fit`, or `fit_transform`:
+
+```python
+context_updates = {
+    0: {"previous_day_high": 105.0},
+    2500: {"previous_day_high": 108.0},
+}
+# kind, symbol, timestamp contain at least 2501 event rows.
+matrix = extractor.transform(kind, symbol, timestamp, price=price,
+                             volume=volume, context_updates=context_updates)
+```
+
+Schedule keys are zero-based event-row indices within that call. Updates apply
+immediately before the corresponding event and produce no additional rows. The
+entire schedule is validated before replay. Fitting reapplies it in every cold
+replay, including rows excluded by `fit_mask`; failed refits preserve live state.
+Specs serialize definitions only. New runtimes and `ModelInputPipeline.reset()`
+clear context values.
+
+For chunked DataFrame extraction, update context explicitly between chunks:
+
+```python
+extractor.update_context({"previous_day_high": yesterday_high})
+first = extractor.compute_features(first_chunk)
+extractor.update_context({"previous_day_high": next_previous_day_high})
+second = extractor.compute_features(second_chunk)
+features = pd.concat([first, second])
+```
+
+Split chunks at context availability boundaries. Callers own availability timing,
+day/session boundaries, and replacement or clearing of stale values; there is no
+automatic expiry, timestamp join, or historical-data fetching.

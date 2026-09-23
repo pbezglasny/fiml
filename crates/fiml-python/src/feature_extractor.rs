@@ -2,7 +2,7 @@
 
 use fiml::FeatureVector;
 use numpy::PyReadonlyArray1;
-use pyo3::prelude::*;
+use pyo3::{prelude::*, types::PyDict};
 
 use crate::feature_extractor_spec::FeatureExtractorSpec;
 use crate::order_book::OrderBookEvent;
@@ -44,6 +44,11 @@ impl FeatureExtractor {
 
 #[pymethods]
 impl FeatureExtractor {
+    /// Replace context values atomically without advancing market-event state.
+    fn update_context(&mut self, updates: &Bound<'_, PyDict>) -> PyResult<()> {
+        self.driver.update_context(updates)
+    }
+
     /// Applies a validated snapshot/delta, preserving core synchronization semantics.
     fn update_order_book(&mut self, event: PyRef<'_, OrderBookEvent>) -> PyResult<()> {
         self.driver.update_order_book(&event)
@@ -52,12 +57,15 @@ impl FeatureExtractor {
     /// Prevalidates symbols/timestamps, then replays book events sequentially.
     /// A state-dependent error reports row N; prior rows remain applied and later
     /// rows are skipped. The rejected row retains core resynchronization effects.
+    #[pyo3(signature = (events, *, context_updates=None))]
     fn transform_order_book(
         &mut self,
         py: Python<'_>,
         events: Vec<PyRef<'_, OrderBookEvent>>,
+        context_updates: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<Py<PyAny>> {
-        self.driver.transform_order_book(py, events)
+        self.driver
+            .transform_order_book(py, events, context_updates)
     }
 
     /// Build an extractor directly from a [`FeatureExtractorSpec`].
@@ -195,7 +203,8 @@ impl FeatureExtractor {
         volume=None,
         side=None,
         bid=None,
-        ask=None
+        ask=None,
+        context_updates=None
     ))]
     #[allow(clippy::too_many_arguments)] // payload columns are the Python keyword API
     fn transform<'py>(
@@ -209,8 +218,19 @@ impl FeatureExtractor {
         side: Option<PyReadonlyArray1<'py, u8>>,
         bid: Option<PyReadonlyArray1<'py, f64>>,
         ask: Option<PyReadonlyArray1<'py, f64>>,
+        context_updates: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<Py<PyAny>> {
-        self.driver
-            .transform(py, kind, symbol, timestamp, price, volume, side, bid, ask)
+        self.driver.transform(
+            py,
+            kind,
+            symbol,
+            timestamp,
+            price,
+            volume,
+            side,
+            bid,
+            ask,
+            context_updates,
+        )
     }
 }

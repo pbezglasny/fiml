@@ -143,6 +143,12 @@ struct OptionsWire {
         deserialize_with = "deserialize_present_option",
         skip_serializing_if = "Option::is_none"
     )]
+    name: Option<String>,
+    #[serde(
+        default,
+        deserialize_with = "deserialize_present_option",
+        skip_serializing_if = "Option::is_none"
+    )]
     side: Option<String>,
     #[serde(
         default,
@@ -200,7 +206,10 @@ impl OptionsWire {
     }
 
     fn is_empty(&self) -> bool {
-        self.aggregation.is_none() && self.utc_offset.is_none() && !self.has_book_parameters()
+        self.name.is_none()
+            && self.aggregation.is_none()
+            && self.utc_offset.is_none()
+            && !self.has_book_parameters()
     }
 }
 
@@ -254,8 +263,9 @@ where
     T::deserialize(deserializer).map(Some)
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum IndicatorIdentity {
+    Context(String),
     OrderBook(&'static str),
     OrderBookQuery(FeatureKey),
     Field(EventField),
@@ -324,7 +334,8 @@ impl TryFrom<&FeatureExtractorSpec> for FeatureExtractorSpecWire {
             {
                 if matches!(
                     identity,
-                    IndicatorIdentity::OrderBookQuery(_)
+                    IndicatorIdentity::Context(_)
+                        | IndicatorIdentity::OrderBookQuery(_)
                         | IndicatorIdentity::DayOfWeek(_)
                         | IndicatorIdentity::TimeSinceFirstEventOfDay(_, _)
                 ) || matches!(identity, IndicatorIdentity::OrderBook(kind) if kind != "order_book_imbalance")
@@ -410,6 +421,31 @@ fn serialize_definition(
     let default_id = FeatureId::from_feature_key(&definition.key);
     let id = (definition.id != default_id).then(|| definition.id.as_str().to_owned());
     let (identity, kind, source, warmup_policy, options, window) = match definition.key {
+        FeatureKey::Context { ref name, .. } => {
+            crate::features::compiler::validate_key(&definition.key)
+                .map_err(|error| error.to_string())?;
+            return Ok((
+                IndicatorIdentity::Context(name.clone()),
+                IndicatorWire {
+                    kind: "context".into(),
+                    source: SourceWire {
+                        source_type: "context".into(),
+                        event: None,
+                        field: None,
+                    },
+                    warmup_policy: None,
+                    options: Some(OptionsWire {
+                        name: Some(name.clone()),
+                        ..OptionsWire::default()
+                    }),
+                    outputs: None,
+                },
+                OutputWire {
+                    id,
+                    ..OutputWire::default()
+                },
+            ));
+        }
         FeatureKey::OrderBookBestBidPrice { .. }
         | FeatureKey::OrderBookBestBidSize { .. }
         | FeatureKey::OrderBookBestAskPrice { .. }
@@ -428,7 +464,7 @@ fn serialize_definition(
         | FeatureKey::OrderBookWeightedMidPrice { .. }
         | FeatureKey::OrderBookMicroprice { .. }
         | FeatureKey::OrderBookImbalance { .. } => {
-            return serialize_order_book_definition(definition.key, id);
+            return serialize_order_book_definition(definition.key.clone(), id);
         }
         FeatureKey::Field { field, .. } => (
             IndicatorIdentity::Field(field),
@@ -786,6 +822,28 @@ fn deserialize_indicator(
         None => vec![OutputWire::default()],
     };
 
+    if indicator.kind == "context" {
+        reject_warmup(&indicator)?;
+        if indicator.source.source_type != "context"
+            || indicator.source.event.is_some()
+            || indicator.source.field.is_some()
+        {
+            return Err("context requires a context source without event or field".into());
+        }
+        let mut remaining = options.clone();
+        let name = remaining
+            .name
+            .take()
+            .ok_or("context requires options.name")?;
+        require_empty_options("context", &remaining)?;
+        let key = FeatureKey::Context { symbol, name };
+        crate::features::compiler::validate_key(&key).map_err(|error| error.to_string())?;
+        definitions.push(scalar_definition(key, outputs, "context")?);
+        return Ok(());
+    }
+    if options.name.is_some() {
+        return Err("only context allows options.name".into());
+    }
     if indicator.source.source_type == "order_book" {
         return deserialize_order_book_indicator(symbol, &indicator, outputs, definitions);
     }
@@ -1119,7 +1177,7 @@ fn serialize_order_book_definition(
     key: FeatureKey,
     id: Option<String>,
 ) -> Result<(IndicatorIdentity, IndicatorWire, OutputWire), String> {
-    let query = order_book_query_options(key);
+    let query = order_book_query_options(key.clone());
     if query.is_some() {
         crate::features::compiler::validate_key(&key).map_err(|error| error.to_string())?;
     }
@@ -1246,7 +1304,7 @@ fn deserialize_order_book_indicator(
     };
     if let Some(key) = query {
         crate::features::compiler::validate_key(&key).map_err(|error| error.to_string())?;
-        let (_, expected) = order_book_query_options(key).expect("query key");
+        let (_, expected) = order_book_query_options(key.clone()).expect("query key");
         // Compare parameter presence; decimal strings may use different scales.
         if options.aggregation.is_some()
             || options.utc_offset.is_some()
@@ -1369,7 +1427,8 @@ fn require_empty_options(kind: &str, options: &OptionsWire) -> Result<(), String
 
 fn symbol_of(key: &FeatureKey) -> Symbol {
     match key {
-        FeatureKey::Field { symbol, .. }
+        FeatureKey::Context { symbol, .. }
+        | FeatureKey::Field { symbol, .. }
         | FeatureKey::OrderBookBestBidPrice { symbol, .. }
         | FeatureKey::OrderBookBestBidSize { symbol, .. }
         | FeatureKey::OrderBookBestAskPrice { symbol, .. }

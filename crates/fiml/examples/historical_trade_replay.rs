@@ -127,7 +127,8 @@ fn build_extractor(
         },
     ];
 
-    let raw = FeatureExtractorSpec::new(definitions.map(FeatureDefinition::with_default_id))?;
+    let raw =
+        FeatureExtractorSpec::new(definitions.clone().map(FeatureDefinition::with_default_id))?;
     let price = FeatureId::from(&definitions[0]);
     let volume = FeatureId::from(&definitions[1]);
     PipelineSpec::new(

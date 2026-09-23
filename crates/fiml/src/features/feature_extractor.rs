@@ -321,6 +321,7 @@ where
     output_ranges: Box<[OutputRange]>,
     /// User-facing IDs in feature-vector index order.
     feature_ids: Box<[FeatureId]>,
+    context_slots: Box<[bool]>,
     event_router: EventRouter,
     order_books: OrderBookStorage,
     last_timestamp: Option<i64>,
@@ -375,12 +376,50 @@ where
             features: compilation.features,
             output_ranges: compilation.output_ranges,
             feature_ids: compilation.feature_ids,
+            context_slots: compilation.context_slots,
             event_router: compilation.event_router,
             order_books,
             last_timestamp: None,
             symbol_timestamps: vec![None; usize::from(MAX_SYMBOL_NUMBER)].into_boxed_slice(),
             max_timestamp: None,
         })
+    }
+
+    /// Validates an entire context update without changing runtime state.
+    pub fn validate_context(&self, updates: &[(&str, Option<f64>)]) -> Result<()> {
+        for (index, &(id, value)) in updates.iter().enumerate() {
+            let reason = match self.index_of_id(id) {
+                None => Some("unknown feature ID"),
+                Some(slot) if !self.context_slots[slot] => Some("target is not a context feature"),
+                _ if updates[..index].iter().any(|(previous, _)| *previous == id) => {
+                    Some("duplicate feature ID")
+                }
+                _ if value.is_some_and(|value| !value.is_finite()) => {
+                    Some("context value must be finite or None")
+                }
+                _ => None,
+            };
+            if let Some(reason) = reason {
+                return Err(FimlError::InvalidContextUpdate { index, reason });
+            }
+        }
+        Ok(())
+    }
+
+    /// Atomically replaces selected context values; `None` clears a value to NaN.
+    /// Does not advance timestamps, order books, or observation histories.
+    pub fn update_context(&mut self, updates: &[(&str, Option<f64>)]) -> Result<()> {
+        self.validate_context(updates)?;
+        if updates.is_empty() {
+            return Ok(());
+        }
+        self.observations.fill(false);
+        for &(id, value) in updates {
+            let slot = self.index_of_id(id).unwrap();
+            self.feature_vector
+                .set_value_at(slot, value.unwrap_or(f64::NAN));
+        }
+        Ok(())
     }
 
     /// Starts configuring an extractor using the supplied output storage.
@@ -586,7 +625,13 @@ where
 
     /// Resolve a feature ID to its output-vector index.
     pub fn feature_index(&self, feature_id: &FeatureId) -> Option<usize> {
-        self.feature_ids.iter().position(|id| id == feature_id)
+        self.index_of_id(feature_id.as_str())
+    }
+
+    fn index_of_id(&self, id: &str) -> Option<usize> {
+        self.feature_ids
+            .iter()
+            .position(|feature| feature.as_str() == id)
     }
 
     /// Return order book of given symbol
@@ -1135,6 +1180,7 @@ mod tests {
         let mut vector = FeatureExtractor::<ArrayFeatureVector<2>> {
             feature_vector: ArrayFeatureVector::new(),
             observations: vec![false; 2].into_boxed_slice(),
+            context_slots: vec![false; 2].into_boxed_slice(),
             features,
             output_ranges,
             feature_ids: vec![FeatureId::new("day")].into_boxed_slice(),

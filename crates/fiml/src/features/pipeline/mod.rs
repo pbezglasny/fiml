@@ -40,6 +40,25 @@ where
     #[must_use = "event errors must be handled before using updated model-input values"]
     pub fn handle_event(&mut self, event: Event) -> Result<UpdateResult> {
         let update_result = self.feature_extractor.handle_event(event)?;
+        self.refresh(true);
+        Ok(update_result)
+    }
+
+    /// Validates context IDs and values without changing runtime state.
+    pub fn validate_context(&self, updates: &[(&str, Option<f64>)]) -> Result<()> {
+        self.feature_extractor.validate_context(updates)
+    }
+
+    /// Replaces context and refreshes stateless stages without advancing histories.
+    pub fn update_context(&mut self, updates: &[(&str, Option<f64>)]) -> Result<()> {
+        self.feature_extractor.update_context(updates)?;
+        if !updates.is_empty() {
+            self.refresh(false);
+        }
+        Ok(())
+    }
+
+    fn refresh(&mut self, advance: bool) {
         let observed = self.feature_extractor.observations();
         self.observations.fill(false);
         let raw_values = self.feature_extractor.feature_vector().values();
@@ -51,9 +70,10 @@ where
                     observed,
                     &mut stages.input,
                     &mut stages.observations,
+                    advance,
                 );
             }
-            stages.apply(&mut self.model_vector, &mut self.observations);
+            stages.apply(&mut self.model_vector, &mut self.observations, advance);
         } else {
             for operation in &mut self.operations {
                 operation.apply(
@@ -61,10 +81,10 @@ where
                     observed,
                     &mut self.model_vector,
                     &mut self.observations,
+                    advance,
                 );
             }
         }
-        Ok(update_result)
     }
 
     /// Returns visible book state for inspection and ingestion validation.

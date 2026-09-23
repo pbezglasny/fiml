@@ -1,0 +1,158 @@
+{
+  "pipeline": {
+    "version": "3.0",
+    "feature_extractor": {
+      "version": "2.0",
+      "capacity": 2,
+      "length": 2,
+      "required_events": [
+        {
+          "symbol": "btc",
+          "event": "price"
+        }
+      ],
+      "features": [
+        {
+          "symbol": "btc",
+          "indicators": [
+            {
+              "kind": "field",
+              "source": {
+                "type": "field",
+                "event": "price",
+                "field": "value"
+              },
+              "outputs": [
+                {
+                  "id": "price"
+                }
+              ]
+            },
+            {
+              "kind": "context",
+              "source": {
+                "type": "context"
+              },
+              "options": {
+                "name": "previous_day_high"
+              },
+              "outputs": [
+                {
+                  "id": "high"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "model_input": {
+      "capacity": 4,
+      "length": 4,
+      "transformations": [
+        {
+          "type": "identity",
+          "input": "high",
+          "output": "high"
+        },
+        {
+          "type": "lagged",
+          "input": "high",
+          "output": "lag",
+          "lag_window": 1
+        },
+        {
+          "type": "sma",
+          "input": "price",
+          "output": "sma",
+          "window": 2,
+          "warmup_policy": "full_window"
+        },
+        {
+          "type": "ema",
+          "input": "high",
+          "output": "context_ema",
+          "window": 1,
+          "warmup_policy": "full_window"
+        }
+      ],
+      "stages": []
+    }
+  },
+  "steps": [
+    {
+      "context": {
+        "high": 100.0
+      },
+      "timestamp": 0,
+      "price": 10.0,
+      "expected": [
+        100.0,
+        null,
+        null,
+        null
+      ]
+    },
+    {
+      "context": {},
+      "timestamp": 1,
+      "price": 20.0,
+      "expected": [
+        100.0,
+        100.0,
+        15.0,
+        null
+      ]
+    },
+    {
+      "context": {
+        "high": 300.0
+      },
+      "timestamp": 2,
+      "price": 30.0,
+      "expected": [
+        300.0,
+        100.0,
+        25.0,
+        null
+      ]
+    },
+    {
+      "context": {},
+      "timestamp": 3,
+      "price": 40.0,
+      "expected": [
+        300.0,
+        300.0,
+        35.0,
+        null
+      ]
+    },
+    {
+      "context": {
+        "high": null
+      },
+      "timestamp": 4,
+      "price": 50.0,
+      "expected": [
+        null,
+        300.0,
+        45.0,
+        null
+      ]
+    },
+    {
+      "context": {
+        "high": 500.0
+      },
+      "timestamp": 5,
+      "price": 60.0,
+      "expected": [
+        500.0,
+        null,
+        55.0,
+        null
+      ]
+    }
+  ]
+}
