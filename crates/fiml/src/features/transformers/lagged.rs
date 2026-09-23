@@ -9,6 +9,8 @@ pub(crate) struct LaggedFeature {
     // Each pair contains a positive lag window and its output index.
     outputs: Box<[(usize, usize)]>,
     buffer: HeapRingBuffer<f64>,
+    // Stage scratch is reused, so refreshes must restore our own last outputs.
+    visible: Box<[f64]>,
 }
 
 impl LaggedFeature {
@@ -30,11 +32,19 @@ impl LaggedFeature {
             "Lag windows must be positive"
         );
         let max_window_size = *windows.iter().max().unwrap();
+        let visible = vec![f64::NAN; windows.len()].into_boxed_slice();
         let outputs = windows.into_iter().zip(output_indices).collect();
         Self {
             input_index,
             outputs,
+            visible,
             buffer: HeapRingBuffer::new(max_window_size),
+        }
+    }
+
+    pub(super) fn refresh<V: FeatureVector>(&self, output: &mut V) {
+        for ((_, index), value) in self.outputs.iter().zip(&self.visible) {
+            output.set_value_at(*index, *value);
         }
     }
 
@@ -51,8 +61,9 @@ impl LaggedFeature {
     }
 
     pub(super) fn apply<V: FeatureVector>(&mut self, input_values: &[f64], output_vector: &mut V) {
-        for (window, output_idx) in &self.outputs {
+        for ((window, output_idx), visible) in self.outputs.iter().zip(self.visible.iter_mut()) {
             if let Some(value) = self.buffer.peek_back_at(*window - 1) {
+                *visible = *value;
                 output_vector.set_value_at(*output_idx, *value);
             }
         }

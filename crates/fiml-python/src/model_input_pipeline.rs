@@ -2,6 +2,7 @@
 
 use fiml::{PipelineSpec as CorePipelineSpec, VecFeatureVector};
 use numpy::PyReadonlyArray1;
+use pyo3::types::PyDict;
 use pyo3::{exceptions::PyValueError, prelude::*};
 
 use crate::order_book::OrderBookEvent;
@@ -49,10 +50,15 @@ impl ModelInputPipeline {
 
 #[pymethods]
 impl ModelInputPipeline {
-    /// Whether accepted events have advanced this runtime, for Python recipe locking.
+    /// Replace context values atomically without advancing market-event state.
+    fn update_context(&mut self, updates: &Bound<'_, PyDict>) -> PyResult<()> {
+        self.driver.update_context(updates)
+    }
+
+    /// Whether an accepted event or context update has locked the Python recipe.
     #[getter]
     fn _has_events(&self) -> bool {
-        self.driver.inner.last_timestamp().is_some()
+        self.driver.has_updates()
     }
 
     /// Applies a validated snapshot/delta, preserving core synchronization semantics.
@@ -63,12 +69,15 @@ impl ModelInputPipeline {
     /// Prevalidates symbols/timestamps, then replays book events sequentially.
     /// A state-dependent error reports row N; prior rows remain applied and later
     /// rows are skipped. The rejected row retains core resynchronization effects.
+    #[pyo3(signature = (events, *, context_updates=None))]
     fn transform_order_book(
         &mut self,
         py: Python<'_>,
         events: Vec<PyRef<'_, OrderBookEvent>>,
+        context_updates: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<Py<PyAny>> {
-        self.driver.transform_order_book(py, events)
+        self.driver
+            .transform_order_book(py, events, context_updates)
     }
 
     /// Compile a validated model-input spec into an independent runtime.
@@ -181,7 +190,8 @@ impl ModelInputPipeline {
         volume=None,
         side=None,
         bid=None,
-        ask=None
+        ask=None,
+        context_updates=None
     ))]
     #[allow(clippy::too_many_arguments)]
     fn transform<'py>(
@@ -195,8 +205,19 @@ impl ModelInputPipeline {
         side: Option<PyReadonlyArray1<'py, u8>>,
         bid: Option<PyReadonlyArray1<'py, f64>>,
         ask: Option<PyReadonlyArray1<'py, f64>>,
+        context_updates: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<Py<PyAny>> {
-        self.driver
-            .transform(py, kind, symbol, timestamp, price, volume, side, bid, ask)
+        self.driver.transform(
+            py,
+            kind,
+            symbol,
+            timestamp,
+            price,
+            volume,
+            side,
+            bid,
+            ask,
+            context_updates,
+        )
     }
 }

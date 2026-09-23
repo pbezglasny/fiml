@@ -42,6 +42,10 @@ impl From<&FeatureKey> for FeatureId {
 
 fn write_feature_key(id: &mut String, key: &FeatureKey) -> fmt::Result {
     match key {
+        FeatureKey::Context { symbol, name } => {
+            write_prefix(id, "context", *symbol, "context")?;
+            write!(id, ":name={}:{}", name.len(), name)
+        }
         FeatureKey::OrderBookBestBidPrice { symbol } => {
             write_prefix(id, "order_book_best_bid_price", *symbol, "order_book")
         }

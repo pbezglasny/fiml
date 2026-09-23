@@ -72,6 +72,13 @@ pub type Result<T> = std::result::Result<T, FimlError>;
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum FimlError {
+    /// An atomic context update failed before any values were written.
+    InvalidContextUpdate {
+        /// Zero-based index in the supplied update slice.
+        index: usize,
+        /// Allocation-free diagnostic describing the invalid target or value.
+        reason: &'static str,
+    },
     /// An argument failed validation.
     InvalidArgument(InvalidArgumentError),
     /// The lower price bound is not below the upper bound.
@@ -324,6 +331,8 @@ pub enum IntegerTarget {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum IndicatorKind {
+    /// Externally supplied context value.
+    Context,
     /// Raw scalar event field.
     Field,
     /// Highest bid price.
@@ -398,6 +407,8 @@ pub enum IndicatorKind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum InvalidIndicatorDefinitionError {
+    /// A context name must contain at least one character.
+    EmptyContextName,
     /// An order-book query uses a negative price.
     OrderBookPriceNegative,
     /// An order-book target size is zero or negative.
@@ -514,6 +525,9 @@ pub enum DefinitionDurationField {
 impl Display for FimlError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::InvalidContextUpdate { index, reason } => {
+                write!(f, "context update {index}: {reason}")
+            }
             FimlError::InvalidPipelineStage { index, reason } => {
                 write!(f, "invalid pipeline stage {index}: {reason}")
             }
@@ -743,6 +757,7 @@ impl Display for IndicatorKind {
             Self::OrderBookWeightedMidPrice => "order-book weighted mid-price",
             Self::OrderBookMicroprice => "order-book microprice",
             Self::OrderBookImbalance => "order-book imbalance",
+            Self::Context => "context",
             Self::Field => "field",
             Self::Sma => "SMA",
             Self::Ema => "EMA",
@@ -823,6 +838,7 @@ impl Display for InvalidIndicatorDefinitionError {
                 "UTC offset must use whole-minute precision, got {offset_millis}ms"
             ),
             Self::InvalidArgument(reason) => write!(f, "invalid argument: {reason}"),
+            Self::EmptyContextName => f.write_str("context name must not be empty"),
             Self::ConstructionFailed => f.write_str("indicator construction failed"),
         }
     }

@@ -15,8 +15,15 @@ use super::feature_source::FeatureSource;
 /// Equal keys describe the same feature. Indicators with multiple windows
 /// therefore have one key per window rather than one key for the complete
 /// runtime indicator.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum FeatureKey {
+    /// Caller-supplied value retained until explicitly replaced or cleared.
+    Context {
+        /// Market scope, or [`Symbol::GLOBAL`] for shared context.
+        symbol: Symbol,
+        /// Nonempty name identifying the precomputed quantity.
+        name: String,
+    },
     /// Size at an exact price; a missing level produces `NaN`.
     OrderBookLevelSize {
         /// Market symbol whose events or order book supply this output.

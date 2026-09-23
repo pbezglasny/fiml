@@ -8,7 +8,11 @@ use fiml::{
 };
 use numpy::ndarray::Array2;
 use numpy::{Element, IntoPyArray, PyArray1, PyReadonlyArray1};
-use pyo3::{exceptions::PyValueError, prelude::*};
+use pyo3::{
+    exceptions::PyValueError,
+    prelude::*,
+    types::{PyBool, PyDict, PyInt},
+};
 
 use crate::feature_extractor_spec::FeatureExtractorSpec;
 use crate::intern_symbol;
@@ -121,6 +125,8 @@ fn complete_names(active_ids: &[String], capacity: usize) -> Vec<String> {
 /// validation, replay, and output buffering while retaining their concrete
 /// Rust runtime types.
 pub(crate) trait EventRuntime {
+    fn validate_context(&self, updates: &[(&str, Option<f64>)]) -> fiml::Result<()>;
+    fn update_context(&mut self, updates: &[(&str, Option<f64>)]) -> fiml::Result<()>;
     fn has_order_book(&self, symbol: Symbol) -> bool;
     fn handle_event(&mut self, event: Event) -> fiml::Result<()>;
     fn last_timestamp(&self) -> Option<i64>;
@@ -129,6 +135,12 @@ pub(crate) trait EventRuntime {
 }
 
 impl EventRuntime for CoreFeatureExtractor {
+    fn validate_context(&self, updates: &[(&str, Option<f64>)]) -> fiml::Result<()> {
+        RustFeatureExtractor::validate_context(self, updates)
+    }
+    fn update_context(&mut self, updates: &[(&str, Option<f64>)]) -> fiml::Result<()> {
+        RustFeatureExtractor::update_context(self, updates)
+    }
     fn has_order_book(&self, symbol: Symbol) -> bool {
         self.order_book_of_symbol(symbol).is_some()
     }
@@ -150,6 +162,12 @@ impl EventRuntime for CoreFeatureExtractor {
 }
 
 impl EventRuntime for CorePipeline {
+    fn validate_context(&self, updates: &[(&str, Option<f64>)]) -> fiml::Result<()> {
+        RustPipeline::validate_context(self, updates)
+    }
+    fn update_context(&mut self, updates: &[(&str, Option<f64>)]) -> fiml::Result<()> {
+        RustPipeline::update_context(self, updates)
+    }
     fn has_order_book(&self, symbol: Symbol) -> bool {
         self.order_book_of_symbol(symbol).is_some()
     }
@@ -182,6 +200,7 @@ where
     pub(crate) output_dtype: OutputDtype,
     runtime_name: &'static str,
     lock_subject: &'static str,
+    context_updated: bool,
 }
 
 pub(crate) struct RuntimeLayout {
@@ -208,13 +227,32 @@ where
             output_dtype,
             runtime_name: layout.runtime_name,
             lock_subject: layout.lock_subject,
+            context_updated: false,
         }
     }
 
+    pub(crate) fn has_updates(&self) -> bool {
+        self.context_updated || self.inner.last_timestamp().is_some()
+    }
+
+    pub(crate) fn update_context(&mut self, updates: &Bound<'_, PyDict>) -> PyResult<()> {
+        let updates = context_values(updates)?;
+        self.inner
+            .update_context(
+                &updates
+                    .iter()
+                    .map(|(id, value)| (id.as_str(), *value))
+                    .collect::<Vec<_>>(),
+            )
+            .map_err(|error| PyValueError::new_err(error.to_string()))?;
+        self.context_updated |= !updates.is_empty();
+        Ok(())
+    }
+
     pub(crate) fn set_output_dtype(&mut self, value: &str) -> PyResult<()> {
-        if self.inner.last_timestamp().is_some() {
+        if self.has_updates() {
             return Err(PyValueError::new_err(format!(
-                "output_dtype cannot be changed after the {} has processed an event",
+                "output_dtype cannot be changed after the {} has processed an event or context update",
                 self.lock_subject
             )));
         }
@@ -324,6 +362,7 @@ where
         side: Option<PyReadonlyArray1<'py, u8>>,
         bid: Option<PyReadonlyArray1<'py, f64>>,
         ask: Option<PyReadonlyArray1<'py, f64>>,
+        context_updates: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<Py<PyAny>> {
         let kind = kind.as_slice()?;
         let symbol = symbol.as_slice()?;
@@ -360,7 +399,7 @@ where
             events.push(event);
         }
 
-        self.replay_events(py, events)
+        self.replay_events(py, events, context_updates)
     }
 
     fn validate_order_book(&self, symbol: Symbol) -> PyResult<()> {
@@ -383,6 +422,7 @@ where
         &mut self,
         py: Python<'_>,
         events: Vec<PyRef<'_, OrderBookEvent>>,
+        context_updates: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<Py<PyAny>> {
         let mut prepared = Vec::with_capacity(events.len());
         for (row, event) in events.iter().enumerate() {
@@ -391,11 +431,44 @@ where
             })?;
             prepared.push(event.event());
         }
-        self.replay_events(py, prepared)
+        self.replay_events(py, prepared, context_updates)
     }
 
-    fn replay_events(&mut self, py: Python<'_>, events: Vec<Event>) -> PyResult<Py<PyAny>> {
+    fn replay_events(
+        &mut self,
+        py: Python<'_>,
+        events: Vec<Event>,
+        context_updates: Option<&Bound<'_, PyDict>>,
+    ) -> PyResult<Py<PyAny>> {
         let n_rows = events.len();
+        let mut schedule = HashMap::new();
+        if let Some(updates) = context_updates {
+            for (row, values) in updates.iter() {
+                if row.is_instance_of::<PyBool>() || !row.is_instance_of::<PyInt>() {
+                    return Err(PyValueError::new_err(
+                        "context row index must be an integer",
+                    ));
+                }
+                let row: usize = row
+                    .extract()
+                    .map_err(|_| PyValueError::new_err("context row index must be nonnegative"))?;
+                if row >= n_rows {
+                    return Err(PyValueError::new_err(format!(
+                        "context row {row} is outside this replay"
+                    )));
+                }
+                let values = context_values(values.downcast::<PyDict>()?)?;
+                self.inner
+                    .validate_context(
+                        &values
+                            .iter()
+                            .map(|(id, value)| (id.as_str(), *value))
+                            .collect::<Vec<_>>(),
+                    )
+                    .map_err(|error| PyValueError::new_err(format!("row {row}: {error}")))?;
+                schedule.insert(row, values);
+            }
+        }
         let mut symbol_timestamps = HashMap::new();
         for (row, event) in events.iter().enumerate() {
             let previous_timestamp = symbol_timestamps
@@ -418,6 +491,17 @@ where
         let n_features = self.feature_names.len();
         let mut output = OutputBuffer::new(self.output_dtype, n_rows * n_features);
         for (row, event) in events.into_iter().enumerate() {
+            if let Some(updates) = schedule.get(&row) {
+                self.inner
+                    .update_context(
+                        &updates
+                            .iter()
+                            .map(|(id, value)| (id.as_str(), *value))
+                            .collect::<Vec<_>>(),
+                    )
+                    .map_err(|error| PyValueError::new_err(format!("row {row}: {error}")))?;
+                self.context_updated |= !updates.is_empty();
+            }
             self.inner
                 .handle_event(event)
                 .map_err(|error| PyValueError::new_err(format!("row {row}: {error}")))?;
@@ -425,6 +509,13 @@ where
         }
         output.into_pyarray(py, n_rows, n_features)
     }
+}
+
+fn context_values(updates: &Bound<'_, PyDict>) -> PyResult<Vec<(String, Option<f64>)>> {
+    updates
+        .iter()
+        .map(|(id, value)| Ok((id.extract()?, value.extract()?)))
+        .collect()
 }
 
 pub(crate) fn values_to_pyarray(py: Python<'_>, dtype: OutputDtype, values: &[f64]) -> Py<PyAny> {

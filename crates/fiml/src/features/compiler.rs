@@ -43,6 +43,8 @@ pub(crate) struct Compilation {
     pub(crate) output_ranges: Box<[OutputRange]>,
     /// Stable feature IDs ordered by their final output-vector indices.
     pub(crate) feature_ids: Box<[FeatureId]>,
+    /// Marks active slots that accept external values instead of event observations.
+    pub(crate) context_slots: Box<[bool]>,
     /// Precomputed symbol and event-kind routes into `features`.
     pub(crate) event_router: EventRouter,
 }
@@ -54,6 +56,10 @@ pub(crate) struct Compilation {
 /// state or event subscription remain part of the key.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 enum GroupKey {
+    Context {
+        symbol: Symbol,
+        name: String,
+    },
     OrderBookLevelSize {
         symbol: Symbol,
         side: Side,
@@ -200,7 +206,8 @@ enum GroupKey {
 impl GroupKey {
     fn symbol(&self) -> Symbol {
         match self {
-            Self::Field { symbol, .. }
+            Self::Context { symbol, .. }
+            | Self::Field { symbol, .. }
             | Self::OrderBookBestBidPrice { symbol, .. }
             | Self::OrderBookBestBidSize { symbol, .. }
             | Self::OrderBookBestAskPrice { symbol, .. }
@@ -236,6 +243,7 @@ impl GroupKey {
 
     fn route(&self) -> FeatureRoute {
         match self {
+            Self::Context { .. } => unreachable!("context has no event route"),
             Self::OrderBookBestBidPrice { .. }
             | Self::OrderBookBestBidSize { .. }
             | Self::OrderBookBestAskPrice { .. }
@@ -392,7 +400,7 @@ pub(crate) fn compile(
     let mut feature_ids = HashSet::with_capacity(definitions.len());
 
     for (definition_index, definition) in definitions.into_iter().enumerate() {
-        if !feature_keys.insert(definition.key) {
+        if !feature_keys.insert(definition.key.clone()) {
             return invalid_definition(
                 definition_index,
                 &definition.key,
@@ -407,6 +415,11 @@ pub(crate) fn compile(
             );
         }
 
+        if crate::features::is_reserved_feature_id(&definition.id) {
+            return Err(FimlError::InvalidArgument(
+                InvalidArgumentError::ReservedFeatureId { definition_index },
+            ));
+        }
         let (group_key, output) = group_key(definition_index, &definition.key)?;
         if let Some(&group_index) = group_indices.get(&group_key) {
             groups[group_index].add_output(
@@ -440,6 +453,7 @@ pub(crate) fn compile(
     let mut features = Vec::with_capacity(groups.len());
     let mut output_ranges = Vec::with_capacity(groups.len());
     let mut compiled_ids = Vec::with_capacity(output_count);
+    let mut context_slots = Vec::with_capacity(output_count);
     let mut routes = Vec::with_capacity(groups.len());
 
     for group in groups {
@@ -447,6 +461,12 @@ pub(crate) fn compile(
             start: compiled_ids.len(),
             count: group.feature_ids.len(),
         };
+        let is_context = matches!(group.key, GroupKey::Context { .. });
+        context_slots.extend(std::iter::repeat_n(is_context, group.feature_ids.len()));
+        if is_context {
+            compiled_ids.extend(group.feature_ids);
+            continue;
+        }
         let feature = build_group(&group).map_err(|error| {
             let reason = match error {
                 FimlError::InvalidArgument(reason) => {
@@ -473,6 +493,7 @@ pub(crate) fn compile(
         features: features.into_boxed_slice(),
         output_ranges: output_ranges.into_boxed_slice(),
         feature_ids: compiled_ids.into_boxed_slice(),
+        context_slots: context_slots.into_boxed_slice(),
         event_router,
     })
 }
@@ -485,6 +506,22 @@ pub(crate) fn validate_key(key: &FeatureKey) -> Result<()> {
 
 fn group_key(index: usize, key: &FeatureKey) -> Result<(GroupKey, GroupOutput)> {
     match *key {
+        FeatureKey::Context { symbol, ref name } => {
+            if name.is_empty() {
+                return invalid_definition(
+                    index,
+                    key,
+                    InvalidIndicatorDefinitionError::EmptyContextName,
+                );
+            }
+            Ok((
+                GroupKey::Context {
+                    symbol,
+                    name: name.clone(),
+                },
+                GroupOutput::Scalar,
+            ))
+        }
         FeatureKey::OrderBookBestBidPrice { symbol } => Ok((
             GroupKey::OrderBookBestBidPrice { symbol },
             GroupOutput::Scalar,
@@ -1308,6 +1345,7 @@ fn route_for_source(source: FeatureSource, symbol: Symbol) -> FeatureRoute {
 
 fn group_kind(key: &GroupKey) -> IndicatorKind {
     match key {
+        GroupKey::Context { .. } => IndicatorKind::Context,
         GroupKey::OrderBookBestBidPrice { .. } => IndicatorKind::OrderBookBestBidPrice,
         GroupKey::OrderBookBestBidSize { .. } => IndicatorKind::OrderBookBestBidSize,
         GroupKey::OrderBookBestAskPrice { .. } => IndicatorKind::OrderBookBestAskPrice,
@@ -1355,6 +1393,7 @@ fn group_kind(key: &GroupKey) -> IndicatorKind {
 
 fn group_kind_from_feature_key(key: &FeatureKey) -> IndicatorKind {
     match key {
+        FeatureKey::Context { .. } => IndicatorKind::Context,
         FeatureKey::OrderBookBestBidPrice { .. } => IndicatorKind::OrderBookBestBidPrice,
         FeatureKey::OrderBookBestBidSize { .. } => IndicatorKind::OrderBookBestBidSize,
         FeatureKey::OrderBookBestAskPrice { .. } => IndicatorKind::OrderBookBestAskPrice,
@@ -1452,9 +1491,9 @@ mod tests {
 
         let compilation = compile(
             vec![
-                definition(volatility_one),
-                definition(cvd_two),
-                definition(volatility_two),
+                definition(volatility_one.clone()),
+                definition(cvd_two.clone()),
+                definition(volatility_two.clone()),
             ],
             3,
         )
@@ -1480,8 +1519,8 @@ mod tests {
             source: FeatureSource::AnyEvent,
         };
         let duplicate_key = vec![
-            FeatureDefinition::new(key, FeatureId::new("one")),
-            FeatureDefinition::new(key, FeatureId::new("two")),
+            FeatureDefinition::new(key.clone(), FeatureId::new("one")),
+            FeatureDefinition::new(key.clone(), FeatureId::new("two")),
         ];
         assert!(compile(duplicate_key, 2).is_err());
 

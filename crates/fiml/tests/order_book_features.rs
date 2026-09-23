@@ -742,7 +742,7 @@ fn remaining_queries_validate_parameters_and_preserve_identity() {
     ] {
         assert!(matches!(
             FeatureExtractor::builder(ArrayFeatureVector::<1>::new())
-                .add_feature(FeatureDefinition::with_default_id(key))
+                .add_feature(FeatureDefinition::with_default_id(key.clone()))
                 .build(),
             Err(FimlError::InvalidIndicatorDefinition { .. })
         ));

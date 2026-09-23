@@ -248,6 +248,26 @@ impl FeatureExtractorSpec {
         core_feature_ids(&self.core)
     }
 
+    /// Register a named, precomputed value. Use "__global__" for shared context.
+    #[pyo3(signature = (symbol, name, *, id=None))]
+    fn context<'py>(
+        mut slf: PyRefMut<'py, Self>,
+        symbol: &str,
+        name: &str,
+        id: Option<&str>,
+    ) -> PyResult<PyRefMut<'py, Self>> {
+        let key = FeatureKey::Context {
+            symbol: intern_symbol(symbol)?,
+            name: name.to_owned(),
+        };
+        let feature = match id {
+            Some(id) => FeatureDefinition::new(key, fiml::FeatureId::new(id)),
+            None => definition(key),
+        };
+        slf.add_group([feature])?;
+        Ok(slf)
+    }
+
     /// Copy the latest matching scalar event field.
     #[pyo3(signature = (symbol, *, source="price", id=None))]
     fn field<'py>(

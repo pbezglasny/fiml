@@ -316,13 +316,15 @@ class ModelInputPipeline:
 
     def fit(
         self, kind, symbol, timestamp, *, price=None, volume=None, side=None,
-        bid=None, ask=None, fit_mask=None,
+        bid=None, ask=None, fit_mask=None, context_updates=None,
     ):
         """Fit on selected event snapshots; replay all events to preserve history.
 
         fit_mask is a boolean vector selecting training rows (e.g. excluding
         warm-up). SimpleImputer and PowerTransformer inputs may contain NaNs;
         infinities are always rejected. Failed refits preserve live state.
+        context_updates maps event-row indices to partial context replacements;
+        the same schedule is applied before events in every cold fitting replay.
         """
         if self._inference_only:
             raise ValueError("this pipeline is inference-only; create a Python training recipe")
@@ -332,6 +334,7 @@ class ModelInputPipeline:
             replay = self._new_runtime(candidate, "float64")
             return replay.transform(
                 kind, symbol, timestamp, price=price, volume=volume, side=side, bid=bid, ask=ask,
+                context_updates=context_updates,
             )[:, :candidate.active_feature_count]
 
         matrix = replay_candidate()
@@ -385,7 +388,7 @@ class ModelInputPipeline:
         return self.transform(*args, **kwargs)
 
     def reset(self):
-        """Clear event state, retaining fitted parameters and symbol handles."""
+        """Clear event and context state, retaining fitted parameters and symbol handles."""
         self._recipe_locked |= self._runtime._has_events
         self._inner = self._new_runtime(self._spec)
         return self
@@ -434,19 +437,24 @@ class ModelInputPipeline:
     def update(self, *args, **kwargs):
         return self._runtime.update(*args, **kwargs)
 
+    def update_context(self, updates):
+        """Replace held context values without advancing event history."""
+        return self._runtime.update_context(updates)
+
     def update_order_book(self, event):
         return self._runtime.update_order_book(event)
 
-    def transform_order_book(self, events):
-        return self._runtime.transform_order_book(events)
+    def transform_order_book(self, events, *, context_updates=None):
+        return self._runtime.transform_order_book(events, context_updates=context_updates)
 
     def transform(
         self, kind, symbol, timestamp, *, price=None, volume=None, side=None,
-        bid=None, ask=None,
+        bid=None, ask=None, context_updates=None,
     ):
-        """Replay event columns with frozen parameters, advancing event state."""
+        """Replay event columns, applying context_updates just before indexed rows."""
         return self._runtime.transform(
             kind, symbol, timestamp, price=price, volume=volume, side=side, bid=bid, ask=ask,
+            context_updates=context_updates,
         )
 
     def compute_features(

@@ -180,3 +180,52 @@ Verification for fitted stages:
 Do not add general transformation graphs, runtime state serialization, or
 speculative transformer exporters. Add another exporter only for a concrete
 training requirement, with a defined Rust inference operation and parity test.
+
+## Caller-supplied context
+
+`FeatureKey::Context { symbol, name }` registers a named precomputed scalar using
+ordinary `FeatureDefinition` IDs and output slots. `Symbol::GLOBAL` provides
+shared scope. Context has no event subscriptions or indicator calculator.
+
+```rust,ignore
+let key = FeatureKey::Context {
+    symbol: Symbol::GLOBAL,
+    name: "previous_day_high".to_owned(),
+};
+let definition = FeatureDefinition::new(key, FeatureId::new("previous_day_high"));
+// Include definition in the extractor spec before constructing the pipeline.
+pipeline.update_context(&[("previous_day_high", Some(105.0))])?;
+pipeline.update_context(&[("previous_day_high", None)])?; // clear to NaN
+```
+
+Both `FeatureExtractor::update_context` and `Pipeline::update_context` validate
+all IDs and values before writing. IDs must identify context outputs and may not
+repeat within a call. Numeric values must be finite. Omitted values are retained;
+an empty update is a no-op. Updates and pipeline refreshes allocate nothing after
+construction. `validate_context` exposes the same validation without mutation for
+batch replay preparation.
+
+A context refresh executes stateless stages through the entire pipeline while
+stateful transformers emit retained outputs. It does not alter event timestamps,
+calendar features, order books, indicator histories, or lag history. Context
+slots never set observation flags, so SMA/EMA do not average context replacements.
+Event lags can sample held context values on subsequent accepted events.
+
+The additive JSON kind retains extractor version `2.0` and pipeline version `3.0`:
+
+```json
+{
+  "kind": "context",
+  "source": {"type": "context"},
+  "options": {"name": "previous_day_high"},
+  "outputs": [{"id": "previous_day_high"}]
+}
+```
+
+Place this indicator under its symbol group. Omit `outputs` to use the default ID,
+which encodes symbol and context-name lengths and contents. Names must be nonempty.
+Context contributes no `required_events` entries. Artifacts store definitions,
+not held values; constructing a runtime initializes context to NaN. See the
+[Python context examples](../crates/fiml-python/README.md#externally-supplied-context)
+for scheduled training replay and chunked DataFrames. Callers supply precomputed
+values when available and own stale-value clearing and session boundaries.

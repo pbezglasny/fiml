@@ -536,6 +536,7 @@ impl CompiledStage {
         observed: &[bool],
         output: &mut V,
         output_observed: &mut [bool],
+        advance: bool,
     ) {
         output_observed.fill(false);
         match self {
@@ -581,7 +582,7 @@ impl CompiledStage {
                     output.set_value_at(index, f64::NAN);
                 }
                 for operation in operations {
-                    operation.apply(input, observed, output, output_observed);
+                    operation.apply(input, observed, output, output_observed, advance);
                 }
             }
             Self::Select { input_indices } => {
@@ -928,7 +929,12 @@ impl StageRuntime {
         }
     }
 
-    pub(super) fn apply<V: FeatureVector>(&mut self, output: &mut V, output_observed: &mut [bool]) {
+    pub(super) fn apply<V: FeatureVector>(
+        &mut self,
+        output: &mut V,
+        output_observed: &mut [bool],
+        advance: bool,
+    ) {
         let (last, preceding) = self
             .stages
             .split_last_mut()
@@ -939,6 +945,7 @@ impl StageRuntime {
                 &self.observations,
                 &mut self.scratch,
                 &mut self.scratch_observations,
+                advance,
             );
             std::mem::swap(&mut self.observations, &mut self.scratch_observations);
             std::mem::swap(&mut self.input, &mut self.scratch);
@@ -948,6 +955,7 @@ impl StageRuntime {
             &self.observations,
             output,
             output_observed,
+            advance,
         );
     }
 }

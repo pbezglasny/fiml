@@ -699,3 +699,79 @@ fn dense_book_inserts_deletes_and_snapshots_do_not_allocate_in_extractor() {
         assert_eq!(allocations, 0);
     }
 }
+
+#[test]
+fn context_updates_and_staged_refreshes_allocate_nothing() {
+    use fiml::FittedStage;
+    let raw = FeatureExtractorSpec::new([FeatureDefinition::new(
+        FeatureKey::Context {
+            symbol: Symbol::GLOBAL,
+            name: "high".into(),
+        },
+        FeatureId::new("high"),
+    )])
+    .unwrap();
+    let mut extractor = raw.build(ArrayFeatureVector::<1>::new()).unwrap();
+    let mut pipeline = PipelineSpec::with_stages(
+        raw,
+        [
+            TransformerDefinition::identity(FeatureId::new("high"), FeatureId::new("high")),
+            TransformerDefinition::lagged(FeatureId::new("high"), FeatureId::new("lag"), 1),
+        ],
+        [
+            FittedStage::SimpleImpute {
+                outputs: vec![FeatureId::new("high"), FeatureId::new("lag")],
+                retained_input_indices: vec![0, 1],
+                replacement_values: vec![0., 0.],
+                indicator_input_indices: vec![],
+            },
+            FittedStage::Pca {
+                outputs: vec![FeatureId::new("pc")],
+                mean: vec![0., 0.],
+                components: vec![vec![0.5, 0.5]],
+                output_scale: vec![1.],
+            },
+            FittedStage::Scalar {
+                transformations: vec![TransformerDefinition::lagged(
+                    FeatureId::new("pc"),
+                    FeatureId::new("lag"),
+                    1,
+                )],
+            },
+            FittedStage::Scalar {
+                transformations: vec![TransformerDefinition::sma(
+                    FeatureId::new("lag"),
+                    FeatureId::new("average"),
+                    2,
+                    WarmupPolicy::FirstValue,
+                )],
+            },
+        ],
+        1,
+        None,
+    )
+    .unwrap()
+    .build(
+        ArrayFeatureVector::<1>::new(),
+        ArrayFeatureVector::<1>::new(),
+    )
+    .unwrap();
+    assert_eq!(
+        count_allocations(|| {
+            for timestamp in 0..128 {
+                for value in [Some(timestamp as f64), None] {
+                    extractor.update_context(&[("high", value)]).unwrap();
+                    pipeline.update_context(&[("high", value)]).unwrap();
+                }
+                assert!(extractor.update_context(&[("missing", None)]).is_err());
+                assert!(
+                    pipeline
+                        .update_context(&[("high", Some(f64::INFINITY))])
+                        .is_err()
+                );
+                pipeline.handle_event(Event::time(timestamp)).unwrap();
+            }
+        }),
+        0
+    );
+}

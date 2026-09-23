@@ -316,6 +316,7 @@ impl Transformer {
         observed: &[bool],
         model_vector: &mut V,
         output_observed: &mut [bool],
+        advance: bool,
     ) {
         match self {
             Self::Average(transformer) => {
@@ -325,7 +326,11 @@ impl Transformer {
                 transformer.apply(raw_values, observed, model_vector, output_observed)
             }
             Self::Lagged(transformer) => {
-                transformer.apply_observed(raw_values, model_vector, output_observed)
+                if advance {
+                    transformer.apply_observed(raw_values, model_vector, output_observed);
+                } else {
+                    transformer.refresh(model_vector);
+                }
             }
             Self::StandardScale(transformer) => {
                 transformer.apply(raw_values, observed, model_vector, output_observed)

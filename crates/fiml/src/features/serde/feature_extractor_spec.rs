@@ -172,6 +172,7 @@ impl FeatureExtractorSpec {
 
 fn canonical_sort_key(key: &FeatureKey) -> (bool, String, u8, u8, u8, u128, u128, i64, String) {
     let (symbol, kind, source, warmup, aggregation, scalar_identity, utc_offset) = match key {
+        FeatureKey::Context { symbol, .. } => (*symbol, 26, 33, 0, 0, 0, 0),
         FeatureKey::OrderBookBestBidPrice { symbol, .. } => (*symbol, 14, 32, 0, 0, 0, 0),
         FeatureKey::OrderBookBestBidSize { symbol, .. } => (*symbol, 15, 32, 0, 0, 0, 0),
         FeatureKey::OrderBookBestAskPrice { symbol, .. } => (*symbol, 16, 32, 0, 0, 0, 0),
@@ -364,7 +365,7 @@ fn canonical_sort_key(key: &FeatureKey) -> (bool, String, u8, u8, u8, u128, u128
         scalar_identity,
         utc_offset,
         // Parameterized book queries compile as separate scalar derivations.
-        if (18..=25).contains(&kind) {
+        if (18..=26).contains(&kind) {
             crate::FeatureId::from(key).as_str().to_owned()
         } else {
             String::new()
