@@ -1,163 +1,60 @@
-# First release checklist
+# Release 0.2.0 checklist
 
-Target release: `v0.1.0`
+Target tag: `v0.2.0`. Rust and Python packages ship together.
+The previous release, [v0.1.0](https://github.com/pbezglasny/fiml/releases/tag/v0.1.0),
+was published on 2026-09-15 from `57619d5`.
 
-The implementation is close to release-ready, but the package metadata,
-documentation, and Python distribution still need work.
+## Release records
 
-## Current status
+- [x] Set both Cargo package versions to `0.2.0`; Python derives its version
+  from the bindings manifest.
+- [x] Document new features and breaking changes in [CHANGELOG.md](../CHANGELOG.md).
+- [x] Prepare [GitHub release notes](releases/v0.2.0.md), read by `release.yml`.
+- [x] Update installation examples and link the [migration guide](sample-average-migration.md).
+- [x] Keep Rust 1.89, CPython 3.12+, and the existing five wheel targets.
+- [ ] Replace `Unreleased` for 0.2.0 in the changelog with the publication date.
+
+## Local validation
+
+Checked on 2026-10-02 in the release worktree. Repeat from the final clean
+release commit before tagging. Local packaging uses `--allow-dirty` only to
+validate the prepared, uncommitted changes; CI packages a clean checkout.
 
 - [x] `cargo fmt --all -- --check`
-- [x] `cargo clippy --workspace --all-targets --all-features -- -D warnings`
-- [x] Rust workspace tests: 254 passed, plus 1 doctest
-- [x] Python tests: 380 passed
-- [x] Notebook execution
-- [x] `cargo package -p fiml`: 81 files, 134.0 KiB compressed
-- [x] Current GitHub `main` build
-- [x] No existing `fiml` package was found on crates.io or PyPI on 2026-09-12
-- [x] Strict Rust documentation check: `-D warnings -D missing_docs` passes,
-  including on Rust 1.89.
+- [x] `cargo +1.89.0 test --workspace --all-features`: 278 tests and 2 doctests.
+- [x] `cargo +1.89.0 clippy --workspace --all-targets --all-features -- -D warnings`
+- [x] `RUSTDOCFLAGS="-D warnings -D missing_docs" cargo +1.89.0 doc -p fiml --all-features --no-deps`
+- [x] `make test-python`: 489 tests on CPython 3.13.
+- [x] `make test-notebook`: marimo execution and export.
+- [x] `cargo +1.89.0 package -p fiml --all-features --allow-dirty`: 88 files;
+  the final local run used `--offline` after fetching dependencies.
+- [x] Build a local release wheel and source distribution with Maturin 1.14.1.
+- [x] Inspect crate, wheel, and source archive for version, source files, README,
+  and license text.
+- [x] Install the wheel in a fresh CPython 3.13 environment; all 489 Python
+  tests and the quickstart pass.
+- [x] Install the source distribution in a separate fresh environment and run
+  the quickstart.
+- [x] Build and run the README Rust example against the packaged crate and
+  the pipeline exported by the README Python example; both return `1.224745`.
 
-## Release blockers
+The local Linux x86-64 wheel validates this host only. The release workflow
+builds manylinux 2.17 x86-64/AArch64, macOS x86-64/AArch64, and Windows x86-64
+wheels; those platform builds remain a CI gate.
 
-### 1. Define the release scope
+## Final CI and publishing
 
-- [x] `v0.1.0` includes both the Rust crate and Python package.
-- [x] Support Linux x86-64/AArch64, macOS x86-64/AArch64, and Windows x86-64
-  Python wheels.
-- [x] Set the minimum supported Rust version to 1.89.
+Pushing `v0.2.0` starts `.github/workflows/release.yml`, which publishes to
+crates.io and PyPI, then creates the GitHub release. A manual workflow dispatch
+builds artifacts without publishing. Do not upload packages manually first.
 
-### 2. Complete the first-release indicator set
-
-Do not delay `v0.1.0` for a large indicator catalogue. Add only the missing
-ML fundamentals, then stop:
-
-- [x] Simple and log returns over configurable sample lags.
-- [x] Rolling volatility as the standard deviation of returns over
-  configurable windows.
-- [x] Rolling trade volume over timed windows.
-- [x] VWAP from trade price and volume over timed windows.
-
-For every added indicator:
-
-- [x] Update the feature-vector builder, feature key, compiler, and runtime
-  derivation.
-- [x] Update serialization, JSON schema, and canonical feature IDs.
-- [x] Update the Python builder and documentation.
-- [x] Add Rust/Python parity, warm-up, input-validation, and steady-state
-  allocation checks.
-
-Defer RSI, MACD, Bollinger Bands, ATR, ADX, and stochastic oscillators. Add
-them after user demand; ATR, ADX, and stochastic oscillators should wait for a
-proper OHLC/bar event model.
-
-### 3. Complete Rust package metadata
-
-- [x] Add a root `README.md` containing:
-  - purpose and development status;
-  - installation and a minimal example;
-  - supported indicators and transformations;
-  - important limits and warm-up behavior;
-  - Rust and Python support policy;
-  - Apache-2.0 license notice.
-- [x] Add `description`, `license`, `repository`, `readme`, and `rust-version`
-  to `crates/fiml/Cargo.toml`.
-- [x] Add useful crates.io `keywords` and `categories`.
-- [x] Make `cargo package -p fiml` complete without metadata warnings.
-
-Cargo's official publishing guide recommends this metadata and a successful
-package dry run:
-<https://doc.rust-lang.org/cargo/reference/publishing.html>.
-
-### 4. Complete Python package metadata and documentation
-
-- [x] Add the license, project URLs, maintainers, and supported Python-version
-  classifiers to `crates/fiml-python/pyproject.toml`.
-- [x] Replace the `<repo-url>` placeholder in
-  `crates/fiml-python/README.md`.
-- [x] Replace the statement that PyPI publishing is only planned.
-- [ ] Build the supported wheels and a source distribution.
-- [ ] Install and test the generated artifacts in fresh virtual environments.
-
-### 5. Audit and document the public Rust API
-
-- [x] Decide which modules and types are intentionally public; make
-  implementation details private before users depend on them.
-  Resolved findings and accepted boundary: [public-api-audit.md](public-api-audit.md).
-- [x] Add crate-level documentation with a minimal end-to-end example.
-- [x] Document the supported public types, traits, methods, errors, and limits.
-- [x] Add a CI documentation check once the public surface is documented:
-
-  ```bash
-  RUSTDOCFLAGS="-D warnings -D missing_docs" \
-    cargo doc -p fiml --all-features --no-deps
-  ```
-
-### 6. Prepare release records
-
-- [x] Add [CHANGELOG.md](../CHANGELOG.md) with the `0.1.0` features, limitations, and breaking
-  change policy.
-- [x] Ensure the Rust and Python package versions are both `0.1.0`.
-- [x] Prepare concise [GitHub release notes](releases/v0.1.0.md).
-  The release workflow uses the notes matching the tag as the release body.
-- [x] Update the GitHub repository description and topics.
-
-Before publishing, replace `Unreleased` in the changelog with the release date.
-
-### 7. Prepare publishing
-
-- [ ] Create and verify the crates.io account and publishing token.
-- [x] Configure PyPI Trusted Publishing with GitHub Actions instead of storing
-  a long-lived PyPI token:
-  <https://docs.pypi.org/trusted-publishers/>.
-  Pending publisher and GitHub environment `pypi` configured; `release.yml`
-  publishes wheels and the source distribution using OIDC. The first upload
-  remains to be verified.
-- [x] Add a Python release workflow that builds wheels for every supported
-  platform.
-- [ ] Verify the exact files included in both Rust and Python artifacts.
-- [ ] Confirm that the `fiml` names are still available immediately before
-  publishing; registry names cannot be reserved by this checklist.
-
-## Final validation
-
-Run from a clean release commit:
-
-```bash
-cargo fmt --all -- --check
-cargo clippy --workspace --all-targets --all-features -- -D warnings
-cargo test --workspace --all-features
-cargo package -p fiml
-make test-python
-make test-notebook
-```
-
-Then test the packaged artifacts rather than importing or compiling directly
-from the repository:
-
-- [ ] Create a temporary Rust project and build it using packaged `fiml`.
-- [ ] Create a fresh Python environment, install a built wheel, and run the
-  quick-start example.
-- [ ] Check that the README and license render correctly in both registries.
-
-## Publish and verify
-
-Pushing the release tag starts `release.yml`, which publishes to both
-registries and then creates the GitHub release. Do not upload the packages
-manually before pushing the tag.
-
-- [ ] Tag the validated release commit as `v0.1.0` and push the tag.
-- [ ] Verify that the workflow publishes `fiml` to crates.io.
-- [ ] Verify that the workflow publishes the Python wheels and source
-  distribution to PyPI.
-- [ ] Verify that the workflow creates the GitHub release from that tag.
-- [ ] Verify fresh `cargo add fiml` and `pip install fiml` installations.
-- [ ] Verify the published documentation and package metadata.
-
-## Deferred until needed
-
-- Project website and logo.
-- Complex release-management tooling.
-- Large benchmark infrastructure beyond the existing performance checks.
-- Compatibility automation for versions and platforms that are not part of
-  the declared support policy.
+- [ ] Commit the prepared changes and obtain green CI for that exact commit.
+- [ ] Run the release workflow manually on the release commit; verify the crate,
+  all five wheels, and source distribution, including the Linux wheel API tests.
+- [ ] Confirm the existing `CARGO_REGISTRY_TOKEN` and PyPI Trusted Publishing
+  configuration are ready for the release.
+- [ ] Tag the validated commit as `v0.2.0` and push the tag.
+- [ ] Verify crates.io and PyPI both contain `fiml` 0.2.0 and the GitHub release
+  contains seven assets and the intended release notes.
+- [ ] Verify fresh `cargo add fiml@0.2.0` and `pip install fiml==0.2.0`
+  installations, documentation, and registry metadata.

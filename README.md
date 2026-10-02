@@ -25,8 +25,8 @@ libraries.
   scaling, lagged values, missing-value imputation, and PCA to produce the
   model's input vector.
 
-Fiml is under active development. Public APIs may change before the first
-release.
+Fiml is under active development. Before 1.0, minor releases may contain
+breaking changes; see the [changelog](CHANGELOG.md) for migration guidance.
 
 Overview
 ------
@@ -71,8 +71,9 @@ Window sizes, sample lags, symbols, and applicable input sources are configurabl
 
 | Category | Supported features |
 | --- | --- |
+| Raw fields and context | Latest price or volume fields; externally supplied values retained until replaced or cleared. |
 | Returns | Simple and log returns over sample lags. |
-| Moving averages | Simple moving average (SMA) over sample or time windows; exponential moving average (EMA) over sample periods. |
+| Moving averages | Simple moving average (SMA) over time windows. Sample SMA and EMA are pipeline transformations. |
 | Volatility | Rolling population standard deviation of simple returns over sample or time windows. |
 | Trade activity | Rolling trade count, total trade volume, and volume-weighted average price (VWAP) over time windows. |
 | Volume flow | Cumulative volume delta (CVD) over sample windows, on-balance volume (OBV) over time windows, and cumulative volume-price trend (VPT). |
@@ -92,7 +93,7 @@ in Rust.
 
 | Operation | Supported transformations |
 | --- | --- |
-| Scalar operations | Copy, rename, and reorder features; scale with supplied mean and scale; lag values by accepted-event count. |
+| Scalar operations | Copy, rename, and reorder features; scale with supplied mean and scale; smooth observed values with sample SMA/EMA; lag values by accepted-event count. |
 | Fitted scaling | `StandardScaler`, `RobustScaler`, `MinMaxScaler`, and `MaxAbsScaler`. |
 | Distribution transforms | `PowerTransformer` with Box-Cox or Yeo-Johnson; `QuantileTransformer` with uniform or normal output. |
 | Missing values | `SimpleImputer` for NaNs using mean, median, most-frequent, or constant replacement, with optional missing-value indicators. |
@@ -103,11 +104,15 @@ Python fitting uses the optional `fiml[sklearn]` extra. See the
 [Python preprocessing documentation](crates/fiml-python/README.md#fitting-sklearn-stages)
 for supported estimator options and restrictions.
 
+Python also provides [`future_value`](crates/fiml-python/README.md#time-horizon-training-targets)
+for elapsed-time training labels, separate from feature replay. Generate labels
+within each instrument and chronological dataset split.
+
 Installation
 --------
 
-The registry commands below apply once `v0.1.0` is published to crates.io and
-PyPI. Until then, install from source using the linked instructions.
+These examples target **0.2.0**. Until that version is published to crates.io
+and PyPI, install from source using the instructions below.
 
 ### Rust
 
@@ -115,7 +120,7 @@ Requires Rust **1.89 or newer** and a native linker for your platform.
 From your application's directory, add Fiml from crates.io:
 
 ```bash
-cargo add fiml --features serde
+cargo add fiml@0.2.0 --features serde
 cargo add serde_json --features float_roundtrip
 ```
 
@@ -125,7 +130,7 @@ specifications. `serde_json` reads and writes those specifications;
 For a Rust-only application that does not exchange JSON, omit `--features serde`
 and the `serde_json` dependency.
 
-To install from Git before the first release:
+To install the development version from Git:
 
 ```bash
 cargo add fiml --git https://github.com/pbezglasny/fiml --features serde
@@ -143,7 +148,7 @@ Activate it with `source .venv/bin/activate` on Linux or macOS, or
 `.\.venv\Scripts\Activate.ps1` in Windows PowerShell. Install from PyPI:
 
 ```bash
-python -m pip install "fiml[pandas]"
+python -m pip install "fiml[pandas]>=0.2.0,<0.3"
 ```
 
 Installing a compatible wheel requires no Rust toolchain. If pip builds from
@@ -155,7 +160,7 @@ when using only the NumPy API.
 To also fit supported scikit-learn transformations:
 
 ```bash
-python -m pip install "fiml[pandas,sklearn]"
+python -m pip install "fiml[pandas,sklearn]>=0.2.0,<0.3"
 ```
 
 The `sklearn` extra currently requires scikit-learn `>=1.9,<1.10`.
@@ -303,6 +308,8 @@ Other docs
 * [Feature-extractor JSON schema](docs/feature-extractor-spec.schema.json) and
   [pipeline JSON schema](docs/pipeline-spec.schema.json) — exported configuration
   formats.
+* [0.2.0 migration guide](docs/sample-average-migration.md) — move sample
+  averages into pipelines and re-export older JSON configurations.
 
 Build the Rust API reference from the repository root:
 
