@@ -9,7 +9,7 @@ serialized configuration will be documented here with migration guidance.
 JSON format versions are independent of package versions; consumers must use
 a release that supports the format they load.
 
-## 0.2.0 — Unreleased
+## 0.2.0 — 2026-10-02
 
 ### Breaking changes and migration
 
