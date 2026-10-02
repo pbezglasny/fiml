@@ -11,7 +11,7 @@ use crate::order_book::{
 use crate::symbols::MAX_SYMBOL_NUMBER;
 use crate::{
     Event, EventKind, FeatureId, FeatureVector, FimlError, InvalidArgumentError, LimitTarget,
-    Result, Symbol,
+    Result, SourceKind, SourceObservation, Symbol,
 };
 
 #[derive(Clone, Copy, Default)]
@@ -279,12 +279,13 @@ impl OrderBookStorage {
         symbol: Symbol,
         prepared: PreparedOrderBookUpdate,
         update: OrderBookUpdate,
+        timestamp: i64,
     ) -> Result<OrderBookUpdateOutcome> {
         let index = self
             .index(symbol)
             .ok_or(FimlError::OrderBookNotConfigured { symbol })?;
         self.books[index]
-            .commit_update(prepared, update)
+            .commit_update(prepared, update, timestamp)
             .map_err(Into::into)
     }
 
@@ -322,6 +323,7 @@ where
     /// User-facing IDs in feature-vector index order.
     feature_ids: Box<[FeatureId]>,
     context_slots: Box<[bool]>,
+    sources: Box<[Option<SourceObservation>]>,
     event_router: EventRouter,
     order_books: OrderBookStorage,
     last_timestamp: Option<i64>,
@@ -331,16 +333,20 @@ where
 }
 
 /// Processing summary for an accepted event; one handler may write multiple output cells.
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct UpdateResult {
     /// Number of runtime feature handlers invoked for the accepted event.
     pub features_updated: usize,
+    /// Outcome for the configured book, even when no feature handler subscribes.
+    /// `None` means no configured book processed this event.
+    pub order_book_outcome: Option<OrderBookUpdateOutcome>,
 }
 
 impl UpdateResult {
     fn combine_with(self, other: UpdateResult) -> Self {
         Self {
             features_updated: self.features_updated + other.features_updated,
+            order_book_outcome: self.order_book_outcome.or(other.order_book_outcome),
         }
     }
 }
@@ -377,6 +383,7 @@ where
             output_ranges: compilation.output_ranges,
             feature_ids: compilation.feature_ids,
             context_slots: compilation.context_slots,
+            sources: compilation.sources,
             event_router: compilation.event_router,
             order_books,
             last_timestamp: None,
@@ -452,7 +459,9 @@ where
         update: OrderBookUpdate,
     ) -> Result<UpdateResult> {
         let subscribers = self.event_router.order_book(symbol);
-        let outcome = self.order_books.commit_update(symbol, prepared, update)?;
+        let outcome = self
+            .order_books
+            .commit_update(symbol, prepared, update, timestamp)?;
 
         if !matches!(
             outcome,
@@ -460,6 +469,7 @@ where
         ) {
             return Ok(UpdateResult {
                 features_updated: 0,
+                order_book_outcome: Some(outcome),
             });
         }
 
@@ -470,6 +480,7 @@ where
         let features_updated = Self::update_order_book_subscribers(
             &mut self.features,
             &self.output_ranges,
+            &mut self.sources,
             &mut ObservedVector {
                 vector: &mut self.feature_vector,
                 observations: &mut self.observations,
@@ -479,7 +490,10 @@ where
             timestamp,
         );
 
-        Ok(UpdateResult { features_updated })
+        Ok(UpdateResult {
+            features_updated,
+            order_book_outcome: Some(outcome),
+        })
     }
 
     fn update_any_features(&mut self, event: &Event) -> UpdateResult {
@@ -489,12 +503,14 @@ where
         {
             return UpdateResult {
                 features_updated: 0,
+                order_book_outcome: None,
             };
         }
         let any_features = self.event_router.any();
         Self::update_subscribers(
             &mut self.features,
             &self.output_ranges,
+            &mut self.sources,
             &mut ObservedVector {
                 vector: &mut self.feature_vector,
                 observations: &mut self.observations,
@@ -504,6 +520,7 @@ where
         );
         UpdateResult {
             features_updated: any_features.len(),
+            order_book_outcome: None,
         }
     }
 
@@ -512,6 +529,7 @@ where
         Self::update_subscribers(
             &mut self.features,
             &self.output_ranges,
+            &mut self.sources,
             &mut ObservedVector {
                 vector: &mut self.feature_vector,
                 observations: &mut self.observations,
@@ -522,6 +540,7 @@ where
 
         UpdateResult {
             features_updated: subscribed_features.len(),
+            order_book_outcome: None,
         }
     }
 
@@ -564,7 +583,9 @@ where
                 .expect("a prepared order-book update must come from an order-book event");
             let prepared = prepared_order_book_update
                 .expect("the rejected order-book update was prepared above");
-            let result = self.order_books.commit_update(symbol, prepared, update);
+            let result = self
+                .order_books
+                .commit_update(symbol, prepared, update, timestamp);
             return match result {
                 Err(error) => Err(error),
                 Ok(_) => unreachable!("a rejected order-book update cannot commit successfully"),
@@ -582,6 +603,7 @@ where
                 }
                 (None, _) => UpdateResult {
                     features_updated: 0,
+                    order_book_outcome: None,
                 },
                 (Some(_), None) => {
                     unreachable!("a prepared order-book update must come from an order-book event")
@@ -628,6 +650,16 @@ where
         self.index_of_id(feature_id.as_str())
     }
 
+    /// Borrows source observations for an active output index.
+    ///
+    /// Returns `None` for invalid or reserved indexes and an empty slice for context
+    /// features, whose freshness belongs to the caller. Unobserved market inputs have
+    /// a source record with a missing timestamp. Inspect every dependency; output
+    /// writes, warmup, and history advancement do not establish source freshness.
+    pub fn feature_sources(&self, index: usize) -> Option<&[SourceObservation]> {
+        self.sources.get(index).map(Option::as_slice)
+    }
+
     fn index_of_id(&self, id: &str) -> Option<usize> {
         self.feature_ids
             .iter()
@@ -642,6 +674,7 @@ where
     fn update_subscribers(
         features: &mut [FeatureDerivation],
         output_ranges: &[OutputRange],
+        sources: &mut [Option<SourceObservation>],
         feature_vector: &mut impl FeatureVector,
         subscribers: &[u16],
         event: &Event,
@@ -649,13 +682,36 @@ where
         for &feature_index in subscribers {
             let feature_index = usize::from(feature_index);
 
-            features[feature_index].update(event, output_ranges[feature_index], feature_vector);
+            let feature = &mut features[feature_index];
+            let range = output_ranges[feature_index];
+            feature.update(event, range, feature_vector);
+
+            // A routed handler can advance time without ingesting its market source.
+            // CVD additionally ignores trades without an aggressor classification.
+            if matches!(feature, FeatureDerivation::Cvd(_))
+                && !matches!(event, Event::Trade(trade) if trade.side.is_some())
+            {
+                continue;
+            }
+            for source in sources[range.start..range.start + range.count]
+                .iter_mut()
+                .flatten()
+            {
+                if match source.kind {
+                    SourceKind::Event(kind) => kind == event.kind(),
+                    SourceKind::AnyEvent => true,
+                    SourceKind::OrderBook => false,
+                } {
+                    source.timestamp_millis = Some(event.timestamp());
+                }
+            }
         }
     }
 
     fn update_order_book_subscribers(
         features: &mut [FeatureDerivation],
         output_ranges: &[OutputRange],
+        sources: &mut [Option<SourceObservation>],
         feature_vector: &mut impl FeatureVector,
         subscribers: &[u16],
         order_book: &OrderBook,
@@ -666,12 +722,22 @@ where
             .copied()
             .filter(|&feature_index| {
                 let feature_index = usize::from(feature_index);
-                features[feature_index].update_order_book(
+                let range = output_ranges[feature_index];
+                let updated = features[feature_index].update_order_book(
                     order_book,
                     timestamp,
-                    output_ranges[feature_index],
+                    range,
                     feature_vector,
-                )
+                );
+                if updated {
+                    for source in sources[range.start..range.start + range.count]
+                        .iter_mut()
+                        .flatten()
+                    {
+                        source.timestamp_millis = order_book.source_timestamp();
+                    }
+                }
+                updated
             })
             .count()
     }
@@ -1181,6 +1247,7 @@ mod tests {
             feature_vector: ArrayFeatureVector::new(),
             observations: vec![false; 2].into_boxed_slice(),
             context_slots: vec![false; 2].into_boxed_slice(),
+            sources: vec![None; 2].into_boxed_slice(),
             features,
             output_ranges,
             feature_ids: vec![FeatureId::new("day")].into_boxed_slice(),

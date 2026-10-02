@@ -14,7 +14,7 @@ use crate::features::{FeatureRoute, FeatureSource, MAX_OUTPUTS_PER_INDICATOR};
 use crate::{
     DefinitionDurationField, EventField, EventKind, FeatureDefinition, FeatureId, FeatureKey,
     FimlError, IndicatorKind, InvalidArgumentError, InvalidIndicatorDefinitionError, LimitTarget,
-    Result, ReturnKind, Symbol, WarmupPolicy,
+    Result, ReturnKind, SourceKind, SourceObservation, Symbol, WarmupPolicy,
 };
 
 /// Contiguous section of the output feature vector written by one derivation.
@@ -45,6 +45,8 @@ pub(crate) struct Compilation {
     pub(crate) feature_ids: Box<[FeatureId]>,
     /// Marks active slots that accept external values instead of event observations.
     pub(crate) context_slots: Box<[bool]>,
+    /// One source per active output; context has no market source.
+    pub(crate) sources: Box<[Option<SourceObservation>]>,
     /// Precomputed symbol and event-kind routes into `features`.
     pub(crate) event_router: EventRouter,
 }
@@ -204,6 +206,25 @@ enum GroupKey {
 }
 
 impl GroupKey {
+    fn source_kind(&self) -> Option<SourceKind> {
+        Some(match self {
+            Self::Context { .. } => return None,
+            // Timed derivations also route unrelated events to advance their windows.
+            Self::SmaTimed { source, .. } | Self::VolatilityTimed { source, .. } => {
+                SourceKind::Event(source.event_kind())
+            }
+            Self::ObvTimed { .. }
+            | Self::TradeCountTimed { .. }
+            | Self::TradeVolumeTimed { .. }
+            | Self::VwapTimed { .. } => SourceKind::Event(EventKind::Trade),
+            _ => match self.route() {
+                FeatureRoute::Kind(kind) => SourceKind::Event(kind),
+                FeatureRoute::Any | FeatureRoute::SymbolAny => SourceKind::AnyEvent,
+                FeatureRoute::OrderBook => SourceKind::OrderBook,
+            },
+        })
+    }
+
     fn symbol(&self) -> Symbol {
         match self {
             Self::Context { symbol, .. }
@@ -454,6 +475,7 @@ pub(crate) fn compile(
     let mut output_ranges = Vec::with_capacity(groups.len());
     let mut compiled_ids = Vec::with_capacity(output_count);
     let mut context_slots = Vec::with_capacity(output_count);
+    let mut sources = Vec::with_capacity(output_count);
     let mut routes = Vec::with_capacity(groups.len());
 
     for group in groups {
@@ -462,6 +484,12 @@ pub(crate) fn compile(
             count: group.feature_ids.len(),
         };
         let is_context = matches!(group.key, GroupKey::Context { .. });
+        let source = group.key.source_kind().map(|kind| SourceObservation {
+            symbol: group.key.symbol(),
+            kind,
+            timestamp_millis: None,
+        });
+        sources.extend(std::iter::repeat_n(source, group.feature_ids.len()));
         context_slots.extend(std::iter::repeat_n(is_context, group.feature_ids.len()));
         if is_context {
             compiled_ids.extend(group.feature_ids);
@@ -494,6 +522,7 @@ pub(crate) fn compile(
         output_ranges: output_ranges.into_boxed_slice(),
         feature_ids: compiled_ids.into_boxed_slice(),
         context_slots: context_slots.into_boxed_slice(),
+        sources: sources.into_boxed_slice(),
         event_router,
     })
 }

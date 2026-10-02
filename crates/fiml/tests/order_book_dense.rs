@@ -92,8 +92,8 @@ fn dense_matches_tree_through_updates_deletions_and_snapshot_replay() {
                 .map_err(|error| error.to_string())
         };
         assert_eq!(
-            outcome(tree.apply_update(update.clone())),
-            outcome(dense.apply_update(update))
+            outcome(tree.apply_update(update.clone(), 0)),
+            outcome(dense.apply_update(update, 0))
         );
         assert_books_equal(&tree, &dense);
     };
@@ -155,11 +155,10 @@ fn dense_rejects_invalid_grids_and_updates_without_mutation() {
         assert!(OrderBook::new_dense(UpdatePolicy::Monotonic, 1, tick, min, max).is_err());
     }
     let mut book = dense();
-    book.apply_update(OrderBookUpdate::new_snapshot(
+    book.apply_update(
+        OrderBookUpdate::new_snapshot(0, vec![OrderBookLevel::new(dec!(100), dec!(2))], vec![]),
         0,
-        vec![OrderBookLevel::new(dec!(100), dec!(2))],
-        vec![],
-    ))
+    )
     .unwrap();
     for (price, size) in [
         (dec!(99.99), dec!(1)),
@@ -183,7 +182,7 @@ fn dense_rejects_invalid_grids_and_updates_without_mutation() {
             ),
         ] {
             assert!(matches!(
-                book.apply_update(update),
+                book.apply_update(update, 0),
                 Err(OrderBookUpdateError::InvalidUpdate { .. })
             ));
             assert_eq!(book.last_update_id(), Some(0));
@@ -193,10 +192,13 @@ fn dense_rejects_invalid_grids_and_updates_without_mutation() {
         }
     }
     // Invalid updates were not buffered and did not consume their sequence IDs.
-    book.apply_update(OrderBookUpdate::new_delta(
-        1,
-        vec![OrderBookLevelUpdate::new(Side::Bid, dec!(100), dec!(4))],
-    ))
+    book.apply_update(
+        OrderBookUpdate::new_delta(
+            1,
+            vec![OrderBookLevelUpdate::new(Side::Bid, dec!(100), dec!(4))],
+        ),
+        0,
+    )
     .unwrap();
     assert_eq!(book.best_bid().unwrap().size, dec!(4));
     for (tick, price) in [
@@ -206,17 +208,19 @@ fn dense_rejects_invalid_grids_and_updates_without_mutation() {
     ] {
         let mut book =
             OrderBook::new_dense(UpdatePolicy::Monotonic, 1, tick, price, price).unwrap();
-        book.apply_update(OrderBookUpdate::new_snapshot(
+        book.apply_update(
+            OrderBookUpdate::new_snapshot(0, vec![OrderBookLevel::new(price, dec!(1))], vec![]),
             0,
-            vec![OrderBookLevel::new(price, dec!(1))],
-            vec![],
-        ))
+        )
         .unwrap();
         assert_eq!(book.best_bid().unwrap().price, price);
-        book.apply_update(OrderBookUpdate::new_delta(
-            1,
-            vec![OrderBookLevelUpdate::new(Side::Bid, price, dec!(0))],
-        ))
+        book.apply_update(
+            OrderBookUpdate::new_delta(
+                1,
+                vec![OrderBookLevelUpdate::new(Side::Bid, price, dec!(0))],
+            ),
+            0,
+        )
         .unwrap();
         assert!(book.best_bid().is_none());
     }

@@ -12,7 +12,10 @@ pub use stages::FittedStage;
 use stages::StageRuntime;
 
 use super::transformers::Transformer;
-use crate::{Event, FeatureExtractor, FeatureId, FeatureVector, Result, Symbol, UpdateResult};
+use crate::{
+    Event, FeatureExtractor, FeatureId, FeatureVector, Result, SourceObservation, Symbol,
+    UpdateResult,
+};
 
 /// Allocation-free event runtime for raw extraction and final model input.
 pub struct Pipeline<RawV, ModelV>
@@ -98,6 +101,38 @@ where
     /// Returns the raw extractor vector, including reserved cells.
     pub fn raw_values(&self) -> &[f64] {
         self.feature_extractor.feature_vector().values()
+    }
+
+    /// Returns active raw IDs in raw-vector order, excluding reserved cells.
+    pub fn raw_feature_ids(&self) -> &[FeatureId] {
+        self.feature_extractor.feature_ids()
+    }
+
+    /// Resolves a raw ID once for subsequent indexed value and source access.
+    pub fn raw_feature_index(&self, id: &FeatureId) -> Option<usize> {
+        self.feature_extractor.feature_index(id)
+    }
+
+    /// Borrows every source dependency for an active raw index.
+    /// See [`FeatureExtractor::feature_sources`] for missing inputs and context semantics.
+    pub fn raw_feature_sources(&self, index: usize) -> Option<&[SourceObservation]> {
+        self.feature_extractor.feature_sources(index)
+    }
+
+    /// Returns processing observations aligned with [`Self::raw_feature_ids`].
+    /// Observations do not imply numeric changes, readiness, or source freshness.
+    /// Inspect after successful event processing and before the next mutation;
+    /// an error can leave masks from an earlier event. Context updates do not
+    /// represent market observations or advance histories.
+    pub fn raw_observations(&self) -> &[bool] {
+        &self.feature_extractor.observations()[..self.raw_feature_ids().len()]
+    }
+
+    /// Returns processing observations aligned with [`Self::output_ids`].
+    /// The same lifetime and readiness caveats as [`Self::raw_observations`] apply.
+    /// Event-driven lags may be observed even when their source was not observed.
+    pub fn output_observations(&self) -> &[bool] {
+        &self.observations[..self.output_ids.len()]
     }
 
     /// Returns final model input, including reserved cells.

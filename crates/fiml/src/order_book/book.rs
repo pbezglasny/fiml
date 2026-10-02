@@ -38,8 +38,9 @@ pub enum UpdatePolicy {
 }
 
 /// Result of applying an update to the order book.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OrderBookUpdateOutcome {
-    /// The update immediately changed the visible order book.
+    /// The update was applied to visible order-book state, even if levels stayed equal.
     Applied,
     /// The delta was retained for later replay but did not change the visible order book.
     Buffered,
@@ -157,7 +158,8 @@ impl From<OrderBookUpdateError> for FimlError {
 }
 
 /// Whether visible levels have been synchronized with the market-data stream.
-enum SyncState {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OrderBookSyncState {
     /// No snapshot has been applied yet; incoming deltas are buffered.
     AwaitingSnapshot,
     /// The visible order book is synchronized.
@@ -195,12 +197,14 @@ fn has_contiguous_gap(
 pub struct OrderBook {
     bids: BookSide,
     asks: BookSide,
-    sync_state: SyncState,
+    sync_state: OrderBookSyncState,
     policy: UpdatePolicy,
-    update_buffer: VecDeque<OrderBookDelta>,
+    // Retain original epoch-millisecond source times through snapshot replay.
+    update_buffer: VecDeque<(OrderBookDelta, i64)>,
     buffer_size: usize,
     last_update_id: Option<OrderBookUpdateId>,
     last_snapshot_update_id: Option<OrderBookUpdateId>,
+    source_timestamp: Option<i64>,
 }
 
 /// Allocation-free plan for applying an update after all fallible checks finish.
@@ -299,12 +303,13 @@ impl OrderBook {
         Self {
             bids,
             asks,
-            sync_state: SyncState::AwaitingSnapshot,
+            sync_state: OrderBookSyncState::AwaitingSnapshot,
             policy: update_policy,
             update_buffer: VecDeque::with_capacity(buffer_size),
             buffer_size,
             last_update_id: None,
             last_snapshot_update_id: None,
+            source_timestamp: None,
         }
     }
 
@@ -325,7 +330,7 @@ impl OrderBook {
             return Ok(());
         }
         let mut prev_id = new_snapshot_update_id;
-        for delta in &self.update_buffer {
+        for (delta, _) in &self.update_buffer {
             if delta.update_id <= new_snapshot_update_id {
                 continue;
             }
@@ -343,33 +348,41 @@ impl OrderBook {
 
     fn replay_history_after_snapshot(&mut self, last_snapshot_id: OrderBookUpdateId) {
         self.update_buffer
-            .retain(|update| update.update_id > last_snapshot_id);
+            .retain(|(update, _)| update.update_id > last_snapshot_id);
 
         let Self {
             bids,
             asks,
             update_buffer,
             last_update_id,
+            source_timestamp,
             ..
         } = self;
-        for delta in update_buffer {
+        for (delta, timestamp) in update_buffer {
             apply_delta_update(bids, asks, delta);
             *last_update_id = Some(delta.update_id);
+            *source_timestamp = Some(*timestamp);
         }
     }
 
-    fn apply_snapshot(&mut self, snapshot: OrderBookSnapshot, resynchronized: bool) {
+    fn apply_snapshot(
+        &mut self,
+        snapshot: OrderBookSnapshot,
+        resynchronized: bool,
+        timestamp: i64,
+    ) {
         debug_assert_eq!(
             resynchronized,
-            matches!(self.sync_state, SyncState::RequireResync),
+            matches!(self.sync_state, OrderBookSyncState::RequireResync),
             "prepared snapshot outcome must be committed without intervening book updates"
         );
         self.bids.apply_snapshot(snapshot.bids);
         self.asks.apply_snapshot(snapshot.asks);
         self.last_update_id = Some(snapshot.last_update_id);
         self.last_snapshot_update_id = Some(snapshot.last_update_id);
+        self.source_timestamp = Some(timestamp);
         self.replay_history_after_snapshot(snapshot.last_update_id);
-        self.sync_state = SyncState::Live;
+        self.sync_state = OrderBookSyncState::Live;
     }
 
     /// Determines an update's exact mutation without changing the book.
@@ -388,7 +401,9 @@ impl OrderBook {
             return PreparedOrderBookUpdate::reject(error, RejectedUpdateAction::None);
         }
 
-        if let Some(previous_update_id) = self.update_buffer.back().map(|delta| delta.update_id) {
+        if let Some(previous_update_id) =
+            self.update_buffer.back().map(|(delta, _)| delta.update_id)
+        {
             if delta.update_id <= previous_update_id {
                 return PreparedOrderBookUpdate::new(PreparedUpdateAction::IgnoreStaleDelta);
             }
@@ -402,21 +417,21 @@ impl OrderBook {
                         received: delta.update_id,
                     },
                     RejectedUpdateAction::BufferDelta {
-                        require_resync: matches!(self.sync_state, SyncState::Live),
+                        require_resync: matches!(self.sync_state, OrderBookSyncState::Live),
                     },
                 );
             }
         }
 
         match self.sync_state {
-            SyncState::AwaitingSnapshot | SyncState::RequireResync => {
+            OrderBookSyncState::AwaitingSnapshot | OrderBookSyncState::RequireResync => {
                 if self.update_buffer.len() == self.buffer_size {
                     self.reject_full_history_buffer()
                 } else {
                     PreparedOrderBookUpdate::new(PreparedUpdateAction::BufferDelta)
                 }
             }
-            SyncState::Live => {
+            OrderBookSyncState::Live => {
                 if delta.update_id <= self.last_update_id.unwrap_or(0) {
                     return PreparedOrderBookUpdate::new(PreparedUpdateAction::IgnoreStaleDelta);
                 }
@@ -469,7 +484,7 @@ impl OrderBook {
             return PreparedOrderBookUpdate::reject(error, RejectedUpdateAction::None);
         }
         PreparedOrderBookUpdate::new(PreparedUpdateAction::ApplySnapshot {
-            resynchronized: matches!(self.sync_state, SyncState::RequireResync),
+            resynchronized: matches!(self.sync_state, OrderBookSyncState::RequireResync),
         })
     }
 
@@ -478,26 +493,28 @@ impl OrderBook {
         &mut self,
         prepared: PreparedOrderBookUpdate,
         update: OrderBookUpdate,
+        timestamp: i64,
     ) -> Result<OrderBookUpdateOutcome, OrderBookUpdateError> {
         match (prepared.action, update) {
             (PreparedUpdateAction::IgnoreStaleDelta, OrderBookUpdate::Delta(_)) => {
                 Ok(OrderBookUpdateOutcome::IgnoredStale)
             }
             (PreparedUpdateAction::BufferDelta, OrderBookUpdate::Delta(delta)) => {
-                self.update_buffer.push_back(delta);
+                self.update_buffer.push_back((delta, timestamp));
                 Ok(OrderBookUpdateOutcome::Buffered)
             }
             (PreparedUpdateAction::ApplyDelta, OrderBookUpdate::Delta(delta)) => {
                 apply_delta_update(&mut self.bids, &mut self.asks, &delta);
                 self.last_update_id = Some(delta.update_id);
-                self.update_buffer.push_back(delta);
+                self.source_timestamp = Some(timestamp);
+                self.update_buffer.push_back((delta, timestamp));
                 Ok(OrderBookUpdateOutcome::Applied)
             }
             (
                 PreparedUpdateAction::ApplySnapshot { resynchronized },
                 OrderBookUpdate::Snapshot(snapshot),
             ) => {
-                self.apply_snapshot(snapshot, resynchronized);
+                self.apply_snapshot(snapshot, resynchronized, timestamp);
                 if resynchronized {
                     Ok(OrderBookUpdateOutcome::Resynchronized)
                 } else {
@@ -518,7 +535,7 @@ impl OrderBook {
                 },
                 _,
             ) => {
-                self.sync_state = SyncState::RequireResync;
+                self.sync_state = OrderBookSyncState::RequireResync;
                 Err(error)
             }
             (
@@ -529,22 +546,38 @@ impl OrderBook {
                 OrderBookUpdate::Delta(delta),
             ) => {
                 if require_resync {
-                    self.sync_state = SyncState::RequireResync;
+                    self.sync_state = OrderBookSyncState::RequireResync;
                 }
-                self.update_buffer.push_back(delta);
+                self.update_buffer.push_back((delta, timestamp));
                 Err(error)
             }
             _ => unreachable!("prepared update must be committed with the update it describes"),
         }
     }
 
-    /// Update order book by passing delta or entire snapshot of order book.
+    /// Applies a delta or snapshot carrying an original epoch-millisecond source time.
+    /// Sequence IDs determine update order; timestamps are retained without clock validation.
     pub fn apply_update(
         &mut self,
         update: OrderBookUpdate,
+        timestamp_millis: i64,
     ) -> Result<OrderBookUpdateOutcome, OrderBookUpdateError> {
         let prepared = self.prepare_update(update.as_ref());
-        self.commit_update(prepared, update)
+        self.commit_update(prepared, update, timestamp_millis)
+    }
+
+    /// Returns synchronization status independently of level availability or source age.
+    pub fn sync_state(&self) -> OrderBookSyncState {
+        self.sync_state
+    }
+
+    /// Original epoch-millisecond time of the last update applied to visible levels.
+    /// Returns `None` before initialization. Buffered, ignored, and rejected updates
+    /// leave this unchanged. Replay uses the final replayed delta's original time,
+    /// which can be older than the snapshot time. Consumers must validate source age
+    /// and clock validity separately; this method never clamps timestamps to now.
+    pub fn source_timestamp(&self) -> Option<i64> {
+        self.source_timestamp
     }
 
     /// Returns the last sequence ID applied to visible levels, or `None` before initialization.
@@ -690,7 +723,7 @@ mod tests {
     use rust_decimal::dec;
 
     fn apply_successfully(book: &mut OrderBook, update: OrderBookUpdate) -> OrderBookUpdateOutcome {
-        match book.apply_update(update) {
+        match book.apply_update(update, 0) {
             Ok(outcome) => outcome,
             Err(_) => panic!("order-book update unexpectedly failed"),
         }
@@ -804,18 +837,18 @@ mod tests {
         );
 
         assert!(matches!(outcome, OrderBookUpdateOutcome::Applied));
-        assert!(matches!(book.sync_state, SyncState::Live));
+        assert!(matches!(book.sync_state, OrderBookSyncState::Live));
         assert_eq!(book.level(Side::Bid, dec!(100)), Some(dec!(2)));
         assert_eq!(book.level(Side::Ask, dec!(101)), Some(dec!(3)));
         assert_eq!(book.last_update_id(), Some(102));
         assert_eq!(book.last_snapshot_update_id(), Some(100));
         assert_eq!(book.update_buffer.len(), 2);
         assert_eq!(
-            book.update_buffer.front().map(|delta| delta.update_id),
+            book.update_buffer.front().map(|(delta, _)| delta.update_id),
             Some(101)
         );
         assert_eq!(
-            book.update_buffer.back().map(|delta| delta.update_id),
+            book.update_buffer.back().map(|(delta, _)| delta.update_id),
             Some(102)
         );
     }
@@ -864,10 +897,13 @@ mod tests {
         );
         assert!(matches!(outcome, OrderBookUpdateOutcome::Applied));
 
-        let gap_result = book.apply_update(OrderBookUpdate::Delta(OrderBookDelta {
-            update_id: 103,
-            changes: vec![OrderBookLevelUpdate::new(Side::Bid, dec!(100), dec!(3))],
-        }));
+        let gap_result = book.apply_update(
+            OrderBookUpdate::Delta(OrderBookDelta {
+                update_id: 103,
+                changes: vec![OrderBookLevelUpdate::new(Side::Bid, dec!(100), dec!(3))],
+            }),
+            0,
+        );
         assert!(matches!(
             gap_result,
             Err(OrderBookUpdateError::SequenceGap {
@@ -876,11 +912,14 @@ mod tests {
             })
         ));
 
-        let snapshot_result = book.apply_update(OrderBookUpdate::Snapshot(OrderBookSnapshot {
-            last_update_id: 101,
-            bids: vec![OrderBookLevel::new(dec!(90), dec!(9))],
-            asks: Vec::new(),
-        }));
+        let snapshot_result = book.apply_update(
+            OrderBookUpdate::Snapshot(OrderBookSnapshot {
+                last_update_id: 101,
+                bids: vec![OrderBookLevel::new(dec!(90), dec!(9))],
+                asks: Vec::new(),
+            }),
+            0,
+        );
         assert!(matches!(
             snapshot_result,
             Err(OrderBookUpdateError::SnapshotHistoryGap {
@@ -890,7 +929,7 @@ mod tests {
             })
         ));
 
-        assert!(matches!(book.sync_state, SyncState::RequireResync));
+        assert!(matches!(book.sync_state, OrderBookSyncState::RequireResync));
         assert_eq!(book.level(Side::Bid, dec!(100)), Some(dec!(1)));
         assert_eq!(book.level(Side::Bid, dec!(90)), None);
         assert_eq!(book.level(Side::Ask, dec!(101)), Some(dec!(2)));
@@ -898,7 +937,7 @@ mod tests {
         assert_eq!(book.last_snapshot_update_id(), Some(100));
         assert_eq!(book.update_buffer.len(), 1);
         assert_eq!(
-            book.update_buffer.front().map(|delta| delta.update_id),
+            book.update_buffer.front().map(|(delta, _)| delta.update_id),
             Some(103)
         );
     }
@@ -923,10 +962,13 @@ mod tests {
             }),
         );
 
-        let gap_result = book.apply_update(OrderBookUpdate::Delta(OrderBookDelta {
-            update_id: 103,
-            changes: vec![OrderBookLevelUpdate::new(Side::Bid, dec!(100), dec!(4))],
-        }));
+        let gap_result = book.apply_update(
+            OrderBookUpdate::Delta(OrderBookDelta {
+                update_id: 103,
+                changes: vec![OrderBookLevelUpdate::new(Side::Bid, dec!(100), dec!(4))],
+            }),
+            0,
+        );
         assert!(matches!(
             gap_result,
             Err(OrderBookUpdateError::SequenceGap {
@@ -945,13 +987,13 @@ mod tests {
         );
 
         assert!(matches!(outcome, OrderBookUpdateOutcome::Resynchronized));
-        assert!(matches!(book.sync_state, SyncState::Live));
+        assert!(matches!(book.sync_state, OrderBookSyncState::Live));
         assert_eq!(book.level(Side::Bid, dec!(100)), Some(dec!(4)));
         assert_eq!(book.last_update_id(), Some(103));
         assert_eq!(book.last_snapshot_update_id(), Some(102));
         assert_eq!(book.update_buffer.len(), 1);
         assert_eq!(
-            book.update_buffer.front().map(|delta| delta.update_id),
+            book.update_buffer.front().map(|(delta, _)| delta.update_id),
             Some(103)
         );
     }
@@ -985,7 +1027,7 @@ mod tests {
         );
 
         assert!(matches!(outcome, OrderBookUpdateOutcome::Applied));
-        assert!(matches!(book.sync_state, SyncState::Live));
+        assert!(matches!(book.sync_state, OrderBookSyncState::Live));
         assert_eq!(book.level(Side::Bid, dec!(100)), Some(dec!(3)));
         assert_eq!(book.last_update_id(), Some(103));
     }
@@ -1020,7 +1062,7 @@ mod tests {
         );
 
         assert!(matches!(outcome, OrderBookUpdateOutcome::Applied));
-        assert!(matches!(book.sync_state, SyncState::Live));
+        assert!(matches!(book.sync_state, OrderBookSyncState::Live));
         assert_eq!(book.level(Side::Bid, dec!(100)), Some(dec!(5)));
         assert_eq!(book.last_update_id(), Some(101));
         assert_eq!(book.last_snapshot_update_id(), Some(101));
@@ -1044,7 +1086,7 @@ mod tests {
         );
 
         assert!(matches!(outcome, OrderBookUpdateOutcome::Applied));
-        assert!(matches!(book.sync_state, SyncState::Live));
+        assert!(matches!(book.sync_state, OrderBookSyncState::Live));
         assert_eq!(book.last_update_id(), Some(0));
         assert_eq!(book.last_snapshot_update_id(), Some(0));
         assert_eq!(book.level(Side::Bid, dec!(100)), Some(dec!(1)));
@@ -1060,7 +1102,7 @@ mod tests {
         let outcome = apply_successfully(&mut book, bid_delta(101, dec!(9)));
 
         assert!(matches!(outcome, OrderBookUpdateOutcome::IgnoredStale));
-        assert!(matches!(book.sync_state, SyncState::Live));
+        assert!(matches!(book.sync_state, OrderBookSyncState::Live));
         assert_eq!(book.level(Side::Bid, dec!(100)), Some(dec!(2)));
         assert_eq!(book.last_update_id(), Some(101));
         assert_eq!(book.last_snapshot_update_id(), Some(100));
@@ -1068,7 +1110,7 @@ mod tests {
         assert_eq!(
             book.update_buffer
                 .front()
-                .and_then(|delta| delta.changes.first())
+                .and_then(|(delta, _)| delta.changes.first())
                 .map(|change| change.size),
             Some(dec!(2))
         );
@@ -1084,13 +1126,13 @@ mod tests {
         let outcome = apply_successfully(&mut book, bid_delta(99, dec!(9)));
 
         assert!(matches!(outcome, OrderBookUpdateOutcome::IgnoredStale));
-        assert!(matches!(book.sync_state, SyncState::Live));
+        assert!(matches!(book.sync_state, OrderBookSyncState::Live));
         assert_eq!(book.level(Side::Bid, dec!(100)), Some(dec!(2)));
         assert_eq!(book.last_update_id(), Some(101));
         assert_eq!(book.last_snapshot_update_id(), Some(100));
         assert_eq!(book.update_buffer.len(), 1);
         assert_eq!(
-            book.update_buffer.front().map(|delta| delta.update_id),
+            book.update_buffer.front().map(|(delta, _)| delta.update_id),
             Some(101)
         );
     }
@@ -1102,7 +1144,7 @@ mod tests {
         apply_successfully(&mut book, bid_snapshot(100, dec!(1)));
         apply_successfully(&mut book, bid_delta(101, dec!(2)));
 
-        let equal_snapshot_result = book.apply_update(bid_snapshot(100, dec!(9)));
+        let equal_snapshot_result = book.apply_update(bid_snapshot(100, dec!(9)), 0);
         assert!(matches!(
             equal_snapshot_result,
             Err(OrderBookUpdateError::StaleSnapshot {
@@ -1111,7 +1153,7 @@ mod tests {
             })
         ));
 
-        let older_snapshot_result = book.apply_update(bid_snapshot(99, dec!(8)));
+        let older_snapshot_result = book.apply_update(bid_snapshot(99, dec!(8)), 0);
         assert!(matches!(
             older_snapshot_result,
             Err(OrderBookUpdateError::StaleSnapshot {
@@ -1120,13 +1162,13 @@ mod tests {
             })
         ));
 
-        assert!(matches!(book.sync_state, SyncState::Live));
+        assert!(matches!(book.sync_state, OrderBookSyncState::Live));
         assert_eq!(book.level(Side::Bid, dec!(100)), Some(dec!(2)));
         assert_eq!(book.last_update_id(), Some(101));
         assert_eq!(book.last_snapshot_update_id(), Some(100));
         assert_eq!(book.update_buffer.len(), 1);
         assert_eq!(
-            book.update_buffer.front().map(|delta| delta.update_id),
+            book.update_buffer.front().map(|(delta, _)| delta.update_id),
             Some(101)
         );
     }
@@ -1143,13 +1185,13 @@ mod tests {
         let outcome = apply_successfully(&mut book, bid_snapshot(102, dec!(30)));
 
         assert!(matches!(outcome, OrderBookUpdateOutcome::Applied));
-        assert!(matches!(book.sync_state, SyncState::Live));
+        assert!(matches!(book.sync_state, OrderBookSyncState::Live));
         assert_eq!(book.level(Side::Bid, dec!(100)), Some(dec!(4)));
         assert_eq!(book.last_update_id(), Some(103));
         assert_eq!(book.last_snapshot_update_id(), Some(102));
         assert_eq!(book.update_buffer.len(), 1);
         assert_eq!(
-            book.update_buffer.front().map(|delta| delta.update_id),
+            book.update_buffer.front().map(|(delta, _)| delta.update_id),
             Some(103)
         );
     }
@@ -1161,19 +1203,19 @@ mod tests {
         let outcome = apply_successfully(&mut book, bid_delta(1, dec!(1)));
         assert!(matches!(outcome, OrderBookUpdateOutcome::Buffered));
 
-        let result = book.apply_update(bid_delta(2, dec!(2)));
+        let result = book.apply_update(bid_delta(2, dec!(2)), 0);
         assert!(matches!(
             result,
             Err(OrderBookUpdateError::BufferCapacityExceeded { capacity: 1 })
         ));
 
-        assert!(matches!(book.sync_state, SyncState::RequireResync));
+        assert!(matches!(book.sync_state, OrderBookSyncState::RequireResync));
         assert_eq!(book.level(Side::Bid, dec!(100)), None);
         assert_eq!(book.last_update_id(), None);
         assert_eq!(book.last_snapshot_update_id(), None);
         assert_eq!(book.update_buffer.len(), 1);
         assert_eq!(
-            book.update_buffer.front().map(|delta| delta.update_id),
+            book.update_buffer.front().map(|(delta, _)| delta.update_id),
             Some(1)
         );
     }
@@ -1185,19 +1227,19 @@ mod tests {
         apply_successfully(&mut book, bid_snapshot(100, dec!(1)));
         apply_successfully(&mut book, bid_delta(101, dec!(2)));
 
-        let result = book.apply_update(bid_delta(102, dec!(3)));
+        let result = book.apply_update(bid_delta(102, dec!(3)), 0);
         assert!(matches!(
             result,
             Err(OrderBookUpdateError::BufferCapacityExceeded { capacity: 1 })
         ));
 
-        assert!(matches!(book.sync_state, SyncState::RequireResync));
+        assert!(matches!(book.sync_state, OrderBookSyncState::RequireResync));
         assert_eq!(book.level(Side::Bid, dec!(100)), Some(dec!(2)));
         assert_eq!(book.last_update_id(), Some(101));
         assert_eq!(book.last_snapshot_update_id(), Some(100));
         assert_eq!(book.update_buffer.len(), 1);
         assert_eq!(
-            book.update_buffer.front().map(|delta| delta.update_id),
+            book.update_buffer.front().map(|(delta, _)| delta.update_id),
             Some(101)
         );
     }
@@ -1215,13 +1257,16 @@ mod tests {
             }),
         );
 
-        let negative_size_result = book.apply_update(OrderBookUpdate::Delta(OrderBookDelta {
-            update_id: 101,
-            changes: vec![
-                OrderBookLevelUpdate::new(Side::Bid, dec!(100), dec!(9)),
-                OrderBookLevelUpdate::new(Side::Ask, dec!(101), dec!(-1)),
-            ],
-        }));
+        let negative_size_result = book.apply_update(
+            OrderBookUpdate::Delta(OrderBookDelta {
+                update_id: 101,
+                changes: vec![
+                    OrderBookLevelUpdate::new(Side::Bid, dec!(100), dec!(9)),
+                    OrderBookLevelUpdate::new(Side::Ask, dec!(101), dec!(-1)),
+                ],
+            }),
+            0,
+        );
         assert!(matches!(
             negative_size_result,
             Err(OrderBookUpdateError::InvalidUpdate {
@@ -1231,13 +1276,16 @@ mod tests {
             }) if price == dec!(101) && size == dec!(-1)
         ));
 
-        let negative_price_result = book.apply_update(OrderBookUpdate::Delta(OrderBookDelta {
-            update_id: 101,
-            changes: vec![
-                OrderBookLevelUpdate::new(Side::Ask, dec!(101), dec!(9)),
-                OrderBookLevelUpdate::new(Side::Bid, dec!(-1), dec!(1)),
-            ],
-        }));
+        let negative_price_result = book.apply_update(
+            OrderBookUpdate::Delta(OrderBookDelta {
+                update_id: 101,
+                changes: vec![
+                    OrderBookLevelUpdate::new(Side::Ask, dec!(101), dec!(9)),
+                    OrderBookLevelUpdate::new(Side::Bid, dec!(-1), dec!(1)),
+                ],
+            }),
+            0,
+        );
         assert!(matches!(
             negative_price_result,
             Err(OrderBookUpdateError::InvalidUpdate {
@@ -1273,12 +1321,14 @@ mod tests {
         apply_successfully(&mut book, bid_delta(101, dec!(2)));
         apply_successfully(&mut book, bid_delta(102, dec!(3)));
 
-        let negative_size_result =
-            book.apply_update(OrderBookUpdate::Snapshot(OrderBookSnapshot {
+        let negative_size_result = book.apply_update(
+            OrderBookUpdate::Snapshot(OrderBookSnapshot {
                 last_update_id: 101,
                 bids: vec![OrderBookLevel::new(dec!(90), dec!(9))],
                 asks: vec![OrderBookLevel::new(dec!(101), dec!(-1))],
-            }));
+            }),
+            0,
+        );
         assert!(matches!(
             negative_size_result,
             Err(OrderBookUpdateError::InvalidUpdate {
@@ -1288,15 +1338,17 @@ mod tests {
             }) if price == dec!(101) && size == dec!(-1)
         ));
 
-        let negative_price_result =
-            book.apply_update(OrderBookUpdate::Snapshot(OrderBookSnapshot {
+        let negative_price_result = book.apply_update(
+            OrderBookUpdate::Snapshot(OrderBookSnapshot {
                 last_update_id: 101,
                 bids: vec![
                     OrderBookLevel::new(dec!(90), dec!(9)),
                     OrderBookLevel::new(dec!(-1), dec!(1)),
                 ],
                 asks: Vec::new(),
-            }));
+            }),
+            0,
+        );
         assert!(matches!(
             negative_price_result,
             Err(OrderBookUpdateError::InvalidUpdate {

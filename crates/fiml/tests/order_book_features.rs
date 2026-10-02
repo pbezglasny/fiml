@@ -71,7 +71,7 @@ fn derives_all_indicators_with_grouped_depths_and_missing_values() {
     let symbol = Symbol::new("book-values").unwrap();
     let definitions = keys(symbol).map(FeatureDefinition::with_default_id);
     let mut book = OrderBook::new(UpdatePolicy::Contiguous, 8);
-    book.apply_update(OrderBookUpdate::Snapshot(snapshot(0)))
+    book.apply_update(OrderBookUpdate::Snapshot(snapshot(0)), 0)
         .unwrap();
     let mut builder =
         FeatureExtractor::builder(ArrayFeatureVector::<8>::new()).add_order_book(symbol, book);
