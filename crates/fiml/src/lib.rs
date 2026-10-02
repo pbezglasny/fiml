@@ -51,7 +51,7 @@ pub use event::{
 pub use features::{
     EventField, FeatureDefinition, FeatureExtractor, FeatureExtractorBuilder, FeatureExtractorSpec,
     FeatureId, FeatureKey, FeatureSource, FittedStage, MAX_OUTPUTS_PER_INDICATOR, Pipeline,
-    PipelineSpec, TransformerDefinition, UpdateResult,
+    PipelineSpec, SourceKind, SourceObservation, TransformerDefinition, UpdateResult,
 };
 pub use indicators::{
     CumulativeVolumeDelta, ObvBucket, OnBalanceVolumeTimed, ReturnKind, VolumePriceTrend,

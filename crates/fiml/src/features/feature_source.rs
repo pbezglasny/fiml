@@ -1,6 +1,34 @@
 //! Selects event fields or complete events as feature inputs.
 //!
-use crate::{Event, EventKind};
+use crate::{Event, EventKind, Symbol};
+
+/// Identifies the input stream whose observations establish a raw feature's source age.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SourceKind {
+    /// Events of one kind; fields carried by the same event share its source time.
+    Event(EventKind),
+    /// The configured symbol's event clock, or the global maximum accepted event clock.
+    /// This is not evidence that every market feed is fresh.
+    AnyEvent,
+    /// Updates applied to visible order-book state, including snapshot replay.
+    OrderBook,
+}
+
+/// Source identity and last observation consumed by a raw feature.
+///
+/// This reports source facts, independently of output observations, numeric readiness,
+/// and age policy. Consumers must check every dependency against evaluation time in
+/// the same clock domain; missing, invalid, or future times cannot establish freshness.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SourceObservation {
+    /// Configured input symbol; global calendar inputs use [`Symbol::GLOBAL`].
+    pub symbol: Symbol,
+    /// Input kind consumed by the feature.
+    pub kind: SourceKind,
+    /// Original epoch-millisecond timestamp, or `None` before a relevant observation.
+    /// Values are not clamped or compared against a wall clock.
+    pub timestamp_millis: Option<i64>,
+}
 
 /// Selects the scalar field or complete event consumed by a feature.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

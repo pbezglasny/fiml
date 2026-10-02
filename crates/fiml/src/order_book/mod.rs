@@ -9,7 +9,8 @@ pub use dense_book_side::{DenseBookConfig, DenseBookSide};
 
 pub(crate) use book::PreparedOrderBookUpdate;
 pub use book::{
-    DepthUntilSizeResult, OrderBook, OrderBookUpdateError, OrderBookUpdateOutcome, UpdatePolicy,
+    DepthUntilSizeResult, OrderBook, OrderBookSyncState, OrderBookUpdateError,
+    OrderBookUpdateOutcome, UpdatePolicy,
 };
 use rust_decimal::Decimal;
 

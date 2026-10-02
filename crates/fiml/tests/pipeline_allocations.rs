@@ -491,9 +491,103 @@ fn configured_book_derivation_and_transformation_do_not_allocate() {
                 black_box(extractor.handle_event(event).unwrap()).features_updated,
                 18
             );
+            black_box(extractor.raw_feature_ids());
+            black_box(extractor.raw_observations());
+            black_box(extractor.output_observations());
+            for index in 0..19 {
+                black_box(extractor.raw_feature_sources(index));
+            }
         }
     });
     assert_eq!(allocations, 0);
+}
+
+#[test]
+fn book_source_tracking_does_not_allocate_during_buffering_or_replay() {
+    use fiml::order_book::{
+        OrderBookConfig, OrderBookDelta, OrderBookLevel, OrderBookLevelUpdate, OrderBookSnapshot,
+        OrderBookUpdateOutcome as Outcome, Side, UpdatePolicy,
+    };
+    use rust_decimal::dec;
+
+    let symbol = Symbol::new("source-replay-allocations").unwrap();
+    let id = FeatureId::new("bid");
+    let raw = FeatureExtractorSpec::new([FeatureDefinition::new(
+        FeatureKey::OrderBookBestBidPrice { symbol },
+        id.clone(),
+    )])
+    .unwrap()
+    .with_order_books([
+        OrderBookConfig::new(symbol, UpdatePolicy::Contiguous, 8).with_dense(
+            dec!(1),
+            dec!(90),
+            dec!(110),
+        ),
+    ])
+    .unwrap();
+    let mut pipeline = PipelineSpec::new(
+        raw,
+        [TransformerDefinition::identity(id.clone(), id.clone())],
+    )
+    .unwrap()
+    .build(
+        ArrayFeatureVector::<1>::new(),
+        ArrayFeatureVector::<1>::new(),
+    )
+    .unwrap();
+    let delta = |timestamp, sequence| {
+        Event::order_book_delta(
+            symbol,
+            timestamp,
+            OrderBookDelta::new(
+                sequence,
+                vec![OrderBookLevelUpdate::new(Side::Bid, dec!(100), dec!(2))],
+            ),
+        )
+    };
+    let snapshot = |timestamp, sequence| {
+        Event::order_book_snapshot(
+            symbol,
+            timestamp,
+            OrderBookSnapshot::new(
+                sequence,
+                vec![OrderBookLevel::new(dec!(100), dec!(2))],
+                vec![],
+            ),
+        )
+    };
+    let events = [
+        (delta(150, 11), Some(Outcome::Buffered)),
+        (snapshot(200, 10), Some(Outcome::Applied)),
+        (delta(201, 11), Some(Outcome::IgnoredStale)),
+        (delta(202, 13), None), // Retained sequence gap, reported as an error.
+        (delta(203, 14), Some(Outcome::Buffered)),
+        (snapshot(204, 12), Some(Outcome::Resynchronized)),
+    ];
+    assert_eq!(
+        count_allocations(|| {
+            for (event, expected) in events {
+                let result = pipeline.handle_event(event);
+                if let Some(outcome) = expected {
+                    assert_eq!(result.unwrap().order_book_outcome, Some(outcome));
+                } else {
+                    assert!(result.is_err());
+                }
+                black_box(pipeline.raw_feature_index(&id));
+                black_box(pipeline.raw_feature_sources(0));
+                black_box(pipeline.raw_observations());
+                black_box(pipeline.output_observations());
+                let book = pipeline.order_book_of_symbol(symbol).unwrap();
+                black_box(book.sync_state());
+                black_box(book.source_timestamp());
+            }
+        }),
+        0
+    );
+    assert_eq!(
+        pipeline.raw_feature_sources(0).unwrap()[0].timestamp_millis,
+        Some(203)
+    );
 }
 
 #[test]
