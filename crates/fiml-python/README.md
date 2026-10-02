@@ -14,8 +14,8 @@ train/serve skew.
 
 ## Install from PyPI
 
-Requires **CPython 3.12 or newer**. These commands apply once `v0.1.0` is
-published to PyPI; until then, use [source installation](#install-from-source).
+Requires **CPython 3.12 or newer**. This guide targets **0.2.0**; until that
+version is published to PyPI, use [source installation](#install-from-source).
 
 ```bash
 python3 -m venv .venv
@@ -25,11 +25,11 @@ Activate it with `source .venv/bin/activate` on Linux or macOS, or
 `.\.venv\Scripts\Activate.ps1` in Windows PowerShell, then install:
 
 ```bash
-python -m pip install "fiml[pandas]"
+python -m pip install "fiml[pandas]>=0.2.0,<0.3"
 ```
 
 Omit `[pandas]` for the NumPy-only API. To also fit supported scikit-learn
-transformations, install `"fiml[pandas,sklearn]"` instead.
+transformations, install `"fiml[pandas,sklearn]>=0.2.0,<0.3"` instead.
 Installing a compatible wheel requires no Rust toolchain; building from
 source requires the tools listed below.
 
@@ -90,7 +90,7 @@ ways to get there:
 
 ```bash
 source .venv/bin/activate
-python -m pip install "fiml[pandas]" jupyterlab
+python -m pip install "fiml[pandas]>=0.2.0,<0.3" jupyterlab
 jupyter lab
 ```
 
@@ -98,7 +98,7 @@ jupyter lab
 
 ```bash
 source .venv/bin/activate
-python -m pip install "fiml[pandas]" ipykernel
+python -m pip install "fiml[pandas]>=0.2.0,<0.3" ipykernel
 python -m ipykernel install --user --name fiml --display-name "Python (fiml)"
 ```
 
@@ -106,7 +106,7 @@ then pick the *Python (fiml)* kernel in the notebook UI. Alternatively, install
 directly from a notebook cell into whatever kernel is running:
 
 ```python
-%pip install "fiml[pandas]"
+%pip install "fiml[pandas]>=0.2.0,<0.3"
 ```
 
 > **Note:** `fiml` is a compiled extension module. After rebuilding the Rust
@@ -491,7 +491,9 @@ and ignores discarded columns. Positive thresholds depend on input scale;
 VarianceThreshold is neither correlation-based nor supervised feature selection.
 
 JSON writers and readers use pipeline version `3.0` and nested extractor version `2.0`.
-Earlier artifacts are rejected with migration guidance. Scalar stages serialize as
+Earlier artifacts are rejected; see the
+[0.2.0 migration guide](https://github.com/pbezglasny/fiml/blob/v0.2.0/docs/sample-average-migration.md)
+before rebuilding and re-exporting configurations. Scalar stages serialize as
 `{"type": "scalar", "transformations": [...]}` within the required `model_input.stages` array.
 They use the same transformation fields as the base layout.
 Rust consumers should enable `serde_json`'s `float_roundtrip` feature to preserve

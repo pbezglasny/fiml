@@ -9,7 +9,63 @@ serialized configuration will be documented here with migration guidance.
 JSON format versions are independent of package versions; consumers must use
 a release that supports the format they load.
 
-## 0.1.0 — Unreleased
+## 0.2.0 — Unreleased
+
+### Breaking changes and migration
+
+- Sample SMA and EMA move from extractor features to pipeline transformations.
+  Replace Python extractor `.sma(...)` / `.ema(...)` and Rust `FeatureKey::Sma`
+  / `FeatureKey::Ema` with raw field extraction and pipeline SMA/EMA stages.
+  Timed SMA and standalone calculators remain available. Raw feature layouts
+  and IDs change; assign explicit output IDs to retain model column names.
+  See the [sample-average migration guide](docs/sample-average-migration.md).
+- Extractor JSON changes from `1.1` to `2.0`; pipeline JSON changes from `2.6`
+  to `3.0`. Earlier formats are rejected. Rebuild and re-export configurations,
+  including fitted pipelines; changing only the JSON version is insufficient.
+- Rust `OrderBook::apply_update(update, timestamp_millis)` now requires the
+  original source timestamp in Unix milliseconds. Preserve feed timestamps
+  when replaying historical updates.
+- Rust `OrderBookConfig` adds optional `dense` storage configuration and
+  `build()` returns a `Result`. Prefer `OrderBookConfig::new(...)` over struct
+  literals and handle construction errors. `FeatureKey` is no longer `Copy`
+  because context features own their names; borrow or explicitly clone keys.
+  Exhaustive matches must account for new feature, transformer, and error
+  variants; `HandleEventResult` literals also need `order_book_outcome`.
+
+### Added
+
+- Raw scalar field extraction and observation-driven SMA/EMA transformations,
+  including smoothing order-book features and composing successive stages.
+  Averages advance only on finite observations; event-count lags retain their
+  accepted-event behavior.
+- Precomputed context features in Rust and Python, with atomic partial updates,
+  explicit clearing, and scheduled updates during Python replay and fitting.
+  Context does not advance indicator history; callers control availability
+  timing and expiry.
+- Python `future_value` for elapsed-time training targets, with backward or
+  forward lookup, tolerance, and optional match details. Requires the `pandas`
+  extra; call it separately for each instrument and chronological data split.
+- Optional dense order-book storage over a bounded decimal tick grid, with
+  preallocated levels and validation of off-grid or out-of-range updates.
+  Sparse BTreeMap storage remains the default.
+- Rust order-book synchronization status and original source timestamps,
+  per-event book outcomes, raw feature source observations, and pipeline
+  observation masks. Configured books process updates even without subscribed
+  book features. Source timestamps survive buffered-delta replay; consumers
+  determine freshness separately from readiness and synchronization.
+- A recorded Binance partial-depth replay example with smoothed and lagged
+  order-book features.
+
+### Support
+
+- Include the Apache-2.0 license text in the Rust crate, Python wheels, and
+  Python source distribution.
+- Rust 1.89+ and CPython 3.12+ remain supported, with the same Python wheel
+  targets and optional extras as 0.1.0.
+- JSON stores configuration and fitted parameters, not live state. Rebuild
+  indicator and order-book history and reapply context after loading.
+
+## 0.1.0 — 2026-09-15
 
 Initial release of Fiml, a streaming feature-engineering library for trading
 and machine learning, with a shared Rust engine and Python bindings.
@@ -40,10 +96,9 @@ and machine learning, with a shared Rust engine and Python bindings.
 - Rust 1.89 or newer; CPython 3.12 or newer (declared versions: 3.12–3.14).
 - Python requires NumPy; `pandas` and `sklearn` extras are optional. The
   `sklearn` extra requires scikit-learn `>=1.9,<1.10`.
-- Planned artifacts: Rust crate, Python source distribution, and Python wheels
+- Released artifacts: Rust crate, Python source distribution, and Python wheels
   for Linux x86-64/AArch64, macOS x86-64/AArch64, and Windows x86-64.
-  Artifact validation and registry publishing remain tracked in the
-  [release checklist](docs/release-check-list.md).
+  See the [GitHub release](https://github.com/pbezglasny/fiml/releases/tag/v0.1.0).
 - Apache-2.0 license.
 
 ### Limitations
