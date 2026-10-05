@@ -169,7 +169,7 @@ Completion criteria:
 
 Verification for fitted stages:
 
-- `make test` (Rust tests, Python tests, and the maintained notebook);
+- `just test` (Rust tests, Python tests, and the maintained notebook);
 - real sklearn training/export and independent Rust fixture replay;
 - exact fitted JSON reloads and zero-allocation stage execution;
 - `cargo fmt --all -- --check`;

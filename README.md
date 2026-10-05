@@ -298,6 +298,21 @@ Linux x86-64/AArch64, macOS x86-64/AArch64, and Windows x86-64. Installation
 from source requires a Rust toolchain and native linker. Release artifact
 validation is tracked in the [release checklist](docs/release-check-list.md).
 
+Development
+-----------
+
+Repository tasks use [just](https://github.com/casey/just). Python and notebook
+tasks also require [uv](https://docs.astral.sh/uv/).
+
+```bash
+just --list       # Show available tasks
+just build        # Build the Rust library and Python wheel (also the default)
+just test         # Run Rust tests, Python tests, and the maintained notebook
+just test-rust    # Run only Rust tests
+just test-python  # Run only Python tests
+just marimo       # Open the notebook editor
+```
+
 Other docs
 ----
 

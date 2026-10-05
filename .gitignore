@@ -15,7 +15,7 @@ __pycache__/
 *$py.class
 # compiled extension built by `maturin develop` into the package source tree
 *.so
-# wheels produced by `make build`
+# wheels produced by `just build`
 /crates/fiml-python/dist/
 
 # marimo notebook session data
