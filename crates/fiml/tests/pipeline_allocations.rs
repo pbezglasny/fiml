@@ -78,6 +78,59 @@ fn pipeline_with<const N: usize>(
 }
 
 #[test]
+fn changes_do_not_allocate_during_warmup_updates_or_stage_refreshes() {
+    use fiml::FittedStage;
+    let id = FeatureId::new;
+    let raw = FeatureExtractorSpec::new([FeatureDefinition::new(
+        FeatureKey::Field {
+            symbol: Symbol::GLOBAL,
+            field: fiml::EventField::Price,
+        },
+        id("p"),
+    )])
+    .unwrap();
+    let spec = PipelineSpec::with_stages(
+        raw,
+        [T::delta(id("p"), id("d"), 1), T::identity(id("p"), id("p"))],
+        [FittedStage::Scalar {
+            transformations: vec![
+                T::delta(id("p"), id("d3"), 3),
+                T::simple_return(id("p"), id("r1"), 1),
+                T::log_return(id("p"), id("l2"), 2),
+                T::delta(id("d"), id("dd"), 1),
+            ],
+        }],
+        4,
+        None,
+    )
+    .unwrap();
+    use TransformerDefinition as T;
+    let mut pipeline = spec
+        .build(
+            ArrayFeatureVector::<1>::new(),
+            ArrayFeatureVector::<4>::new(),
+        )
+        .unwrap();
+    let allocations = count_allocations(|| {
+        for timestamp in 0..128 {
+            black_box(
+                pipeline
+                    .handle_event(Event::price(Symbol::GLOBAL, timestamp as f64, timestamp))
+                    .unwrap(),
+            );
+            black_box(
+                pipeline
+                    .handle_event(Event::volume(Symbol::GLOBAL, 1., timestamp))
+                    .unwrap(),
+            );
+        }
+    });
+    assert_eq!(allocations, 0);
+    assert_eq!(pipeline.values()[0], 3.);
+    assert_eq!(pipeline.values()[3], 0.);
+}
+
+#[test]
 fn lagged_pipeline_warmup_and_steady_state_do_not_allocate() {
     let mut pipeline = pipeline_with([
         TransformerDefinition::lagged(FeatureId::new("day"), FeatureId::new("lag3"), 3),

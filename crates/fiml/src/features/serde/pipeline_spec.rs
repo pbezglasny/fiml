@@ -282,6 +282,22 @@ impl From<StageWire> for FittedStage {
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 enum TransformationWire {
+    Delta {
+        input: String,
+        output: String,
+        lag_window: usize,
+    },
+    SimpleReturn {
+        input: String,
+        output: String,
+        lag_window: usize,
+    },
+    LogReturn {
+        input: String,
+        output: String,
+        lag_window: usize,
+    },
+
     Ema {
         input: String,
         output: String,
@@ -374,6 +390,33 @@ impl From<&TransformerDefinition> for TransformationWire {
                 output: output.as_str().to_owned(),
                 window: *window,
                 warmup_policy: *warmup_policy,
+            },
+            TransformerDefinition::Delta {
+                input,
+                output,
+                lag_window,
+            } => Self::Delta {
+                input: input.as_str().to_owned(),
+                output: output.as_str().to_owned(),
+                lag_window: *lag_window,
+            },
+            TransformerDefinition::SimpleReturn {
+                input,
+                output,
+                lag_window,
+            } => Self::SimpleReturn {
+                input: input.as_str().to_owned(),
+                output: output.as_str().to_owned(),
+                lag_window: *lag_window,
+            },
+            TransformerDefinition::LogReturn {
+                input,
+                output,
+                lag_window,
+            } => Self::LogReturn {
+                input: input.as_str().to_owned(),
+                output: output.as_str().to_owned(),
+                lag_window: *lag_window,
             },
             TransformerDefinition::Identity { input, output } => Self::Identity {
                 input: input.as_str().to_owned(),
@@ -480,6 +523,21 @@ impl From<TransformationWire> for TransformerDefinition {
                 window,
                 warmup_policy,
             ),
+            TransformationWire::Delta {
+                input,
+                output,
+                lag_window,
+            } => Self::delta(FeatureId::new(input), FeatureId::new(output), lag_window),
+            TransformationWire::SimpleReturn {
+                input,
+                output,
+                lag_window,
+            } => Self::simple_return(FeatureId::new(input), FeatureId::new(output), lag_window),
+            TransformationWire::LogReturn {
+                input,
+                output,
+                lag_window,
+            } => Self::log_return(FeatureId::new(input), FeatureId::new(output), lag_window),
             TransformationWire::Identity { input, output } => {
                 Self::identity(FeatureId::new(input), FeatureId::new(output))
             }

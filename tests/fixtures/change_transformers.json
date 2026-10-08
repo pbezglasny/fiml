@@ -1,0 +1,149 @@
+{
+  "pipeline": {
+    "version": "3.0",
+    "feature_extractor": {
+      "version": "2.0",
+      "capacity": 2,
+      "length": 2,
+      "required_events": [
+        {
+          "symbol": "a",
+          "event": "trade"
+        },
+        {
+          "symbol": "b",
+          "event": "trade"
+        }
+      ],
+      "features": [
+        {
+          "symbol": "a",
+          "indicators": [
+            {
+              "kind": "field",
+              "source": {
+                "type": "field",
+                "event": "trade",
+                "field": "price"
+              },
+              "outputs": [
+                {
+                  "id": "p"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "symbol": "b",
+          "indicators": [
+            {
+              "kind": "field",
+              "source": {
+                "type": "field",
+                "event": "trade",
+                "field": "price"
+              },
+              "outputs": [
+                {
+                  "id": "q"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "model_input": {
+      "capacity": 8,
+      "length": 8,
+      "transformations": [
+        {
+          "type": "standard_scale",
+          "input": "p",
+          "output": "x",
+          "mean": 10.0,
+          "scale": 2.0
+        },
+        {
+          "type": "identity",
+          "input": "q",
+          "output": "q"
+        },
+        {
+          "type": "delta",
+          "input": "p",
+          "output": "raw_delta",
+          "lag_window": 1
+        }
+      ],
+      "stages": [
+        {
+          "type": "scalar",
+          "transformations": [
+            {
+              "type": "delta",
+              "input": "x",
+              "output": "d3",
+              "lag_window": 3
+            },
+            {
+              "type": "simple_return",
+              "input": "x",
+              "output": "r1",
+              "lag_window": 1
+            },
+            {
+              "type": "log_return",
+              "input": "x",
+              "output": "l1",
+              "lag_window": 1
+            },
+            {
+              "type": "delta",
+              "input": "x",
+              "output": "d1",
+              "lag_window": 1
+            },
+            {
+              "type": "delta",
+              "input": "x",
+              "output": "d1_copy",
+              "lag_window": 1
+            },
+            {
+              "type": "simple_return",
+              "input": "q",
+              "output": "q_return",
+              "lag_window": 1
+            },
+            {
+              "type": "identity",
+              "input": "raw_delta",
+              "output": "raw_delta"
+            },
+            {
+              "type": "lagged",
+              "input": "x",
+              "output": "event_lag",
+              "lag_window": 1
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "steps": [
+    {"event": {"kind": "trade", "symbol": "a", "timestamp": 0, "price": 12, "volume": 1.0}, "expected": [null, null, null, null, null, null, null, null]},
+    {"event": {"kind": "trade", "symbol": "b", "timestamp": 1, "price": 10, "volume": 1.0}, "expected": [null, null, null, null, null, null, null, 1]},
+    {"event": {"kind": "trade", "symbol": "a", "timestamp": 2, "price": 14, "volume": 1.0}, "expected": [null, 1, 0.6931471805599453, 1, 1, null, 2, 1]},
+    {"event": {"kind": "time", "timestamp": 3}, "expected": [null, 1, 0.6931471805599453, 1, 1, null, 2, 2]},
+    {"event": {"kind": "trade", "symbol": "a", "timestamp": 4, "price": 18, "volume": 1.0}, "expected": [null, 1, 0.6931471805599453, 2, 2, null, 4, 2]},
+    {"event": {"kind": "trade", "symbol": "b", "timestamp": 5, "price": 20, "volume": 1.0}, "expected": [null, 1, 0.6931471805599453, 2, 2, 1, 4, 4]},
+    {"event": {"kind": "trade", "symbol": "a", "timestamp": 6, "price": 10, "volume": 1.0}, "expected": [-1, -1, null, -4, -4, 1, -8, 4]},
+    {"event": {"kind": "trade", "symbol": "a", "timestamp": 7, "price": 8, "volume": 1.0}, "expected": [-3, null, null, -1, -1, 1, -2, 0]},
+    {"event": {"kind": "trade", "symbol": "a", "timestamp": 8, "price": 6, "volume": 1.0}, "expected": [-6, 1, null, -1, -1, 1, -2, -1]},
+    {"event": {"kind": "trade", "symbol": "a", "timestamp": 9, "price": 12, "volume": 1.0}, "expected": [1, -1.5, null, 3, 3, 1, 6, -2]},
+    {"event": {"kind": "trade", "symbol": "a", "timestamp": 10, "price": 12, "volume": 1.0}, "expected": [2, 0, 0, 0, 0, 1, 0, 1]}
+  ]
+}

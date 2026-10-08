@@ -11,10 +11,12 @@ use crate::{
 
 mod average;
 use average::AverageTransformer;
+mod change;
 mod identity;
 mod lagged;
 mod standard_scale;
 
+use change::{ChangeKind, ChangeTransformer};
 use identity::IdentityTransformer;
 use lagged::LaggedFeature;
 use standard_scale::StandardScaleTransformer;
@@ -45,6 +47,44 @@ pub enum TransformerDefinition {
         window: usize,
         /// Controls availability while history fills.
         warmup_policy: WarmupPolicy,
+    },
+    /// Computes `current - previous` over finite source observations.
+    /// A lag of `k` requires `k + 1` observations; until then the output is NaN.
+    /// Observed nonfinite values emit NaN without advancing history; unrelated events retain output.
+    /// All change kinds and windows for the same input share history within a stage.
+    Delta {
+        /// ID to read from the preceding stage's layout.
+        input: FeatureId,
+        /// Unique, non-reserved ID assigned to this output.
+        output: FeatureId,
+        /// Number of finite observations to look back, in `1..=10_000`.
+        lag_window: usize,
+    },
+    /// Computes `current / previous - 1` over finite source observations.
+    /// A zero denominator emits NaN.
+    /// A lag of `k` requires `k + 1` observations; until then the output is NaN.
+    /// Observed nonfinite values emit NaN without advancing history; unrelated events retain output.
+    /// All change kinds and windows for the same input share history within a stage.
+    SimpleReturn {
+        /// ID to read from the preceding stage's layout.
+        input: FeatureId,
+        /// Unique, non-reserved ID assigned to this output.
+        output: FeatureId,
+        /// Number of finite observations to look back, in `1..=10_000`.
+        lag_window: usize,
+    },
+    /// Computes `ln(current) - ln(previous)` over finite source observations.
+    /// Nonpositive operands emit NaN.
+    /// A lag of `k` requires `k + 1` observations; until then the output is NaN.
+    /// Observed nonfinite values emit NaN without advancing history; unrelated events retain output.
+    /// All change kinds and windows for the same input share history within a stage.
+    LogReturn {
+        /// ID to read from the preceding stage's layout.
+        input: FeatureId,
+        /// Unique, non-reserved ID assigned to this output.
+        output: FeatureId,
+        /// Number of finite observations to look back, in `1..=10_000`.
+        lag_window: usize,
     },
     /// Copies one input scalar without changing its value.
     Identity {
@@ -108,6 +148,33 @@ impl TransformerDefinition {
         }
     }
 
+    /// Creates an exact observation-based delta transformation.
+    pub fn delta(input: FeatureId, output: FeatureId, lag_window: usize) -> Self {
+        Self::Delta {
+            input,
+            output,
+            lag_window,
+        }
+    }
+
+    /// Creates an exact observation-based simple return transformation.
+    pub fn simple_return(input: FeatureId, output: FeatureId, lag_window: usize) -> Self {
+        Self::SimpleReturn {
+            input,
+            output,
+            lag_window,
+        }
+    }
+
+    /// Creates an exact observation-based log return transformation.
+    pub fn log_return(input: FeatureId, output: FeatureId, lag_window: usize) -> Self {
+        Self::LogReturn {
+            input,
+            output,
+            lag_window,
+        }
+    }
+
     /// Creates a scalar identity transformation.
     pub fn identity(input: FeatureId, output: FeatureId) -> Self {
         Self::Identity { input, output }
@@ -137,6 +204,9 @@ impl TransformerDefinition {
             Self::Sma { input, .. }
             | Self::Ema { input, .. }
             | Self::Identity { input, .. }
+            | Self::Delta { input, .. }
+            | Self::SimpleReturn { input, .. }
+            | Self::LogReturn { input, .. }
             | Self::Lagged { input, .. }
             | Self::StandardScale { input, .. } => input,
         }
@@ -147,6 +217,9 @@ impl TransformerDefinition {
             Self::Sma { output, .. }
             | Self::Ema { output, .. }
             | Self::Identity { output, .. }
+            | Self::Delta { output, .. }
+            | Self::SimpleReturn { output, .. }
+            | Self::LogReturn { output, .. }
             | Self::Lagged { output, .. }
             | Self::StandardScale { output, .. } => output,
         }
@@ -159,7 +232,11 @@ impl TransformerDefinition {
         ) {
             return Err(InvalidTransformationDefinitionError::WindowZero);
         }
-        if let Self::Lagged { lag_window, .. } = self {
+        if let Self::Lagged { lag_window, .. }
+        | Self::Delta { lag_window, .. }
+        | Self::SimpleReturn { lag_window, .. }
+        | Self::LogReturn { lag_window, .. } = self
+        {
             if *lag_window == 0 {
                 return Err(InvalidTransformationDefinitionError::LagWindowZero);
             }
@@ -248,6 +325,7 @@ pub(crate) fn compile(
 ) -> Box<[Transformer]> {
     let mut operations = Vec::with_capacity(definitions.len());
     let mut averages = HashMap::<(bool, usize, WarmupPolicy), (Vec<usize>, Vec<usize>)>::new();
+    let mut changes = HashMap::<usize, Vec<(ChangeKind, usize, usize)>>::new();
     let mut lagged_outputs = HashMap::<usize, (Vec<usize>, Vec<usize>)>::new();
     for (output_index, definition) in definitions.iter().enumerate() {
         let input_index = inputs
@@ -261,6 +339,19 @@ pub(crate) fn compile(
                 let (windows, outputs) = averages.entry((ema, input_index, warmup)).or_default();
                 windows.push(*window);
                 outputs.push(output_index);
+            }
+            TransformerDefinition::Delta { lag_window, .. }
+            | TransformerDefinition::SimpleReturn { lag_window, .. }
+            | TransformerDefinition::LogReturn { lag_window, .. } => {
+                let kind = match definition {
+                    TransformerDefinition::Delta { .. } => ChangeKind::Delta,
+                    TransformerDefinition::SimpleReturn { .. } => ChangeKind::SimpleReturn,
+                    _ => ChangeKind::LogReturn,
+                };
+                changes
+                    .entry(input_index)
+                    .or_default()
+                    .push((kind, *lag_window, output_index));
             }
             TransformerDefinition::Identity { .. } => operations.push(Transformer::Identity(
                 IdentityTransformer::new(input_index, output_index),
@@ -298,12 +389,16 @@ pub(crate) fn compile(
             warmup,
         ))));
     }
+    for (input, outputs) in changes {
+        operations.push(Transformer::Change(ChangeTransformer::new(input, outputs)));
+    }
     operations.into_boxed_slice()
 }
 
 /// Resolved scalar operation for allocation-free writes into model input.
 pub(crate) enum Transformer {
     Average(Box<AverageTransformer>),
+    Change(ChangeTransformer),
     Identity(IdentityTransformer),
     Lagged(LaggedFeature),
     StandardScale(StandardScaleTransformer),
@@ -320,6 +415,9 @@ impl Transformer {
     ) {
         match self {
             Self::Average(transformer) => {
+                transformer.apply(raw_values, observed, model_vector, output_observed)
+            }
+            Self::Change(transformer) => {
                 transformer.apply(raw_values, observed, model_vector, output_observed)
             }
             Self::Identity(transformer) => {

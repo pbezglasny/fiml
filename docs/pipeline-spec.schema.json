@@ -34,6 +34,7 @@
         { "$ref": "#/$defs/average" },
         { "$ref": "#/$defs/identity" },
         { "$ref": "#/$defs/lagged" },
+        { "$ref": "#/$defs/change" },
         { "$ref": "#/$defs/standard_scale" }
       ]
     },
@@ -64,6 +65,17 @@
       "required": ["type", "input", "output", "lag_window"],
       "properties": {
         "type": { "const": "lagged" },
+        "input": { "$ref": "#/$defs/feature_id" },
+        "output": { "$ref": "#/$defs/output_feature_id" },
+        "lag_window": { "type": "integer", "minimum": 1, "maximum": 10000 }
+      }
+    },
+    "change": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "input", "output", "lag_window"],
+      "properties": {
+        "type": { "enum": ["delta", "simple_return", "log_return"] },
         "input": { "$ref": "#/$defs/feature_id" },
         "output": { "$ref": "#/$defs/output_feature_id" },
         "lag_window": { "type": "integer", "minimum": 1, "maximum": 10000 }
