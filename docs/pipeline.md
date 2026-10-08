@@ -34,7 +34,7 @@ fitted missing-indicator inputs.
 `FittedStage::PowerTransform` applies Box-Cox or Yeo-Johnson and effective scaling.
 `FittedStage::Select` copies retained columns by prevalidated numeric index.
 `FittedStage::Pca` projects to named components and supports whitening.
-`FittedStage::Scalar` selects, renames, scales, averages, or lags columns from the preceding
+`FittedStage::Scalar` selects, renames, scales, averages, lags, or computes changes of columns from the preceding
 layout. Definitions within a scalar stage are independent; dependent operations
 belong in successive stages. Intermediate widths may exceed final capacity.
 General transformation graphs are not supported.
@@ -53,6 +53,25 @@ layout) compile into one transformer with one
 history buffer sized to the largest lag. Each output keeps its authored position
 and becomes available after its own positive lag window. Duplicate lag windows
 with different output IDs are supported; rejected events do not advance history.
+
+`TransformerDefinition::delta`, `simple_return`, and `log_return` use exact
+finite-observation lags instead of accepted-event lags. A lag `k` in `1..=10_000`
+requires `k + 1` finite observed inputs. Equal-valued observations count;
+unobserved events retain the last output. An observed nonfinite input emits NaN
+without advancing history. Each output inherits its input's observation flag,
+including during warm-up and invalid arithmetic domains.
+
+Delta computes `current - previous`; simple return computes
+`current / previous - 1` (NaN for a zero denominator); log return computes
+`ln(current) - ln(previous)` (NaN unless both values are positive). Finite zero
+and negative values still enter history. Delta/simple-return arithmetic can
+overflow; subtracting logs avoids intermediate ratio overflow for log returns.
+One ring buffer sized to the maximum lag serves all change kinds and windows
+for one input in one stage, with no allocations during warm-up or updates.
+The additive JSON types `delta`, `simple_return`, and `log_return` have
+`input`, `output`, and `lag_window` fields and retain pipeline version `3.0`.
+See the [order-book spread example](../crates/fiml/examples/transformers.rs)
+and [Python builders](../crates/fiml-python/README.md#fitted-model-input-pipelines).
 
 Timestamps are nondecreasing per symbol across all event kinds. Symbols may
 interleave with older timestamps; transformations and lag histories still follow
@@ -208,7 +227,7 @@ batch replay preparation.
 A context refresh executes stateless stages through the entire pipeline while
 stateful transformers emit retained outputs. It does not alter event timestamps,
 calendar features, order books, indicator histories, or lag history. Context
-slots never set observation flags, so SMA/EMA do not average context replacements.
+slots never set observation flags, so SMA/EMA and change transformers do not sample context replacements.
 Event lags can sample held context values on subsequent accepted events.
 
 The additive JSON kind retains extractor version `2.0` and pipeline version `3.0`:
