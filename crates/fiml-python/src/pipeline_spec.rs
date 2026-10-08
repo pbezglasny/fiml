@@ -18,6 +18,60 @@ pub struct ScalarStage {
 
 #[pymethods]
 impl ScalarStage {
+    /// Compute an exact delta over finite input observations.
+    /// Lag must be in 1..=10_000; observed nonfinite inputs emit NaN without advancing history.
+    /// Unobserved events retain the last output. Exact lag k requires k + 1 finite observations.
+    #[pyo3(signature = (input, *, lag_window, output=None))]
+    fn delta<'py>(
+        mut slf: PyRefMut<'py, Self>,
+        input: &str,
+        lag_window: usize,
+        output: Option<&str>,
+    ) -> PyRefMut<'py, Self> {
+        slf.definitions.push(TransformerDefinition::delta(
+            FeatureId::new(input),
+            FeatureId::new(output.unwrap_or(input)),
+            lag_window,
+        ));
+        slf
+    }
+
+    /// Compute an exact simple return over finite input observations.
+    /// Lag must be in 1..=10_000; observed nonfinite inputs emit NaN without advancing history.
+    /// Unobserved events retain the last output. Exact lag k requires k + 1 finite observations.
+    #[pyo3(signature = (input, *, lag_window, output=None))]
+    fn simple_return<'py>(
+        mut slf: PyRefMut<'py, Self>,
+        input: &str,
+        lag_window: usize,
+        output: Option<&str>,
+    ) -> PyRefMut<'py, Self> {
+        slf.definitions.push(TransformerDefinition::simple_return(
+            FeatureId::new(input),
+            FeatureId::new(output.unwrap_or(input)),
+            lag_window,
+        ));
+        slf
+    }
+
+    /// Compute an exact log return over finite input observations.
+    /// Lag must be in 1..=10_000; observed nonfinite inputs emit NaN without advancing history.
+    /// Unobserved events retain the last output. Exact lag k requires k + 1 finite observations.
+    #[pyo3(signature = (input, *, lag_window, output=None))]
+    fn log_return<'py>(
+        mut slf: PyRefMut<'py, Self>,
+        input: &str,
+        lag_window: usize,
+        output: Option<&str>,
+    ) -> PyRefMut<'py, Self> {
+        slf.definitions.push(TransformerDefinition::log_return(
+            FeatureId::new(input),
+            FeatureId::new(output.unwrap_or(input)),
+            lag_window,
+        ));
+        slf
+    }
+
     /// Average finite source observations using the existing EMA calculator.
     #[pyo3(signature = (input, *, window, warmup=PyWarmupPolicy::FullWindow, output=None))]
     fn ema<'py>(
@@ -187,6 +241,60 @@ impl PipelineSpec {
 
 #[pymethods]
 impl PipelineSpec {
+    /// Compute an exact delta over finite input observations.
+    /// Lag must be in 1..=10_000; observed nonfinite inputs emit NaN without advancing history.
+    /// Unobserved events retain the last output. Exact lag k requires k + 1 finite observations.
+    #[pyo3(signature = (input, *, lag_window, output=None))]
+    fn delta<'py>(
+        mut slf: PyRefMut<'py, Self>,
+        input: &str,
+        lag_window: usize,
+        output: Option<&str>,
+    ) -> PyResult<PyRefMut<'py, Self>> {
+        slf.add_transformation(TransformerDefinition::delta(
+            FeatureId::new(input),
+            FeatureId::new(output.unwrap_or(input)),
+            lag_window,
+        ))?;
+        Ok(slf)
+    }
+
+    /// Compute an exact simple return over finite input observations.
+    /// Lag must be in 1..=10_000; observed nonfinite inputs emit NaN without advancing history.
+    /// Unobserved events retain the last output. Exact lag k requires k + 1 finite observations.
+    #[pyo3(signature = (input, *, lag_window, output=None))]
+    fn simple_return<'py>(
+        mut slf: PyRefMut<'py, Self>,
+        input: &str,
+        lag_window: usize,
+        output: Option<&str>,
+    ) -> PyResult<PyRefMut<'py, Self>> {
+        slf.add_transformation(TransformerDefinition::simple_return(
+            FeatureId::new(input),
+            FeatureId::new(output.unwrap_or(input)),
+            lag_window,
+        ))?;
+        Ok(slf)
+    }
+
+    /// Compute an exact log return over finite input observations.
+    /// Lag must be in 1..=10_000; observed nonfinite inputs emit NaN without advancing history.
+    /// Unobserved events retain the last output. Exact lag k requires k + 1 finite observations.
+    #[pyo3(signature = (input, *, lag_window, output=None))]
+    fn log_return<'py>(
+        mut slf: PyRefMut<'py, Self>,
+        input: &str,
+        lag_window: usize,
+        output: Option<&str>,
+    ) -> PyResult<PyRefMut<'py, Self>> {
+        slf.add_transformation(TransformerDefinition::log_return(
+            FeatureId::new(input),
+            FeatureId::new(output.unwrap_or(input)),
+            lag_window,
+        ))?;
+        Ok(slf)
+    }
+
     /// Average finite source observations using the existing EMA calculator.
     #[pyo3(signature = (input, *, window, warmup=PyWarmupPolicy::FullWindow, output=None))]
     fn ema<'py>(

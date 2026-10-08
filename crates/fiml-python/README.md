@@ -356,6 +356,36 @@ independent opaque metadata.
 window must be between 1 and 10,000 inclusive; outputs remain `NaN` until enough history exists.
 Multiple lags of the same input share one history buffer.
 
+`delta(input, *, lag_window, output=None)`, `simple_return(...)`, and
+`log_return(...)` are available on both `PipelineSpec` and `ScalarStage`.
+They compute `current - previous`, `current / previous - 1`, and
+`ln(current) - ln(previous)`, respectively. Their lag counts **finite observations
+of the input**, including repeated values. An exact lag of `k` requires `k + 1`
+observations; outputs are `NaN` until then. Windows must be in `1..=10_000`.
+All three kinds and their windows share one history per input within each stage.
+
+An observed NaN/infinity emits NaN without advancing history. Unobserved events
+retain the last output; context replacement does not count as an observation.
+Finite zero/negative values enter history, but a zero denominator makes simple
+return NaN and nonpositive operands make log return NaN. Arithmetic uses `f64`;
+extreme finite values can overflow delta or simple return. Log return subtracts
+logs to avoid overflowing the intermediate ratio. The output observation flag
+follows the input even when the result is warming up or undefined.
+
+For example, scale an extracted spread and then compute its changes:
+
+```python
+raw = (fiml.FeatureExtractorSpec()
+       .configure_order_book("BTCUSDT", update_policy="contiguous", buffer_size=8)
+       .order_book_spread("BTCUSDT"))
+spec = (fiml.PipelineSpec(raw)
+        .standard_scale(raw.feature_ids()[0], mean=0., scale=2., output="spread")
+        .scalar_stage(fiml.ScalarStage()
+                      .delta("spread", lag_window=1, output="spread_delta")
+                      .simple_return("spread", lag_window=2, output="spread_return")
+                      .log_return("spread", lag_window=2, output="spread_log_return")))
+```
+
 `ModelInputPipeline` mirrors the extractor's stateful `symbol`, `update`,
 `transform`, and `compute_features` event-replay APIs. `values()` and
 `feature_names()` describe final model input; `raw_values()` and
