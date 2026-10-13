@@ -13,14 +13,17 @@ use crate::feature_extractor_spec::{FeatureExtractorSpec, PyWarmupPolicy, parse_
 fn timed_transformation(
     input: &str,
     lag_window: &str,
+    aggregation: &str,
     output: Option<&str>,
-    constructor: fn(FeatureId, FeatureId, Duration) -> TransformerDefinition,
+    constructor: fn(FeatureId, FeatureId, Duration, Duration) -> TransformerDefinition,
 ) -> PyResult<TransformerDefinition> {
     let window = parse_duration("lag_window", lag_window)?;
+    let aggregation = parse_duration("aggregation", aggregation)?;
     Ok(constructor(
         FeatureId::new(input),
         FeatureId::new(output.unwrap_or(input)),
         window,
+        aggregation,
     ))
 }
 
@@ -34,78 +37,94 @@ pub struct ScalarStage {
 
 #[pymethods]
 impl ScalarStage {
-    /// Apply an exact finite-observation as-of operation on the input's source clock.
+    /// Apply an as-of operation on the input's source clock, exact at the default 1ms aggregation.
     /// Positive whole-millisecond duration strings include "100ms", "500ms", and "1s".
+    /// Aggregation retains the last finite observation per bucket and reduces memory and precision.
+    /// Lag must be a positive multiple of aggregation; history is capped at 1,000,000 slots.
     /// Clock advances refresh output; missing observations emit NaN without entering history.
-    #[pyo3(signature = (input, *, lag_window, output=None))]
+    #[pyo3(signature = (input, *, lag_window, aggregation="1ms", output=None))]
     fn lagged_timed<'py>(
         mut slf: PyRefMut<'py, Self>,
         input: &str,
         lag_window: &str,
+        aggregation: &str,
         output: Option<&str>,
     ) -> PyResult<PyRefMut<'py, Self>> {
         slf.definitions.push(timed_transformation(
             input,
             lag_window,
+            aggregation,
             output,
-            TransformerDefinition::lagged_timed,
+            TransformerDefinition::lagged_timed_with_aggregation,
         )?);
         Ok(slf)
     }
 
-    /// Apply an exact finite-observation as-of operation on the input's source clock.
+    /// Apply an as-of operation on the input's source clock, exact at the default 1ms aggregation.
     /// Positive whole-millisecond duration strings include "100ms", "500ms", and "1s".
+    /// Aggregation retains the last finite observation per bucket and reduces memory and precision.
+    /// Lag must be a positive multiple of aggregation; history is capped at 1,000,000 slots.
     /// Clock advances refresh output; missing observations emit NaN without entering history.
-    #[pyo3(signature = (input, *, lag_window, output=None))]
+    #[pyo3(signature = (input, *, lag_window, aggregation="1ms", output=None))]
     fn delta_timed<'py>(
         mut slf: PyRefMut<'py, Self>,
         input: &str,
         lag_window: &str,
+        aggregation: &str,
         output: Option<&str>,
     ) -> PyResult<PyRefMut<'py, Self>> {
         slf.definitions.push(timed_transformation(
             input,
             lag_window,
+            aggregation,
             output,
-            TransformerDefinition::delta_timed,
+            TransformerDefinition::delta_timed_with_aggregation,
         )?);
         Ok(slf)
     }
 
-    /// Apply an exact finite-observation as-of operation on the input's source clock.
+    /// Apply an as-of operation on the input's source clock, exact at the default 1ms aggregation.
     /// Positive whole-millisecond duration strings include "100ms", "500ms", and "1s".
+    /// Aggregation retains the last finite observation per bucket and reduces memory and precision.
+    /// Lag must be a positive multiple of aggregation; history is capped at 1,000,000 slots.
     /// Clock advances refresh output; missing observations emit NaN without entering history.
-    #[pyo3(signature = (input, *, lag_window, output=None))]
+    #[pyo3(signature = (input, *, lag_window, aggregation="1ms", output=None))]
     fn simple_return_timed<'py>(
         mut slf: PyRefMut<'py, Self>,
         input: &str,
         lag_window: &str,
+        aggregation: &str,
         output: Option<&str>,
     ) -> PyResult<PyRefMut<'py, Self>> {
         slf.definitions.push(timed_transformation(
             input,
             lag_window,
+            aggregation,
             output,
-            TransformerDefinition::simple_return_timed,
+            TransformerDefinition::simple_return_timed_with_aggregation,
         )?);
         Ok(slf)
     }
 
-    /// Apply an exact finite-observation as-of operation on the input's source clock.
+    /// Apply an as-of operation on the input's source clock, exact at the default 1ms aggregation.
     /// Positive whole-millisecond duration strings include "100ms", "500ms", and "1s".
+    /// Aggregation retains the last finite observation per bucket and reduces memory and precision.
+    /// Lag must be a positive multiple of aggregation; history is capped at 1,000,000 slots.
     /// Clock advances refresh output; missing observations emit NaN without entering history.
-    #[pyo3(signature = (input, *, lag_window, output=None))]
+    #[pyo3(signature = (input, *, lag_window, aggregation="1ms", output=None))]
     fn log_return_timed<'py>(
         mut slf: PyRefMut<'py, Self>,
         input: &str,
         lag_window: &str,
+        aggregation: &str,
         output: Option<&str>,
     ) -> PyResult<PyRefMut<'py, Self>> {
         slf.definitions.push(timed_transformation(
             input,
             lag_window,
+            aggregation,
             output,
-            TransformerDefinition::log_return_timed,
+            TransformerDefinition::log_return_timed_with_aggregation,
         )?);
         Ok(slf)
     }
@@ -333,78 +352,94 @@ impl PipelineSpec {
 
 #[pymethods]
 impl PipelineSpec {
-    /// Apply an exact finite-observation as-of operation on the input's source clock.
+    /// Apply an as-of operation on the input's source clock, exact at the default 1ms aggregation.
     /// Positive whole-millisecond duration strings include "100ms", "500ms", and "1s".
+    /// Aggregation retains the last finite observation per bucket and reduces memory and precision.
+    /// Lag must be a positive multiple of aggregation; history is capped at 1,000,000 slots.
     /// Clock advances refresh output; missing observations emit NaN without entering history.
-    #[pyo3(signature = (input, *, lag_window, output=None))]
+    #[pyo3(signature = (input, *, lag_window, aggregation="1ms", output=None))]
     fn lagged_timed<'py>(
         mut slf: PyRefMut<'py, Self>,
         input: &str,
         lag_window: &str,
+        aggregation: &str,
         output: Option<&str>,
     ) -> PyResult<PyRefMut<'py, Self>> {
         slf.add_transformation(timed_transformation(
             input,
             lag_window,
+            aggregation,
             output,
-            TransformerDefinition::lagged_timed,
+            TransformerDefinition::lagged_timed_with_aggregation,
         )?)?;
         Ok(slf)
     }
 
-    /// Apply an exact finite-observation as-of operation on the input's source clock.
+    /// Apply an as-of operation on the input's source clock, exact at the default 1ms aggregation.
     /// Positive whole-millisecond duration strings include "100ms", "500ms", and "1s".
+    /// Aggregation retains the last finite observation per bucket and reduces memory and precision.
+    /// Lag must be a positive multiple of aggregation; history is capped at 1,000,000 slots.
     /// Clock advances refresh output; missing observations emit NaN without entering history.
-    #[pyo3(signature = (input, *, lag_window, output=None))]
+    #[pyo3(signature = (input, *, lag_window, aggregation="1ms", output=None))]
     fn delta_timed<'py>(
         mut slf: PyRefMut<'py, Self>,
         input: &str,
         lag_window: &str,
+        aggregation: &str,
         output: Option<&str>,
     ) -> PyResult<PyRefMut<'py, Self>> {
         slf.add_transformation(timed_transformation(
             input,
             lag_window,
+            aggregation,
             output,
-            TransformerDefinition::delta_timed,
+            TransformerDefinition::delta_timed_with_aggregation,
         )?)?;
         Ok(slf)
     }
 
-    /// Apply an exact finite-observation as-of operation on the input's source clock.
+    /// Apply an as-of operation on the input's source clock, exact at the default 1ms aggregation.
     /// Positive whole-millisecond duration strings include "100ms", "500ms", and "1s".
+    /// Aggregation retains the last finite observation per bucket and reduces memory and precision.
+    /// Lag must be a positive multiple of aggregation; history is capped at 1,000,000 slots.
     /// Clock advances refresh output; missing observations emit NaN without entering history.
-    #[pyo3(signature = (input, *, lag_window, output=None))]
+    #[pyo3(signature = (input, *, lag_window, aggregation="1ms", output=None))]
     fn simple_return_timed<'py>(
         mut slf: PyRefMut<'py, Self>,
         input: &str,
         lag_window: &str,
+        aggregation: &str,
         output: Option<&str>,
     ) -> PyResult<PyRefMut<'py, Self>> {
         slf.add_transformation(timed_transformation(
             input,
             lag_window,
+            aggregation,
             output,
-            TransformerDefinition::simple_return_timed,
+            TransformerDefinition::simple_return_timed_with_aggregation,
         )?)?;
         Ok(slf)
     }
 
-    /// Apply an exact finite-observation as-of operation on the input's source clock.
+    /// Apply an as-of operation on the input's source clock, exact at the default 1ms aggregation.
     /// Positive whole-millisecond duration strings include "100ms", "500ms", and "1s".
+    /// Aggregation retains the last finite observation per bucket and reduces memory and precision.
+    /// Lag must be a positive multiple of aggregation; history is capped at 1,000,000 slots.
     /// Clock advances refresh output; missing observations emit NaN without entering history.
-    #[pyo3(signature = (input, *, lag_window, output=None))]
+    #[pyo3(signature = (input, *, lag_window, aggregation="1ms", output=None))]
     fn log_return_timed<'py>(
         mut slf: PyRefMut<'py, Self>,
         input: &str,
         lag_window: &str,
+        aggregation: &str,
         output: Option<&str>,
     ) -> PyResult<PyRefMut<'py, Self>> {
         slf.add_transformation(timed_transformation(
             input,
             lag_window,
+            aggregation,
             output,
-            TransformerDefinition::log_return_timed,
+            TransformerDefinition::log_return_timed_with_aggregation,
         )?)?;
         Ok(slf)
     }

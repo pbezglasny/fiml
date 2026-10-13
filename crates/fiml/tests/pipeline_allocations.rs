@@ -947,9 +947,19 @@ fn timed_transformers_do_not_allocate_during_warmup_wraparound_or_refresh() {
         [
             FittedStage::Scalar {
                 transformations: vec![
-                    T::lagged_timed(id("d"), id("lag"), Duration::from_millis(7)),
+                    T::lagged_timed_with_aggregation(
+                        id("d"),
+                        id("lag"),
+                        Duration::from_millis(7),
+                        Duration::from_millis(7),
+                    ),
                     T::delta_timed(id("p"), id("d"), Duration::from_millis(7)),
-                    T::simple_return_timed(id("p"), id("r"), Duration::from_millis(3)),
+                    T::simple_return_timed_with_aggregation(
+                        id("p"),
+                        id("r"),
+                        Duration::from_millis(3),
+                        Duration::from_millis(3),
+                    ),
                     T::log_return_timed(id("p"), id("log"), Duration::from_millis(1)),
                 ],
             },

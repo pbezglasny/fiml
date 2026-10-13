@@ -36,51 +36,53 @@ fn equal(actual: &[f64], expected: &[f64]) {
 #[cfg(feature = "serde")]
 #[test]
 fn shared_artifact_replays_irregular_intervals_mixed_symbols_and_event_kinds() {
-    let fixture: serde_json::Value = serde_json::from_str(include_str!(
-        "../../../tests/fixtures/timed_transformers.json"
-    ))
-    .unwrap();
-    let spec: PipelineSpec = serde_json::from_value(fixture["pipeline"].clone()).unwrap();
-    assert_eq!(serde_json::to_value(&spec).unwrap(), fixture["pipeline"]);
-    let mut pipeline = spec
-        .build(
-            ArrayFeatureVector::<2>::new(),
-            ArrayFeatureVector::<9>::new(),
-        )
-        .unwrap();
-    for step in fixture["steps"].as_array().unwrap() {
-        let event = &step["event"];
-        let timestamp = event["timestamp"].as_i64().unwrap();
-        let event = match event["kind"].as_str().unwrap() {
-            "time" => Event::time(timestamp),
-            "volume" => Event::volume(
-                Symbol::new(event["symbol"].as_str().unwrap()).unwrap(),
-                1.,
-                timestamp,
-            ),
-            _ => Event::trade(
-                Symbol::new(event["symbol"].as_str().unwrap()).unwrap(),
-                event["price"].as_f64().unwrap(),
-                1.,
-                timestamp,
-                None,
-            ),
-        };
-        pipeline.handle_event(event).unwrap();
-        let expected: Vec<_> = step["expected"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|v| v.as_f64().unwrap_or(f64::NAN))
-            .collect();
-        equal(pipeline.values(), &expected);
-        let observed: Vec<_> = step["observed"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|v| v.as_bool().unwrap())
-            .collect();
-        assert_eq!(pipeline.output_observations(), observed);
+    for text in [
+        include_str!("../../../tests/fixtures/timed_transformers.json"),
+        include_str!("../../../tests/fixtures/timed_transformers_aggregated.json"),
+    ] {
+        let fixture: serde_json::Value = serde_json::from_str(text).unwrap();
+        let spec: PipelineSpec = serde_json::from_value(fixture["pipeline"].clone()).unwrap();
+        assert_eq!(serde_json::to_value(&spec).unwrap(), fixture["pipeline"]);
+        let mut pipeline = spec
+            .build(
+                ArrayFeatureVector::<2>::new(),
+                ArrayFeatureVector::<9>::new(),
+            )
+            .unwrap();
+        for step in fixture["steps"].as_array().unwrap() {
+            let event = &step["event"];
+            let timestamp = event["timestamp"].as_i64().unwrap();
+            let event = match event["kind"].as_str().unwrap() {
+                "time" => Event::time(timestamp),
+                "volume" => Event::volume(
+                    Symbol::new(event["symbol"].as_str().unwrap()).unwrap(),
+                    1.,
+                    timestamp,
+                ),
+                _ => Event::trade(
+                    Symbol::new(event["symbol"].as_str().unwrap()).unwrap(),
+                    event["price"].as_f64().unwrap(),
+                    1.,
+                    timestamp,
+                    None,
+                ),
+            };
+            pipeline.handle_event(event).unwrap();
+            let expected: Vec<_> = step["expected"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|v| v.as_f64().unwrap_or(f64::NAN))
+                .collect();
+            equal(pipeline.values(), &expected);
+            let observed: Vec<_> = step["observed"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|v| v.as_bool().unwrap())
+                .collect();
+            assert_eq!(pipeline.output_observations(), observed);
+        }
     }
 }
 

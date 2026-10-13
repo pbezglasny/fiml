@@ -510,10 +510,16 @@ pub enum InvalidTransformationDefinitionError {
     LagWindowZero,
     /// A lag window exceeds 10,000 accepted events.
     LagWindowTooLarge,
-    /// A timed lag is not a whole number of milliseconds.
+    /// A timed lag or aggregation is not a whole number of milliseconds.
     LagDurationPrecision,
-    /// A timed lag exceeds timestamp or history-storage limits.
+    /// A timed lag or aggregation exceeds the timestamp range.
     LagDurationOutOfRange,
+    /// A timed aggregation interval is zero.
+    LagAggregationZero,
+    /// A timed lag must be a positive multiple of its aggregation interval.
+    LagWindowNotMultipleOfAggregation,
+    /// A shared timed history would require more than 1,000,000 slots.
+    TimedHistoryTooLarge,
 }
 
 /// Duration field in an invalid compiled feature definition.
@@ -861,8 +867,15 @@ impl Display for InvalidTransformationDefinitionError {
             Self::WindowZero => "average window must be positive",
             Self::TooManyAverageOutputs => "too many compatible average outputs (maximum 16)",
             Self::LagWindowZero => "lag window must be positive",
-            Self::LagDurationPrecision => "timed lag must use whole milliseconds",
-            Self::LagDurationOutOfRange => "timed lag exceeds timestamp or history-storage limits",
+            Self::LagDurationPrecision => "timed lag and aggregation must use whole milliseconds",
+            Self::LagDurationOutOfRange => "timed lag or aggregation exceeds the timestamp range",
+            Self::LagAggregationZero => "timed aggregation must be positive",
+            Self::LagWindowNotMultipleOfAggregation => {
+                "timed lag must be a positive multiple of aggregation"
+            }
+            Self::TimedHistoryTooLarge => {
+                "timed history exceeds 1000000 slots; shorten the lag or increase aggregation"
+            }
             Self::LagWindowTooLarge => "lag window exceeds the maximum of 10000 values",
         })
     }
