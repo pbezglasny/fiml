@@ -2,7 +2,7 @@
 
 Status: in progress
 
-Last updated: 2026-09-18
+Last updated: 2026-10-13
 
 The pipeline runtime, model-input serialization, and Python interface are
 implemented, including Python-fitted sklearn `SimpleImputer`, `StandardScaler`,
@@ -10,6 +10,58 @@ implemented, including Python-fitted sklearn `SimpleImputer`, `StandardScaler`,
 `VarianceThreshold`, and PCA
 stages with Rust online inference.
 Remaining interface-hardening items are listed below.
+
+## Rolling scalar statistics
+
+`TransformerDefinition::rolling_std`, `rolling_min`, `rolling_max`, and
+`rolling_range` consume any preceding-stage scalar, including fitted vector
+outputs. Sample constructors take `(input, output, window, warmup_policy)`;
+`window` is a positive observation count, without the event-lag 10,000 limit.
+Use existing `sma` for rolling mean. Standard deviation is population std
+(`ddof=0`); one observation has zero std and range.
+
+The corresponding `_timed` constructors take a `Duration` window and default
+to 1 ms aggregation. `_timed_with_aggregation` takes
+`(input, output, window, aggregation, warmup_policy)`. Durations must be positive
+whole milliseconds; windows must be multiples of aggregation. Every finite
+observation contributes, including repeated timestamps and repeated values.
+Epoch-aligned buckets expire when `bucket_start + window <= source_clock`.
+Coarse aggregation therefore expires whole buckets; it does not discard spikes
+inside them. This follows timed volatility's bucket semantics, rather than the
+last-observation sampling used by timed lag/change transformers.
+
+Only observed finite inputs enter history. An observed NaN or infinity emits
+NaN until the next finite observation; history is preserved. Unobserved inputs
+retain outputs, except source-clock advances refresh timed expiry and mark the
+timed output observed for downstream stages. Context replacement does not
+advance or refresh timed statistics, and context-only inputs have no clock.
+Composite clocks follow existing vector-stage rules; every observed finite
+value at that clock contributes. Empty windows and nonfinite arithmetic results
+emit NaN. Extremely large finite inputs can overflow the variance calculation;
+those summaries stop affecting results when their samples or buckets expire.
+
+`FirstValue` exposes the current nonempty window immediately. `FullWindow`
+requires the configured number of finite observations for samples, or elapsed
+time since the first finite observation for timed windows. Readiness persists
+through gaps, but an empty timed window still emits NaN.
+
+All statistics and warmup policies for one input share circular history within
+a stage; timed groups also share aggregation. Each distinct window is queried
+once. A preallocated summary tree merges shifted moments and exact min/max,
+without subtractive variance updates or allocation during event processing.
+Updates and distinct-window queries cost `O(log slots)`. On 64-bit targets the
+tree uses `96 * next_power_of_two(slots)` bytes, plus `8 * slots` for timed bucket
+IDs. Sample slots equal the largest window. Timed slots equal
+`max_window / aggregation + 2`, capped at 1,000,000 (about 104 MiB including the
+tree at that cap). Choose coarser aggregation to reduce memory for long windows.
+
+Version `3.0` JSON adds `rolling_std`, `rolling_min`, `rolling_max`,
+`rolling_range`, and their `_timed` forms. All require `input`, `output`, `window`,
+and `warmup_policy`; timed windows use duration strings and optional
+`aggregation` (default `"1ms"`, omitted when serialized at its default).
+Existing artifacts retain their behavior; older runtimes cannot read these new
+types. See the [schema](pipeline-spec.schema.json) and the
+[multi-scale market-state example](../crates/fiml/examples/transformers.rs).
 
 ## Current interface
 
@@ -34,7 +86,7 @@ fitted missing-indicator inputs.
 `FittedStage::PowerTransform` applies Box-Cox or Yeo-Johnson and effective scaling.
 `FittedStage::Select` copies retained columns by prevalidated numeric index.
 `FittedStage::Pca` projects to named components and supports whitening.
-`FittedStage::Scalar` selects, renames, scales, averages, lags, or computes changes of columns from the preceding
+`FittedStage::Scalar` selects, renames, scales, averages, lags, computes changes, or measures rolling statistics of columns from the preceding
 layout. Definitions within a scalar stage are independent; dependent operations
 belong in successive stages. Intermediate widths may exceed final capacity.
 General transformation graphs are not supported.

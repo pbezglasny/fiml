@@ -93,7 +93,7 @@ in Rust.
 
 | Operation | Supported transformations |
 | --- | --- |
-| Scalar operations | Copy, rename, and reorder features; scale with supplied mean and scale; smooth observed values with sample SMA/EMA; lag values by accepted-event count. |
+| Scalar operations | Copy, rename, and reorder features; scale with supplied mean and scale; smooth observed values with sample SMA/EMA; measure rolling population std/min/max/range over sample or time windows; lag values by accepted-event count. |
 | Fitted scaling | `StandardScaler`, `RobustScaler`, `MinMaxScaler`, and `MaxAbsScaler`. |
 | Distribution transforms | `PowerTransformer` with Box-Cox or Yeo-Johnson; `QuantileTransformer` with uniform or normal output. |
 | Missing values | `SimpleImputer` for NaNs using mean, median, most-frequent, or constant replacement, with optional missing-value indicators. |

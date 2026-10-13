@@ -4,11 +4,51 @@ use std::time::Duration;
 
 use fiml::{
     FeatureExtractorSpec as CoreFeatureExtractorSpec, FeatureId, FittedStage,
-    PipelineSpec as CorePipelineSpec, TransformerDefinition,
+    PipelineSpec as CorePipelineSpec, TransformerDefinition, WarmupPolicy,
 };
 use pyo3::{exceptions::PyValueError, prelude::*};
 
 use crate::feature_extractor_spec::{FeatureExtractorSpec, PyWarmupPolicy, parse_duration};
+
+fn rolling_transformation(
+    input: &str,
+    window: usize,
+    warmup: PyWarmupPolicy,
+    output: Option<&str>,
+    constructor: fn(FeatureId, FeatureId, usize, WarmupPolicy) -> TransformerDefinition,
+) -> TransformerDefinition {
+    constructor(
+        FeatureId::new(input),
+        FeatureId::new(output.unwrap_or(input)),
+        window,
+        warmup.into(),
+    )
+}
+
+fn rolling_timed_transformation(
+    input: &str,
+    window: &str,
+    aggregation: &str,
+    warmup: PyWarmupPolicy,
+    output: Option<&str>,
+    constructor: fn(
+        FeatureId,
+        FeatureId,
+        Duration,
+        Duration,
+        WarmupPolicy,
+    ) -> TransformerDefinition,
+) -> PyResult<TransformerDefinition> {
+    let window = parse_duration("window", window)?;
+    let aggregation = parse_duration("aggregation", aggregation)?;
+    Ok(constructor(
+        FeatureId::new(input),
+        FeatureId::new(output.unwrap_or(input)),
+        window,
+        aggregation,
+        warmup.into(),
+    ))
+}
 
 fn timed_transformation(
     input: &str,
@@ -37,6 +77,163 @@ pub struct ScalarStage {
 
 #[pymethods]
 impl ScalarStage {
+    /// Rolling population standard deviation of finite observations, with shared history across windows.
+    #[pyo3(signature = (input, *, window, warmup=PyWarmupPolicy::FullWindow, output=None))]
+    fn rolling_std<'py>(
+        mut slf: PyRefMut<'py, Self>,
+        input: &str,
+        window: usize,
+        warmup: PyWarmupPolicy,
+        output: Option<&str>,
+    ) -> PyRefMut<'py, Self> {
+        slf.definitions.push(rolling_transformation(
+            input,
+            window,
+            warmup,
+            output,
+            TransformerDefinition::rolling_std,
+        ));
+        slf
+    }
+    /// Rolling population standard deviation of finite observations, with shared history across windows.
+    /// Timed buckets retain every finite observation and expire together.
+    #[pyo3(signature = (input, *, window, aggregation="1ms", warmup=PyWarmupPolicy::FullWindow, output=None))]
+    fn rolling_std_timed<'py>(
+        mut slf: PyRefMut<'py, Self>,
+        input: &str,
+        window: &str,
+        aggregation: &str,
+        warmup: PyWarmupPolicy,
+        output: Option<&str>,
+    ) -> PyResult<PyRefMut<'py, Self>> {
+        slf.definitions.push(rolling_timed_transformation(
+            input,
+            window,
+            aggregation,
+            warmup,
+            output,
+            TransformerDefinition::rolling_std_timed_with_aggregation,
+        )?);
+        Ok(slf)
+    }
+    /// Rolling minimum of finite observations, with shared history across windows.
+    #[pyo3(signature = (input, *, window, warmup=PyWarmupPolicy::FullWindow, output=None))]
+    fn rolling_min<'py>(
+        mut slf: PyRefMut<'py, Self>,
+        input: &str,
+        window: usize,
+        warmup: PyWarmupPolicy,
+        output: Option<&str>,
+    ) -> PyRefMut<'py, Self> {
+        slf.definitions.push(rolling_transformation(
+            input,
+            window,
+            warmup,
+            output,
+            TransformerDefinition::rolling_min,
+        ));
+        slf
+    }
+    /// Rolling minimum of finite observations, with shared history across windows.
+    /// Timed buckets retain every finite observation and expire together.
+    #[pyo3(signature = (input, *, window, aggregation="1ms", warmup=PyWarmupPolicy::FullWindow, output=None))]
+    fn rolling_min_timed<'py>(
+        mut slf: PyRefMut<'py, Self>,
+        input: &str,
+        window: &str,
+        aggregation: &str,
+        warmup: PyWarmupPolicy,
+        output: Option<&str>,
+    ) -> PyResult<PyRefMut<'py, Self>> {
+        slf.definitions.push(rolling_timed_transformation(
+            input,
+            window,
+            aggregation,
+            warmup,
+            output,
+            TransformerDefinition::rolling_min_timed_with_aggregation,
+        )?);
+        Ok(slf)
+    }
+    /// Rolling maximum of finite observations, with shared history across windows.
+    #[pyo3(signature = (input, *, window, warmup=PyWarmupPolicy::FullWindow, output=None))]
+    fn rolling_max<'py>(
+        mut slf: PyRefMut<'py, Self>,
+        input: &str,
+        window: usize,
+        warmup: PyWarmupPolicy,
+        output: Option<&str>,
+    ) -> PyRefMut<'py, Self> {
+        slf.definitions.push(rolling_transformation(
+            input,
+            window,
+            warmup,
+            output,
+            TransformerDefinition::rolling_max,
+        ));
+        slf
+    }
+    /// Rolling maximum of finite observations, with shared history across windows.
+    /// Timed buckets retain every finite observation and expire together.
+    #[pyo3(signature = (input, *, window, aggregation="1ms", warmup=PyWarmupPolicy::FullWindow, output=None))]
+    fn rolling_max_timed<'py>(
+        mut slf: PyRefMut<'py, Self>,
+        input: &str,
+        window: &str,
+        aggregation: &str,
+        warmup: PyWarmupPolicy,
+        output: Option<&str>,
+    ) -> PyResult<PyRefMut<'py, Self>> {
+        slf.definitions.push(rolling_timed_transformation(
+            input,
+            window,
+            aggregation,
+            warmup,
+            output,
+            TransformerDefinition::rolling_max_timed_with_aggregation,
+        )?);
+        Ok(slf)
+    }
+    /// Rolling range (maximum minus minimum) of finite observations, with shared history across windows.
+    #[pyo3(signature = (input, *, window, warmup=PyWarmupPolicy::FullWindow, output=None))]
+    fn rolling_range<'py>(
+        mut slf: PyRefMut<'py, Self>,
+        input: &str,
+        window: usize,
+        warmup: PyWarmupPolicy,
+        output: Option<&str>,
+    ) -> PyRefMut<'py, Self> {
+        slf.definitions.push(rolling_transformation(
+            input,
+            window,
+            warmup,
+            output,
+            TransformerDefinition::rolling_range,
+        ));
+        slf
+    }
+    /// Rolling range (maximum minus minimum) of finite observations, with shared history across windows.
+    /// Timed buckets retain every finite observation and expire together.
+    #[pyo3(signature = (input, *, window, aggregation="1ms", warmup=PyWarmupPolicy::FullWindow, output=None))]
+    fn rolling_range_timed<'py>(
+        mut slf: PyRefMut<'py, Self>,
+        input: &str,
+        window: &str,
+        aggregation: &str,
+        warmup: PyWarmupPolicy,
+        output: Option<&str>,
+    ) -> PyResult<PyRefMut<'py, Self>> {
+        slf.definitions.push(rolling_timed_transformation(
+            input,
+            window,
+            aggregation,
+            warmup,
+            output,
+            TransformerDefinition::rolling_range_timed_with_aggregation,
+        )?);
+        Ok(slf)
+    }
+
     /// Apply an as-of operation on the input's source clock, exact at the default 1ms aggregation.
     /// Positive whole-millisecond duration strings include "100ms", "500ms", and "1s".
     /// Aggregation retains the last finite observation per bucket and reduces memory and precision.
@@ -352,6 +549,163 @@ impl PipelineSpec {
 
 #[pymethods]
 impl PipelineSpec {
+    /// Rolling population standard deviation of finite observations, with shared history across windows.
+    #[pyo3(signature = (input, *, window, warmup=PyWarmupPolicy::FullWindow, output=None))]
+    fn rolling_std<'py>(
+        mut slf: PyRefMut<'py, Self>,
+        input: &str,
+        window: usize,
+        warmup: PyWarmupPolicy,
+        output: Option<&str>,
+    ) -> PyResult<PyRefMut<'py, Self>> {
+        slf.add_transformation(rolling_transformation(
+            input,
+            window,
+            warmup,
+            output,
+            TransformerDefinition::rolling_std,
+        ))?;
+        Ok(slf)
+    }
+    /// Rolling population standard deviation of finite observations, with shared history across windows.
+    /// Timed buckets retain every finite observation and expire together.
+    #[pyo3(signature = (input, *, window, aggregation="1ms", warmup=PyWarmupPolicy::FullWindow, output=None))]
+    fn rolling_std_timed<'py>(
+        mut slf: PyRefMut<'py, Self>,
+        input: &str,
+        window: &str,
+        aggregation: &str,
+        warmup: PyWarmupPolicy,
+        output: Option<&str>,
+    ) -> PyResult<PyRefMut<'py, Self>> {
+        slf.add_transformation(rolling_timed_transformation(
+            input,
+            window,
+            aggregation,
+            warmup,
+            output,
+            TransformerDefinition::rolling_std_timed_with_aggregation,
+        )?)?;
+        Ok(slf)
+    }
+    /// Rolling minimum of finite observations, with shared history across windows.
+    #[pyo3(signature = (input, *, window, warmup=PyWarmupPolicy::FullWindow, output=None))]
+    fn rolling_min<'py>(
+        mut slf: PyRefMut<'py, Self>,
+        input: &str,
+        window: usize,
+        warmup: PyWarmupPolicy,
+        output: Option<&str>,
+    ) -> PyResult<PyRefMut<'py, Self>> {
+        slf.add_transformation(rolling_transformation(
+            input,
+            window,
+            warmup,
+            output,
+            TransformerDefinition::rolling_min,
+        ))?;
+        Ok(slf)
+    }
+    /// Rolling minimum of finite observations, with shared history across windows.
+    /// Timed buckets retain every finite observation and expire together.
+    #[pyo3(signature = (input, *, window, aggregation="1ms", warmup=PyWarmupPolicy::FullWindow, output=None))]
+    fn rolling_min_timed<'py>(
+        mut slf: PyRefMut<'py, Self>,
+        input: &str,
+        window: &str,
+        aggregation: &str,
+        warmup: PyWarmupPolicy,
+        output: Option<&str>,
+    ) -> PyResult<PyRefMut<'py, Self>> {
+        slf.add_transformation(rolling_timed_transformation(
+            input,
+            window,
+            aggregation,
+            warmup,
+            output,
+            TransformerDefinition::rolling_min_timed_with_aggregation,
+        )?)?;
+        Ok(slf)
+    }
+    /// Rolling maximum of finite observations, with shared history across windows.
+    #[pyo3(signature = (input, *, window, warmup=PyWarmupPolicy::FullWindow, output=None))]
+    fn rolling_max<'py>(
+        mut slf: PyRefMut<'py, Self>,
+        input: &str,
+        window: usize,
+        warmup: PyWarmupPolicy,
+        output: Option<&str>,
+    ) -> PyResult<PyRefMut<'py, Self>> {
+        slf.add_transformation(rolling_transformation(
+            input,
+            window,
+            warmup,
+            output,
+            TransformerDefinition::rolling_max,
+        ))?;
+        Ok(slf)
+    }
+    /// Rolling maximum of finite observations, with shared history across windows.
+    /// Timed buckets retain every finite observation and expire together.
+    #[pyo3(signature = (input, *, window, aggregation="1ms", warmup=PyWarmupPolicy::FullWindow, output=None))]
+    fn rolling_max_timed<'py>(
+        mut slf: PyRefMut<'py, Self>,
+        input: &str,
+        window: &str,
+        aggregation: &str,
+        warmup: PyWarmupPolicy,
+        output: Option<&str>,
+    ) -> PyResult<PyRefMut<'py, Self>> {
+        slf.add_transformation(rolling_timed_transformation(
+            input,
+            window,
+            aggregation,
+            warmup,
+            output,
+            TransformerDefinition::rolling_max_timed_with_aggregation,
+        )?)?;
+        Ok(slf)
+    }
+    /// Rolling range (maximum minus minimum) of finite observations, with shared history across windows.
+    #[pyo3(signature = (input, *, window, warmup=PyWarmupPolicy::FullWindow, output=None))]
+    fn rolling_range<'py>(
+        mut slf: PyRefMut<'py, Self>,
+        input: &str,
+        window: usize,
+        warmup: PyWarmupPolicy,
+        output: Option<&str>,
+    ) -> PyResult<PyRefMut<'py, Self>> {
+        slf.add_transformation(rolling_transformation(
+            input,
+            window,
+            warmup,
+            output,
+            TransformerDefinition::rolling_range,
+        ))?;
+        Ok(slf)
+    }
+    /// Rolling range (maximum minus minimum) of finite observations, with shared history across windows.
+    /// Timed buckets retain every finite observation and expire together.
+    #[pyo3(signature = (input, *, window, aggregation="1ms", warmup=PyWarmupPolicy::FullWindow, output=None))]
+    fn rolling_range_timed<'py>(
+        mut slf: PyRefMut<'py, Self>,
+        input: &str,
+        window: &str,
+        aggregation: &str,
+        warmup: PyWarmupPolicy,
+        output: Option<&str>,
+    ) -> PyResult<PyRefMut<'py, Self>> {
+        slf.add_transformation(rolling_timed_transformation(
+            input,
+            window,
+            aggregation,
+            warmup,
+            output,
+            TransformerDefinition::rolling_range_timed_with_aggregation,
+        )?)?;
+        Ok(slf)
+    }
+
     /// Apply an as-of operation on the input's source clock, exact at the default 1ms aggregation.
     /// Positive whole-millisecond duration strings include "100ms", "500ms", and "1s".
     /// Aggregation retains the last finite observation per bucket and reduces memory and precision.

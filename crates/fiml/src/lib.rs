@@ -492,6 +492,8 @@ pub enum InvalidTransformationDefinitionError {
     WindowZero,
     /// Compatible averages exceed the calculator output limit.
     TooManyAverageOutputs,
+    /// Statistics history size cannot be represented by the allocator.
+    StatisticsHistoryTooLarge,
     /// The input ID is absent from the preceding layout.
     InputFeatureNotFound,
     /// Two transformations use the same output ID.
@@ -857,6 +859,7 @@ impl Display for InvalidIndicatorDefinitionError {
 impl Display for InvalidTransformationDefinitionError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
+            Self::StatisticsHistoryTooLarge => "rolling statistics history is too large",
             Self::InputFeatureNotFound => "input feature ID does not exist in the preceding layout",
             Self::DuplicateOutputFeature => "output feature ID duplicates an earlier output",
             Self::ReservedOutputFeature => "output feature ID uses the reserved namespace",
@@ -864,7 +867,7 @@ impl Display for InvalidTransformationDefinitionError {
             Self::ScaleNotFinite => "standard-scaler scale must be finite",
             Self::ScaleNotPositive => "standard-scaler scale must be positive",
             Self::InverseScaleNotFinite => "standard-scaler inverse scale must be finite",
-            Self::WindowZero => "average window must be positive",
+            Self::WindowZero => "sample window must be positive",
             Self::TooManyAverageOutputs => "too many compatible average outputs (maximum 16)",
             Self::LagWindowZero => "lag window must be positive",
             Self::LagDurationPrecision => "timed lag and aggregation must use whole milliseconds",

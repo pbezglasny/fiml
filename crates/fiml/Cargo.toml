@@ -63,3 +63,7 @@ name = "historical_trade_replay"
 [[example]]
 name = "feature_extractor_spec_from_json"
 required-features = ["serde"]
+
+[[bench]]
+name = "rolling_statistics"
+harness = false

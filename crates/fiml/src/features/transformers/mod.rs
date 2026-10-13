@@ -15,6 +15,8 @@ mod change;
 mod identity;
 mod lagged;
 mod standard_scale;
+mod statistics;
+use statistics::{StatisticKind, StatisticsTransformer};
 mod timed;
 
 use timed::TimedTransformer;
@@ -28,8 +30,8 @@ const WINDOW_MAX_SIZE: usize = 10_000;
 
 /// One named scalar transformation from an input layout to the next output layout.
 ///
-/// Timed variants use the newest retained finite observation at or before `clock - lag_window`.
-/// Single-symbol clocks advance on every accepted event for that symbol; global calendars
+/// Timed lag/change variants use the newest retained finite observation at or before `clock - lag_window`.
+/// For these lag/change variants, single-symbol clocks advance on every accepted event for that symbol; global calendars
 /// and event-count lags use the maximum accepted timestamp. Column-wise stages preserve
 /// clocks, and PCA combines them using their maximum. Observations behind a composite
 /// clock replace the last finite value at that clock. Context-only inputs have no clock.
@@ -44,8 +46,128 @@ const WINDOW_MAX_SIZE: usize = 10_000;
 /// multiple of aggregation. History reserves `max_lag / aggregation + 2` slots of 16 bytes,
 /// capped at 1,000,000 slots (about 16 MB) per shared history. Context updates do not
 /// advance timed histories or refresh their outputs.
+///
+/// Rolling statistics share a summary tree across kinds, windows, and warmup policies
+/// for each input (and aggregation for timed statistics). Unlike timed lag/change
+/// histories, timed statistics include every finite observation in a bucket, including
+/// observations at the same composite clock. Buckets expire when their epoch-aligned
+/// start plus the window is at or before the source clock. Full-window warmup measures
+/// elapsed time since the first finite observation; empty windows emit NaN. Sample
+/// full-window warmup requires the configured number of finite observations.
+/// Population standard deviation and range are zero for a single observation.
+/// Nonfinite inputs emit NaN without entering history; nonfinite arithmetic results
+/// also emit NaN. Timed statistics follow the same clock and context-refresh rules.
+/// Statistics updates and distinct-window queries are logarithmic in history size.
+/// The tree reserves `2 * next_power_of_two(slots)` summaries of 48 bytes on 64-bit
+/// targets, plus 8 bytes per timed slot; timed slots use `max_window / aggregation + 2`
+/// and the same 1,000,000-slot limit. Sample slots equal the largest sample window.
 #[derive(Debug, Clone, PartialEq)]
 pub enum TransformerDefinition {
+    /// Rolling population standard deviation over finite source observations.
+    /// Missing observations emit NaN without entering history; compatible outputs share storage.
+    RollingStd {
+        /// ID in the preceding layout.
+        input: FeatureId,
+        /// ID assigned to this output.
+        output: FeatureId,
+        /// Positive number of finite observations.
+        window: usize,
+        /// Controls availability while history fills.
+        warmup_policy: WarmupPolicy,
+    },
+    /// Rolling population standard deviation over all finite observations in elapsed-time buckets.
+    /// Missing observations emit NaN without entering history; compatible outputs share storage.
+    RollingStdTimed {
+        /// ID in the preceding layout.
+        input: FeatureId,
+        /// ID assigned to this output.
+        output: FeatureId,
+        /// Positive whole-millisecond duration, a multiple of aggregation.
+        window: Duration,
+        /// Positive whole-millisecond bucket width; every finite observation contributes.
+        aggregation: Duration,
+        /// Controls availability while history fills.
+        warmup_policy: WarmupPolicy,
+    },
+    /// Rolling minimum over finite source observations.
+    /// Missing observations emit NaN without entering history; compatible outputs share storage.
+    RollingMin {
+        /// ID in the preceding layout.
+        input: FeatureId,
+        /// ID assigned to this output.
+        output: FeatureId,
+        /// Positive number of finite observations.
+        window: usize,
+        /// Controls availability while history fills.
+        warmup_policy: WarmupPolicy,
+    },
+    /// Rolling minimum over all finite observations in elapsed-time buckets.
+    /// Missing observations emit NaN without entering history; compatible outputs share storage.
+    RollingMinTimed {
+        /// ID in the preceding layout.
+        input: FeatureId,
+        /// ID assigned to this output.
+        output: FeatureId,
+        /// Positive whole-millisecond duration, a multiple of aggregation.
+        window: Duration,
+        /// Positive whole-millisecond bucket width; every finite observation contributes.
+        aggregation: Duration,
+        /// Controls availability while history fills.
+        warmup_policy: WarmupPolicy,
+    },
+    /// Rolling maximum over finite source observations.
+    /// Missing observations emit NaN without entering history; compatible outputs share storage.
+    RollingMax {
+        /// ID in the preceding layout.
+        input: FeatureId,
+        /// ID assigned to this output.
+        output: FeatureId,
+        /// Positive number of finite observations.
+        window: usize,
+        /// Controls availability while history fills.
+        warmup_policy: WarmupPolicy,
+    },
+    /// Rolling maximum over all finite observations in elapsed-time buckets.
+    /// Missing observations emit NaN without entering history; compatible outputs share storage.
+    RollingMaxTimed {
+        /// ID in the preceding layout.
+        input: FeatureId,
+        /// ID assigned to this output.
+        output: FeatureId,
+        /// Positive whole-millisecond duration, a multiple of aggregation.
+        window: Duration,
+        /// Positive whole-millisecond bucket width; every finite observation contributes.
+        aggregation: Duration,
+        /// Controls availability while history fills.
+        warmup_policy: WarmupPolicy,
+    },
+    /// Rolling range (maximum minus minimum) over finite source observations.
+    /// Missing observations emit NaN without entering history; compatible outputs share storage.
+    RollingRange {
+        /// ID in the preceding layout.
+        input: FeatureId,
+        /// ID assigned to this output.
+        output: FeatureId,
+        /// Positive number of finite observations.
+        window: usize,
+        /// Controls availability while history fills.
+        warmup_policy: WarmupPolicy,
+    },
+    /// Rolling range (maximum minus minimum) over all finite observations in elapsed-time buckets.
+    /// Missing observations emit NaN without entering history; compatible outputs share storage.
+    RollingRangeTimed {
+        /// ID in the preceding layout.
+        input: FeatureId,
+        /// ID assigned to this output.
+        output: FeatureId,
+        /// Positive whole-millisecond duration, a multiple of aggregation.
+        window: Duration,
+        /// Positive whole-millisecond bucket width; every finite observation contributes.
+        aggregation: Duration,
+        /// Controls availability while history fills.
+        warmup_policy: WarmupPolicy,
+    },
+
     /// Emits the as-of value at a positive elapsed-time lag.
     /// Only finite observations enter shared history. Nonfinite observations emit NaN.
     /// Source-clock advances refresh the output and mark it observed for later stages.
@@ -191,6 +313,256 @@ pub enum TransformerDefinition {
 }
 
 impl TransformerDefinition {
+    /// Creates an observation-based rolling population standard deviation.
+    pub fn rolling_std(
+        input: FeatureId,
+        output: FeatureId,
+        window: usize,
+        warmup_policy: WarmupPolicy,
+    ) -> Self {
+        Self::RollingStd {
+            input,
+            output,
+            window,
+            warmup_policy,
+        }
+    }
+    /// Creates a timed rolling population standard deviation, using 1 ms aggregation.
+    pub fn rolling_std_timed(
+        input: FeatureId,
+        output: FeatureId,
+        window: Duration,
+        warmup_policy: WarmupPolicy,
+    ) -> Self {
+        Self::rolling_std_timed_with_aggregation(
+            input,
+            output,
+            window,
+            Duration::from_millis(1),
+            warmup_policy,
+        )
+    }
+    /// Creates a timed rolling population standard deviation; buckets include every finite observation.
+    pub fn rolling_std_timed_with_aggregation(
+        input: FeatureId,
+        output: FeatureId,
+        window: Duration,
+        aggregation: Duration,
+        warmup_policy: WarmupPolicy,
+    ) -> Self {
+        Self::RollingStdTimed {
+            input,
+            output,
+            window,
+            aggregation,
+            warmup_policy,
+        }
+    }
+    /// Creates an observation-based rolling minimum.
+    pub fn rolling_min(
+        input: FeatureId,
+        output: FeatureId,
+        window: usize,
+        warmup_policy: WarmupPolicy,
+    ) -> Self {
+        Self::RollingMin {
+            input,
+            output,
+            window,
+            warmup_policy,
+        }
+    }
+    /// Creates a timed rolling minimum, using 1 ms aggregation.
+    pub fn rolling_min_timed(
+        input: FeatureId,
+        output: FeatureId,
+        window: Duration,
+        warmup_policy: WarmupPolicy,
+    ) -> Self {
+        Self::rolling_min_timed_with_aggregation(
+            input,
+            output,
+            window,
+            Duration::from_millis(1),
+            warmup_policy,
+        )
+    }
+    /// Creates a timed rolling minimum; buckets include every finite observation.
+    pub fn rolling_min_timed_with_aggregation(
+        input: FeatureId,
+        output: FeatureId,
+        window: Duration,
+        aggregation: Duration,
+        warmup_policy: WarmupPolicy,
+    ) -> Self {
+        Self::RollingMinTimed {
+            input,
+            output,
+            window,
+            aggregation,
+            warmup_policy,
+        }
+    }
+    /// Creates an observation-based rolling maximum.
+    pub fn rolling_max(
+        input: FeatureId,
+        output: FeatureId,
+        window: usize,
+        warmup_policy: WarmupPolicy,
+    ) -> Self {
+        Self::RollingMax {
+            input,
+            output,
+            window,
+            warmup_policy,
+        }
+    }
+    /// Creates a timed rolling maximum, using 1 ms aggregation.
+    pub fn rolling_max_timed(
+        input: FeatureId,
+        output: FeatureId,
+        window: Duration,
+        warmup_policy: WarmupPolicy,
+    ) -> Self {
+        Self::rolling_max_timed_with_aggregation(
+            input,
+            output,
+            window,
+            Duration::from_millis(1),
+            warmup_policy,
+        )
+    }
+    /// Creates a timed rolling maximum; buckets include every finite observation.
+    pub fn rolling_max_timed_with_aggregation(
+        input: FeatureId,
+        output: FeatureId,
+        window: Duration,
+        aggregation: Duration,
+        warmup_policy: WarmupPolicy,
+    ) -> Self {
+        Self::RollingMaxTimed {
+            input,
+            output,
+            window,
+            aggregation,
+            warmup_policy,
+        }
+    }
+    /// Creates an observation-based rolling range (maximum minus minimum).
+    pub fn rolling_range(
+        input: FeatureId,
+        output: FeatureId,
+        window: usize,
+        warmup_policy: WarmupPolicy,
+    ) -> Self {
+        Self::RollingRange {
+            input,
+            output,
+            window,
+            warmup_policy,
+        }
+    }
+    /// Creates a timed rolling range (maximum minus minimum), using 1 ms aggregation.
+    pub fn rolling_range_timed(
+        input: FeatureId,
+        output: FeatureId,
+        window: Duration,
+        warmup_policy: WarmupPolicy,
+    ) -> Self {
+        Self::rolling_range_timed_with_aggregation(
+            input,
+            output,
+            window,
+            Duration::from_millis(1),
+            warmup_policy,
+        )
+    }
+    /// Creates a timed rolling range (maximum minus minimum); buckets include every finite observation.
+    pub fn rolling_range_timed_with_aggregation(
+        input: FeatureId,
+        output: FeatureId,
+        window: Duration,
+        aggregation: Duration,
+        warmup_policy: WarmupPolicy,
+    ) -> Self {
+        Self::RollingRangeTimed {
+            input,
+            output,
+            window,
+            aggregation,
+            warmup_policy,
+        }
+    }
+    fn statistic(&self) -> Option<(StatisticKind, u64, Option<Duration>, WarmupPolicy)> {
+        match self {
+            Self::RollingStd {
+                window,
+                warmup_policy,
+                ..
+            } => Some((StatisticKind::Std, *window as u64, None, *warmup_policy)),
+            Self::RollingStdTimed {
+                window,
+                warmup_policy,
+                aggregation,
+                ..
+            } => Some((
+                StatisticKind::Std,
+                window.as_millis() as u64,
+                Some(*aggregation),
+                *warmup_policy,
+            )),
+            Self::RollingMin {
+                window,
+                warmup_policy,
+                ..
+            } => Some((StatisticKind::Min, *window as u64, None, *warmup_policy)),
+            Self::RollingMinTimed {
+                window,
+                warmup_policy,
+                aggregation,
+                ..
+            } => Some((
+                StatisticKind::Min,
+                window.as_millis() as u64,
+                Some(*aggregation),
+                *warmup_policy,
+            )),
+            Self::RollingMax {
+                window,
+                warmup_policy,
+                ..
+            } => Some((StatisticKind::Max, *window as u64, None, *warmup_policy)),
+            Self::RollingMaxTimed {
+                window,
+                warmup_policy,
+                aggregation,
+                ..
+            } => Some((
+                StatisticKind::Max,
+                window.as_millis() as u64,
+                Some(*aggregation),
+                *warmup_policy,
+            )),
+            Self::RollingRange {
+                window,
+                warmup_policy,
+                ..
+            } => Some((StatisticKind::Range, *window as u64, None, *warmup_policy)),
+            Self::RollingRangeTimed {
+                window,
+                warmup_policy,
+                aggregation,
+                ..
+            } => Some((
+                StatisticKind::Range,
+                window.as_millis() as u64,
+                Some(*aggregation),
+                *warmup_policy,
+            )),
+            _ => None,
+        }
+    }
+
     /// Creates a source-clock transformation emitting the as-of value.
     /// Uses the newest finite observation at or before `clock - lag_window`, without interpolation.
     pub fn lagged_timed(input: FeatureId, output: FeatureId, lag_window: Duration) -> Self {
@@ -367,7 +739,15 @@ impl TransformerDefinition {
 
     pub(crate) fn input(&self) -> &FeatureId {
         match self {
-            Self::LaggedTimed { input, .. }
+            Self::RollingStd { input, .. }
+            | Self::RollingStdTimed { input, .. }
+            | Self::RollingMin { input, .. }
+            | Self::RollingMinTimed { input, .. }
+            | Self::RollingMax { input, .. }
+            | Self::RollingMaxTimed { input, .. }
+            | Self::RollingRange { input, .. }
+            | Self::RollingRangeTimed { input, .. }
+            | Self::LaggedTimed { input, .. }
             | Self::DeltaTimed { input, .. }
             | Self::SimpleReturnTimed { input, .. }
             | Self::LogReturnTimed { input, .. }
@@ -384,7 +764,15 @@ impl TransformerDefinition {
 
     pub(crate) fn output(&self) -> &FeatureId {
         match self {
-            Self::LaggedTimed { output, .. }
+            Self::RollingStd { output, .. }
+            | Self::RollingStdTimed { output, .. }
+            | Self::RollingMin { output, .. }
+            | Self::RollingMinTimed { output, .. }
+            | Self::RollingMax { output, .. }
+            | Self::RollingMaxTimed { output, .. }
+            | Self::RollingRange { output, .. }
+            | Self::RollingRangeTimed { output, .. }
+            | Self::LaggedTimed { output, .. }
             | Self::DeltaTimed { output, .. }
             | Self::SimpleReturnTimed { output, .. }
             | Self::LogReturnTimed { output, .. }
@@ -401,6 +789,26 @@ impl TransformerDefinition {
 
     pub(crate) fn timed_window(&self) -> Option<(Duration, Duration)> {
         match self {
+            Self::RollingStdTimed {
+                window,
+                aggregation,
+                ..
+            }
+            | Self::RollingMinTimed {
+                window,
+                aggregation,
+                ..
+            }
+            | Self::RollingMaxTimed {
+                window,
+                aggregation,
+                ..
+            }
+            | Self::RollingRangeTimed {
+                window,
+                aggregation,
+                ..
+            } => Some((*window, *aggregation)),
             Self::LaggedTimed {
                 lag_window,
                 aggregation,
@@ -428,6 +836,12 @@ impl TransformerDefinition {
     pub(crate) fn validate(&self) -> std::result::Result<(), InvalidTransformationDefinitionError> {
         if let Some((window, aggregation)) = self.timed_window() {
             timed::validate_window(window, aggregation)?;
+        }
+        if let Some((_, window, aggregation, _)) = self.statistic() {
+            if window == 0 {
+                return Err(InvalidTransformationDefinitionError::WindowZero);
+            }
+            statistics::validate_capacity(window, aggregation.map(|a| a.as_millis() as i64))?;
         }
         if matches!(
             self,
@@ -527,6 +941,8 @@ pub(crate) fn compile(
     inputs: &[FeatureId],
 ) -> Box<[Transformer]> {
     let mut operations = Vec::with_capacity(definitions.len());
+    let mut statistics =
+        HashMap::<(usize, Option<i64>), Vec<(StatisticKind, u64, WarmupPolicy, usize)>>::new();
     let mut averages = HashMap::<(bool, usize, WarmupPolicy), (Vec<usize>, Vec<usize>)>::new();
     let mut timed_outputs = HashMap::<(usize, i64), Vec<(Option<ChangeKind>, i64, usize)>>::new();
     let mut changes = HashMap::<usize, Vec<(ChangeKind, usize, usize)>>::new();
@@ -537,6 +953,20 @@ pub(crate) fn compile(
             .position(|id| id == definition.input())
             .expect("pipeline construction validated every input ID");
         match definition {
+            TransformerDefinition::RollingStd { .. }
+            | TransformerDefinition::RollingStdTimed { .. }
+            | TransformerDefinition::RollingMin { .. }
+            | TransformerDefinition::RollingMinTimed { .. }
+            | TransformerDefinition::RollingMax { .. }
+            | TransformerDefinition::RollingMaxTimed { .. }
+            | TransformerDefinition::RollingRange { .. }
+            | TransformerDefinition::RollingRangeTimed { .. } => {
+                let (kind, window, aggregation, warmup) = definition.statistic().unwrap();
+                statistics
+                    .entry((input_index, aggregation.map(|a| a.as_millis() as i64)))
+                    .or_default()
+                    .push((kind, window, warmup, output_index));
+            }
             TransformerDefinition::LaggedTimed {
                 lag_window,
                 aggregation,
@@ -636,11 +1066,19 @@ pub(crate) fn compile(
             outputs,
         )));
     }
+    for ((input, aggregation), outputs) in statistics {
+        operations.push(Transformer::Statistics(StatisticsTransformer::new(
+            input,
+            aggregation,
+            outputs,
+        )));
+    }
     operations.into_boxed_slice()
 }
 
 /// Resolved scalar operation for allocation-free writes into model input.
 pub(crate) enum Transformer {
+    Statistics(StatisticsTransformer),
     Timed(TimedTransformer),
     Average(Box<AverageTransformer>),
     Change(ChangeTransformer),
@@ -659,6 +1097,13 @@ impl Transformer {
         evaluation: Evaluation<'_>,
     ) {
         match self {
+            Self::Statistics(transformer) => transformer.apply(
+                raw_values,
+                observed,
+                model_vector,
+                output_observed,
+                evaluation,
+            ),
             Self::Timed(transformer) => transformer.apply(
                 raw_values,
                 observed,

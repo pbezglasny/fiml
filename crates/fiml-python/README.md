@@ -386,6 +386,37 @@ spec = (fiml.PipelineSpec(raw)
                       .log_return("spread", lag_window=2, output="spread_log_return")))
 ```
 
+`rolling_std`, `rolling_min`, `rolling_max`, and `rolling_range` are available
+on both `PipelineSpec` and `ScalarStage`. They accept
+`(input, *, window, warmup=WarmupPolicy.FULL_WINDOW, output=None)` and count
+finite observations. Their `_timed` forms accept duration strings for `window`
+and an optional `aggregation="1ms"`. All finite values in each timed bucket
+contribute, preserving within-bucket spikes. Std uses population variance;
+use `sma` for mean. Compatible outputs share history across kinds and windows.
+
+```python
+raw = (fiml.FeatureExtractorSpec()
+       .configure_order_book("BTCUSDT", update_policy="contiguous", buffer_size=8)
+       .order_book_spread("BTCUSDT")
+       .order_book_imbalance("BTCUSDT", [1]))
+spread, imbalance = raw.feature_ids()
+spec = (fiml.PipelineSpec(raw)
+        .rolling_std(spread, window=20, output="spread_std20")
+        .rolling_std(spread, window=100, output="spread_std100")
+        .rolling_range_timed(imbalance, window="1s", aggregation="10ms",
+                             output="imbalance_range1s")
+        .rolling_range_timed(imbalance, window="10s", aggregation="10ms",
+                             output="imbalance_range10s"))
+```
+
+Observed NaN/infinity emits NaN without adding history; unobserved inputs retain
+outputs. Timed windows also refresh on source-clock advances and expire whole
+epoch-aligned buckets. `FULL_WINDOW` waits for the sample count or elapsed time
+since the first finite observation; `FIRST_VALUE` exposes a nonempty window
+immediately. Empty windows emit NaN; one value has zero std/range. See
+[rolling statistics](../../docs/pipeline.md#rolling-scalar-statistics) for precise
+expiry, overflow, clock, and memory semantics.
+
 `lagged_timed`, `delta_timed`, `simple_return_timed`, and `log_return_timed` are
 available on both `PipelineSpec` and `ScalarStage`. Use positive whole-millisecond
 duration strings such as `lag_window="100ms"`, `"500ms"`, or `"1s"`:
