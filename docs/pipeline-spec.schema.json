@@ -32,6 +32,8 @@
     "transformation": {
       "oneOf": [
         { "$ref": "#/$defs/average" },
+        { "$ref": "#/$defs/rolling_statistic" },
+        { "$ref": "#/$defs/rolling_statistic_timed" },
         { "$ref": "#/$defs/identity" },
         { "$ref": "#/$defs/lagged" },
         { "$ref": "#/$defs/change" },
@@ -48,6 +50,85 @@
         "output": { "$ref": "#/$defs/output_feature_id" },
         "window": { "type": "integer", "minimum": 1 },
         "warmup_policy": { "enum": ["first_value", "full_window"] }
+      }
+    },
+    "rolling_statistic": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "input",
+        "output",
+        "window",
+        "warmup_policy"
+      ],
+      "properties": {
+        "type": {
+          "enum": [
+            "rolling_std",
+            "rolling_min",
+            "rolling_max",
+            "rolling_range"
+          ]
+        },
+        "input": {
+          "$ref": "#/$defs/feature_id"
+        },
+        "output": {
+          "$ref": "#/$defs/output_feature_id"
+        },
+        "window": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "warmup_policy": {
+          "enum": [
+            "first_value",
+            "full_window"
+          ]
+        }
+      }
+    },
+    "rolling_statistic_timed": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "input",
+        "output",
+        "window",
+        "warmup_policy"
+      ],
+      "properties": {
+        "type": {
+          "enum": [
+            "rolling_std_timed",
+            "rolling_min_timed",
+            "rolling_max_timed",
+            "rolling_range_timed"
+          ]
+        },
+        "input": {
+          "$ref": "#/$defs/feature_id"
+        },
+        "output": {
+          "$ref": "#/$defs/output_feature_id"
+        },
+        "window": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]*(ms|s|m|h)$"
+        },
+        "warmup_policy": {
+          "enum": [
+            "first_value",
+            "full_window"
+          ]
+        },
+        "aggregation": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]*(ms|s|m|h)$",
+          "default": "1ms"
+        }
       }
     },
     "identity": {

@@ -282,6 +282,83 @@ impl From<StageWire> for FittedStage {
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 enum TransformationWire {
+    RollingStd {
+        input: String,
+        output: String,
+        window: usize,
+        warmup_policy: crate::WarmupPolicy,
+    },
+    RollingStdTimed {
+        input: String,
+        output: String,
+        #[serde(with = "lag_duration")]
+        window: std::time::Duration,
+        #[serde(
+            default = "lag_duration::default_aggregation",
+            with = "lag_duration",
+            skip_serializing_if = "lag_duration::is_default_aggregation"
+        )]
+        aggregation: std::time::Duration,
+        warmup_policy: crate::WarmupPolicy,
+    },
+    RollingMin {
+        input: String,
+        output: String,
+        window: usize,
+        warmup_policy: crate::WarmupPolicy,
+    },
+    RollingMinTimed {
+        input: String,
+        output: String,
+        #[serde(with = "lag_duration")]
+        window: std::time::Duration,
+        #[serde(
+            default = "lag_duration::default_aggregation",
+            with = "lag_duration",
+            skip_serializing_if = "lag_duration::is_default_aggregation"
+        )]
+        aggregation: std::time::Duration,
+        warmup_policy: crate::WarmupPolicy,
+    },
+    RollingMax {
+        input: String,
+        output: String,
+        window: usize,
+        warmup_policy: crate::WarmupPolicy,
+    },
+    RollingMaxTimed {
+        input: String,
+        output: String,
+        #[serde(with = "lag_duration")]
+        window: std::time::Duration,
+        #[serde(
+            default = "lag_duration::default_aggregation",
+            with = "lag_duration",
+            skip_serializing_if = "lag_duration::is_default_aggregation"
+        )]
+        aggregation: std::time::Duration,
+        warmup_policy: crate::WarmupPolicy,
+    },
+    RollingRange {
+        input: String,
+        output: String,
+        window: usize,
+        warmup_policy: crate::WarmupPolicy,
+    },
+    RollingRangeTimed {
+        input: String,
+        output: String,
+        #[serde(with = "lag_duration")]
+        window: std::time::Duration,
+        #[serde(
+            default = "lag_duration::default_aggregation",
+            with = "lag_duration",
+            skip_serializing_if = "lag_duration::is_default_aggregation"
+        )]
+        aggregation: std::time::Duration,
+        warmup_policy: crate::WarmupPolicy,
+    },
+
     LaggedTimed {
         input: String,
         output: String,
@@ -418,6 +495,102 @@ impl From<&PipelineSpec> for PipelineSpecWire {
 impl From<&TransformerDefinition> for TransformationWire {
     fn from(definition: &TransformerDefinition) -> Self {
         match definition {
+            TransformerDefinition::RollingStd {
+                input,
+                output,
+                window,
+                warmup_policy,
+            } => Self::RollingStd {
+                input: input.as_str().to_owned(),
+                output: output.as_str().to_owned(),
+                window: *window,
+                warmup_policy: *warmup_policy,
+            },
+            TransformerDefinition::RollingStdTimed {
+                input,
+                output,
+                window,
+                aggregation,
+                warmup_policy,
+            } => Self::RollingStdTimed {
+                input: input.as_str().to_owned(),
+                output: output.as_str().to_owned(),
+                window: *window,
+                aggregation: *aggregation,
+                warmup_policy: *warmup_policy,
+            },
+            TransformerDefinition::RollingMin {
+                input,
+                output,
+                window,
+                warmup_policy,
+            } => Self::RollingMin {
+                input: input.as_str().to_owned(),
+                output: output.as_str().to_owned(),
+                window: *window,
+                warmup_policy: *warmup_policy,
+            },
+            TransformerDefinition::RollingMinTimed {
+                input,
+                output,
+                window,
+                aggregation,
+                warmup_policy,
+            } => Self::RollingMinTimed {
+                input: input.as_str().to_owned(),
+                output: output.as_str().to_owned(),
+                window: *window,
+                aggregation: *aggregation,
+                warmup_policy: *warmup_policy,
+            },
+            TransformerDefinition::RollingMax {
+                input,
+                output,
+                window,
+                warmup_policy,
+            } => Self::RollingMax {
+                input: input.as_str().to_owned(),
+                output: output.as_str().to_owned(),
+                window: *window,
+                warmup_policy: *warmup_policy,
+            },
+            TransformerDefinition::RollingMaxTimed {
+                input,
+                output,
+                window,
+                aggregation,
+                warmup_policy,
+            } => Self::RollingMaxTimed {
+                input: input.as_str().to_owned(),
+                output: output.as_str().to_owned(),
+                window: *window,
+                aggregation: *aggregation,
+                warmup_policy: *warmup_policy,
+            },
+            TransformerDefinition::RollingRange {
+                input,
+                output,
+                window,
+                warmup_policy,
+            } => Self::RollingRange {
+                input: input.as_str().to_owned(),
+                output: output.as_str().to_owned(),
+                window: *window,
+                warmup_policy: *warmup_policy,
+            },
+            TransformerDefinition::RollingRangeTimed {
+                input,
+                output,
+                window,
+                aggregation,
+                warmup_policy,
+            } => Self::RollingRangeTimed {
+                input: input.as_str().to_owned(),
+                output: output.as_str().to_owned(),
+                window: *window,
+                aggregation: *aggregation,
+                warmup_policy: *warmup_policy,
+            },
             TransformerDefinition::LaggedTimed {
                 input,
                 output,
@@ -595,6 +768,102 @@ impl TryFrom<PipelineSpecWire> for PipelineSpec {
 impl From<TransformationWire> for TransformerDefinition {
     fn from(transformation: TransformationWire) -> Self {
         match transformation {
+            TransformationWire::RollingStd {
+                input,
+                output,
+                window,
+                warmup_policy,
+            } => Self::rolling_std(
+                FeatureId::new(input),
+                FeatureId::new(output),
+                window,
+                warmup_policy,
+            ),
+            TransformationWire::RollingStdTimed {
+                input,
+                output,
+                window,
+                aggregation,
+                warmup_policy,
+            } => Self::rolling_std_timed_with_aggregation(
+                FeatureId::new(input),
+                FeatureId::new(output),
+                window,
+                aggregation,
+                warmup_policy,
+            ),
+            TransformationWire::RollingMin {
+                input,
+                output,
+                window,
+                warmup_policy,
+            } => Self::rolling_min(
+                FeatureId::new(input),
+                FeatureId::new(output),
+                window,
+                warmup_policy,
+            ),
+            TransformationWire::RollingMinTimed {
+                input,
+                output,
+                window,
+                aggregation,
+                warmup_policy,
+            } => Self::rolling_min_timed_with_aggregation(
+                FeatureId::new(input),
+                FeatureId::new(output),
+                window,
+                aggregation,
+                warmup_policy,
+            ),
+            TransformationWire::RollingMax {
+                input,
+                output,
+                window,
+                warmup_policy,
+            } => Self::rolling_max(
+                FeatureId::new(input),
+                FeatureId::new(output),
+                window,
+                warmup_policy,
+            ),
+            TransformationWire::RollingMaxTimed {
+                input,
+                output,
+                window,
+                aggregation,
+                warmup_policy,
+            } => Self::rolling_max_timed_with_aggregation(
+                FeatureId::new(input),
+                FeatureId::new(output),
+                window,
+                aggregation,
+                warmup_policy,
+            ),
+            TransformationWire::RollingRange {
+                input,
+                output,
+                window,
+                warmup_policy,
+            } => Self::rolling_range(
+                FeatureId::new(input),
+                FeatureId::new(output),
+                window,
+                warmup_policy,
+            ),
+            TransformationWire::RollingRangeTimed {
+                input,
+                output,
+                window,
+                aggregation,
+                warmup_policy,
+            } => Self::rolling_range_timed_with_aggregation(
+                FeatureId::new(input),
+                FeatureId::new(output),
+                window,
+                aggregation,
+                warmup_policy,
+            ),
             TransformationWire::LaggedTimed {
                 input,
                 output,

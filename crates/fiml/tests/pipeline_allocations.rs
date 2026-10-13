@@ -1002,3 +1002,80 @@ fn timed_transformers_do_not_allocate_during_warmup_wraparound_or_refresh() {
         0
     );
 }
+
+#[test]
+fn rolling_statistics_do_not_allocate_during_warmup_wraparound_or_expiry() {
+    use TransformerDefinition as T;
+    let id = FeatureId::new;
+    let a = Symbol::new("rolling-allocations").unwrap();
+    let raw = FeatureExtractorSpec::new([FeatureDefinition::new(
+        FeatureKey::Field {
+            symbol: a,
+            field: fiml::EventField::Price,
+        },
+        id("p"),
+    )])
+    .unwrap();
+    let mut pipeline = PipelineSpec::new(
+        raw,
+        [
+            T::rolling_std(id("p"), id("s"), 7, WarmupPolicy::FullWindow),
+            T::rolling_min(id("p"), id("min"), 4, WarmupPolicy::FirstValue),
+            T::rolling_max(id("p"), id("max"), 7, WarmupPolicy::FirstValue),
+            T::rolling_range(id("p"), id("range"), 3, WarmupPolicy::FullWindow),
+            T::rolling_std_timed_with_aggregation(
+                id("p"),
+                id("ts"),
+                Duration::from_millis(12),
+                Duration::from_millis(3),
+                WarmupPolicy::FullWindow,
+            ),
+            T::rolling_min_timed(
+                id("p"),
+                id("tmin"),
+                Duration::from_millis(4),
+                WarmupPolicy::FirstValue,
+            ),
+            T::rolling_max_timed(
+                id("p"),
+                id("tmax"),
+                Duration::from_millis(7),
+                WarmupPolicy::FirstValue,
+            ),
+            T::rolling_range_timed(
+                id("p"),
+                id("trange"),
+                Duration::from_millis(3),
+                WarmupPolicy::FullWindow,
+            ),
+        ],
+    )
+    .unwrap()
+    .build(
+        ArrayFeatureVector::<1>::new(),
+        ArrayFeatureVector::<8>::new(),
+    )
+    .unwrap();
+    assert_eq!(
+        count_allocations(|| {
+            for time in 0..128 {
+                pipeline
+                    .handle_event(Event::price(a, time as f64, time))
+                    .unwrap();
+                pipeline
+                    .handle_event(Event::price(a, time as f64 + 2., time))
+                    .unwrap();
+                pipeline
+                    .handle_event(Event::volume(a, 1., time + 1))
+                    .unwrap();
+            }
+            pipeline
+                .handle_event(Event::volume(a, 1., i64::MAX))
+                .unwrap();
+            black_box(pipeline.values());
+        }),
+        0
+    );
+    assert!(pipeline.values()[..4].iter().all(|v| v.is_finite()));
+    assert!(pipeline.values()[4..].iter().all(|v| v.is_nan()));
+}
