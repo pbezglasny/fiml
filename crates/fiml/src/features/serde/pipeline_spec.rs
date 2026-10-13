@@ -287,24 +287,48 @@ enum TransformationWire {
         output: String,
         #[serde(with = "lag_duration")]
         lag_window: std::time::Duration,
+        #[serde(
+            default = "lag_duration::default_aggregation",
+            with = "lag_duration",
+            skip_serializing_if = "lag_duration::is_default_aggregation"
+        )]
+        aggregation: std::time::Duration,
     },
     DeltaTimed {
         input: String,
         output: String,
         #[serde(with = "lag_duration")]
         lag_window: std::time::Duration,
+        #[serde(
+            default = "lag_duration::default_aggregation",
+            with = "lag_duration",
+            skip_serializing_if = "lag_duration::is_default_aggregation"
+        )]
+        aggregation: std::time::Duration,
     },
     SimpleReturnTimed {
         input: String,
         output: String,
         #[serde(with = "lag_duration")]
         lag_window: std::time::Duration,
+        #[serde(
+            default = "lag_duration::default_aggregation",
+            with = "lag_duration",
+            skip_serializing_if = "lag_duration::is_default_aggregation"
+        )]
+        aggregation: std::time::Duration,
     },
     LogReturnTimed {
         input: String,
         output: String,
         #[serde(with = "lag_duration")]
         lag_window: std::time::Duration,
+        #[serde(
+            default = "lag_duration::default_aggregation",
+            with = "lag_duration",
+            skip_serializing_if = "lag_duration::is_default_aggregation"
+        )]
+        aggregation: std::time::Duration,
     },
 
     Delta {
@@ -398,37 +422,45 @@ impl From<&TransformerDefinition> for TransformationWire {
                 input,
                 output,
                 lag_window,
+                aggregation,
             } => Self::LaggedTimed {
                 input: input.as_str().to_owned(),
                 output: output.as_str().to_owned(),
                 lag_window: *lag_window,
+                aggregation: *aggregation,
             },
             TransformerDefinition::DeltaTimed {
                 input,
                 output,
                 lag_window,
+                aggregation,
             } => Self::DeltaTimed {
                 input: input.as_str().to_owned(),
                 output: output.as_str().to_owned(),
                 lag_window: *lag_window,
+                aggregation: *aggregation,
             },
             TransformerDefinition::SimpleReturnTimed {
                 input,
                 output,
                 lag_window,
+                aggregation,
             } => Self::SimpleReturnTimed {
                 input: input.as_str().to_owned(),
                 output: output.as_str().to_owned(),
                 lag_window: *lag_window,
+                aggregation: *aggregation,
             },
             TransformerDefinition::LogReturnTimed {
                 input,
                 output,
                 lag_window,
+                aggregation,
             } => Self::LogReturnTimed {
                 input: input.as_str().to_owned(),
                 output: output.as_str().to_owned(),
                 lag_window: *lag_window,
+                aggregation: *aggregation,
             },
 
             TransformerDefinition::Ema {
@@ -567,24 +599,46 @@ impl From<TransformationWire> for TransformerDefinition {
                 input,
                 output,
                 lag_window,
-            } => Self::lagged_timed(FeatureId::new(input), FeatureId::new(output), lag_window),
+                aggregation,
+            } => Self::lagged_timed_with_aggregation(
+                FeatureId::new(input),
+                FeatureId::new(output),
+                lag_window,
+                aggregation,
+            ),
             TransformationWire::DeltaTimed {
                 input,
                 output,
                 lag_window,
-            } => Self::delta_timed(FeatureId::new(input), FeatureId::new(output), lag_window),
+                aggregation,
+            } => Self::delta_timed_with_aggregation(
+                FeatureId::new(input),
+                FeatureId::new(output),
+                lag_window,
+                aggregation,
+            ),
             TransformationWire::SimpleReturnTimed {
                 input,
                 output,
                 lag_window,
-            } => {
-                Self::simple_return_timed(FeatureId::new(input), FeatureId::new(output), lag_window)
-            }
+                aggregation,
+            } => Self::simple_return_timed_with_aggregation(
+                FeatureId::new(input),
+                FeatureId::new(output),
+                lag_window,
+                aggregation,
+            ),
             TransformationWire::LogReturnTimed {
                 input,
                 output,
                 lag_window,
-            } => Self::log_return_timed(FeatureId::new(input), FeatureId::new(output), lag_window),
+                aggregation,
+            } => Self::log_return_timed_with_aggregation(
+                FeatureId::new(input),
+                FeatureId::new(output),
+                lag_window,
+                aggregation,
+            ),
 
             TransformationWire::Ema {
                 input,
@@ -987,6 +1041,14 @@ mod tests {
 mod lag_duration {
     use super::*;
     use std::time::Duration;
+
+    pub(super) fn default_aggregation() -> Duration {
+        Duration::from_millis(1)
+    }
+
+    pub(super) fn is_default_aggregation(duration: &Duration) -> bool {
+        *duration == default_aggregation()
+    }
 
     pub(super) fn serialize<S: Serializer>(
         duration: &Duration,

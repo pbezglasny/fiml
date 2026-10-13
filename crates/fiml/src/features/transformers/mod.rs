@@ -28,18 +28,22 @@ const WINDOW_MAX_SIZE: usize = 10_000;
 
 /// One named scalar transformation from an input layout to the next output layout.
 ///
-/// Timed variants use the newest finite observation at or before `clock - lag_window`.
+/// Timed variants use the newest retained finite observation at or before `clock - lag_window`.
 /// Single-symbol clocks advance on every accepted event for that symbol; global calendars
 /// and event-count lags use the maximum accepted timestamp. Column-wise stages preserve
 /// clocks, and PCA combines them using their maximum. Observations behind a composite
 /// clock replace the last finite value at that clock. Context-only inputs have no clock.
 ///
-/// Timed outputs stay NaN until an eligible observation exists. Missing observations
+/// Timed outputs stay NaN until an eligible observation exists. Observed nonfinite values
 /// preserve history but emit NaN until the next finite observation. Clock-only refreshes
 /// are observations of the timed output, without adding samples to its input history.
-/// All timed kinds/windows of one input share history within a stage, reserving approximately
-/// 16 bytes per millisecond of the maximum lag. Same-millisecond finite observations replace
-/// one another. Context updates do not advance timed histories or refresh their outputs.
+/// Timed kinds/windows with the same input and aggregation share history within a stage.
+/// Each epoch-aligned bucket retains its last finite observation with its actual timestamp.
+/// Aggregation defaults to 1 ms; coarser aggregation discards intermediate observations,
+/// but lookups never use an observation after the requested cutoff. A lag must be a positive
+/// multiple of aggregation. History reserves `max_lag / aggregation + 2` slots of 16 bytes,
+/// capped at 1,000,000 slots (about 16 MB) per shared history. Context updates do not
+/// advance timed histories or refresh their outputs.
 #[derive(Debug, Clone, PartialEq)]
 pub enum TransformerDefinition {
     /// Emits the as-of value at a positive elapsed-time lag.
@@ -50,8 +54,10 @@ pub enum TransformerDefinition {
         input: FeatureId,
         /// ID assigned to this output.
         output: FeatureId,
-        /// Positive whole-millisecond duration; history costs about 16 bytes per millisecond.
+        /// Positive whole-millisecond duration, a multiple of `aggregation`.
         lag_window: Duration,
+        /// Positive whole-millisecond bucket width. Each bucket retains its last finite observation.
+        aggregation: Duration,
     },
     /// Emits current minus the as-of value at a positive elapsed-time lag.
     /// Only finite observations enter shared history. Nonfinite observations emit NaN.
@@ -61,8 +67,10 @@ pub enum TransformerDefinition {
         input: FeatureId,
         /// ID assigned to this output.
         output: FeatureId,
-        /// Positive whole-millisecond duration; history costs about 16 bytes per millisecond.
+        /// Positive whole-millisecond duration, a multiple of `aggregation`.
         lag_window: Duration,
+        /// Positive whole-millisecond bucket width. Each bucket retains its last finite observation.
+        aggregation: Duration,
     },
     /// Emits current / as-of value - 1 at a positive elapsed-time lag.
     /// Only finite observations enter shared history. Nonfinite observations emit NaN.
@@ -72,8 +80,10 @@ pub enum TransformerDefinition {
         input: FeatureId,
         /// ID assigned to this output.
         output: FeatureId,
-        /// Positive whole-millisecond duration; history costs about 16 bytes per millisecond.
+        /// Positive whole-millisecond duration, a multiple of `aggregation`.
         lag_window: Duration,
+        /// Positive whole-millisecond bucket width. Each bucket retains its last finite observation.
+        aggregation: Duration,
     },
     /// Emits ln(current) - ln(as-of value) at a positive elapsed-time lag.
     /// Only finite observations enter shared history. Nonfinite observations emit NaN.
@@ -83,8 +93,10 @@ pub enum TransformerDefinition {
         input: FeatureId,
         /// ID assigned to this output.
         output: FeatureId,
-        /// Positive whole-millisecond duration; history costs about 16 bytes per millisecond.
+        /// Positive whole-millisecond duration, a multiple of `aggregation`.
         lag_window: Duration,
+        /// Positive whole-millisecond bucket width. Each bucket retains its last finite observation.
+        aggregation: Duration,
     },
 
     /// EMA over finite source observations; missing observations emit NaN without advancing history.
@@ -182,40 +194,93 @@ impl TransformerDefinition {
     /// Creates a source-clock transformation emitting the as-of value.
     /// Uses the newest finite observation at or before `clock - lag_window`, without interpolation.
     pub fn lagged_timed(input: FeatureId, output: FeatureId, lag_window: Duration) -> Self {
+        Self::lagged_timed_with_aggregation(input, output, lag_window, Duration::from_millis(1))
+    }
+
+    /// Creates a `lagged_timed` transformation retaining the last observation per aggregation bucket.
+    /// Coarser aggregation reduces memory and as-of precision; see [`Self`] for limits.
+    pub fn lagged_timed_with_aggregation(
+        input: FeatureId,
+        output: FeatureId,
+        lag_window: Duration,
+        aggregation: Duration,
+    ) -> Self {
         Self::LaggedTimed {
             input,
             output,
             lag_window,
+            aggregation,
         }
     }
 
     /// Creates a source-clock transformation emitting current minus the as-of value.
     /// Uses the newest finite observation at or before `clock - lag_window`, without interpolation.
     pub fn delta_timed(input: FeatureId, output: FeatureId, lag_window: Duration) -> Self {
+        Self::delta_timed_with_aggregation(input, output, lag_window, Duration::from_millis(1))
+    }
+
+    /// Creates a `delta_timed` transformation retaining the last observation per aggregation bucket.
+    /// Coarser aggregation reduces memory and as-of precision; see [`Self`] for limits.
+    pub fn delta_timed_with_aggregation(
+        input: FeatureId,
+        output: FeatureId,
+        lag_window: Duration,
+        aggregation: Duration,
+    ) -> Self {
         Self::DeltaTimed {
             input,
             output,
             lag_window,
+            aggregation,
         }
     }
 
     /// Creates a source-clock transformation emitting current / as-of value - 1.
     /// Uses the newest finite observation at or before `clock - lag_window`, without interpolation.
     pub fn simple_return_timed(input: FeatureId, output: FeatureId, lag_window: Duration) -> Self {
+        Self::simple_return_timed_with_aggregation(
+            input,
+            output,
+            lag_window,
+            Duration::from_millis(1),
+        )
+    }
+
+    /// Creates a `simple_return_timed` transformation retaining the last observation per aggregation bucket.
+    /// Coarser aggregation reduces memory and as-of precision; see [`Self`] for limits.
+    pub fn simple_return_timed_with_aggregation(
+        input: FeatureId,
+        output: FeatureId,
+        lag_window: Duration,
+        aggregation: Duration,
+    ) -> Self {
         Self::SimpleReturnTimed {
             input,
             output,
             lag_window,
+            aggregation,
         }
     }
 
     /// Creates a source-clock transformation emitting ln(current) - ln(as-of value).
     /// Uses the newest finite observation at or before `clock - lag_window`, without interpolation.
     pub fn log_return_timed(input: FeatureId, output: FeatureId, lag_window: Duration) -> Self {
+        Self::log_return_timed_with_aggregation(input, output, lag_window, Duration::from_millis(1))
+    }
+
+    /// Creates a `log_return_timed` transformation retaining the last observation per aggregation bucket.
+    /// Coarser aggregation reduces memory and as-of precision; see [`Self`] for limits.
+    pub fn log_return_timed_with_aggregation(
+        input: FeatureId,
+        output: FeatureId,
+        lag_window: Duration,
+        aggregation: Duration,
+    ) -> Self {
         Self::LogReturnTimed {
             input,
             output,
             lag_window,
+            aggregation,
         }
     }
 
@@ -334,19 +399,35 @@ impl TransformerDefinition {
         }
     }
 
-    pub(crate) fn timed_window(&self) -> Option<Duration> {
+    pub(crate) fn timed_window(&self) -> Option<(Duration, Duration)> {
         match self {
-            Self::LaggedTimed { lag_window, .. }
-            | Self::DeltaTimed { lag_window, .. }
-            | Self::SimpleReturnTimed { lag_window, .. }
-            | Self::LogReturnTimed { lag_window, .. } => Some(*lag_window),
+            Self::LaggedTimed {
+                lag_window,
+                aggregation,
+                ..
+            }
+            | Self::DeltaTimed {
+                lag_window,
+                aggregation,
+                ..
+            }
+            | Self::SimpleReturnTimed {
+                lag_window,
+                aggregation,
+                ..
+            }
+            | Self::LogReturnTimed {
+                lag_window,
+                aggregation,
+                ..
+            } => Some((*lag_window, *aggregation)),
             _ => None,
         }
     }
 
     pub(crate) fn validate(&self) -> std::result::Result<(), InvalidTransformationDefinitionError> {
-        if let Some(window) = self.timed_window() {
-            timed::validate_window(window)?;
+        if let Some((window, aggregation)) = self.timed_window() {
+            timed::validate_window(window, aggregation)?;
         }
         if matches!(
             self,
@@ -447,7 +528,7 @@ pub(crate) fn compile(
 ) -> Box<[Transformer]> {
     let mut operations = Vec::with_capacity(definitions.len());
     let mut averages = HashMap::<(bool, usize, WarmupPolicy), (Vec<usize>, Vec<usize>)>::new();
-    let mut timed_outputs = HashMap::<usize, Vec<(Option<ChangeKind>, i64, usize)>>::new();
+    let mut timed_outputs = HashMap::<(usize, i64), Vec<(Option<ChangeKind>, i64, usize)>>::new();
     let mut changes = HashMap::<usize, Vec<(ChangeKind, usize, usize)>>::new();
     let mut lagged_outputs = HashMap::<usize, (Vec<usize>, Vec<usize>)>::new();
     for (output_index, definition) in definitions.iter().enumerate() {
@@ -456,10 +537,26 @@ pub(crate) fn compile(
             .position(|id| id == definition.input())
             .expect("pipeline construction validated every input ID");
         match definition {
-            TransformerDefinition::LaggedTimed { lag_window, .. }
-            | TransformerDefinition::DeltaTimed { lag_window, .. }
-            | TransformerDefinition::SimpleReturnTimed { lag_window, .. }
-            | TransformerDefinition::LogReturnTimed { lag_window, .. } => {
+            TransformerDefinition::LaggedTimed {
+                lag_window,
+                aggregation,
+                ..
+            }
+            | TransformerDefinition::DeltaTimed {
+                lag_window,
+                aggregation,
+                ..
+            }
+            | TransformerDefinition::SimpleReturnTimed {
+                lag_window,
+                aggregation,
+                ..
+            }
+            | TransformerDefinition::LogReturnTimed {
+                lag_window,
+                aggregation,
+                ..
+            } => {
                 let kind = match definition {
                     TransformerDefinition::DeltaTimed { .. } => Some(ChangeKind::Delta),
                     TransformerDefinition::SimpleReturnTimed { .. } => {
@@ -468,11 +565,10 @@ pub(crate) fn compile(
                     TransformerDefinition::LogReturnTimed { .. } => Some(ChangeKind::LogReturn),
                     _ => None,
                 };
-                timed_outputs.entry(input_index).or_default().push((
-                    kind,
-                    lag_window.as_millis() as i64,
-                    output_index,
-                ));
+                timed_outputs
+                    .entry((input_index, aggregation.as_millis() as i64))
+                    .or_default()
+                    .push((kind, lag_window.as_millis() as i64, output_index));
             }
             TransformerDefinition::Sma { window, .. }
             | TransformerDefinition::Ema { window, .. } => {
@@ -533,8 +629,12 @@ pub(crate) fn compile(
     for (input, outputs) in changes {
         operations.push(Transformer::Change(ChangeTransformer::new(input, outputs)));
     }
-    for (input, outputs) in timed_outputs {
-        operations.push(Transformer::Timed(TimedTransformer::new(input, outputs)));
+    for ((input, aggregation), outputs) in timed_outputs {
+        operations.push(Transformer::Timed(TimedTransformer::new(
+            input,
+            aggregation,
+            outputs,
+        )));
     }
     operations.into_boxed_slice()
 }

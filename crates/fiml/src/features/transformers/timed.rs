@@ -1,30 +1,41 @@
-//! Exact as-of lags sharing finite timestamp/value history across elapsed-time windows.
+//! As-of lags sharing finite bucket-last observations across elapsed-time windows.
 
 use std::time::Duration;
 
 use super::{Evaluation, change::ChangeKind};
 use crate::{FeatureVector, HeapRingBuffer, InvalidTransformationDefinitionError, RingBuffer};
 
+const MAX_HISTORY_SLOTS: u128 = 1_000_000;
+
 pub(super) fn validate_window(
     window: Duration,
+    aggregation: Duration,
 ) -> Result<(), InvalidTransformationDefinitionError> {
     use InvalidTransformationDefinitionError as Error;
     if window.is_zero() {
         return Err(Error::LagWindowZero);
     }
-    if !window.subsec_nanos().is_multiple_of(1_000_000) {
-        return Err(Error::LagDurationPrecision);
+    if aggregation.is_zero() {
+        return Err(Error::LagAggregationZero);
     }
-    let millis = window.as_millis();
-    if millis > i64::MAX as u128
-        || millis + 1 > (isize::MAX as usize / size_of::<(i64, f64)>()) as u128
-    {
-        return Err(Error::LagDurationOutOfRange);
+    for duration in [window, aggregation] {
+        if !duration.subsec_nanos().is_multiple_of(1_000_000) {
+            return Err(Error::LagDurationPrecision);
+        }
+        if duration.as_millis() > i64::MAX as u128 {
+            return Err(Error::LagDurationOutOfRange);
+        }
+    }
+    if window < aggregation || !window.as_millis().is_multiple_of(aggregation.as_millis()) {
+        return Err(Error::LagWindowNotMultipleOfAggregation);
+    }
+    if window.as_millis() / aggregation.as_millis() + 2 > MAX_HISTORY_SLOTS {
+        return Err(Error::TimedHistoryTooLarge);
     }
     Ok(())
 }
 
-/// One input's finite as-of observations, bounded by its largest millisecond lag.
+/// One input's finite bucket-last observations, bounded by its largest lag and aggregation.
 pub(crate) struct TimedTransformer {
     input: usize,
     // Optional change formula, elapsed milliseconds, and authored output index.
@@ -32,19 +43,26 @@ pub(crate) struct TimedTransformer {
     visible: Box<[f64]>,
     history: HeapRingBuffer<(i64, f64)>,
     max_lag: i64,
+    aggregation: i64,
     clock: Option<i64>,
     current: f64,
 }
 
 impl TimedTransformer {
-    pub(super) fn new(input: usize, outputs: Vec<(Option<ChangeKind>, i64, usize)>) -> Self {
+    pub(super) fn new(
+        input: usize,
+        aggregation: i64,
+        outputs: Vec<(Option<ChangeKind>, i64, usize)>,
+    ) -> Self {
         let max_lag = outputs.iter().map(|(_, lag, _)| *lag).max().unwrap();
         Self {
             input,
             visible: vec![f64::NAN; outputs.len()].into_boxed_slice(),
             outputs: outputs.into_boxed_slice(),
-            history: HeapRingBuffer::new(max_lag as usize + 1),
+            // Keep the boundary bucket, the current partial bucket, and an older predecessor.
+            history: HeapRingBuffer::new((max_lag / aggregation) as usize + 2),
             max_lag,
+            aggregation,
             clock: None,
             current: f64::NAN,
         }
@@ -77,11 +95,9 @@ impl TimedTransformer {
             if observed[self.input] {
                 self.current = input[self.input];
                 if self.current.is_finite() {
-                    if self
-                        .history
-                        .peek_back()
-                        .is_some_and(|&(time, _)| time == now)
-                    {
+                    if self.history.peek_back().is_some_and(|&(time, _)| {
+                        time.div_euclid(self.aggregation) == now.div_euclid(self.aggregation)
+                    }) {
                         self.history.pop_back();
                     }
                     self.history.push_back((now, self.current));
@@ -157,7 +173,7 @@ mod tests {
         let Transformer::Timed(group) = &mut operations[0] else {
             panic!("expected shared timed group")
         };
-        assert_eq!(group.history.capacity(), 8);
+        assert_eq!(group.history.capacity(), 9);
         let mut output = ArrayFeatureVector::<5>::new();
         let mut mask = [false; 5];
         let mut history = Vec::<(i64, f64)>::new();
@@ -211,8 +227,11 @@ mod tests {
 
     #[test]
     fn timestamp_extremes_and_missing_values_preserve_exact_history() {
-        let mut group =
-            TimedTransformer::new(0, vec![(None, 1, 0), (Some(ChangeKind::LogReturn), 1, 1)]);
+        let mut group = TimedTransformer::new(
+            0,
+            1,
+            vec![(None, 1, 0), (Some(ChangeKind::LogReturn), 1, 1)],
+        );
         let mut output = ArrayFeatureVector::<2>::new();
         let mut mask = [false; 2];
         for (now, value, observed, expected) in [
@@ -262,14 +281,153 @@ mod tests {
             Duration::MAX,
             Duration::from_millis(i64::MAX as u64),
         ] {
-            assert!(validate_window(window).is_err());
+            assert!(validate_window(window, Duration::from_millis(1)).is_err());
         }
         for window in [
             Duration::from_millis(1),
             Duration::from_secs(1),
-            Duration::from_secs(3600),
+            Duration::from_millis(999_998),
         ] {
-            assert!(validate_window(window).is_ok());
+            assert!(validate_window(window, Duration::from_millis(1)).is_ok());
+        }
+    }
+
+    #[test]
+    fn aggregation_shares_only_compatible_histories_and_bounds_long_windows() {
+        let id = FeatureId::new;
+        let day = Duration::from_secs(86_400);
+        let second = Duration::from_secs(1);
+        let minute = Duration::from_secs(60);
+        let operations = compile(
+            &[
+                T::lagged_timed_with_aggregation(id("x"), id("lag"), day, second),
+                T::delta_timed_with_aggregation(id("x"), id("d"), day, second),
+                T::simple_return_timed_with_aggregation(id("x"), id("r"), day, second),
+                T::log_return_timed_with_aggregation(id("x"), id("log"), day, second),
+                T::lagged_timed_with_aggregation(id("x"), id("coarse"), day, minute),
+            ],
+            &[id("x")],
+        );
+        assert_eq!(operations.len(), 2);
+        for operation in operations {
+            let Transformer::Timed(group) = operation else {
+                panic!("expected timed group")
+            };
+            if group.aggregation == 1000 {
+                assert_eq!(group.outputs.len(), 4);
+                assert_eq!(group.history.capacity(), 86_402);
+            } else {
+                assert_eq!(group.outputs.len(), 1);
+                assert_eq!(group.history.capacity(), 1_442);
+            }
+        }
+        use InvalidTransformationDefinitionError as Error;
+        for (window, aggregation, expected) in [
+            (day, Duration::from_millis(1), Error::TimedHistoryTooLarge),
+            (
+                Duration::from_secs(3_600_000_000),
+                second,
+                Error::TimedHistoryTooLarge,
+            ),
+            (second, Duration::ZERO, Error::LagAggregationZero),
+            (second, Duration::from_nanos(1), Error::LagDurationPrecision),
+            (
+                second,
+                Duration::from_secs(u64::MAX),
+                Error::LagDurationOutOfRange,
+            ),
+            (second, minute, Error::LagWindowNotMultipleOfAggregation),
+            (
+                second,
+                Duration::from_millis(300),
+                Error::LagWindowNotMultipleOfAggregation,
+            ),
+            (
+                Duration::from_millis(999_999),
+                Duration::from_millis(1),
+                Error::TimedHistoryTooLarge,
+            ),
+        ] {
+            assert_eq!(validate_window(window, aggregation), Err(expected));
+        }
+        assert!(validate_window(Duration::from_millis(999_998), Duration::from_millis(1)).is_ok());
+        assert!(validate_window(day, second).is_ok());
+    }
+
+    #[test]
+    fn coarse_history_matches_bucket_last_oracle_without_future_samples() {
+        use std::collections::BTreeMap;
+        for aggregation in [1, 2, 10, 1000] {
+            let lag = 3 * aggregation;
+            let mut group =
+                TimedTransformer::new(0, aggregation, vec![(None, lag, 0), (None, aggregation, 1)]);
+            let mut history = BTreeMap::<i64, (i64, f64)>::new();
+            let mut output = ArrayFeatureVector::<2>::new();
+            let mut observed = [false; 2];
+            let mut now = -10 * aggregation;
+            let mut current = f64::NAN;
+            for i in 0..2000 {
+                now += if i % 41 == 0 {
+                    10 * aggregation
+                } else {
+                    i % (aggregation + 1)
+                };
+                let input_observed = i % 5 != 0;
+                let value = if i % 17 == 0 { f64::NAN } else { i as f64 };
+                if input_observed {
+                    current = value;
+                    if value.is_finite() {
+                        history.insert(now.div_euclid(aggregation), (now, value));
+                    }
+                }
+                group.apply(
+                    &[value],
+                    &[input_observed],
+                    &mut output,
+                    &mut observed,
+                    Evaluation {
+                        timestamps: &[Some(now)],
+                        global_timestamp: Some(now),
+                        advance: true,
+                    },
+                );
+                let expected = [lag, aggregation].map(|lag| {
+                    if !current.is_finite() {
+                        return f64::NAN;
+                    }
+                    history
+                        .values()
+                        .rev()
+                        .find(|&&(time, _)| time <= now - lag)
+                        .map_or(f64::NAN, |&(_, value)| value)
+                });
+                equal(output.values(), &expected);
+                assert!(group.history.len() <= 5);
+            }
+        }
+    }
+
+    #[test]
+    fn coarse_boundary_retains_predecessor_and_handles_extreme_timestamps() {
+        for base in [0, -30, i64::MIN, i64::MAX - 40] {
+            let mut group = TimedTransformer::new(0, 10, vec![(None, 20, 0)]);
+            let mut output = ArrayFeatureVector::<1>::new();
+            let mut observed = [false];
+            for (offset, value) in [(0, 2.), (19, 4.), (29, 6.), (30, 8.)] {
+                let now = base + offset;
+                group.apply(
+                    &[value],
+                    &[true],
+                    &mut output,
+                    &mut observed,
+                    Evaluation {
+                        timestamps: &[Some(now)],
+                        global_timestamp: Some(now),
+                        advance: true,
+                    },
+                );
+            }
+            equal(output.values(), &[2.]);
         }
     }
 }

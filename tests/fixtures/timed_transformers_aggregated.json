@@ -1,0 +1,169 @@
+{
+  "pipeline": {
+    "version": "3.0",
+    "feature_extractor": {
+      "version": "2.0",
+      "capacity": 2,
+      "length": 2,
+      "required_events": [
+        {
+          "symbol": "a",
+          "event": "trade"
+        },
+        {
+          "symbol": "b",
+          "event": "trade"
+        }
+      ],
+      "features": [
+        {
+          "symbol": "a",
+          "indicators": [
+            {
+              "kind": "field",
+              "source": {
+                "type": "field",
+                "event": "trade",
+                "field": "price"
+              },
+              "outputs": [
+                {
+                  "id": "p"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "symbol": "b",
+          "indicators": [
+            {
+              "kind": "field",
+              "source": {
+                "type": "field",
+                "event": "trade",
+                "field": "price"
+              },
+              "outputs": [
+                {
+                  "id": "q"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "model_input": {
+      "capacity": 9,
+      "length": 9,
+      "transformations": [
+        {
+          "type": "standard_scale",
+          "input": "p",
+          "output": "x",
+          "mean": 0.0,
+          "scale": 0.5
+        },
+        {
+          "type": "identity",
+          "input": "q",
+          "output": "q"
+        },
+        {
+          "type": "delta_timed",
+          "input": "p",
+          "output": "raw_delta",
+          "lag_window": "500ms",
+          "aggregation": "100ms"
+        }
+      ],
+      "stages": [
+        {
+          "type": "scalar",
+          "transformations": [
+            {
+              "type": "lagged_timed",
+              "input": "x",
+              "output": "l100",
+              "lag_window": "100ms",
+              "aggregation": "100ms"
+            },
+            {
+              "type": "lagged_timed",
+              "input": "x",
+              "output": "l500",
+              "lag_window": "500ms",
+              "aggregation": "100ms"
+            },
+            {
+              "type": "delta_timed",
+              "input": "x",
+              "output": "d500",
+              "lag_window": "500ms",
+              "aggregation": "100ms"
+            },
+            {
+              "type": "simple_return_timed",
+              "input": "x",
+              "output": "r500",
+              "lag_window": "500ms",
+              "aggregation": "100ms"
+            },
+            {
+              "type": "log_return_timed",
+              "input": "x",
+              "output": "log500",
+              "lag_window": "500ms",
+              "aggregation": "100ms"
+            },
+            {
+              "type": "lagged_timed",
+              "input": "x",
+              "output": "l500_copy",
+              "lag_window": "500ms"
+            },
+            {
+              "type": "lagged_timed",
+              "input": "q",
+              "output": "q_lag",
+              "lag_window": "500ms",
+              "aggregation": "100ms"
+            },
+            {
+              "type": "identity",
+              "input": "raw_delta",
+              "output": "raw_delta"
+            },
+            {
+              "type": "lagged",
+              "input": "x",
+              "output": "event_lag",
+              "lag_window": 1
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "steps": [
+    {"event": {"kind": "trade", "timestamp": 0, "symbol": "a", "volume": 1.0, "price": 1.0}, "expected": [null, null, null, null, null, null, null, null, null], "observed": [true, true, true, true, true, true, false, true, true]},
+    {"event": {"kind": "trade", "timestamp": 10000, "symbol": "b", "volume": 1.0, "price": 100.0}, "expected": [null, null, null, null, null, null, null, null, 2.0], "observed": [false, false, false, false, false, false, true, false, true]},
+    {"event": {"kind": "trade", "timestamp": 90, "symbol": "a", "volume": 1.0, "price": 2.0}, "expected": [null, null, null, null, null, null, null, null, 2.0], "observed": [true, true, true, true, true, true, false, true, true]},
+    {"event": {"kind": "volume", "timestamp": 100, "symbol": "a", "volume": 1.0}, "expected": [null, null, null, null, null, null, null, null, 4.0], "observed": [true, true, true, true, true, true, false, true, true]},
+    {"event": {"kind": "trade", "timestamp": 300, "symbol": "a", "volume": 1.0, "price": 4.0}, "expected": [4.0, null, null, null, null, null, null, null, 4.0], "observed": [true, true, true, true, true, true, false, true, true]},
+    {"event": {"kind": "volume", "timestamp": 499, "symbol": "a", "volume": 1.0}, "expected": [8.0, null, null, null, null, null, null, null, 8.0], "observed": [true, true, true, true, true, true, false, true, true]},
+    {"event": {"kind": "volume", "timestamp": 500, "symbol": "a", "volume": 1.0}, "expected": [8.0, null, null, null, null, 2.0, null, null, 8.0], "observed": [true, true, true, true, true, true, false, true, true]},
+    {"event": {"kind": "trade", "timestamp": 550, "symbol": "a", "volume": 1.0, "price": 8.0}, "expected": [8.0, null, null, null, null, 2.0, null, null, 8.0], "observed": [true, true, true, true, true, true, false, true, true]},
+    {"event": {"kind": "trade", "timestamp": 550, "symbol": "a", "volume": 1.0, "price": 16.0}, "expected": [8.0, null, null, null, null, 2.0, null, null, 16.0], "observed": [true, true, true, true, true, true, false, true, true]},
+    {"event": {"kind": "volume", "timestamp": 590, "symbol": "a", "volume": 1.0}, "expected": [8.0, 4.0, 28.0, 7.0, 2.079441541679836, 4.0, null, 14.0, 32.0], "observed": [true, true, true, true, true, true, false, true, true]},
+    {"event": {"kind": "volume", "timestamp": 800, "symbol": "a", "volume": 1.0}, "expected": [32.0, 8.0, 24.0, 3.0, 1.3862943611198908, 8.0, null, 12.0, 32.0], "observed": [true, true, true, true, true, true, false, true, true]},
+    {"event": {"kind": "volume", "timestamp": 1050, "symbol": "a", "volume": 1.0}, "expected": [32.0, 32.0, 0.0, 0.0, 0.0, 32.0, null, 0.0, 32.0], "observed": [true, true, true, true, true, true, false, true, true]},
+    {"event": {"kind": "trade", "timestamp": 1200, "symbol": "a", "volume": 1.0, "price": 0.0}, "expected": [32.0, 32.0, -32.0, -1.0, null, 32.0, null, -16.0, 32.0], "observed": [true, true, true, true, true, true, false, true, true]},
+    {"event": {"kind": "trade", "timestamp": 1700, "symbol": "a", "volume": 1.0, "price": -1.0}, "expected": [0.0, 0.0, -2.0, null, null, 0.0, null, -1.0, 0.0], "observed": [true, true, true, true, true, true, false, true, true]},
+    {"event": {"kind": "trade", "timestamp": 2200, "symbol": "a", "volume": 1.0, "price": 1.0}, "expected": [-2.0, -2.0, 4.0, -2.0, null, -2.0, null, 2.0, -2.0], "observed": [true, true, true, true, true, true, false, true, true]},
+    {"event": {"kind": "volume", "timestamp": 10010, "symbol": "b", "volume": 1.0}, "expected": [-2.0, -2.0, 4.0, -2.0, null, -2.0, null, 2.0, 2.0], "observed": [false, false, false, false, false, false, true, false, true]},
+    {"event": {"kind": "volume", "timestamp": 10500, "symbol": "b", "volume": 1.0}, "expected": [-2.0, -2.0, 4.0, -2.0, null, -2.0, 100.0, 2.0, 2.0], "observed": [false, false, false, false, false, false, true, false, true]},
+    {"event": {"kind": "time", "timestamp": 20000}, "expected": [-2.0, -2.0, 4.0, -2.0, null, -2.0, 100.0, 2.0, 2.0], "observed": [false, false, false, false, false, false, false, false, true]}
+  ]
+}

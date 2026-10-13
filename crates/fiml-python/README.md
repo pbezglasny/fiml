@@ -401,12 +401,39 @@ spec = (fiml.PipelineSpec(raw)
                       .log_return_timed("scaled", lag_window="1s", output="log1s")))
 ```
 
-At source clock `t`, the as-of value is the newest finite input observation with
-timestamp `<= t - lag_window`, including exact boundaries. No interpolation is
-performed; missing history produces NaN. The last finite observation at a given
-millisecond wins. All four operations share one timestamp/value history per
-input within a stage, reserving about **16 KB per second of maximum lag** at
-construction. Long lags therefore require proportionally more memory.
+At source clock `t`, the as-of value is the newest retained finite input observation
+with timestamp `<= t - lag_window`, including exact boundaries. No interpolation
+is performed; missing history produces NaN. The default `aggregation="1ms"`
+retains the last finite observation at each millisecond and preserves exact
+millisecond as-of behavior. Existing JSON artifacts default to `"1ms"` when
+`aggregation` is omitted; writers omit that default too.
+
+For long windows, choose a coarser aggregation explicitly:
+
+```python
+spec = fiml.PipelineSpec(raw).delta_timed(
+    "price", lag_window="24h", aggregation="1s", output="daily_change"
+)
+```
+
+Buckets align to Unix epoch multiples of the aggregation interval, including
+negative timestamps. Each bucket keeps its last finite observation with its
+**actual timestamp**, so a lookup never selects a sample after its cutoff.
+Intermediate observations are discarded: a coarse lookup can return an older
+bucket's value or NaN where the exact 1 ms lookup has a value. Aggregation controls
+history only; the current operand remains the latest observed input value.
+`"1s"` and `"1000ms"` mean the same duration, regardless of spelling.
+
+Lag and aggregation must be positive whole-millisecond durations, and lag must
+be a multiple of aggregation. All four operations share history within a stage
+when input and aggregation match. A history reserves `max_lag / aggregation + 2`
+timestamp/value slots, including room for a boundary bucket and predecessor.
+The limit is **1,000,000 slots (about 16 MB) per shared history**; excessive
+configurations raise a configuration error before allocation. Multiple inputs or
+aggregation intervals have separate histories, so their memory costs add up.
+A 24-hour lag with 1-second aggregation reserves about **1.38 MB**, or **23 KB**
+with 1-minute aggregation. At the default 1 ms aggregation, lags longer than
+999,998 ms are rejected; increase aggregation or shorten the lag.
 
 A single-symbol input's clock advances on every accepted event for that symbol.
 Other symbols and global Time events do not advance it. Global calendar inputs

@@ -268,8 +268,16 @@ Behavior and limits
   FeatureId::new("change_500ms"), Duration::from_millis(500))` compares the
   current observation with the newest finite value at or before the source clock
   minus 500 ms. These also work after earlier scalar/fitted stages. Windows share
-  history per input and stage, costing about 16 KB per second of maximum lag.
-  There is no interpolation; outputs remain NaN until an as-of value exists.
+  history per input, aggregation, and stage. The default 1 ms aggregation is exact.
+  Use the corresponding `_with_aggregation(input, output, lag_window, aggregation)`
+  constructor for coarser history. For example, a 24-hour lag with 1-second
+  aggregation reserves about 1.38 MB. Each bucket retains its last finite
+  observation and its actual timestamp; intermediate observations are discarded,
+  and lookups never select an observation after their cutoff. Lag must be a
+  positive multiple of aggregation; `max_lag / aggregation + 2` cannot exceed
+  1,000,000 slots (about 16 MB per shared history). Larger configurations are
+  rejected before allocation. There is no interpolation; outputs remain NaN
+  until an eligible retained observation exists.
 * **Input validation:** Extractors and pipelines reject NaN and infinity in
   numeric event payloads and reject out-of-order timestamps. Standalone
   indicators rely on the caller to supply finite inputs and ordered time.
