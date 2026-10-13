@@ -510,6 +510,10 @@ pub enum InvalidTransformationDefinitionError {
     LagWindowZero,
     /// A lag window exceeds 10,000 accepted events.
     LagWindowTooLarge,
+    /// A timed lag is not a whole number of milliseconds.
+    LagDurationPrecision,
+    /// A timed lag exceeds timestamp or history-storage limits.
+    LagDurationOutOfRange,
 }
 
 /// Duration field in an invalid compiled feature definition.
@@ -857,6 +861,8 @@ impl Display for InvalidTransformationDefinitionError {
             Self::WindowZero => "average window must be positive",
             Self::TooManyAverageOutputs => "too many compatible average outputs (maximum 16)",
             Self::LagWindowZero => "lag window must be positive",
+            Self::LagDurationPrecision => "timed lag must use whole milliseconds",
+            Self::LagDurationOutOfRange => "timed lag exceeds timestamp or history-storage limits",
             Self::LagWindowTooLarge => "lag window exceeds the maximum of 10000 values",
         })
     }

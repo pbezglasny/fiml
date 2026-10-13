@@ -631,6 +631,19 @@ where
         self.symbol_timestamps[symbol.index()]
     }
 
+    pub(crate) fn max_timestamp(&self) -> Option<i64> {
+        self.max_timestamp
+    }
+
+    pub(crate) fn evaluation_timestamp(&self, index: usize) -> Option<i64> {
+        let source = self.sources.get(index)?.as_ref()?;
+        if source.symbol == Symbol::GLOBAL && source.kind == SourceKind::AnyEvent {
+            self.max_timestamp
+        } else {
+            self.last_timestamp_for_symbol(source.symbol)
+        }
+    }
+
     pub(crate) fn observations(&self) -> &[bool] {
         &self.observations
     }

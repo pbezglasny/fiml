@@ -37,7 +37,7 @@ impl From<PyWarmupPolicy> for CoreWarmupPolicy {
 
 /// Parse a duration string such as `"500ms"`, `"1s"`, `"5m"` or `"1h"`.
 /// `field` names the argument in the error message.
-fn parse_duration(field: &str, text: &str) -> PyResult<Duration> {
+pub(crate) fn parse_duration(field: &str, text: &str) -> PyResult<Duration> {
     let text = text.trim();
     let digits = text.len() - text.trim_start_matches(|c: char| c.is_ascii_digit()).len();
     let (number, unit) = text.split_at(digits);

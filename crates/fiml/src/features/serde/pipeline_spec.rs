@@ -282,6 +282,31 @@ impl From<StageWire> for FittedStage {
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 enum TransformationWire {
+    LaggedTimed {
+        input: String,
+        output: String,
+        #[serde(with = "lag_duration")]
+        lag_window: std::time::Duration,
+    },
+    DeltaTimed {
+        input: String,
+        output: String,
+        #[serde(with = "lag_duration")]
+        lag_window: std::time::Duration,
+    },
+    SimpleReturnTimed {
+        input: String,
+        output: String,
+        #[serde(with = "lag_duration")]
+        lag_window: std::time::Duration,
+    },
+    LogReturnTimed {
+        input: String,
+        output: String,
+        #[serde(with = "lag_duration")]
+        lag_window: std::time::Duration,
+    },
+
     Delta {
         input: String,
         output: String,
@@ -369,6 +394,43 @@ impl From<&PipelineSpec> for PipelineSpecWire {
 impl From<&TransformerDefinition> for TransformationWire {
     fn from(definition: &TransformerDefinition) -> Self {
         match definition {
+            TransformerDefinition::LaggedTimed {
+                input,
+                output,
+                lag_window,
+            } => Self::LaggedTimed {
+                input: input.as_str().to_owned(),
+                output: output.as_str().to_owned(),
+                lag_window: *lag_window,
+            },
+            TransformerDefinition::DeltaTimed {
+                input,
+                output,
+                lag_window,
+            } => Self::DeltaTimed {
+                input: input.as_str().to_owned(),
+                output: output.as_str().to_owned(),
+                lag_window: *lag_window,
+            },
+            TransformerDefinition::SimpleReturnTimed {
+                input,
+                output,
+                lag_window,
+            } => Self::SimpleReturnTimed {
+                input: input.as_str().to_owned(),
+                output: output.as_str().to_owned(),
+                lag_window: *lag_window,
+            },
+            TransformerDefinition::LogReturnTimed {
+                input,
+                output,
+                lag_window,
+            } => Self::LogReturnTimed {
+                input: input.as_str().to_owned(),
+                output: output.as_str().to_owned(),
+                lag_window: *lag_window,
+            },
+
             TransformerDefinition::Ema {
                 input,
                 output,
@@ -501,6 +563,29 @@ impl TryFrom<PipelineSpecWire> for PipelineSpec {
 impl From<TransformationWire> for TransformerDefinition {
     fn from(transformation: TransformationWire) -> Self {
         match transformation {
+            TransformationWire::LaggedTimed {
+                input,
+                output,
+                lag_window,
+            } => Self::lagged_timed(FeatureId::new(input), FeatureId::new(output), lag_window),
+            TransformationWire::DeltaTimed {
+                input,
+                output,
+                lag_window,
+            } => Self::delta_timed(FeatureId::new(input), FeatureId::new(output), lag_window),
+            TransformationWire::SimpleReturnTimed {
+                input,
+                output,
+                lag_window,
+            } => {
+                Self::simple_return_timed(FeatureId::new(input), FeatureId::new(output), lag_window)
+            }
+            TransformationWire::LogReturnTimed {
+                input,
+                output,
+                lag_window,
+            } => Self::log_return_timed(FeatureId::new(input), FeatureId::new(output), lag_window),
+
             TransformationWire::Ema {
                 input,
                 output,
@@ -895,5 +980,27 @@ mod tests {
         ] {
             assert!(serde_json::from_str::<PipelineSpec>(text).is_err());
         }
+    }
+}
+
+/// Reuse the extractor artifact's strict whole-millisecond duration representation.
+mod lag_duration {
+    use super::*;
+    use std::time::Duration;
+
+    pub(super) fn serialize<S: Serializer>(
+        duration: &Duration,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        let text = super::super::serialization::format_duration(*duration)
+            .map_err(::serde::ser::Error::custom)?;
+        serializer.serialize_str(&text)
+    }
+
+    pub(super) fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Duration, D::Error> {
+        let text = String::deserialize(deserializer)?;
+        super::super::serialization::parse_duration(&text).map_err(::serde::de::Error::custom)
     }
 }

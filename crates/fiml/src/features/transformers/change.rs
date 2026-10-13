@@ -10,7 +10,7 @@ pub(super) enum ChangeKind {
 }
 
 impl ChangeKind {
-    fn calculate(&self, current: f64, previous: f64) -> f64 {
+    pub(super) fn calculate(&self, current: f64, previous: f64) -> f64 {
         match self {
             Self::Delta => current - previous,
             Self::SimpleReturn if previous != 0.0 => current / previous - 1.0,

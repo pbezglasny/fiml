@@ -261,6 +261,15 @@ Behavior and limits
   extractor, timed windows advance on events for their own symbol. Global
   `Time` events do not advance other symbols' windows. Standalone timed
   indicators expose `observe(timestamp)` to advance time without adding data.
+* **Elapsed-time transformations:** `TransformerDefinition::lagged_timed`,
+  `delta_timed`, `simple_return_timed`, and `log_return_timed` accept a positive
+  whole-millisecond `Duration`. For example,
+  `TransformerDefinition::delta_timed(FeatureId::new("microprice"),
+  FeatureId::new("change_500ms"), Duration::from_millis(500))` compares the
+  current observation with the newest finite value at or before the source clock
+  minus 500 ms. These also work after earlier scalar/fitted stages. Windows share
+  history per input and stage, costing about 16 KB per second of maximum lag.
+  There is no interpolation; outputs remain NaN until an as-of value exists.
 * **Input validation:** Extractors and pipelines reject NaN and infinity in
   numeric event payloads and reject out-of-order timestamps. Standalone
   indicators rely on the caller to supply finite inputs and ordered time.
