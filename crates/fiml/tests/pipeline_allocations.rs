@@ -922,3 +922,73 @@ fn context_updates_and_staged_refreshes_allocate_nothing() {
         0
     );
 }
+
+#[test]
+fn timed_transformers_do_not_allocate_during_warmup_wraparound_or_refresh() {
+    use TransformerDefinition as T;
+    use fiml::{EventField, FittedStage};
+    let id = FeatureId::new;
+    let a = Symbol::new("timed-allocation-a").unwrap();
+    let b = Symbol::new("timed-allocation-b").unwrap();
+    let raw = FeatureExtractorSpec::new([FeatureDefinition::new(
+        FeatureKey::Field {
+            symbol: a,
+            field: EventField::Price,
+        },
+        id("p"),
+    )])
+    .unwrap();
+    let mut pipeline = PipelineSpec::with_stages(
+        raw,
+        [
+            T::delta_timed(id("p"), id("d"), Duration::from_millis(1)),
+            T::identity(id("p"), id("p")),
+        ],
+        [
+            FittedStage::Scalar {
+                transformations: vec![
+                    T::lagged_timed(id("d"), id("lag"), Duration::from_millis(7)),
+                    T::delta_timed(id("p"), id("d"), Duration::from_millis(7)),
+                    T::simple_return_timed(id("p"), id("r"), Duration::from_millis(3)),
+                    T::log_return_timed(id("p"), id("log"), Duration::from_millis(1)),
+                ],
+            },
+            FittedStage::Scalar {
+                transformations: vec![T::identity(id("d"), id("d"))],
+            },
+        ],
+        1,
+        None,
+    )
+    .unwrap()
+    .build(
+        ArrayFeatureVector::<1>::new(),
+        ArrayFeatureVector::<1>::new(),
+    )
+    .unwrap();
+    assert_eq!(
+        count_allocations(|| {
+            for timestamp in 0..128 {
+                pipeline
+                    .handle_event(Event::price(a, timestamp as f64, timestamp))
+                    .unwrap();
+                pipeline
+                    .handle_event(Event::price(a, timestamp as f64, timestamp))
+                    .unwrap();
+                pipeline
+                    .handle_event(Event::volume(b, 1., timestamp - 1000))
+                    .unwrap();
+                pipeline
+                    .handle_event(Event::volume(a, 1., timestamp))
+                    .unwrap();
+            }
+            assert_eq!(pipeline.values(), &[7.]);
+            pipeline
+                .handle_event(Event::volume(a, 1., i64::MAX))
+                .unwrap();
+            assert_eq!(pipeline.values(), &[0.]);
+            black_box(pipeline.output_observations());
+        }),
+        0
+    );
+}

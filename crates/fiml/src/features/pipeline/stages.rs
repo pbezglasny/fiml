@@ -2,7 +2,9 @@
 
 use std::borrow::Cow;
 
-use crate::features::transformers::{self, Transformer, validate_standard_scale};
+use crate::features::transformers::{
+    self, Evaluation, Transformer, clock_inputs, inherit_clocks, validate_standard_scale,
+};
 use crate::{FeatureId, FeatureVector, TransformerDefinition, VecFeatureVector};
 
 /// Deployable scalar definitions or learned numeric state consuming the preceding active vector.
@@ -414,6 +416,7 @@ enum CompiledStage {
     Scalar {
         operations: Box<[Transformer]>,
         output_width: usize,
+        clock_sources: Box<[Option<usize>]>,
     },
     Select {
         input_indices: Box<[usize]>,
@@ -455,11 +458,16 @@ enum CompiledStage {
 }
 
 impl CompiledStage {
-    fn new(stage: &FittedStage, inputs: &[FeatureId]) -> Self {
+    fn new(stage: &FittedStage, inputs: &[FeatureId], timed: bool) -> Self {
         match stage {
             FittedStage::Scalar { transformations } => Self::Scalar {
                 operations: transformers::compile(transformations, inputs),
                 output_width: transformations.len(),
+                clock_sources: if timed {
+                    clock_inputs(transformations, inputs)
+                } else {
+                    Box::new([])
+                },
             },
             FittedStage::Select { input_indices, .. } => Self::Select {
                 input_indices: input_indices.clone().into_boxed_slice(),
@@ -536,14 +544,21 @@ impl CompiledStage {
         observed: &[bool],
         output: &mut V,
         output_observed: &mut [bool],
-        advance: bool,
+        evaluation: Evaluation<'_>,
+        output_clocks: &mut [Option<i64>],
     ) {
+        output_clocks.fill(None);
         output_observed.fill(false);
         match self {
-            Self::Scalar { .. } => {}
+            Self::Scalar { clock_sources, .. } => {
+                inherit_clocks(clock_sources, evaluation, output_clocks);
+            }
             Self::Select { input_indices } => {
                 for (i, &source) in input_indices.iter().enumerate() {
                     output_observed[i] = observed[source];
+                    if let Some(clock) = output_clocks.get_mut(i) {
+                        *clock = evaluation.timestamps[source];
+                    }
                 }
             }
             Self::SimpleImpute {
@@ -557,6 +572,9 @@ impl CompiledStage {
                     .enumerate()
                 {
                     output_observed[i] = observed[source];
+                    if let Some(clock) = output_clocks.get_mut(i) {
+                        *clock = evaluation.timestamps[source];
+                    }
                 }
             }
             Self::Pca {
@@ -566,23 +584,36 @@ impl CompiledStage {
             } => {
                 output_observed[..output_scale.len()]
                     .fill(observed[..*input_width].iter().any(|&flag| flag));
+                if !output_clocks.is_empty() {
+                    output_clocks[..output_scale.len()].fill(
+                        evaluation.timestamps[..*input_width]
+                            .iter()
+                            .copied()
+                            .flatten()
+                            .max(),
+                    );
+                }
             }
             _ => {
                 let width = input.len().min(output_observed.len());
                 output_observed[..width].copy_from_slice(&observed[..width]);
+                if !output_clocks.is_empty() {
+                    output_clocks[..width].copy_from_slice(&evaluation.timestamps[..width]);
+                }
             }
         }
         match self {
             Self::Scalar {
                 operations,
                 output_width,
+                ..
             } => {
                 // Lag warm-up must not expose values left in reused scratch storage.
                 for index in 0..*output_width {
                     output.set_value_at(index, f64::NAN);
                 }
                 for operation in operations {
-                    operation.apply(input, observed, output, output_observed, advance);
+                    operation.apply(input, observed, output, output_observed, evaluation);
                 }
             }
             Self::Select { input_indices } => {
@@ -887,10 +918,18 @@ pub(super) struct StageRuntime {
     base_width: usize,
     scratch: VecFeatureVector,
     stages: Box<[CompiledStage]>,
+    base_clock_sources: Box<[Option<usize>]>,
+    clocks: Box<[Option<i64>]>,
+    scratch_clocks: Box<[Option<i64>]>,
 }
 
 impl StageRuntime {
-    pub(super) fn new(base: &[TransformerDefinition], stages: &[FittedStage]) -> Option<Self> {
+    pub(super) fn new(
+        base: &[TransformerDefinition],
+        stages: &[FittedStage],
+        raw_ids: &[FeatureId],
+        timed: bool,
+    ) -> Option<Self> {
         if stages.is_empty() {
             return None;
         }
@@ -904,7 +943,7 @@ impl StageRuntime {
         let stages = stages
             .iter()
             .map(|stage| {
-                let compiled = CompiledStage::new(stage, &inputs);
+                let compiled = CompiledStage::new(stage, &inputs, timed);
                 inputs = stage.outputs();
                 width = width.max(inputs.len());
                 compiled
@@ -912,6 +951,14 @@ impl StageRuntime {
             .collect::<Box<[_]>>();
         Some(Self {
             base_width,
+            base_clock_sources: if timed {
+                clock_inputs(base, raw_ids)
+            } else {
+                Box::new([])
+            },
+            clocks: vec![None; if timed { width } else { 0 }].into_boxed_slice(),
+            scratch_clocks: vec![None; if timed && stages.len() > 1 { width } else { 0 }]
+                .into_boxed_slice(),
             observations: vec![false; width].into_boxed_slice(),
             scratch_observations: vec![false; width].into_boxed_slice(),
             input: VecFeatureVector::new(width),
@@ -933,8 +980,10 @@ impl StageRuntime {
         &mut self,
         output: &mut V,
         output_observed: &mut [bool],
-        advance: bool,
+        evaluation: Evaluation<'_>,
     ) {
+        self.clocks.fill(None);
+        inherit_clocks(&self.base_clock_sources, evaluation, &mut self.clocks);
         let (last, preceding) = self
             .stages
             .split_last_mut()
@@ -945,8 +994,13 @@ impl StageRuntime {
                 &self.observations,
                 &mut self.scratch,
                 &mut self.scratch_observations,
-                advance,
+                Evaluation {
+                    timestamps: &self.clocks,
+                    ..evaluation
+                },
+                &mut self.scratch_clocks,
             );
+            std::mem::swap(&mut self.clocks, &mut self.scratch_clocks);
             std::mem::swap(&mut self.observations, &mut self.scratch_observations);
             std::mem::swap(&mut self.input, &mut self.scratch);
         }
@@ -955,7 +1009,11 @@ impl StageRuntime {
             &self.observations,
             output,
             output_observed,
-            advance,
+            Evaluation {
+                timestamps: &self.clocks,
+                ..evaluation
+            },
+            &mut [],
         );
     }
 }

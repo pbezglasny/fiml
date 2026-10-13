@@ -201,10 +201,39 @@ impl PipelineSpec {
             model_vector.set_value_at(index, f64::NAN);
         }
 
+        let timed = self
+            .transformation_definitions
+            .iter()
+            .chain(
+                self.stages
+                    .iter()
+                    .filter_map(|stage| match stage {
+                        FittedStage::Scalar { transformations } => Some(transformations.as_slice()),
+                        _ => None,
+                    })
+                    .flatten(),
+            )
+            .any(|definition| definition.timed_window().is_some());
+        let stages = StageRuntime::new(
+            &self.transformation_definitions,
+            &self.stages,
+            feature_extractor.feature_ids(),
+            timed,
+        );
+        let clocks = vec![
+            None;
+            if timed {
+                feature_extractor.feature_ids().len()
+            } else {
+                0
+            }
+        ]
+        .into_boxed_slice();
         Ok(Pipeline {
             feature_extractor,
+            clocks,
             operations,
-            stages: StageRuntime::new(&self.transformation_definitions, &self.stages),
+            stages,
             observations: vec![false; model_vector.capacity()].into_boxed_slice(),
             model_vector,
             output_ids,

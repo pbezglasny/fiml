@@ -1,12 +1,28 @@
 //! Defines model transformations and the Python-facing pipeline specification.
 
+use std::time::Duration;
+
 use fiml::{
     FeatureExtractorSpec as CoreFeatureExtractorSpec, FeatureId, FittedStage,
     PipelineSpec as CorePipelineSpec, TransformerDefinition,
 };
 use pyo3::{exceptions::PyValueError, prelude::*};
 
-use crate::feature_extractor_spec::{FeatureExtractorSpec, PyWarmupPolicy};
+use crate::feature_extractor_spec::{FeatureExtractorSpec, PyWarmupPolicy, parse_duration};
+
+fn timed_transformation(
+    input: &str,
+    lag_window: &str,
+    output: Option<&str>,
+    constructor: fn(FeatureId, FeatureId, Duration) -> TransformerDefinition,
+) -> PyResult<TransformerDefinition> {
+    let window = parse_duration("lag_window", lag_window)?;
+    Ok(constructor(
+        FeatureId::new(input),
+        FeatureId::new(output.unwrap_or(input)),
+        window,
+    ))
+}
 
 /// Authors one group of scalar outputs whose inputs are resolved against the preceding stage.
 /// Resolution is deferred until fitting because PCA output IDs may not exist yet.
@@ -18,6 +34,82 @@ pub struct ScalarStage {
 
 #[pymethods]
 impl ScalarStage {
+    /// Apply an exact finite-observation as-of operation on the input's source clock.
+    /// Positive whole-millisecond duration strings include "100ms", "500ms", and "1s".
+    /// Clock advances refresh output; missing observations emit NaN without entering history.
+    #[pyo3(signature = (input, *, lag_window, output=None))]
+    fn lagged_timed<'py>(
+        mut slf: PyRefMut<'py, Self>,
+        input: &str,
+        lag_window: &str,
+        output: Option<&str>,
+    ) -> PyResult<PyRefMut<'py, Self>> {
+        slf.definitions.push(timed_transformation(
+            input,
+            lag_window,
+            output,
+            TransformerDefinition::lagged_timed,
+        )?);
+        Ok(slf)
+    }
+
+    /// Apply an exact finite-observation as-of operation on the input's source clock.
+    /// Positive whole-millisecond duration strings include "100ms", "500ms", and "1s".
+    /// Clock advances refresh output; missing observations emit NaN without entering history.
+    #[pyo3(signature = (input, *, lag_window, output=None))]
+    fn delta_timed<'py>(
+        mut slf: PyRefMut<'py, Self>,
+        input: &str,
+        lag_window: &str,
+        output: Option<&str>,
+    ) -> PyResult<PyRefMut<'py, Self>> {
+        slf.definitions.push(timed_transformation(
+            input,
+            lag_window,
+            output,
+            TransformerDefinition::delta_timed,
+        )?);
+        Ok(slf)
+    }
+
+    /// Apply an exact finite-observation as-of operation on the input's source clock.
+    /// Positive whole-millisecond duration strings include "100ms", "500ms", and "1s".
+    /// Clock advances refresh output; missing observations emit NaN without entering history.
+    #[pyo3(signature = (input, *, lag_window, output=None))]
+    fn simple_return_timed<'py>(
+        mut slf: PyRefMut<'py, Self>,
+        input: &str,
+        lag_window: &str,
+        output: Option<&str>,
+    ) -> PyResult<PyRefMut<'py, Self>> {
+        slf.definitions.push(timed_transformation(
+            input,
+            lag_window,
+            output,
+            TransformerDefinition::simple_return_timed,
+        )?);
+        Ok(slf)
+    }
+
+    /// Apply an exact finite-observation as-of operation on the input's source clock.
+    /// Positive whole-millisecond duration strings include "100ms", "500ms", and "1s".
+    /// Clock advances refresh output; missing observations emit NaN without entering history.
+    #[pyo3(signature = (input, *, lag_window, output=None))]
+    fn log_return_timed<'py>(
+        mut slf: PyRefMut<'py, Self>,
+        input: &str,
+        lag_window: &str,
+        output: Option<&str>,
+    ) -> PyResult<PyRefMut<'py, Self>> {
+        slf.definitions.push(timed_transformation(
+            input,
+            lag_window,
+            output,
+            TransformerDefinition::log_return_timed,
+        )?);
+        Ok(slf)
+    }
+
     /// Compute an exact delta over finite input observations.
     /// Lag must be in 1..=10_000; observed nonfinite inputs emit NaN without advancing history.
     /// Unobserved events retain the last output. Exact lag k requires k + 1 finite observations.
@@ -241,6 +333,82 @@ impl PipelineSpec {
 
 #[pymethods]
 impl PipelineSpec {
+    /// Apply an exact finite-observation as-of operation on the input's source clock.
+    /// Positive whole-millisecond duration strings include "100ms", "500ms", and "1s".
+    /// Clock advances refresh output; missing observations emit NaN without entering history.
+    #[pyo3(signature = (input, *, lag_window, output=None))]
+    fn lagged_timed<'py>(
+        mut slf: PyRefMut<'py, Self>,
+        input: &str,
+        lag_window: &str,
+        output: Option<&str>,
+    ) -> PyResult<PyRefMut<'py, Self>> {
+        slf.add_transformation(timed_transformation(
+            input,
+            lag_window,
+            output,
+            TransformerDefinition::lagged_timed,
+        )?)?;
+        Ok(slf)
+    }
+
+    /// Apply an exact finite-observation as-of operation on the input's source clock.
+    /// Positive whole-millisecond duration strings include "100ms", "500ms", and "1s".
+    /// Clock advances refresh output; missing observations emit NaN without entering history.
+    #[pyo3(signature = (input, *, lag_window, output=None))]
+    fn delta_timed<'py>(
+        mut slf: PyRefMut<'py, Self>,
+        input: &str,
+        lag_window: &str,
+        output: Option<&str>,
+    ) -> PyResult<PyRefMut<'py, Self>> {
+        slf.add_transformation(timed_transformation(
+            input,
+            lag_window,
+            output,
+            TransformerDefinition::delta_timed,
+        )?)?;
+        Ok(slf)
+    }
+
+    /// Apply an exact finite-observation as-of operation on the input's source clock.
+    /// Positive whole-millisecond duration strings include "100ms", "500ms", and "1s".
+    /// Clock advances refresh output; missing observations emit NaN without entering history.
+    #[pyo3(signature = (input, *, lag_window, output=None))]
+    fn simple_return_timed<'py>(
+        mut slf: PyRefMut<'py, Self>,
+        input: &str,
+        lag_window: &str,
+        output: Option<&str>,
+    ) -> PyResult<PyRefMut<'py, Self>> {
+        slf.add_transformation(timed_transformation(
+            input,
+            lag_window,
+            output,
+            TransformerDefinition::simple_return_timed,
+        )?)?;
+        Ok(slf)
+    }
+
+    /// Apply an exact finite-observation as-of operation on the input's source clock.
+    /// Positive whole-millisecond duration strings include "100ms", "500ms", and "1s".
+    /// Clock advances refresh output; missing observations emit NaN without entering history.
+    #[pyo3(signature = (input, *, lag_window, output=None))]
+    fn log_return_timed<'py>(
+        mut slf: PyRefMut<'py, Self>,
+        input: &str,
+        lag_window: &str,
+        output: Option<&str>,
+    ) -> PyResult<PyRefMut<'py, Self>> {
+        slf.add_transformation(timed_transformation(
+            input,
+            lag_window,
+            output,
+            TransformerDefinition::log_return_timed,
+        )?)?;
+        Ok(slf)
+    }
+
     /// Compute an exact delta over finite input observations.
     /// Lag must be in 1..=10_000; observed nonfinite inputs emit NaN without advancing history.
     /// Unobserved events retain the last output. Exact lag k requires k + 1 finite observations.

@@ -386,6 +386,44 @@ spec = (fiml.PipelineSpec(raw)
                       .log_return("spread", lag_window=2, output="spread_log_return")))
 ```
 
+`lagged_timed`, `delta_timed`, `simple_return_timed`, and `log_return_timed` are
+available on both `PipelineSpec` and `ScalarStage`. Use positive whole-millisecond
+duration strings such as `lag_window="100ms"`, `"500ms"`, or `"1s"`:
+
+```python
+raw = fiml.FeatureExtractorSpec().field("BTCUSDT", source="trade_price", id="price")
+spec = (fiml.PipelineSpec(raw)
+        .standard_scale("price", mean=0., scale=2., output="scaled")
+        .scalar_stage(fiml.ScalarStage()
+                      .lagged_timed("scaled", lag_window="100ms", output="lag100")
+                      .delta_timed("scaled", lag_window="500ms", output="delta500")
+                      .simple_return_timed("scaled", lag_window="1s", output="return1s")
+                      .log_return_timed("scaled", lag_window="1s", output="log1s")))
+```
+
+At source clock `t`, the as-of value is the newest finite input observation with
+timestamp `<= t - lag_window`, including exact boundaries. No interpolation is
+performed; missing history produces NaN. The last finite observation at a given
+millisecond wins. All four operations share one timestamp/value history per
+input within a stage, reserving about **16 KB per second of maximum lag** at
+construction. Long lags therefore require proportionally more memory.
+
+A single-symbol input's clock advances on every accepted event for that symbol.
+Other symbols and global Time events do not advance it. Global calendar inputs
+and event-count lag outputs use the maximum accepted timestamp. Column-wise
+stages preserve clocks; PCA uses the maximum of its input clocks. An observation
+arriving behind a mixed-symbol clock is recorded at that composite time.
+Context-only inputs have no clock or observations and remain unavailable.
+
+Only finite observations of the input enter history. An observed NaN/infinity
+emits NaN until the next finite observation without discarding earlier history.
+Clock-only refreshes use the latest observed current value, add no duplicate
+input samples, and mark the timed output observed for later stateful stages.
+Equal-clock events with no input observation retain output and are not observed.
+Context replacement never advances timed histories. Delta/return arithmetic and
+numeric edge cases follow the sample-based contract above. Existing event-count
+and sample-count transformers retain their existing behavior.
+
 `ModelInputPipeline` mirrors the extractor's stateful `symbol`, `update`,
 `transform`, and `compute_features` event-replay APIs. `values()` and
 `feature_names()` describe final model input; `raw_values()` and

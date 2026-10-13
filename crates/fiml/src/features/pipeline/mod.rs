@@ -11,7 +11,7 @@ pub use specs::PipelineSpec;
 pub use stages::FittedStage;
 use stages::StageRuntime;
 
-use super::transformers::Transformer;
+use super::transformers::{Evaluation, Transformer};
 use crate::{
     Event, FeatureExtractor, FeatureId, FeatureVector, Result, SourceObservation, Symbol,
     UpdateResult,
@@ -25,6 +25,7 @@ where
 {
     feature_extractor: FeatureExtractor<RawV>,
     operations: Box<[Transformer]>,
+    clocks: Box<[Option<i64>]>,
     stages: Option<StageRuntime>,
     model_vector: ModelV,
     observations: Box<[bool]>,
@@ -62,6 +63,14 @@ where
     }
 
     fn refresh(&mut self, advance: bool) {
+        for (index, clock) in self.clocks.iter_mut().enumerate() {
+            *clock = self.feature_extractor.evaluation_timestamp(index);
+        }
+        let evaluation = Evaluation {
+            timestamps: &self.clocks,
+            global_timestamp: self.feature_extractor.max_timestamp(),
+            advance,
+        };
         let observed = self.feature_extractor.observations();
         self.observations.fill(false);
         let raw_values = self.feature_extractor.feature_vector().values();
@@ -73,10 +82,10 @@ where
                     observed,
                     &mut stages.input,
                     &mut stages.observations,
-                    advance,
+                    evaluation,
                 );
             }
-            stages.apply(&mut self.model_vector, &mut self.observations, advance);
+            stages.apply(&mut self.model_vector, &mut self.observations, evaluation);
         } else {
             for operation in &mut self.operations {
                 operation.apply(
@@ -84,7 +93,7 @@ where
                     observed,
                     &mut self.model_vector,
                     &mut self.observations,
-                    advance,
+                    evaluation,
                 );
             }
         }
@@ -130,7 +139,7 @@ where
 
     /// Returns processing observations aligned with [`Self::output_ids`].
     /// The same lifetime and readiness caveats as [`Self::raw_observations`] apply.
-    /// Event-driven lags may be observed even when their source was not observed.
+    /// Event-driven lags and clock-driven timed refreshes may be observed even when their input was not observed.
     pub fn output_observations(&self) -> &[bool] {
         &self.observations[..self.output_ids.len()]
     }

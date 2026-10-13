@@ -1583,7 +1583,7 @@ fn parse_event(event: &str) -> Result<EventKind, String> {
     }
 }
 
-fn parse_duration(text: &str) -> Result<Duration, String> {
+pub(super) fn parse_duration(text: &str) -> Result<Duration, String> {
     let split = text
         .bytes()
         .position(|byte| !byte.is_ascii_digit())
@@ -1610,7 +1610,7 @@ fn invalid_duration(text: &str) -> String {
     format!("invalid duration {text:?}; expected a positive integer followed by ms, s, m, or h")
 }
 
-fn format_duration(duration: Duration) -> Result<String, String> {
+pub(super) fn format_duration(duration: Duration) -> Result<String, String> {
     if duration.is_zero() || !duration.as_nanos().is_multiple_of(1_000_000) {
         return Err("durations must be positive whole milliseconds".to_owned());
     }
