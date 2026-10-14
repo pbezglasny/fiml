@@ -38,6 +38,7 @@ pub mod order_book;
 mod ring_buffer;
 pub mod symbols;
 mod types;
+mod utc_offset;
 mod vectors;
 
 use std::{error::Error, fmt::Display, time::Duration};
@@ -61,6 +62,7 @@ pub use ring_buffer::{
 };
 pub use symbols::Symbol;
 pub use types::WarmupPolicy;
+pub use utc_offset::parse_utc_offset;
 pub use vectors::{ArrayFeatureVector, FeatureVector, VecFeatureVector};
 
 use crate::order_book::OrderBookUpdateError;

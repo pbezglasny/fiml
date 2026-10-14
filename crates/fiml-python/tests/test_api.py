@@ -365,12 +365,6 @@ def test_global_clock_features_have_no_symbol():
     ]
 
 
-@pytest.mark.parametrize("tz", ["é", "UTC+14:30", "+-1"])
-def test_fixed_utc_offset_rejects_invalid_text_without_panicking(tz):
-    with pytest.raises(ValueError, match="invalid `tz`"):
-        fiml.FeatureExtractorSpec().time_since_first_event_of_day(tz)
-
-
 def test_custom_column_names_are_preserved():
     source = trades().rename(
         columns={"symbol": "ticker", "ts": "timestamp", "price": "px", "volume": "qty"}

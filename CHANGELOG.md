@@ -9,6 +9,16 @@ serialized configuration will be documented here with migration guidance.
 JSON format versions are independent of package versions; consumers must use
 a release that supports the format they load.
 
+## Unreleased
+
+### Fixed
+
+- Share checked UTC-offset parsing between JSON loading and Python builders.
+  Malformed signed components and oversized numbers now return validation
+  errors instead of accepting incorrect offsets or panicking. Empty offsets
+  are rejected; use `"UTC"` or `"+00:00"` for zero. Valid spellings and canonical
+  JSON are unchanged.
+
 ## 0.2.0 — 2026-10-02
 
 ### Breaking changes and migration
