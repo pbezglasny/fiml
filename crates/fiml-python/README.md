@@ -292,6 +292,11 @@ keyword-only `warmup` enum; its default is `fiml.WarmupPolicy.FULL_WINDOW`.
 `vpt` consumes trade price and volume, starts at zero, and emits its cumulative
 value from the first trade.
 
+Fixed UTC offsets accept `"UTC"`, `"UTC+3"`, `"-05:30"`, or signed hours with
+optional minutes, within `-14:00` through `+14:00`. Hour/minute components must
+contain only ASCII digits. Empty strings and embedded signs are rejected.
+The Python builder trims surrounding whitespace; JSON loading does not.
+
 Raw fields and timed SMA accept a keyword-only `source` of `"price"`, `"volume"`,
 `"trade_price"`, or `"trade_volume"` (default `"price"`). Use a trade source
 with `compute_features`. Output names are generated canonically at compilation,

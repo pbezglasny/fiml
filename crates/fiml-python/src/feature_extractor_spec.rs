@@ -87,31 +87,13 @@ fn parse_durations(field: &str, values: Vec<String>) -> PyResult<Vec<Duration>> 
 /// intentionally unsupported (the core carries no timezone database); pass a
 /// fixed UTC offset instead.
 fn parse_tz(tz: &str) -> PyResult<i64> {
-    let invalid = || {
+    fiml::parse_utc_offset(tz.trim()).ok_or_else(|| {
         PyValueError::new_err(format!(
             "invalid `tz` {tz:?}; use \"UTC\" or a fixed offset like \"UTC+3\" \
              or \"-05:30\" (named zones are not supported: the core has no \
              timezone database)"
         ))
-    };
-    let rest = tz.trim().strip_prefix("UTC").unwrap_or(tz.trim());
-    if rest.is_empty() {
-        return Ok(0);
-    }
-    let (sign, body) = if let Some(body) = rest.strip_prefix('+') {
-        (1, body)
-    } else if let Some(body) = rest.strip_prefix('-') {
-        (-1, body)
-    } else {
-        return Err(invalid());
-    };
-    let (hours, minutes) = body.split_once(':').unwrap_or((body, "0"));
-    let hours: i64 = hours.parse().map_err(|_| invalid())?;
-    let minutes: i64 = minutes.parse().map_err(|_| invalid())?;
-    if hours < 0 || minutes < 0 || hours > 14 || minutes > 59 || (hours == 14 && minutes != 0) {
-        return Err(invalid());
-    }
-    Ok(sign * (hours * 3_600_000 + minutes * 60_000))
+    })
 }
 
 /// Declarative feature-vector spec: the ordered list of features an extractor produces

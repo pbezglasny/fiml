@@ -1033,7 +1033,10 @@ fn deserialize_indicator(
                 .ok_or_else(|| {
                     "time_since_first_event_of_day options require utc_offset".to_owned()
                 })
-                .and_then(parse_utc_offset)?;
+                .and_then(|text| {
+                    crate::parse_utc_offset(text)
+                        .ok_or_else(|| format!("invalid UTC offset {text:?}"))
+                })?;
             definitions.push(scalar_definition(
                 FeatureKey::TimeSinceFirstEventOfDay {
                     symbol,
@@ -1624,32 +1627,6 @@ pub(super) fn format_duration(duration: Duration) -> Result<String, String> {
     Ok(format!("{millis}ms"))
 }
 
-fn parse_utc_offset(text: &str) -> Result<i64, String> {
-    let rest = text.strip_prefix("UTC").unwrap_or(text);
-    if rest.is_empty() {
-        return Ok(0);
-    }
-    let (sign, body) = if let Some(body) = rest.strip_prefix('+') {
-        (1, body)
-    } else if let Some(body) = rest.strip_prefix('-') {
-        (-1, body)
-    } else {
-        return Err(invalid_utc_offset(text));
-    };
-    let (hours, minutes) = body.split_once(':').unwrap_or((body, "0"));
-    if hours.is_empty() || minutes.is_empty() {
-        return Err(invalid_utc_offset(text));
-    }
-    let hours = hours.parse::<i64>().map_err(|_| invalid_utc_offset(text))?;
-    let minutes = minutes
-        .parse::<i64>()
-        .map_err(|_| invalid_utc_offset(text))?;
-    if hours > 14 || minutes > 59 || (hours == 14 && minutes != 0) {
-        return Err(invalid_utc_offset(text));
-    }
-    Ok(sign * (hours * 3_600_000 + minutes * 60_000))
-}
-
 fn format_utc_offset(offset_millis: i64) -> Result<String, String> {
     if offset_millis % 60_000 != 0 || !(-50_400_000..=50_400_000).contains(&offset_millis) {
         return Err(
@@ -1663,10 +1640,6 @@ fn format_utc_offset(offset_millis: i64) -> Result<String, String> {
         total_minutes / 60,
         total_minutes % 60
     ))
-}
-
-fn invalid_utc_offset(text: &str) -> String {
-    format!("invalid UTC offset {text:?}")
 }
 
 #[cfg(test)]
@@ -1978,6 +1951,99 @@ mod tests {
         serde_json::from_value::<FeatureExtractorSpec>(value)
             .unwrap_err()
             .to_string()
+    }
+
+    fn utc_offset_spec(offset: &str) -> Value {
+        let mut value = valid_day_set();
+        let indicator = &mut value["features"][0]["indicators"][0];
+        indicator["kind"] = json!("time_since_first_event_of_day");
+        indicator["options"] = json!({"utc_offset": offset});
+        value
+    }
+
+    #[test]
+    fn rejects_malformed_utc_offsets() {
+        for offset in [
+            "+-9223372036854775808",
+            "+-1",
+            "+01:-30",
+            "UTC+-0",
+            "++1",
+            "+01:+30",
+            "",
+            "+",
+            "UTC-",
+            "+:30",
+            "+01:",
+            "+01:30:00",
+            "01:30",
+            "+15",
+            "-15",
+            "+14:01",
+            "-14:01",
+            "+01:60",
+            "+18446744073709551616",
+            "+00:18446744073709551616",
+            "é",
+            "+０１:30",
+            " UTC",
+            "+01:30 ",
+        ] {
+            assert!(
+                error(utc_offset_spec(offset)).contains("invalid UTC offset"),
+                "{offset:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn utc_offsets_preserve_canonical_json_and_day_boundaries() {
+        use crate::{ArrayFeatureVector, Event, FeatureVector};
+
+        for (offset, millis, canonical) in [
+            ("UTC", 0, "+00:00"),
+            ("+0", 0, "+00:00"),
+            ("-00:00", 0, "+00:00"),
+            ("UTC+3", 10_800_000, "+03:00"),
+            ("UTC-05:30", -19_800_000, "-05:30"),
+            ("+01:30", 5_400_000, "+01:30"),
+            ("-7", -25_200_000, "-07:00"),
+            ("+13:59", 50_340_000, "+13:59"),
+            ("+14:00", 50_400_000, "+14:00"),
+            ("-14:00", -50_400_000, "-14:00"),
+        ] {
+            let spec: FeatureExtractorSpec =
+                serde_json::from_value(utc_offset_spec(offset)).unwrap();
+            assert_eq!(
+                spec.definitions()[0].key,
+                FeatureKey::TimeSinceFirstEventOfDay {
+                    symbol: Symbol::GLOBAL,
+                    source: FeatureSource::AnyEvent,
+                    utc_offset_millis: millis,
+                }
+            );
+            let serialized = serde_json::to_value(&spec).unwrap();
+            assert_eq!(
+                serialized["features"][0]["indicators"][0]["options"]["utc_offset"],
+                canonical
+            );
+            assert_eq!(
+                serde_json::from_value::<FeatureExtractorSpec>(serialized).unwrap(),
+                spec
+            );
+
+            let mut extractor = spec.build(ArrayFeatureVector::<1>::new()).unwrap();
+            let midnight = 86_400_000 - millis;
+            for (timestamp, expected) in [
+                (midnight - 2_000, 0.0),
+                (midnight - 1_000, 1_000.0),
+                (midnight, 0.0),
+                (midnight + 1_000, 1_000.0),
+            ] {
+                extractor.handle_event(Event::time(timestamp)).unwrap();
+                assert_eq!(extractor.feature_vector().values(), &[expected], "{offset}");
+            }
+        }
     }
 
     #[test]

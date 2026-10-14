@@ -33,6 +33,69 @@ def test_fluent_spec_uses_core_json_and_round_trips_metadata():
     assert json.loads(restored.to_json()) == document
 
 
+@pytest.mark.parametrize("tz", [
+    "+-9223372036854775808", "+-1", "+01:-30", "UTC+-0", "++1", "--1",
+    "+01:+30", "", " ", "+", "UTC-", "+:30", "+01:", "+01:30:00",
+    "01:30", "+15", "-15", "+14:01", "-14:01", "UTC+14:30", "+01:60",
+    "+18446744073709551616", "+00:18446744073709551616", "é", "+０１:30",
+])
+def test_utc_offset_rejects_invalid_text_in_builder_and_json(tz):
+    with pytest.raises(ValueError, match="invalid `tz`"):
+        fiml.FeatureExtractorSpec().time_since_first_event_of_day(tz)
+
+    spec = fiml.FeatureExtractorSpec().time_since_first_event_of_day()
+    document = json.loads(spec.to_json())
+    document["features"][0]["indicators"][0]["options"]["utc_offset"] = tz
+    with pytest.raises(ValueError, match="invalid UTC offset"):
+        fiml.FeatureExtractorSpec.from_json(json.dumps(document))
+
+
+@pytest.mark.parametrize("tz,millis,canonical", [
+    ("UTC", 0, "+00:00"),
+    ("+0", 0, "+00:00"),
+    ("-00:00", 0, "+00:00"),
+    ("UTC+3", 10_800_000, "+03:00"),
+    ("UTC-05:30", -19_800_000, "-05:30"),
+    ("+01:30", 5_400_000, "+01:30"),
+    ("-7", -25_200_000, "-07:00"),
+    ("+13:59", 50_340_000, "+13:59"),
+    ("+14:00", 50_400_000, "+14:00"),
+    ("-14:00", -50_400_000, "-14:00"),
+])
+def test_utc_offset_preserves_canonical_json_and_day_boundaries(tz, millis, canonical):
+    spec = fiml.FeatureExtractorSpec().time_since_first_event_of_day(tz)
+    document = json.loads(spec.to_json())
+    assert document["features"][0]["indicators"][0]["options"]["utc_offset"] == canonical
+    document["features"][0]["indicators"][0]["options"]["utc_offset"] = tz
+    restored = fiml.FeatureExtractorSpec.from_json(json.dumps(document))
+    assert restored.to_json() == spec.to_json()
+    assert restored.feature_ids() == spec.feature_ids()
+
+    midnight = 86_400_000 - millis
+    for definition in (spec, restored):
+        extractor = fiml.FeatureExtractor(definition)
+        for timestamp, expected in [
+            (midnight - 2_000, 0.0),
+            (midnight - 1_000, 1_000.0),
+            (midnight, 0.0),
+            (midnight + 1_000, 1_000.0),
+        ]:
+            extractor.update(fiml.KIND_TIME, 0, timestamp)
+            np.testing.assert_equal(extractor.values(), [expected])
+
+
+@pytest.mark.parametrize("tz", [" UTC ", "\tUTC+3\n", "\u00a0-05:30\u00a0"])
+def test_utc_offset_whitespace_is_trimmed_only_by_python_builder(tz):
+    spec = fiml.FeatureExtractorSpec().time_since_first_event_of_day(tz)
+    plain = fiml.FeatureExtractorSpec().time_since_first_event_of_day(tz.strip())
+    assert spec.to_json() == plain.to_json()
+
+    document = json.loads(spec.to_json())
+    document["features"][0]["indicators"][0]["options"]["utc_offset"] = tz
+    with pytest.raises(ValueError, match="invalid UTC offset"):
+        fiml.FeatureExtractorSpec.from_json(json.dumps(document))
+
+
 def test_feature_ids_returns_only_active_stable_ids():
     feature_extractor_spec = configured_spec()
 
