@@ -68,7 +68,13 @@
             "rolling_std",
             "rolling_min",
             "rolling_max",
-            "rolling_range"
+            "rolling_range",
+            "rolling_slope",
+            "rolling_path_length",
+            "rolling_positive_movement",
+            "rolling_negative_movement",
+            "rolling_direction_change_count",
+            "rolling_max_drawdown"
           ]
         },
         "input": {

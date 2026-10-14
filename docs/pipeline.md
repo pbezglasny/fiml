@@ -2,7 +2,7 @@
 
 Status: in progress
 
-Last updated: 2026-10-13
+Last updated: 2026-10-14
 
 The pipeline runtime, model-input serialization, and Python interface are
 implemented, including Python-fitted sklearn `SimpleImputer`, `StandardScaler`,
@@ -62,6 +62,52 @@ and `warmup_policy`; timed windows use duration strings and optional
 Existing artifacts retain their behavior; older runtimes cannot read these new
 types. See the [schema](pipeline-spec.schema.json) and the
 [multi-scale market-state example](../crates/fiml/examples/transformers.rs).
+
+## Rolling trajectory shape
+
+`rolling_slope`, `rolling_path_length`, `rolling_positive_movement`,
+`rolling_negative_movement`, `rolling_direction_change_count`, and
+`rolling_max_drawdown` use the same sample-window constructor signature as
+rolling statistics. They consume any preceding-stage scalar, including other
+scalar transformations and fitted model components. Windows must be positive
+observation counts; these transformers have no timed variants.
+
+For ordered values `x[0..n]`, slope is ordinary least-squares regression against
+sample indices `0..n-1`, in input units per observation. Path length sums
+`abs(dx)`; positive movement sums `max(dx, 0)`; negative movement sums
+`max(-dx, 0)`. Thus path length equals positive plus negative movement, while
+last minus first equals positive minus negative movement. Direction changes
+count reversals after discarding zero deltas: `+, 0, -` is one reversal.
+Only deltas whose endpoints are inside the window contribute. Maximum drawdown
+is `max(0, max(x[i] - x[j]))` for `i < j`, in absolute input units; it also works
+for zero or negative inputs and is not a percentage.
+
+| Window | Slope | Path length | Positive | Negative | Reversals | Drawdown |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `[1, 2, 3, 4]` | 1 | 3 | 3 | 0 | 0 | 0 |
+| `[1, 4, 1, 4]` | 0.6 | 9 | 6 | 3 | 2 | 3 |
+| `[1, 3, 3, 1]` | 0 | 4 | 2 | 2 | 1 | 2 |
+
+The first two paths have identical endpoints and means but different shapes.
+`FullWindow` waits for `window` finite observations; `FirstValue` exposes partial
+windows. Slope always needs at least two observations, so `window=1` always
+produces NaN for slope. Other singleton measurements are zero. Observed NaN or
+infinity emits NaN without entering history; the next finite input connects to
+the previous retained finite value. Unobserved inputs retain their outputs.
+Nonfinite arithmetic results emit NaN and recover when the affected samples
+leave the window.
+
+All six kinds share one trajectory tree per input and stage across windows and
+warmup policies, separate from the smaller statistics tree. Each distinct
+window is queried once. Updates and queries cost `O(log max_window)` and make
+no heap allocations. On 64-bit targets, tree storage is
+`192 * next_power_of_two(max_window)` bytes (about 24 MiB for 100,000 samples).
+Regression moments use an observed origin to preserve small changes in large
+values. Tree merges preserve chronological order through circular wraparound.
+
+Version `3.0` JSON uses the six names above as `type`, with required `input`,
+`output`, `window`, and `warmup_policy` fields. Existing artifacts retain their
+behavior; older runtimes cannot read these new types.
 
 ## Current interface
 

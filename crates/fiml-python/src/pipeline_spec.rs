@@ -77,6 +77,114 @@ pub struct ScalarStage {
 
 #[pymethods]
 impl ScalarStage {
+    /// Least-squares slope against sample indices; NaN with fewer than two observations.
+    #[pyo3(signature = (input, *, window, warmup=PyWarmupPolicy::FullWindow, output=None))]
+    fn rolling_slope<'py>(
+        mut slf: PyRefMut<'py, Self>,
+        input: &str,
+        window: usize,
+        warmup: PyWarmupPolicy,
+        output: Option<&str>,
+    ) -> PyRefMut<'py, Self> {
+        slf.definitions.push(rolling_transformation(
+            input,
+            window,
+            warmup,
+            output,
+            TransformerDefinition::rolling_slope,
+        ));
+        slf
+    }
+    /// Sum of absolute adjacent changes within the window.
+    #[pyo3(signature = (input, *, window, warmup=PyWarmupPolicy::FullWindow, output=None))]
+    fn rolling_path_length<'py>(
+        mut slf: PyRefMut<'py, Self>,
+        input: &str,
+        window: usize,
+        warmup: PyWarmupPolicy,
+        output: Option<&str>,
+    ) -> PyRefMut<'py, Self> {
+        slf.definitions.push(rolling_transformation(
+            input,
+            window,
+            warmup,
+            output,
+            TransformerDefinition::rolling_path_length,
+        ));
+        slf
+    }
+    /// Sum of positive adjacent changes within the window.
+    #[pyo3(signature = (input, *, window, warmup=PyWarmupPolicy::FullWindow, output=None))]
+    fn rolling_positive_movement<'py>(
+        mut slf: PyRefMut<'py, Self>,
+        input: &str,
+        window: usize,
+        warmup: PyWarmupPolicy,
+        output: Option<&str>,
+    ) -> PyRefMut<'py, Self> {
+        slf.definitions.push(rolling_transformation(
+            input,
+            window,
+            warmup,
+            output,
+            TransformerDefinition::rolling_positive_movement,
+        ));
+        slf
+    }
+    /// Magnitude of negative adjacent changes within the window.
+    #[pyo3(signature = (input, *, window, warmup=PyWarmupPolicy::FullWindow, output=None))]
+    fn rolling_negative_movement<'py>(
+        mut slf: PyRefMut<'py, Self>,
+        input: &str,
+        window: usize,
+        warmup: PyWarmupPolicy,
+        output: Option<&str>,
+    ) -> PyRefMut<'py, Self> {
+        slf.definitions.push(rolling_transformation(
+            input,
+            window,
+            warmup,
+            output,
+            TransformerDefinition::rolling_negative_movement,
+        ));
+        slf
+    }
+    /// Number of reversals between nonzero deltas; zero deltas are ignored.
+    #[pyo3(signature = (input, *, window, warmup=PyWarmupPolicy::FullWindow, output=None))]
+    fn rolling_direction_change_count<'py>(
+        mut slf: PyRefMut<'py, Self>,
+        input: &str,
+        window: usize,
+        warmup: PyWarmupPolicy,
+        output: Option<&str>,
+    ) -> PyRefMut<'py, Self> {
+        slf.definitions.push(rolling_transformation(
+            input,
+            window,
+            warmup,
+            output,
+            TransformerDefinition::rolling_direction_change_count,
+        ));
+        slf
+    }
+    /// Largest earlier-peak to later-trough decrease, in absolute input units.
+    #[pyo3(signature = (input, *, window, warmup=PyWarmupPolicy::FullWindow, output=None))]
+    fn rolling_max_drawdown<'py>(
+        mut slf: PyRefMut<'py, Self>,
+        input: &str,
+        window: usize,
+        warmup: PyWarmupPolicy,
+        output: Option<&str>,
+    ) -> PyRefMut<'py, Self> {
+        slf.definitions.push(rolling_transformation(
+            input,
+            window,
+            warmup,
+            output,
+            TransformerDefinition::rolling_max_drawdown,
+        ));
+        slf
+    }
     /// Rolling population standard deviation of finite observations, with shared history across windows.
     #[pyo3(signature = (input, *, window, warmup=PyWarmupPolicy::FullWindow, output=None))]
     fn rolling_std<'py>(
@@ -549,6 +657,114 @@ impl PipelineSpec {
 
 #[pymethods]
 impl PipelineSpec {
+    /// Least-squares slope against sample indices; NaN with fewer than two observations.
+    #[pyo3(signature = (input, *, window, warmup=PyWarmupPolicy::FullWindow, output=None))]
+    fn rolling_slope<'py>(
+        mut slf: PyRefMut<'py, Self>,
+        input: &str,
+        window: usize,
+        warmup: PyWarmupPolicy,
+        output: Option<&str>,
+    ) -> PyResult<PyRefMut<'py, Self>> {
+        slf.add_transformation(rolling_transformation(
+            input,
+            window,
+            warmup,
+            output,
+            TransformerDefinition::rolling_slope,
+        ))?;
+        Ok(slf)
+    }
+    /// Sum of absolute adjacent changes within the window.
+    #[pyo3(signature = (input, *, window, warmup=PyWarmupPolicy::FullWindow, output=None))]
+    fn rolling_path_length<'py>(
+        mut slf: PyRefMut<'py, Self>,
+        input: &str,
+        window: usize,
+        warmup: PyWarmupPolicy,
+        output: Option<&str>,
+    ) -> PyResult<PyRefMut<'py, Self>> {
+        slf.add_transformation(rolling_transformation(
+            input,
+            window,
+            warmup,
+            output,
+            TransformerDefinition::rolling_path_length,
+        ))?;
+        Ok(slf)
+    }
+    /// Sum of positive adjacent changes within the window.
+    #[pyo3(signature = (input, *, window, warmup=PyWarmupPolicy::FullWindow, output=None))]
+    fn rolling_positive_movement<'py>(
+        mut slf: PyRefMut<'py, Self>,
+        input: &str,
+        window: usize,
+        warmup: PyWarmupPolicy,
+        output: Option<&str>,
+    ) -> PyResult<PyRefMut<'py, Self>> {
+        slf.add_transformation(rolling_transformation(
+            input,
+            window,
+            warmup,
+            output,
+            TransformerDefinition::rolling_positive_movement,
+        ))?;
+        Ok(slf)
+    }
+    /// Magnitude of negative adjacent changes within the window.
+    #[pyo3(signature = (input, *, window, warmup=PyWarmupPolicy::FullWindow, output=None))]
+    fn rolling_negative_movement<'py>(
+        mut slf: PyRefMut<'py, Self>,
+        input: &str,
+        window: usize,
+        warmup: PyWarmupPolicy,
+        output: Option<&str>,
+    ) -> PyResult<PyRefMut<'py, Self>> {
+        slf.add_transformation(rolling_transformation(
+            input,
+            window,
+            warmup,
+            output,
+            TransformerDefinition::rolling_negative_movement,
+        ))?;
+        Ok(slf)
+    }
+    /// Number of reversals between nonzero deltas; zero deltas are ignored.
+    #[pyo3(signature = (input, *, window, warmup=PyWarmupPolicy::FullWindow, output=None))]
+    fn rolling_direction_change_count<'py>(
+        mut slf: PyRefMut<'py, Self>,
+        input: &str,
+        window: usize,
+        warmup: PyWarmupPolicy,
+        output: Option<&str>,
+    ) -> PyResult<PyRefMut<'py, Self>> {
+        slf.add_transformation(rolling_transformation(
+            input,
+            window,
+            warmup,
+            output,
+            TransformerDefinition::rolling_direction_change_count,
+        ))?;
+        Ok(slf)
+    }
+    /// Largest earlier-peak to later-trough decrease, in absolute input units.
+    #[pyo3(signature = (input, *, window, warmup=PyWarmupPolicy::FullWindow, output=None))]
+    fn rolling_max_drawdown<'py>(
+        mut slf: PyRefMut<'py, Self>,
+        input: &str,
+        window: usize,
+        warmup: PyWarmupPolicy,
+        output: Option<&str>,
+    ) -> PyResult<PyRefMut<'py, Self>> {
+        slf.add_transformation(rolling_transformation(
+            input,
+            window,
+            warmup,
+            output,
+            TransformerDefinition::rolling_max_drawdown,
+        ))?;
+        Ok(slf)
+    }
     /// Rolling population standard deviation of finite observations, with shared history across windows.
     #[pyo3(signature = (input, *, window, warmup=PyWarmupPolicy::FullWindow, output=None))]
     fn rolling_std<'py>(

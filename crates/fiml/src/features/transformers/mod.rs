@@ -12,9 +12,12 @@ use crate::{
 mod average;
 use average::AverageTransformer;
 mod change;
+mod history;
 mod identity;
 mod lagged;
 mod standard_scale;
+mod trajectory;
+use trajectory::{TrajectoryKind, TrajectoryTransformer};
 mod statistics;
 use statistics::{StatisticKind, StatisticsTransformer};
 mod timed;
@@ -61,8 +64,86 @@ const WINDOW_MAX_SIZE: usize = 10_000;
 /// The tree reserves `2 * next_power_of_two(slots)` summaries of 48 bytes on 64-bit
 /// targets, plus 8 bytes per timed slot; timed slots use `max_window / aggregation + 2`
 /// and the same 1,000,000-slot limit. Sample slots equal the largest sample window.
+///
+/// Trajectory transformers use observation-count windows and a separate shared tree
+/// per input. Windows count finite observations, skipping nonfinite inputs while
+/// emitting NaN until the next finite observation. Unobserved inputs retain outputs.
+/// Full-window warmup requires `window` finite observations; first-value warmup
+/// exposes partial windows. Slope requires two observations, even for `window = 1`.
+/// Other trajectory measurements are zero for a singleton. Nonfinite arithmetic
+/// results emit NaN and recover when the contributing observations leave the window.
+/// Updates and distinct-window queries cost `O(log max_window)` without allocation.
+/// Trajectory storage uses `2 * next_power_of_two(max_window)` summaries (96 bytes
+/// each on 64-bit targets), shared across kinds, windows, and warmup policies.
 #[derive(Debug, Clone, PartialEq)]
 pub enum TransformerDefinition {
+    /// Least-squares slope against sample indices; NaN with fewer than two observations.
+    RollingSlope {
+        /// ID in the preceding layout.
+        input: FeatureId,
+        /// ID assigned to this output.
+        output: FeatureId,
+        /// Positive number of finite observations.
+        window: usize,
+        /// Controls availability while history fills.
+        warmup_policy: WarmupPolicy,
+    },
+    /// Sum of absolute adjacent changes within the window.
+    RollingPathLength {
+        /// ID in the preceding layout.
+        input: FeatureId,
+        /// ID assigned to this output.
+        output: FeatureId,
+        /// Positive number of finite observations.
+        window: usize,
+        /// Controls availability while history fills.
+        warmup_policy: WarmupPolicy,
+    },
+    /// Sum of positive adjacent changes within the window.
+    RollingPositiveMovement {
+        /// ID in the preceding layout.
+        input: FeatureId,
+        /// ID assigned to this output.
+        output: FeatureId,
+        /// Positive number of finite observations.
+        window: usize,
+        /// Controls availability while history fills.
+        warmup_policy: WarmupPolicy,
+    },
+    /// Magnitude of negative adjacent changes within the window.
+    RollingNegativeMovement {
+        /// ID in the preceding layout.
+        input: FeatureId,
+        /// ID assigned to this output.
+        output: FeatureId,
+        /// Positive number of finite observations.
+        window: usize,
+        /// Controls availability while history fills.
+        warmup_policy: WarmupPolicy,
+    },
+    /// Number of reversals between nonzero deltas; zero deltas are ignored.
+    RollingDirectionChangeCount {
+        /// ID in the preceding layout.
+        input: FeatureId,
+        /// ID assigned to this output.
+        output: FeatureId,
+        /// Positive number of finite observations.
+        window: usize,
+        /// Controls availability while history fills.
+        warmup_policy: WarmupPolicy,
+    },
+    /// Largest earlier-peak to later-trough decrease, in absolute input units.
+    RollingMaxDrawdown {
+        /// ID in the preceding layout.
+        input: FeatureId,
+        /// ID assigned to this output.
+        output: FeatureId,
+        /// Positive number of finite observations.
+        window: usize,
+        /// Controls availability while history fills.
+        warmup_policy: WarmupPolicy,
+    },
+
     /// Rolling population standard deviation over finite source observations.
     /// Missing observations emit NaN without entering history; compatible outputs share storage.
     RollingStd {
@@ -313,6 +394,130 @@ pub enum TransformerDefinition {
 }
 
 impl TransformerDefinition {
+    /// Least-squares slope against sample indices; NaN with fewer than two observations.
+    pub fn rolling_slope(
+        input: FeatureId,
+        output: FeatureId,
+        window: usize,
+        warmup_policy: WarmupPolicy,
+    ) -> Self {
+        Self::RollingSlope {
+            input,
+            output,
+            window,
+            warmup_policy,
+        }
+    }
+    /// Sum of absolute adjacent changes within the window.
+    pub fn rolling_path_length(
+        input: FeatureId,
+        output: FeatureId,
+        window: usize,
+        warmup_policy: WarmupPolicy,
+    ) -> Self {
+        Self::RollingPathLength {
+            input,
+            output,
+            window,
+            warmup_policy,
+        }
+    }
+    /// Sum of positive adjacent changes within the window.
+    pub fn rolling_positive_movement(
+        input: FeatureId,
+        output: FeatureId,
+        window: usize,
+        warmup_policy: WarmupPolicy,
+    ) -> Self {
+        Self::RollingPositiveMovement {
+            input,
+            output,
+            window,
+            warmup_policy,
+        }
+    }
+    /// Magnitude of negative adjacent changes within the window.
+    pub fn rolling_negative_movement(
+        input: FeatureId,
+        output: FeatureId,
+        window: usize,
+        warmup_policy: WarmupPolicy,
+    ) -> Self {
+        Self::RollingNegativeMovement {
+            input,
+            output,
+            window,
+            warmup_policy,
+        }
+    }
+    /// Number of reversals between nonzero deltas; zero deltas are ignored.
+    pub fn rolling_direction_change_count(
+        input: FeatureId,
+        output: FeatureId,
+        window: usize,
+        warmup_policy: WarmupPolicy,
+    ) -> Self {
+        Self::RollingDirectionChangeCount {
+            input,
+            output,
+            window,
+            warmup_policy,
+        }
+    }
+    /// Largest earlier-peak to later-trough decrease, in absolute input units.
+    pub fn rolling_max_drawdown(
+        input: FeatureId,
+        output: FeatureId,
+        window: usize,
+        warmup_policy: WarmupPolicy,
+    ) -> Self {
+        Self::RollingMaxDrawdown {
+            input,
+            output,
+            window,
+            warmup_policy,
+        }
+    }
+    fn trajectory(&self) -> Option<(TrajectoryKind, usize, WarmupPolicy)> {
+        match self {
+            Self::RollingSlope {
+                window,
+                warmup_policy,
+                ..
+            } => Some((TrajectoryKind::Slope, *window, *warmup_policy)),
+            Self::RollingPathLength {
+                window,
+                warmup_policy,
+                ..
+            } => Some((TrajectoryKind::PathLength, *window, *warmup_policy)),
+            Self::RollingPositiveMovement {
+                window,
+                warmup_policy,
+                ..
+            } => Some((TrajectoryKind::PositiveMovement, *window, *warmup_policy)),
+            Self::RollingNegativeMovement {
+                window,
+                warmup_policy,
+                ..
+            } => Some((TrajectoryKind::NegativeMovement, *window, *warmup_policy)),
+            Self::RollingDirectionChangeCount {
+                window,
+                warmup_policy,
+                ..
+            } => Some((
+                TrajectoryKind::DirectionChangeCount,
+                *window,
+                *warmup_policy,
+            )),
+            Self::RollingMaxDrawdown {
+                window,
+                warmup_policy,
+                ..
+            } => Some((TrajectoryKind::MaxDrawdown, *window, *warmup_policy)),
+            _ => None,
+        }
+    }
+
     /// Creates an observation-based rolling population standard deviation.
     pub fn rolling_std(
         input: FeatureId,
@@ -739,7 +944,13 @@ impl TransformerDefinition {
 
     pub(crate) fn input(&self) -> &FeatureId {
         match self {
-            Self::RollingStd { input, .. }
+            Self::RollingSlope { input, .. }
+            | Self::RollingPathLength { input, .. }
+            | Self::RollingPositiveMovement { input, .. }
+            | Self::RollingNegativeMovement { input, .. }
+            | Self::RollingDirectionChangeCount { input, .. }
+            | Self::RollingMaxDrawdown { input, .. }
+            | Self::RollingStd { input, .. }
             | Self::RollingStdTimed { input, .. }
             | Self::RollingMin { input, .. }
             | Self::RollingMinTimed { input, .. }
@@ -764,7 +975,13 @@ impl TransformerDefinition {
 
     pub(crate) fn output(&self) -> &FeatureId {
         match self {
-            Self::RollingStd { output, .. }
+            Self::RollingSlope { output, .. }
+            | Self::RollingPathLength { output, .. }
+            | Self::RollingPositiveMovement { output, .. }
+            | Self::RollingNegativeMovement { output, .. }
+            | Self::RollingDirectionChangeCount { output, .. }
+            | Self::RollingMaxDrawdown { output, .. }
+            | Self::RollingStd { output, .. }
             | Self::RollingStdTimed { output, .. }
             | Self::RollingMin { output, .. }
             | Self::RollingMinTimed { output, .. }
@@ -836,6 +1053,9 @@ impl TransformerDefinition {
     pub(crate) fn validate(&self) -> std::result::Result<(), InvalidTransformationDefinitionError> {
         if let Some((window, aggregation)) = self.timed_window() {
             timed::validate_window(window, aggregation)?;
+        }
+        if let Some((_, window, _)) = self.trajectory() {
+            trajectory::validate_capacity(window)?;
         }
         if let Some((_, window, aggregation, _)) = self.statistic() {
             if window == 0 {
@@ -941,6 +1161,8 @@ pub(crate) fn compile(
     inputs: &[FeatureId],
 ) -> Box<[Transformer]> {
     let mut operations = Vec::with_capacity(definitions.len());
+    let mut trajectories =
+        HashMap::<usize, Vec<(TrajectoryKind, usize, WarmupPolicy, usize)>>::new();
     let mut statistics =
         HashMap::<(usize, Option<i64>), Vec<(StatisticKind, u64, WarmupPolicy, usize)>>::new();
     let mut averages = HashMap::<(bool, usize, WarmupPolicy), (Vec<usize>, Vec<usize>)>::new();
@@ -953,6 +1175,20 @@ pub(crate) fn compile(
             .position(|id| id == definition.input())
             .expect("pipeline construction validated every input ID");
         match definition {
+            TransformerDefinition::RollingSlope { .. }
+            | TransformerDefinition::RollingPathLength { .. }
+            | TransformerDefinition::RollingPositiveMovement { .. }
+            | TransformerDefinition::RollingNegativeMovement { .. }
+            | TransformerDefinition::RollingDirectionChangeCount { .. }
+            | TransformerDefinition::RollingMaxDrawdown { .. } => {
+                let (kind, window, warmup) = definition.trajectory().unwrap();
+                trajectories.entry(input_index).or_default().push((
+                    kind,
+                    window,
+                    warmup,
+                    output_index,
+                ));
+            }
             TransformerDefinition::RollingStd { .. }
             | TransformerDefinition::RollingStdTimed { .. }
             | TransformerDefinition::RollingMin { .. }
@@ -1066,6 +1302,11 @@ pub(crate) fn compile(
             outputs,
         )));
     }
+    for (input, outputs) in trajectories {
+        operations.push(Transformer::Trajectory(TrajectoryTransformer::new(
+            input, outputs,
+        )));
+    }
     for ((input, aggregation), outputs) in statistics {
         operations.push(Transformer::Statistics(StatisticsTransformer::new(
             input,
@@ -1078,6 +1319,7 @@ pub(crate) fn compile(
 
 /// Resolved scalar operation for allocation-free writes into model input.
 pub(crate) enum Transformer {
+    Trajectory(TrajectoryTransformer),
     Statistics(StatisticsTransformer),
     Timed(TimedTransformer),
     Average(Box<AverageTransformer>),
@@ -1097,6 +1339,9 @@ impl Transformer {
         evaluation: Evaluation<'_>,
     ) {
         match self {
+            Self::Trajectory(transformer) => {
+                transformer.apply(raw_values, observed, model_vector, output_observed)
+            }
             Self::Statistics(transformer) => transformer.apply(
                 raw_values,
                 observed,

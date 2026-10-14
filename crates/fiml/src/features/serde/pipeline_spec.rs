@@ -282,6 +282,42 @@ impl From<StageWire> for FittedStage {
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 enum TransformationWire {
+    RollingSlope {
+        input: String,
+        output: String,
+        window: usize,
+        warmup_policy: crate::WarmupPolicy,
+    },
+    RollingPathLength {
+        input: String,
+        output: String,
+        window: usize,
+        warmup_policy: crate::WarmupPolicy,
+    },
+    RollingPositiveMovement {
+        input: String,
+        output: String,
+        window: usize,
+        warmup_policy: crate::WarmupPolicy,
+    },
+    RollingNegativeMovement {
+        input: String,
+        output: String,
+        window: usize,
+        warmup_policy: crate::WarmupPolicy,
+    },
+    RollingDirectionChangeCount {
+        input: String,
+        output: String,
+        window: usize,
+        warmup_policy: crate::WarmupPolicy,
+    },
+    RollingMaxDrawdown {
+        input: String,
+        output: String,
+        window: usize,
+        warmup_policy: crate::WarmupPolicy,
+    },
     RollingStd {
         input: String,
         output: String,
@@ -495,6 +531,72 @@ impl From<&PipelineSpec> for PipelineSpecWire {
 impl From<&TransformerDefinition> for TransformationWire {
     fn from(definition: &TransformerDefinition) -> Self {
         match definition {
+            TransformerDefinition::RollingSlope {
+                input,
+                output,
+                window,
+                warmup_policy,
+            } => Self::RollingSlope {
+                input: input.as_str().to_owned(),
+                output: output.as_str().to_owned(),
+                window: *window,
+                warmup_policy: *warmup_policy,
+            },
+            TransformerDefinition::RollingPathLength {
+                input,
+                output,
+                window,
+                warmup_policy,
+            } => Self::RollingPathLength {
+                input: input.as_str().to_owned(),
+                output: output.as_str().to_owned(),
+                window: *window,
+                warmup_policy: *warmup_policy,
+            },
+            TransformerDefinition::RollingPositiveMovement {
+                input,
+                output,
+                window,
+                warmup_policy,
+            } => Self::RollingPositiveMovement {
+                input: input.as_str().to_owned(),
+                output: output.as_str().to_owned(),
+                window: *window,
+                warmup_policy: *warmup_policy,
+            },
+            TransformerDefinition::RollingNegativeMovement {
+                input,
+                output,
+                window,
+                warmup_policy,
+            } => Self::RollingNegativeMovement {
+                input: input.as_str().to_owned(),
+                output: output.as_str().to_owned(),
+                window: *window,
+                warmup_policy: *warmup_policy,
+            },
+            TransformerDefinition::RollingDirectionChangeCount {
+                input,
+                output,
+                window,
+                warmup_policy,
+            } => Self::RollingDirectionChangeCount {
+                input: input.as_str().to_owned(),
+                output: output.as_str().to_owned(),
+                window: *window,
+                warmup_policy: *warmup_policy,
+            },
+            TransformerDefinition::RollingMaxDrawdown {
+                input,
+                output,
+                window,
+                warmup_policy,
+            } => Self::RollingMaxDrawdown {
+                input: input.as_str().to_owned(),
+                output: output.as_str().to_owned(),
+                window: *window,
+                warmup_policy: *warmup_policy,
+            },
             TransformerDefinition::RollingStd {
                 input,
                 output,
@@ -768,6 +870,72 @@ impl TryFrom<PipelineSpecWire> for PipelineSpec {
 impl From<TransformationWire> for TransformerDefinition {
     fn from(transformation: TransformationWire) -> Self {
         match transformation {
+            TransformationWire::RollingSlope {
+                input,
+                output,
+                window,
+                warmup_policy,
+            } => Self::rolling_slope(
+                FeatureId::new(input),
+                FeatureId::new(output),
+                window,
+                warmup_policy,
+            ),
+            TransformationWire::RollingPathLength {
+                input,
+                output,
+                window,
+                warmup_policy,
+            } => Self::rolling_path_length(
+                FeatureId::new(input),
+                FeatureId::new(output),
+                window,
+                warmup_policy,
+            ),
+            TransformationWire::RollingPositiveMovement {
+                input,
+                output,
+                window,
+                warmup_policy,
+            } => Self::rolling_positive_movement(
+                FeatureId::new(input),
+                FeatureId::new(output),
+                window,
+                warmup_policy,
+            ),
+            TransformationWire::RollingNegativeMovement {
+                input,
+                output,
+                window,
+                warmup_policy,
+            } => Self::rolling_negative_movement(
+                FeatureId::new(input),
+                FeatureId::new(output),
+                window,
+                warmup_policy,
+            ),
+            TransformationWire::RollingDirectionChangeCount {
+                input,
+                output,
+                window,
+                warmup_policy,
+            } => Self::rolling_direction_change_count(
+                FeatureId::new(input),
+                FeatureId::new(output),
+                window,
+                warmup_policy,
+            ),
+            TransformationWire::RollingMaxDrawdown {
+                input,
+                output,
+                window,
+                warmup_policy,
+            } => Self::rolling_max_drawdown(
+                FeatureId::new(input),
+                FeatureId::new(output),
+                window,
+                warmup_policy,
+            ),
             TransformationWire::RollingStd {
                 input,
                 output,

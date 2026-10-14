@@ -494,6 +494,8 @@ pub enum InvalidTransformationDefinitionError {
     TooManyAverageOutputs,
     /// Statistics history size cannot be represented by the allocator.
     StatisticsHistoryTooLarge,
+    /// Trajectory history size cannot be represented by the allocator.
+    TrajectoryHistoryTooLarge,
     /// The input ID is absent from the preceding layout.
     InputFeatureNotFound,
     /// Two transformations use the same output ID.
@@ -859,6 +861,7 @@ impl Display for InvalidIndicatorDefinitionError {
 impl Display for InvalidTransformationDefinitionError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
+            Self::TrajectoryHistoryTooLarge => "rolling trajectory history is too large",
             Self::StatisticsHistoryTooLarge => "rolling statistics history is too large",
             Self::InputFeatureNotFound => "input feature ID does not exist in the preceding layout",
             Self::DuplicateOutputFeature => "output feature ID duplicates an earlier output",

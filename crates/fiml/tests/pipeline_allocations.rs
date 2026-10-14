@@ -1004,7 +1004,7 @@ fn timed_transformers_do_not_allocate_during_warmup_wraparound_or_refresh() {
 }
 
 #[test]
-fn rolling_statistics_do_not_allocate_during_warmup_wraparound_or_expiry() {
+fn rolling_summaries_do_not_allocate_during_warmup_wraparound_or_expiry() {
     use TransformerDefinition as T;
     let id = FeatureId::new;
     let a = Symbol::new("rolling-allocations").unwrap();
@@ -1048,12 +1048,33 @@ fn rolling_statistics_do_not_allocate_during_warmup_wraparound_or_expiry() {
                 Duration::from_millis(3),
                 WarmupPolicy::FullWindow,
             ),
+            T::rolling_slope(id("p"), id("slope"), 3, WarmupPolicy::FullWindow),
+            T::rolling_path_length(id("p"), id("path_length"), 7, WarmupPolicy::FirstValue),
+            T::rolling_positive_movement(
+                id("p"),
+                id("positive_movement"),
+                3,
+                WarmupPolicy::FullWindow,
+            ),
+            T::rolling_negative_movement(
+                id("p"),
+                id("negative_movement"),
+                7,
+                WarmupPolicy::FirstValue,
+            ),
+            T::rolling_direction_change_count(
+                id("p"),
+                id("direction_change_count"),
+                3,
+                WarmupPolicy::FullWindow,
+            ),
+            T::rolling_max_drawdown(id("p"), id("max_drawdown"), 7, WarmupPolicy::FirstValue),
         ],
     )
     .unwrap()
     .build(
         ArrayFeatureVector::<1>::new(),
-        ArrayFeatureVector::<8>::new(),
+        ArrayFeatureVector::<14>::new(),
     )
     .unwrap();
     assert_eq!(
@@ -1077,5 +1098,6 @@ fn rolling_statistics_do_not_allocate_during_warmup_wraparound_or_expiry() {
         0
     );
     assert!(pipeline.values()[..4].iter().all(|v| v.is_finite()));
-    assert!(pipeline.values()[4..].iter().all(|v| v.is_nan()));
+    assert!(pipeline.values()[4..8].iter().all(|v| v.is_nan()));
+    assert!(pipeline.values()[8..].iter().all(|v| v.is_finite()));
 }

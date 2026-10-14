@@ -1,4 +1,4 @@
-//! Extract market state at multiple scales using changes, spread std, and imbalance range.
+//! Extract market state at multiple scales using changes, statistics, and trajectory shape.
 //! Run with `cargo run -p fiml --example transformers`.
 
 use fiml::order_book::{OrderBookConfig, OrderBookLevel, OrderBookSnapshot, UpdatePolicy};
@@ -61,14 +61,50 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     4,
                     WarmupPolicy::FirstValue,
                 ),
+                T::rolling_slope(
+                    id("scaled_spread"),
+                    id("spread_slope4"),
+                    4,
+                    WarmupPolicy::FirstValue,
+                ),
+                T::rolling_path_length(
+                    id("scaled_spread"),
+                    id("spread_path_length4"),
+                    4,
+                    WarmupPolicy::FirstValue,
+                ),
+                T::rolling_positive_movement(
+                    id("scaled_spread"),
+                    id("spread_positive_movement4"),
+                    4,
+                    WarmupPolicy::FirstValue,
+                ),
+                T::rolling_negative_movement(
+                    id("scaled_spread"),
+                    id("spread_negative_movement4"),
+                    4,
+                    WarmupPolicy::FirstValue,
+                ),
+                T::rolling_direction_change_count(
+                    id("scaled_spread"),
+                    id("spread_direction_change_count4"),
+                    4,
+                    WarmupPolicy::FirstValue,
+                ),
+                T::rolling_max_drawdown(
+                    id("scaled_spread"),
+                    id("spread_max_drawdown4"),
+                    4,
+                    WarmupPolicy::FirstValue,
+                ),
             ],
         }],
-        8,
+        14,
         None,
     )?;
     let mut pipeline = spec.build(
         ArrayFeatureVector::<2>::new(),
-        ArrayFeatureVector::<8>::new(),
+        ArrayFeatureVector::<14>::new(),
     )?;
     println!("model columns: {:?}", pipeline.output_ids());
     for (index, ask) in [102, 104, 108, 108].into_iter().enumerate() {
@@ -91,10 +127,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
         // Unrelated events do not add duplicate spread observations.
         pipeline.handle_event(Event::time(index as i64))?;
-        assert_eq!(pipeline.output_observations(), &[false; 8]);
+        assert_eq!(pipeline.output_observations(), &[false; 14]);
     }
     assert_eq!(pipeline.raw_values(), &[8., 0.6]);
-    let expected = [0., 0., 0., 2., 0., 1.6875_f64.sqrt(), 0.1, 0.6];
+    let expected = [
+        0.,
+        0.,
+        0.,
+        2.,
+        0.,
+        1.6875_f64.sqrt(),
+        0.1,
+        0.6,
+        1.1,
+        3.,
+        3.,
+        0.,
+        0.,
+        0.,
+    ];
     for (actual, expected) in pipeline.values().iter().zip(expected) {
         assert!((actual - expected).abs() < 1e-12);
     }

@@ -1,6 +1,9 @@
 //! Shared circular summaries for exact extrema and stable population variance.
 
-use super::Evaluation;
+use super::{
+    Evaluation,
+    history::{History, Merge, valid_capacity},
+};
 use crate::{
     FeatureVector, HeapRingBuffer, InvalidTransformationDefinitionError, RingBuffer, WarmupPolicy,
 };
@@ -36,6 +39,24 @@ impl Summary {
         }
     }
 
+    fn statistic(self, kind: StatisticKind) -> f64 {
+        if self.count == 0 {
+            return f64::NAN;
+        }
+        let value = match kind {
+            StatisticKind::Std if self.m2.is_finite() => {
+                (self.m2 / self.count as f64).max(0.).sqrt()
+            }
+            StatisticKind::Std => f64::NAN,
+            StatisticKind::Min => self.min,
+            StatisticKind::Max => self.max,
+            StatisticKind::Range => self.max - self.min,
+        };
+        if value.is_finite() { value } else { f64::NAN }
+    }
+}
+
+impl Merge for Summary {
     fn merge(self, other: Self) -> Self {
         if self.count == 0 {
             return other;
@@ -55,22 +76,6 @@ impl Summary {
             max: self.max.max(other.max),
         }
     }
-
-    fn statistic(self, kind: StatisticKind) -> f64 {
-        if self.count == 0 {
-            return f64::NAN;
-        }
-        let value = match kind {
-            StatisticKind::Std if self.m2.is_finite() => {
-                (self.m2 / self.count as f64).max(0.).sqrt()
-            }
-            StatisticKind::Std => f64::NAN,
-            StatisticKind::Min => self.min,
-            StatisticKind::Max => self.max,
-            StatisticKind::Range => self.max - self.min,
-        };
-        if value.is_finite() { value } else { f64::NAN }
-    }
 }
 
 fn capacity(window: u64, aggregation: Option<i64>) -> Option<usize> {
@@ -83,83 +88,9 @@ pub(super) fn validate_capacity(
     aggregation: Option<i64>,
 ) -> Result<(), InvalidTransformationDefinitionError> {
     capacity(window, aggregation)
-        .and_then(usize::checked_next_power_of_two)
-        .and_then(|n| n.checked_mul(2 * std::mem::size_of::<Summary>()))
-        .filter(|&bytes| bytes <= isize::MAX as usize)
+        .filter(|&n| valid_capacity::<Summary>(n))
         .map(|_| ())
         .ok_or(InvalidTransformationDefinitionError::StatisticsHistoryTooLarge)
-}
-
-/// A flat summary tree whose leaves are circular history slots; updates never subtract moments.
-struct History {
-    tree: Box<[Summary]>,
-    base: usize,
-    capacity: usize,
-    next: usize,
-    len: usize,
-}
-impl History {
-    fn new(capacity: usize) -> Self {
-        let base = capacity.next_power_of_two();
-        Self {
-            tree: vec![Summary::default(); 2 * base].into_boxed_slice(),
-            base,
-            capacity,
-            next: 0,
-            len: 0,
-        }
-    }
-    fn write(&mut self, index: usize, value: Summary) {
-        let mut node = self.base + index;
-        self.tree[node] = value;
-        while node > 1 {
-            node /= 2;
-            self.tree[node] = self.tree[node * 2].merge(self.tree[node * 2 + 1]);
-        }
-    }
-    fn push(&mut self, value: f64, same_bucket: bool) {
-        if same_bucket {
-            let index = (self.next + self.capacity - 1) % self.capacity;
-            self.write(
-                index,
-                self.tree[self.base + index].merge(Summary::value(value)),
-            );
-        } else {
-            self.write(self.next, Summary::value(value));
-            self.next = (self.next + 1) % self.capacity;
-            self.len = (self.len + 1).min(self.capacity);
-        }
-    }
-    fn query(&self, mut start: usize, mut end: usize) -> Summary {
-        start += self.base;
-        end += self.base;
-        let (mut left, mut right) = (Summary::default(), Summary::default());
-        while start < end {
-            if start % 2 == 1 {
-                left = left.merge(self.tree[start]);
-                start += 1;
-            }
-            if end % 2 == 1 {
-                end -= 1;
-                right = self.tree[end].merge(right);
-            }
-            start /= 2;
-            end /= 2;
-        }
-        left.merge(right)
-    }
-    fn newest(&self, count: usize) -> Summary {
-        if count == 0 {
-            return Summary::default();
-        }
-        let start = (self.next + self.capacity - count) % self.capacity;
-        if start < self.next {
-            self.query(start, self.next)
-        } else {
-            self.query(start, self.capacity)
-                .merge(self.query(0, self.next))
-        }
-    }
 }
 
 /// Authored output position and warmup, with a cached value for unrelated events.
@@ -179,7 +110,7 @@ struct Window {
 pub(crate) struct StatisticsTransformer {
     input: usize,
     windows: Box<[Window]>,
-    history: History,
+    history: History<Summary>,
     aggregation: Option<i64>,
     buckets: Option<HeapRingBuffer<i64>>,
     clock: Option<i64>,
@@ -256,7 +187,8 @@ impl StatisticsTransformer {
                             buckets.push_back(bucket);
                         }
                     }
-                    self.history.push(input[self.input], same_bucket);
+                    self.history
+                        .push(Summary::value(input[self.input]), same_bucket);
                 }
             }
             for window in &mut self.windows {

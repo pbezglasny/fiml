@@ -417,6 +417,30 @@ immediately. Empty windows emit NaN; one value has zero std/range. See
 [rolling statistics](../../docs/pipeline.md#rolling-scalar-statistics) for precise
 expiry, overflow, clock, and memory semantics.
 
+Trajectory methods `rolling_slope`, `rolling_path_length`,
+`rolling_positive_movement`, `rolling_negative_movement`,
+`rolling_direction_change_count`, and `rolling_max_drawdown` accept the same
+observation-count arguments on both `PipelineSpec` and `ScalarStage`:
+
+```python
+raw = fiml.FeatureExtractorSpec().field("BTCUSDT", source="trade_price", id="price")
+spec = (fiml.PipelineSpec(raw)
+        .standard_scale("price", mean=0., scale=2., output="scaled")
+        .scalar_stage(fiml.ScalarStage()
+                      .rolling_slope("scaled", window=20, output="trend")
+                      .rolling_path_length("scaled", window=20, output="movement")
+                      .rolling_max_drawdown("scaled", window=20, output="drawdown")))
+```
+
+Slope uses sample indices and requires two finite observations even with
+`FIRST_VALUE`; the other measurements return zero for a singleton. Direction
+changes ignore zero deltas (`+, 0, -` counts once). Drawdown is an absolute
+peak-to-later-trough decrease, not a percentage. Nonfinite observations emit
+NaN without entering history; the next finite observation reconnects to retained
+history. Outputs for one input share a preallocated tree across windows and
+warmup policies, with logarithmic updates and queries. Timed trajectory methods
+are not provided. See [trajectory definitions and memory costs](../../docs/pipeline.md#rolling-trajectory-shape).
+
 `lagged_timed`, `delta_timed`, `simple_return_timed`, and `log_return_timed` are
 available on both `PipelineSpec` and `ScalarStage`. Use positive whole-millisecond
 duration strings such as `lag_window="100ms"`, `"500ms"`, or `"1s"`:

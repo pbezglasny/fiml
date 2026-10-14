@@ -278,6 +278,13 @@ Behavior and limits
   1,000,000 slots (about 16 MB per shared history). Larger configurations are
   rejected before allocation. There is no interpolation; outputs remain NaN
   until an eligible retained observation exists.
+* **Trajectory transformations:** `rolling_slope`, `rolling_path_length`,
+  `rolling_positive_movement`, `rolling_negative_movement`,
+  `rolling_direction_change_count`, and `rolling_max_drawdown` describe the
+  recent path of any preceding-stage scalar. Windows count finite observations;
+  compatible outputs share allocation-free, logarithmic history updates.
+  Slope requires two observations, zero deltas do not count as reversals, and
+  drawdown uses absolute input units. See [definitions and examples](docs/pipeline.md#rolling-trajectory-shape).
 * **Input validation:** Extractors and pipelines reject NaN and infinity in
   numeric event payloads and reject out-of-order timestamps. Standalone
   indicators rely on the caller to supply finite inputs and ordered time.

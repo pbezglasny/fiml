@@ -36,17 +36,18 @@ fn equal(actual: &[f64], expected: &[f64]) {
 
 #[cfg(feature = "serde")]
 #[test]
-fn shared_artifact_replays_rolling_statistics() {
-    for text in [include_str!(
-        "../../../tests/fixtures/rolling_statistics.json"
-    )] {
+fn shared_artifacts_replay_rolling_summaries() {
+    for text in [
+        include_str!("../../../tests/fixtures/rolling_statistics.json"),
+        include_str!("../../../tests/fixtures/rolling_trajectory.json"),
+    ] {
         let fixture: serde_json::Value = serde_json::from_str(text).unwrap();
         let spec: PipelineSpec = serde_json::from_value(fixture["pipeline"].clone()).unwrap();
         assert_eq!(serde_json::to_value(&spec).unwrap(), fixture["pipeline"]);
         let mut pipeline = spec
             .build(
                 ArrayFeatureVector::<2>::new(),
-                ArrayFeatureVector::<16>::new(),
+                fiml::VecFeatureVector::new(spec.feature_vector_capacity()),
             )
             .unwrap();
         for step in fixture["steps"].as_array().unwrap() {
@@ -209,6 +210,12 @@ fn invalid_windows_fail_in_base_and_scalar_stages() {
         T::rolling_min,
         T::rolling_max,
         T::rolling_range,
+        T::rolling_slope,
+        T::rolling_path_length,
+        T::rolling_positive_movement,
+        T::rolling_negative_movement,
+        T::rolling_direction_change_count,
+        T::rolling_max_drawdown,
     ] {
         for window in [0, usize::MAX] {
             let def = constructor(id("p"), id("s"), window, WarmupPolicy::FullWindow);

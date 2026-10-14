@@ -1,0 +1,833 @@
+{
+  "pipeline": {
+    "version": "3.0",
+    "feature_extractor": {
+      "version": "2.0",
+      "capacity": 2,
+      "length": 2,
+      "required_events": [
+        {
+          "symbol": "a",
+          "event": "trade"
+        },
+        {
+          "symbol": "b",
+          "event": "trade"
+        }
+      ],
+      "features": [
+        {
+          "symbol": "a",
+          "indicators": [
+            {
+              "kind": "field",
+              "source": {
+                "type": "field",
+                "event": "trade",
+                "field": "price"
+              },
+              "outputs": [
+                {
+                  "id": "p"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "symbol": "b",
+          "indicators": [
+            {
+              "kind": "field",
+              "source": {
+                "type": "field",
+                "event": "trade",
+                "field": "price"
+              },
+              "outputs": [
+                {
+                  "id": "q"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "model_input": {
+      "capacity": 14,
+      "length": 14,
+      "transformations": [
+        {
+          "type": "identity",
+          "input": "p",
+          "output": "p"
+        },
+        {
+          "type": "identity",
+          "input": "q",
+          "output": "q"
+        }
+      ],
+      "stages": [
+        {
+          "type": "scalar",
+          "transformations": [
+            {
+              "type": "standard_scale",
+              "input": "p",
+              "output": "x",
+              "mean": 1.0,
+              "scale": 2.0
+            },
+            {
+              "type": "identity",
+              "input": "q",
+              "output": "q"
+            }
+          ]
+        },
+        {
+          "type": "scalar",
+          "transformations": [
+            {
+              "type": "rolling_slope",
+              "input": "x",
+              "output": "slope_4",
+              "window": 4,
+              "warmup_policy": "first_value"
+            },
+            {
+              "type": "rolling_path_length",
+              "input": "x",
+              "output": "path_length_4",
+              "window": 4,
+              "warmup_policy": "first_value"
+            },
+            {
+              "type": "rolling_positive_movement",
+              "input": "x",
+              "output": "positive_movement_4",
+              "window": 4,
+              "warmup_policy": "first_value"
+            },
+            {
+              "type": "rolling_negative_movement",
+              "input": "x",
+              "output": "negative_movement_4",
+              "window": 4,
+              "warmup_policy": "first_value"
+            },
+            {
+              "type": "rolling_direction_change_count",
+              "input": "x",
+              "output": "direction_change_count_4",
+              "window": 4,
+              "warmup_policy": "first_value"
+            },
+            {
+              "type": "rolling_max_drawdown",
+              "input": "x",
+              "output": "max_drawdown_4",
+              "window": 4,
+              "warmup_policy": "first_value"
+            },
+            {
+              "type": "rolling_slope",
+              "input": "x",
+              "output": "slope_3",
+              "window": 3,
+              "warmup_policy": "full_window"
+            },
+            {
+              "type": "rolling_path_length",
+              "input": "x",
+              "output": "path_length_3",
+              "window": 3,
+              "warmup_policy": "full_window"
+            },
+            {
+              "type": "rolling_positive_movement",
+              "input": "x",
+              "output": "positive_movement_3",
+              "window": 3,
+              "warmup_policy": "full_window"
+            },
+            {
+              "type": "rolling_negative_movement",
+              "input": "x",
+              "output": "negative_movement_3",
+              "window": 3,
+              "warmup_policy": "full_window"
+            },
+            {
+              "type": "rolling_direction_change_count",
+              "input": "x",
+              "output": "direction_change_count_3",
+              "window": 3,
+              "warmup_policy": "full_window"
+            },
+            {
+              "type": "rolling_max_drawdown",
+              "input": "x",
+              "output": "max_drawdown_3",
+              "window": 3,
+              "warmup_policy": "full_window"
+            },
+            {
+              "type": "rolling_slope",
+              "input": "q",
+              "output": "other_slope",
+              "window": 2,
+              "warmup_policy": "first_value"
+            },
+            {
+              "type": "identity",
+              "input": "x",
+              "output": "scaled"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "event": {
+        "kind": "volume",
+        "symbol": "a",
+        "timestamp": 0
+      },
+      "expected": [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "observed": [
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "event": {
+        "kind": "trade",
+        "symbol": "a",
+        "timestamp": 1,
+        "price": 3.0
+      },
+      "expected": [
+        null,
+        0,
+        0,
+        0,
+        0,
+        0.0,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        1.0
+      ],
+      "observed": [
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        false,
+        true
+      ]
+    },
+    {
+      "event": {
+        "kind": "trade",
+        "symbol": "b",
+        "timestamp": 2,
+        "price": 10.0
+      },
+      "expected": [
+        null,
+        0,
+        0,
+        0,
+        0,
+        0.0,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        1.0
+      ],
+      "observed": [
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        true,
+        false
+      ]
+    },
+    {
+      "event": {
+        "kind": "trade",
+        "symbol": "a",
+        "timestamp": 3,
+        "price": 7.0
+      },
+      "expected": [
+        2.0,
+        2.0,
+        2.0,
+        0.0,
+        0,
+        0.0,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        3.0
+      ],
+      "observed": [
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        false,
+        true
+      ]
+    },
+    {
+      "event": {
+        "kind": "trade",
+        "symbol": "a",
+        "timestamp": 4,
+        "price": 7.0
+      },
+      "expected": [
+        1.0,
+        2.0,
+        2.0,
+        0.0,
+        0,
+        0.0,
+        1.0,
+        2.0,
+        2.0,
+        0.0,
+        0,
+        0.0,
+        null,
+        3.0
+      ],
+      "observed": [
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        false,
+        true
+      ]
+    },
+    {
+      "event": {
+        "kind": "volume",
+        "symbol": "a",
+        "timestamp": 5
+      },
+      "expected": [
+        1.0,
+        2.0,
+        2.0,
+        0.0,
+        0,
+        0.0,
+        1.0,
+        2.0,
+        2.0,
+        0.0,
+        0,
+        0.0,
+        null,
+        3.0
+      ],
+      "observed": [
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "event": {
+        "kind": "trade",
+        "symbol": "a",
+        "timestamp": 6,
+        "price": 3.0
+      },
+      "expected": [
+        0.0,
+        4.0,
+        2.0,
+        2.0,
+        1,
+        2.0,
+        -1.0,
+        2.0,
+        0.0,
+        2.0,
+        0,
+        2.0,
+        null,
+        1.0
+      ],
+      "observed": [
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        false,
+        true
+      ]
+    },
+    {
+      "event": {
+        "kind": "trade",
+        "symbol": "b",
+        "timestamp": 7,
+        "price": 6.0
+      },
+      "expected": [
+        0.0,
+        4.0,
+        2.0,
+        2.0,
+        1,
+        2.0,
+        -1.0,
+        2.0,
+        0.0,
+        2.0,
+        0,
+        2.0,
+        -4.0,
+        1.0
+      ],
+      "observed": [
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        true,
+        false
+      ]
+    },
+    {
+      "event": {
+        "kind": "trade",
+        "symbol": "a",
+        "timestamp": 8,
+        "price": 9.0
+      },
+      "expected": [
+        0.1,
+        5.0,
+        3.0,
+        2.0,
+        1,
+        2.0,
+        0.5,
+        5.0,
+        3.0,
+        2.0,
+        1,
+        2.0,
+        -4.0,
+        4.0
+      ],
+      "observed": [
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        false,
+        true
+      ]
+    },
+    {
+      "event": {
+        "kind": "trade",
+        "symbol": "a",
+        "timestamp": 9,
+        "price": 1.0
+      },
+      "expected": [
+        -0.6,
+        9.0,
+        3.0,
+        6.0,
+        2,
+        4.0,
+        -0.5,
+        7.0,
+        3.0,
+        4.0,
+        1,
+        4.0,
+        -4.0,
+        0.0
+      ],
+      "observed": [
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        false,
+        true
+      ]
+    },
+    {
+      "event": {
+        "kind": "trade",
+        "symbol": "a",
+        "timestamp": 10,
+        "price": 5.0
+      },
+      "expected": [
+        -0.1,
+        9.0,
+        5.0,
+        4.0,
+        2,
+        4.0,
+        -1.0,
+        6.0,
+        2.0,
+        4.0,
+        1,
+        4.0,
+        -4.0,
+        2.0
+      ],
+      "observed": [
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        false,
+        true
+      ]
+    },
+    {
+      "event": {
+        "kind": "trade",
+        "symbol": "a",
+        "timestamp": 11,
+        "price": 5.0
+      },
+      "expected": [
+        -0.4,
+        6.0,
+        2.0,
+        4.0,
+        1,
+        4.0,
+        1.0,
+        2.0,
+        2.0,
+        0.0,
+        0,
+        0.0,
+        -4.0,
+        2.0
+      ],
+      "observed": [
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        false,
+        true
+      ]
+    },
+    {
+      "event": {
+        "kind": "trade",
+        "symbol": "a",
+        "timestamp": 12,
+        "price": 11.0
+      },
+      "expected": [
+        1.5,
+        5.0,
+        5.0,
+        0.0,
+        0,
+        0.0,
+        1.5,
+        3.0,
+        3.0,
+        0.0,
+        0,
+        0.0,
+        -4.0,
+        5.0
+      ],
+      "observed": [
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        false,
+        true
+      ]
+    },
+    {
+      "event": {
+        "kind": "trade",
+        "symbol": "a",
+        "timestamp": 13,
+        "price": 13.0
+      },
+      "expected": [
+        1.5,
+        4.0,
+        4.0,
+        0.0,
+        0,
+        0.0,
+        2.0,
+        4.0,
+        4.0,
+        0.0,
+        0,
+        0.0,
+        -4.0,
+        6.0
+      ],
+      "observed": [
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        false,
+        true
+      ]
+    },
+    {
+      "event": {
+        "kind": "volume",
+        "symbol": "b",
+        "timestamp": 14
+      },
+      "expected": [
+        1.5,
+        4.0,
+        4.0,
+        0.0,
+        0,
+        0.0,
+        2.0,
+        4.0,
+        4.0,
+        0.0,
+        0,
+        0.0,
+        -4.0,
+        6.0
+      ],
+      "observed": [
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "event": {
+        "kind": "trade",
+        "symbol": "b",
+        "timestamp": 15,
+        "price": 8.0
+      },
+      "expected": [
+        1.5,
+        4.0,
+        4.0,
+        0.0,
+        0,
+        0.0,
+        2.0,
+        4.0,
+        4.0,
+        0.0,
+        0,
+        0.0,
+        2.0,
+        6.0
+      ],
+      "observed": [
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        true,
+        false
+      ]
+    }
+  ]
+}
