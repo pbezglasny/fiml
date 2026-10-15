@@ -2,7 +2,7 @@
 
 Status: in progress
 
-Last updated: 2026-10-14
+Last updated: 2026-10-15
 
 The pipeline runtime, model-input serialization, and Python interface are
 implemented, including Python-fitted sklearn `SimpleImputer`, `StandardScaler`,
@@ -10,6 +10,34 @@ implemented, including Python-fitted sklearn `SimpleImputer`, `StandardScaler`,
 `VarianceThreshold`, and PCA
 stages with Rust online inference.
 Remaining interface-hardening items are listed below.
+
+## Scalar definition migration (Rust)
+
+`TransformerDefinition` stores public `input` and `output` IDs alongside a
+public `TransformerOperation` enum containing only calculation parameters.
+Existing constructors such as `TransformerDefinition::lagged(input, output, 2)`
+are unchanged. Replace direct enum construction such as
+`TransformerDefinition::Lagged { input, output, lag_window: 2 }` with:
+
+```rust
+use fiml::{FeatureId, TransformerDefinition, TransformerOperation};
+
+let definition = TransformerDefinition {
+    input: FeatureId::new("price"),
+    output: FeatureId::new("previous_price"),
+    operation: TransformerOperation::Lagged { lag_window: 2 },
+};
+
+if let TransformerOperation::Lagged { lag_window } = &definition.operation {
+    println!("{}: {} events ago", definition.input.as_str(), lag_window);
+}
+```
+
+Read IDs directly from the struct and match operation parameters through
+`definition.operation`. `TransformerOperation::Identity` has no fields.
+Pipeline construction still validates IDs and operation parameters. Python
+builders and version `3.0` JSON retain their existing format and behavior;
+saved artifacts need no migration.
 
 ## Rolling scalar statistics
 

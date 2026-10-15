@@ -105,7 +105,7 @@ impl FittedStage {
         match self {
             Self::Scalar { transformations } => transformations
                 .iter()
-                .map(|definition| definition.output().clone())
+                .map(|definition| definition.output.clone())
                 .collect::<Vec<_>>()
                 .into(),
             Self::Select { outputs, .. }
@@ -937,7 +937,7 @@ impl StageRuntime {
         let mut width = base_width;
         let mut inputs: Cow<'_, [FeatureId]> = base
             .iter()
-            .map(|definition| definition.output().clone())
+            .map(|definition| definition.output.clone())
             .collect::<Vec<_>>()
             .into();
         let stages = stages

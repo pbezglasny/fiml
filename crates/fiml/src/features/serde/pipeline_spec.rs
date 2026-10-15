@@ -3,7 +3,7 @@
 use ::serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use super::{FeatureExtractorSpec, serialization::deserialize_present_option};
-use crate::{FeatureId, FittedStage, PipelineSpec, TransformerDefinition};
+use crate::{FeatureId, FittedStage, PipelineSpec, TransformerDefinition, TransformerOperation};
 
 const FORMAT_VERSION: &str = "3.0";
 
@@ -530,284 +530,222 @@ impl From<&PipelineSpec> for PipelineSpecWire {
 
 impl From<&TransformerDefinition> for TransformationWire {
     fn from(definition: &TransformerDefinition) -> Self {
-        match definition {
-            TransformerDefinition::RollingSlope {
-                input,
-                output,
+        let input = definition.input.as_str().to_owned();
+        let output = definition.output.as_str().to_owned();
+        match &definition.operation {
+            TransformerOperation::RollingSlope {
                 window,
                 warmup_policy,
             } => Self::RollingSlope {
-                input: input.as_str().to_owned(),
-                output: output.as_str().to_owned(),
+                input,
+                output,
                 window: *window,
                 warmup_policy: *warmup_policy,
             },
-            TransformerDefinition::RollingPathLength {
-                input,
-                output,
+            TransformerOperation::RollingPathLength {
                 window,
                 warmup_policy,
             } => Self::RollingPathLength {
-                input: input.as_str().to_owned(),
-                output: output.as_str().to_owned(),
+                input,
+                output,
                 window: *window,
                 warmup_policy: *warmup_policy,
             },
-            TransformerDefinition::RollingPositiveMovement {
-                input,
-                output,
+            TransformerOperation::RollingPositiveMovement {
                 window,
                 warmup_policy,
             } => Self::RollingPositiveMovement {
-                input: input.as_str().to_owned(),
-                output: output.as_str().to_owned(),
+                input,
+                output,
                 window: *window,
                 warmup_policy: *warmup_policy,
             },
-            TransformerDefinition::RollingNegativeMovement {
-                input,
-                output,
+            TransformerOperation::RollingNegativeMovement {
                 window,
                 warmup_policy,
             } => Self::RollingNegativeMovement {
-                input: input.as_str().to_owned(),
-                output: output.as_str().to_owned(),
+                input,
+                output,
                 window: *window,
                 warmup_policy: *warmup_policy,
             },
-            TransformerDefinition::RollingDirectionChangeCount {
-                input,
-                output,
+            TransformerOperation::RollingDirectionChangeCount {
                 window,
                 warmup_policy,
             } => Self::RollingDirectionChangeCount {
-                input: input.as_str().to_owned(),
-                output: output.as_str().to_owned(),
+                input,
+                output,
                 window: *window,
                 warmup_policy: *warmup_policy,
             },
-            TransformerDefinition::RollingMaxDrawdown {
-                input,
-                output,
+            TransformerOperation::RollingMaxDrawdown {
                 window,
                 warmup_policy,
             } => Self::RollingMaxDrawdown {
-                input: input.as_str().to_owned(),
-                output: output.as_str().to_owned(),
+                input,
+                output,
                 window: *window,
                 warmup_policy: *warmup_policy,
             },
-            TransformerDefinition::RollingStd {
-                input,
-                output,
+            TransformerOperation::RollingStd {
                 window,
                 warmup_policy,
             } => Self::RollingStd {
-                input: input.as_str().to_owned(),
-                output: output.as_str().to_owned(),
+                input,
+                output,
                 window: *window,
                 warmup_policy: *warmup_policy,
             },
-            TransformerDefinition::RollingStdTimed {
-                input,
-                output,
+            TransformerOperation::RollingStdTimed {
                 window,
                 aggregation,
                 warmup_policy,
             } => Self::RollingStdTimed {
-                input: input.as_str().to_owned(),
-                output: output.as_str().to_owned(),
+                input,
+                output,
                 window: *window,
                 aggregation: *aggregation,
                 warmup_policy: *warmup_policy,
             },
-            TransformerDefinition::RollingMin {
-                input,
-                output,
+            TransformerOperation::RollingMin {
                 window,
                 warmup_policy,
             } => Self::RollingMin {
-                input: input.as_str().to_owned(),
-                output: output.as_str().to_owned(),
+                input,
+                output,
                 window: *window,
                 warmup_policy: *warmup_policy,
             },
-            TransformerDefinition::RollingMinTimed {
-                input,
-                output,
+            TransformerOperation::RollingMinTimed {
                 window,
                 aggregation,
                 warmup_policy,
             } => Self::RollingMinTimed {
-                input: input.as_str().to_owned(),
-                output: output.as_str().to_owned(),
+                input,
+                output,
                 window: *window,
                 aggregation: *aggregation,
                 warmup_policy: *warmup_policy,
             },
-            TransformerDefinition::RollingMax {
-                input,
-                output,
+            TransformerOperation::RollingMax {
                 window,
                 warmup_policy,
             } => Self::RollingMax {
-                input: input.as_str().to_owned(),
-                output: output.as_str().to_owned(),
+                input,
+                output,
                 window: *window,
                 warmup_policy: *warmup_policy,
             },
-            TransformerDefinition::RollingMaxTimed {
-                input,
-                output,
+            TransformerOperation::RollingMaxTimed {
                 window,
                 aggregation,
                 warmup_policy,
             } => Self::RollingMaxTimed {
-                input: input.as_str().to_owned(),
-                output: output.as_str().to_owned(),
+                input,
+                output,
                 window: *window,
                 aggregation: *aggregation,
                 warmup_policy: *warmup_policy,
             },
-            TransformerDefinition::RollingRange {
-                input,
-                output,
+            TransformerOperation::RollingRange {
                 window,
                 warmup_policy,
             } => Self::RollingRange {
-                input: input.as_str().to_owned(),
-                output: output.as_str().to_owned(),
+                input,
+                output,
                 window: *window,
                 warmup_policy: *warmup_policy,
             },
-            TransformerDefinition::RollingRangeTimed {
-                input,
-                output,
+            TransformerOperation::RollingRangeTimed {
                 window,
                 aggregation,
                 warmup_policy,
             } => Self::RollingRangeTimed {
-                input: input.as_str().to_owned(),
-                output: output.as_str().to_owned(),
+                input,
+                output,
                 window: *window,
                 aggregation: *aggregation,
                 warmup_policy: *warmup_policy,
             },
-            TransformerDefinition::LaggedTimed {
-                input,
-                output,
+            TransformerOperation::LaggedTimed {
                 lag_window,
                 aggregation,
             } => Self::LaggedTimed {
-                input: input.as_str().to_owned(),
-                output: output.as_str().to_owned(),
+                input,
+                output,
                 lag_window: *lag_window,
                 aggregation: *aggregation,
             },
-            TransformerDefinition::DeltaTimed {
-                input,
-                output,
+            TransformerOperation::DeltaTimed {
                 lag_window,
                 aggregation,
             } => Self::DeltaTimed {
-                input: input.as_str().to_owned(),
-                output: output.as_str().to_owned(),
+                input,
+                output,
                 lag_window: *lag_window,
                 aggregation: *aggregation,
             },
-            TransformerDefinition::SimpleReturnTimed {
-                input,
-                output,
+            TransformerOperation::SimpleReturnTimed {
                 lag_window,
                 aggregation,
             } => Self::SimpleReturnTimed {
-                input: input.as_str().to_owned(),
-                output: output.as_str().to_owned(),
+                input,
+                output,
                 lag_window: *lag_window,
                 aggregation: *aggregation,
             },
-            TransformerDefinition::LogReturnTimed {
-                input,
-                output,
+            TransformerOperation::LogReturnTimed {
                 lag_window,
                 aggregation,
             } => Self::LogReturnTimed {
-                input: input.as_str().to_owned(),
-                output: output.as_str().to_owned(),
+                input,
+                output,
                 lag_window: *lag_window,
                 aggregation: *aggregation,
             },
 
-            TransformerDefinition::Ema {
-                input,
-                output,
+            TransformerOperation::Ema {
                 window,
                 warmup_policy,
             } => Self::Ema {
-                input: input.as_str().to_owned(),
-                output: output.as_str().to_owned(),
+                input,
+                output,
                 window: *window,
                 warmup_policy: *warmup_policy,
             },
-            TransformerDefinition::Sma {
-                input,
-                output,
+            TransformerOperation::Sma {
                 window,
                 warmup_policy,
             } => Self::Sma {
-                input: input.as_str().to_owned(),
-                output: output.as_str().to_owned(),
+                input,
+                output,
                 window: *window,
                 warmup_policy: *warmup_policy,
             },
-            TransformerDefinition::Delta {
+            TransformerOperation::Delta { lag_window } => Self::Delta {
                 input,
                 output,
-                lag_window,
-            } => Self::Delta {
-                input: input.as_str().to_owned(),
-                output: output.as_str().to_owned(),
                 lag_window: *lag_window,
             },
-            TransformerDefinition::SimpleReturn {
+            TransformerOperation::SimpleReturn { lag_window } => Self::SimpleReturn {
                 input,
                 output,
-                lag_window,
-            } => Self::SimpleReturn {
-                input: input.as_str().to_owned(),
-                output: output.as_str().to_owned(),
                 lag_window: *lag_window,
             },
-            TransformerDefinition::LogReturn {
+            TransformerOperation::LogReturn { lag_window } => Self::LogReturn {
                 input,
                 output,
-                lag_window,
-            } => Self::LogReturn {
-                input: input.as_str().to_owned(),
-                output: output.as_str().to_owned(),
                 lag_window: *lag_window,
             },
-            TransformerDefinition::Identity { input, output } => Self::Identity {
-                input: input.as_str().to_owned(),
-                output: output.as_str().to_owned(),
-            },
-            TransformerDefinition::Lagged {
+            TransformerOperation::Identity => Self::Identity { input, output },
+            TransformerOperation::Lagged { lag_window } => Self::Lagged {
                 input,
                 output,
-                lag_window,
-            } => Self::Lagged {
-                input: input.as_str().to_owned(),
-                output: output.as_str().to_owned(),
                 lag_window: *lag_window,
             },
-            TransformerDefinition::StandardScale {
+            TransformerOperation::StandardScale { mean, scale } => Self::StandardScale {
                 input,
                 output,
-                mean,
-                scale,
-            } => Self::StandardScale {
-                input: input.as_str().to_owned(),
-                output: output.as_str().to_owned(),
                 mean: *mean,
                 scale: *scale,
             },

@@ -314,6 +314,7 @@ fn shared_python_rust_context_replay_fixture() {
     let fixture: serde_json::Value =
         serde_json::from_str(include_str!("../../../tests/fixtures/context_replay.json")).unwrap();
     let spec: PipelineSpec = serde_json::from_value(fixture["pipeline"].clone()).unwrap();
+    assert_eq!(serde_json::to_value(&spec).unwrap(), fixture["pipeline"]);
     let mut pipeline = spec
         .build(
             ArrayFeatureVector::<2>::new(),
