@@ -39,7 +39,7 @@ pub use feature_key::FeatureKey;
 pub use feature_source::{EventField, FeatureSource, SourceKind, SourceObservation};
 pub use pipeline::{FittedStage, Pipeline, PipelineSpec};
 pub use serde::FeatureExtractorSpec;
-pub use transformers::TransformerDefinition;
+pub use transformers::{TransformerDefinition, TransformerOperation};
 
 const RESERVED_ID_PREFIX: &str = "__reserved_";
 

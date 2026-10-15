@@ -11,6 +11,15 @@ a release that supports the format they load.
 
 ## Unreleased
 
+### Breaking changes and migration
+
+- Rust `TransformerDefinition` is now a struct with public `input`, `output`,
+  and `operation` fields. Existing convenience constructors are unchanged.
+  Replace direct enum construction with the struct and a `TransformerOperation`
+  variant; match on `definition.operation` to inspect parameters. Python builders,
+  JSON formats, and numerical behavior are unchanged. See the
+  [Rust migration example](docs/pipeline.md#scalar-definition-migration-rust).
+
 ### Fixed
 
 - Share checked UTC-offset parsing between JSON loading and Python builders.

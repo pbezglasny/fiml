@@ -33,6 +33,24 @@ const WINDOW_MAX_SIZE: usize = 10_000;
 
 /// One named scalar transformation from an input layout to the next output layout.
 ///
+/// Input and output IDs are stored once alongside the operation's parameters.
+/// Convenience constructors and direct construction describe the same definition:
+///
+/// ```
+/// use fiml::{FeatureId, TransformerDefinition, TransformerOperation};
+///
+/// let definition = TransformerDefinition {
+///     input: FeatureId::new("price"),
+///     output: FeatureId::new("previous_price"),
+///     operation: TransformerOperation::Lagged { lag_window: 2 },
+/// };
+/// assert_eq!(definition, TransformerDefinition::lagged(
+///     FeatureId::new("price"), FeatureId::new("previous_price"), 2,
+/// ));
+/// assert_eq!(definition.input.as_str(), "price");
+/// assert!(matches!(definition.operation, TransformerOperation::Lagged { lag_window: 2 }));
+/// ```
+///
 /// Timed lag/change variants use the newest retained finite observation at or before `clock - lag_window`.
 /// For these lag/change variants, single-symbol clocks advance on every accepted event for that symbol; global calendars
 /// and event-count lags use the maximum accepted timestamp. Column-wise stages preserve
@@ -76,13 +94,23 @@ const WINDOW_MAX_SIZE: usize = 10_000;
 /// Trajectory storage uses `2 * next_power_of_two(max_window)` summaries (96 bytes
 /// each on 64-bit targets), shared across kinds, windows, and warmup policies.
 #[derive(Debug, Clone, PartialEq)]
-pub enum TransformerDefinition {
+pub struct TransformerDefinition {
+    /// ID to read from the preceding stage's layout.
+    pub input: FeatureId,
+    /// Unique, non-reserved ID assigned to this output.
+    pub output: FeatureId,
+    /// Calculation and parameters applied to the input.
+    pub operation: TransformerOperation,
+}
+
+/// Scalar calculation parameters, independent of input and output IDs.
+///
+/// Used by [`TransformerDefinition`] to keep layout IDs in one place while
+/// retaining operation-specific configuration. See that type for history and clock behavior.
+#[derive(Debug, Clone, PartialEq)]
+pub enum TransformerOperation {
     /// Least-squares slope against sample indices; NaN with fewer than two observations.
     RollingSlope {
-        /// ID in the preceding layout.
-        input: FeatureId,
-        /// ID assigned to this output.
-        output: FeatureId,
         /// Positive number of finite observations.
         window: usize,
         /// Controls availability while history fills.
@@ -90,10 +118,6 @@ pub enum TransformerDefinition {
     },
     /// Sum of absolute adjacent changes within the window.
     RollingPathLength {
-        /// ID in the preceding layout.
-        input: FeatureId,
-        /// ID assigned to this output.
-        output: FeatureId,
         /// Positive number of finite observations.
         window: usize,
         /// Controls availability while history fills.
@@ -101,10 +125,6 @@ pub enum TransformerDefinition {
     },
     /// Sum of positive adjacent changes within the window.
     RollingPositiveMovement {
-        /// ID in the preceding layout.
-        input: FeatureId,
-        /// ID assigned to this output.
-        output: FeatureId,
         /// Positive number of finite observations.
         window: usize,
         /// Controls availability while history fills.
@@ -112,10 +132,6 @@ pub enum TransformerDefinition {
     },
     /// Magnitude of negative adjacent changes within the window.
     RollingNegativeMovement {
-        /// ID in the preceding layout.
-        input: FeatureId,
-        /// ID assigned to this output.
-        output: FeatureId,
         /// Positive number of finite observations.
         window: usize,
         /// Controls availability while history fills.
@@ -123,10 +139,6 @@ pub enum TransformerDefinition {
     },
     /// Number of reversals between nonzero deltas; zero deltas are ignored.
     RollingDirectionChangeCount {
-        /// ID in the preceding layout.
-        input: FeatureId,
-        /// ID assigned to this output.
-        output: FeatureId,
         /// Positive number of finite observations.
         window: usize,
         /// Controls availability while history fills.
@@ -134,10 +146,6 @@ pub enum TransformerDefinition {
     },
     /// Largest earlier-peak to later-trough decrease, in absolute input units.
     RollingMaxDrawdown {
-        /// ID in the preceding layout.
-        input: FeatureId,
-        /// ID assigned to this output.
-        output: FeatureId,
         /// Positive number of finite observations.
         window: usize,
         /// Controls availability while history fills.
@@ -147,10 +155,6 @@ pub enum TransformerDefinition {
     /// Rolling population standard deviation over finite source observations.
     /// Missing observations emit NaN without entering history; compatible outputs share storage.
     RollingStd {
-        /// ID in the preceding layout.
-        input: FeatureId,
-        /// ID assigned to this output.
-        output: FeatureId,
         /// Positive number of finite observations.
         window: usize,
         /// Controls availability while history fills.
@@ -159,10 +163,6 @@ pub enum TransformerDefinition {
     /// Rolling population standard deviation over all finite observations in elapsed-time buckets.
     /// Missing observations emit NaN without entering history; compatible outputs share storage.
     RollingStdTimed {
-        /// ID in the preceding layout.
-        input: FeatureId,
-        /// ID assigned to this output.
-        output: FeatureId,
         /// Positive whole-millisecond duration, a multiple of aggregation.
         window: Duration,
         /// Positive whole-millisecond bucket width; every finite observation contributes.
@@ -173,10 +173,6 @@ pub enum TransformerDefinition {
     /// Rolling minimum over finite source observations.
     /// Missing observations emit NaN without entering history; compatible outputs share storage.
     RollingMin {
-        /// ID in the preceding layout.
-        input: FeatureId,
-        /// ID assigned to this output.
-        output: FeatureId,
         /// Positive number of finite observations.
         window: usize,
         /// Controls availability while history fills.
@@ -185,10 +181,6 @@ pub enum TransformerDefinition {
     /// Rolling minimum over all finite observations in elapsed-time buckets.
     /// Missing observations emit NaN without entering history; compatible outputs share storage.
     RollingMinTimed {
-        /// ID in the preceding layout.
-        input: FeatureId,
-        /// ID assigned to this output.
-        output: FeatureId,
         /// Positive whole-millisecond duration, a multiple of aggregation.
         window: Duration,
         /// Positive whole-millisecond bucket width; every finite observation contributes.
@@ -199,10 +191,6 @@ pub enum TransformerDefinition {
     /// Rolling maximum over finite source observations.
     /// Missing observations emit NaN without entering history; compatible outputs share storage.
     RollingMax {
-        /// ID in the preceding layout.
-        input: FeatureId,
-        /// ID assigned to this output.
-        output: FeatureId,
         /// Positive number of finite observations.
         window: usize,
         /// Controls availability while history fills.
@@ -211,10 +199,6 @@ pub enum TransformerDefinition {
     /// Rolling maximum over all finite observations in elapsed-time buckets.
     /// Missing observations emit NaN without entering history; compatible outputs share storage.
     RollingMaxTimed {
-        /// ID in the preceding layout.
-        input: FeatureId,
-        /// ID assigned to this output.
-        output: FeatureId,
         /// Positive whole-millisecond duration, a multiple of aggregation.
         window: Duration,
         /// Positive whole-millisecond bucket width; every finite observation contributes.
@@ -225,10 +209,6 @@ pub enum TransformerDefinition {
     /// Rolling range (maximum minus minimum) over finite source observations.
     /// Missing observations emit NaN without entering history; compatible outputs share storage.
     RollingRange {
-        /// ID in the preceding layout.
-        input: FeatureId,
-        /// ID assigned to this output.
-        output: FeatureId,
         /// Positive number of finite observations.
         window: usize,
         /// Controls availability while history fills.
@@ -237,10 +217,6 @@ pub enum TransformerDefinition {
     /// Rolling range (maximum minus minimum) over all finite observations in elapsed-time buckets.
     /// Missing observations emit NaN without entering history; compatible outputs share storage.
     RollingRangeTimed {
-        /// ID in the preceding layout.
-        input: FeatureId,
-        /// ID assigned to this output.
-        output: FeatureId,
         /// Positive whole-millisecond duration, a multiple of aggregation.
         window: Duration,
         /// Positive whole-millisecond bucket width; every finite observation contributes.
@@ -253,10 +229,6 @@ pub enum TransformerDefinition {
     /// Only finite observations enter shared history. Nonfinite observations emit NaN.
     /// Source-clock advances refresh the output and mark it observed for later stages.
     LaggedTimed {
-        /// ID in the preceding layout.
-        input: FeatureId,
-        /// ID assigned to this output.
-        output: FeatureId,
         /// Positive whole-millisecond duration, a multiple of `aggregation`.
         lag_window: Duration,
         /// Positive whole-millisecond bucket width. Each bucket retains its last finite observation.
@@ -266,10 +238,6 @@ pub enum TransformerDefinition {
     /// Only finite observations enter shared history. Nonfinite observations emit NaN.
     /// Source-clock advances refresh the output and mark it observed for later stages.
     DeltaTimed {
-        /// ID in the preceding layout.
-        input: FeatureId,
-        /// ID assigned to this output.
-        output: FeatureId,
         /// Positive whole-millisecond duration, a multiple of `aggregation`.
         lag_window: Duration,
         /// Positive whole-millisecond bucket width. Each bucket retains its last finite observation.
@@ -279,10 +247,6 @@ pub enum TransformerDefinition {
     /// Only finite observations enter shared history. Nonfinite observations emit NaN.
     /// Source-clock advances refresh the output and mark it observed for later stages.
     SimpleReturnTimed {
-        /// ID in the preceding layout.
-        input: FeatureId,
-        /// ID assigned to this output.
-        output: FeatureId,
         /// Positive whole-millisecond duration, a multiple of `aggregation`.
         lag_window: Duration,
         /// Positive whole-millisecond bucket width. Each bucket retains its last finite observation.
@@ -292,10 +256,6 @@ pub enum TransformerDefinition {
     /// Only finite observations enter shared history. Nonfinite observations emit NaN.
     /// Source-clock advances refresh the output and mark it observed for later stages.
     LogReturnTimed {
-        /// ID in the preceding layout.
-        input: FeatureId,
-        /// ID assigned to this output.
-        output: FeatureId,
         /// Positive whole-millisecond duration, a multiple of `aggregation`.
         lag_window: Duration,
         /// Positive whole-millisecond bucket width. Each bucket retains its last finite observation.
@@ -304,10 +264,6 @@ pub enum TransformerDefinition {
 
     /// EMA over finite source observations; missing observations emit NaN without advancing history.
     Ema {
-        /// ID in the preceding layout.
-        input: FeatureId,
-        /// ID assigned to this output.
-        output: FeatureId,
         /// Positive number of finite observations.
         window: usize,
         /// Controls availability while history fills.
@@ -315,10 +271,6 @@ pub enum TransformerDefinition {
     },
     /// SMA over finite source observations; missing observations emit NaN without advancing history.
     Sma {
-        /// ID in the preceding layout.
-        input: FeatureId,
-        /// ID assigned to this output.
-        output: FeatureId,
         /// Positive number of finite observations.
         window: usize,
         /// Controls availability while history fills.
@@ -329,10 +281,6 @@ pub enum TransformerDefinition {
     /// Observed nonfinite values emit NaN without advancing history; unrelated events retain output.
     /// All change kinds and windows for the same input share history within a stage.
     Delta {
-        /// ID to read from the preceding stage's layout.
-        input: FeatureId,
-        /// Unique, non-reserved ID assigned to this output.
-        output: FeatureId,
         /// Number of finite observations to look back, in `1..=10_000`.
         lag_window: usize,
     },
@@ -342,10 +290,6 @@ pub enum TransformerDefinition {
     /// Observed nonfinite values emit NaN without advancing history; unrelated events retain output.
     /// All change kinds and windows for the same input share history within a stage.
     SimpleReturn {
-        /// ID to read from the preceding stage's layout.
-        input: FeatureId,
-        /// Unique, non-reserved ID assigned to this output.
-        output: FeatureId,
         /// Number of finite observations to look back, in `1..=10_000`.
         lag_window: usize,
     },
@@ -355,37 +299,20 @@ pub enum TransformerDefinition {
     /// Observed nonfinite values emit NaN without advancing history; unrelated events retain output.
     /// All change kinds and windows for the same input share history within a stage.
     LogReturn {
-        /// ID to read from the preceding stage's layout.
-        input: FeatureId,
-        /// Unique, non-reserved ID assigned to this output.
-        output: FeatureId,
         /// Number of finite observations to look back, in `1..=10_000`.
         lag_window: usize,
     },
     /// Copies one input scalar without changing its value.
-    Identity {
-        /// ID to read from the preceding stage's layout.
-        input: FeatureId,
-        /// Unique, non-reserved ID assigned to this output.
-        output: FeatureId,
-    },
+    Identity,
     /// Emits the input scalar from `lag_window` accepted events earlier.
     /// The window must be in `1..=10_000`; output remains NaN until enough history exists.
     /// Definitions for the same input share one runtime history buffer.
     Lagged {
-        /// ID to read from the preceding stage's layout.
-        input: FeatureId,
-        /// Unique, non-reserved ID assigned to this output.
-        output: FeatureId,
         /// Number of accepted events to look back, in `1..=10_000`.
         lag_window: usize,
     },
     /// Applies `(input - mean) / scale` to one input scalar.
     StandardScale {
-        /// ID to read from the preceding stage's layout.
-        input: FeatureId,
-        /// Unique, non-reserved ID assigned to this output.
-        output: FeatureId,
         /// Finite centering value.
         mean: f64,
         /// Positive finite divisor whose reciprocal must also be finite.
@@ -401,11 +328,13 @@ impl TransformerDefinition {
         window: usize,
         warmup_policy: WarmupPolicy,
     ) -> Self {
-        Self::RollingSlope {
+        Self {
             input,
             output,
-            window,
-            warmup_policy,
+            operation: TransformerOperation::RollingSlope {
+                window,
+                warmup_policy,
+            },
         }
     }
     /// Sum of absolute adjacent changes within the window.
@@ -415,11 +344,13 @@ impl TransformerDefinition {
         window: usize,
         warmup_policy: WarmupPolicy,
     ) -> Self {
-        Self::RollingPathLength {
+        Self {
             input,
             output,
-            window,
-            warmup_policy,
+            operation: TransformerOperation::RollingPathLength {
+                window,
+                warmup_policy,
+            },
         }
     }
     /// Sum of positive adjacent changes within the window.
@@ -429,11 +360,13 @@ impl TransformerDefinition {
         window: usize,
         warmup_policy: WarmupPolicy,
     ) -> Self {
-        Self::RollingPositiveMovement {
+        Self {
             input,
             output,
-            window,
-            warmup_policy,
+            operation: TransformerOperation::RollingPositiveMovement {
+                window,
+                warmup_policy,
+            },
         }
     }
     /// Magnitude of negative adjacent changes within the window.
@@ -443,11 +376,13 @@ impl TransformerDefinition {
         window: usize,
         warmup_policy: WarmupPolicy,
     ) -> Self {
-        Self::RollingNegativeMovement {
+        Self {
             input,
             output,
-            window,
-            warmup_policy,
+            operation: TransformerOperation::RollingNegativeMovement {
+                window,
+                warmup_policy,
+            },
         }
     }
     /// Number of reversals between nonzero deltas; zero deltas are ignored.
@@ -457,11 +392,13 @@ impl TransformerDefinition {
         window: usize,
         warmup_policy: WarmupPolicy,
     ) -> Self {
-        Self::RollingDirectionChangeCount {
+        Self {
             input,
             output,
-            window,
-            warmup_policy,
+            operation: TransformerOperation::RollingDirectionChangeCount {
+                window,
+                warmup_policy,
+            },
         }
     }
     /// Largest earlier-peak to later-trough decrease, in absolute input units.
@@ -471,48 +408,44 @@ impl TransformerDefinition {
         window: usize,
         warmup_policy: WarmupPolicy,
     ) -> Self {
-        Self::RollingMaxDrawdown {
+        Self {
             input,
             output,
-            window,
-            warmup_policy,
+            operation: TransformerOperation::RollingMaxDrawdown {
+                window,
+                warmup_policy,
+            },
         }
     }
     fn trajectory(&self) -> Option<(TrajectoryKind, usize, WarmupPolicy)> {
-        match self {
-            Self::RollingSlope {
+        match &self.operation {
+            TransformerOperation::RollingSlope {
                 window,
                 warmup_policy,
-                ..
             } => Some((TrajectoryKind::Slope, *window, *warmup_policy)),
-            Self::RollingPathLength {
+            TransformerOperation::RollingPathLength {
                 window,
                 warmup_policy,
-                ..
             } => Some((TrajectoryKind::PathLength, *window, *warmup_policy)),
-            Self::RollingPositiveMovement {
+            TransformerOperation::RollingPositiveMovement {
                 window,
                 warmup_policy,
-                ..
             } => Some((TrajectoryKind::PositiveMovement, *window, *warmup_policy)),
-            Self::RollingNegativeMovement {
+            TransformerOperation::RollingNegativeMovement {
                 window,
                 warmup_policy,
-                ..
             } => Some((TrajectoryKind::NegativeMovement, *window, *warmup_policy)),
-            Self::RollingDirectionChangeCount {
+            TransformerOperation::RollingDirectionChangeCount {
                 window,
                 warmup_policy,
-                ..
             } => Some((
                 TrajectoryKind::DirectionChangeCount,
                 *window,
                 *warmup_policy,
             )),
-            Self::RollingMaxDrawdown {
+            TransformerOperation::RollingMaxDrawdown {
                 window,
                 warmup_policy,
-                ..
             } => Some((TrajectoryKind::MaxDrawdown, *window, *warmup_policy)),
             _ => None,
         }
@@ -525,11 +458,13 @@ impl TransformerDefinition {
         window: usize,
         warmup_policy: WarmupPolicy,
     ) -> Self {
-        Self::RollingStd {
+        Self {
             input,
             output,
-            window,
-            warmup_policy,
+            operation: TransformerOperation::RollingStd {
+                window,
+                warmup_policy,
+            },
         }
     }
     /// Creates a timed rolling population standard deviation, using 1 ms aggregation.
@@ -555,12 +490,14 @@ impl TransformerDefinition {
         aggregation: Duration,
         warmup_policy: WarmupPolicy,
     ) -> Self {
-        Self::RollingStdTimed {
+        Self {
             input,
             output,
-            window,
-            aggregation,
-            warmup_policy,
+            operation: TransformerOperation::RollingStdTimed {
+                window,
+                aggregation,
+                warmup_policy,
+            },
         }
     }
     /// Creates an observation-based rolling minimum.
@@ -570,11 +507,13 @@ impl TransformerDefinition {
         window: usize,
         warmup_policy: WarmupPolicy,
     ) -> Self {
-        Self::RollingMin {
+        Self {
             input,
             output,
-            window,
-            warmup_policy,
+            operation: TransformerOperation::RollingMin {
+                window,
+                warmup_policy,
+            },
         }
     }
     /// Creates a timed rolling minimum, using 1 ms aggregation.
@@ -600,12 +539,14 @@ impl TransformerDefinition {
         aggregation: Duration,
         warmup_policy: WarmupPolicy,
     ) -> Self {
-        Self::RollingMinTimed {
+        Self {
             input,
             output,
-            window,
-            aggregation,
-            warmup_policy,
+            operation: TransformerOperation::RollingMinTimed {
+                window,
+                aggregation,
+                warmup_policy,
+            },
         }
     }
     /// Creates an observation-based rolling maximum.
@@ -615,11 +556,13 @@ impl TransformerDefinition {
         window: usize,
         warmup_policy: WarmupPolicy,
     ) -> Self {
-        Self::RollingMax {
+        Self {
             input,
             output,
-            window,
-            warmup_policy,
+            operation: TransformerOperation::RollingMax {
+                window,
+                warmup_policy,
+            },
         }
     }
     /// Creates a timed rolling maximum, using 1 ms aggregation.
@@ -645,12 +588,14 @@ impl TransformerDefinition {
         aggregation: Duration,
         warmup_policy: WarmupPolicy,
     ) -> Self {
-        Self::RollingMaxTimed {
+        Self {
             input,
             output,
-            window,
-            aggregation,
-            warmup_policy,
+            operation: TransformerOperation::RollingMaxTimed {
+                window,
+                aggregation,
+                warmup_policy,
+            },
         }
     }
     /// Creates an observation-based rolling range (maximum minus minimum).
@@ -660,11 +605,13 @@ impl TransformerDefinition {
         window: usize,
         warmup_policy: WarmupPolicy,
     ) -> Self {
-        Self::RollingRange {
+        Self {
             input,
             output,
-            window,
-            warmup_policy,
+            operation: TransformerOperation::RollingRange {
+                window,
+                warmup_policy,
+            },
         }
     }
     /// Creates a timed rolling range (maximum minus minimum), using 1 ms aggregation.
@@ -690,74 +637,68 @@ impl TransformerDefinition {
         aggregation: Duration,
         warmup_policy: WarmupPolicy,
     ) -> Self {
-        Self::RollingRangeTimed {
+        Self {
             input,
             output,
-            window,
-            aggregation,
-            warmup_policy,
+            operation: TransformerOperation::RollingRangeTimed {
+                window,
+                aggregation,
+                warmup_policy,
+            },
         }
     }
     fn statistic(&self) -> Option<(StatisticKind, u64, Option<Duration>, WarmupPolicy)> {
-        match self {
-            Self::RollingStd {
+        match &self.operation {
+            TransformerOperation::RollingStd {
                 window,
                 warmup_policy,
-                ..
             } => Some((StatisticKind::Std, *window as u64, None, *warmup_policy)),
-            Self::RollingStdTimed {
+            TransformerOperation::RollingStdTimed {
                 window,
                 warmup_policy,
                 aggregation,
-                ..
             } => Some((
                 StatisticKind::Std,
                 window.as_millis() as u64,
                 Some(*aggregation),
                 *warmup_policy,
             )),
-            Self::RollingMin {
+            TransformerOperation::RollingMin {
                 window,
                 warmup_policy,
-                ..
             } => Some((StatisticKind::Min, *window as u64, None, *warmup_policy)),
-            Self::RollingMinTimed {
+            TransformerOperation::RollingMinTimed {
                 window,
                 warmup_policy,
                 aggregation,
-                ..
             } => Some((
                 StatisticKind::Min,
                 window.as_millis() as u64,
                 Some(*aggregation),
                 *warmup_policy,
             )),
-            Self::RollingMax {
+            TransformerOperation::RollingMax {
                 window,
                 warmup_policy,
-                ..
             } => Some((StatisticKind::Max, *window as u64, None, *warmup_policy)),
-            Self::RollingMaxTimed {
+            TransformerOperation::RollingMaxTimed {
                 window,
                 warmup_policy,
                 aggregation,
-                ..
             } => Some((
                 StatisticKind::Max,
                 window.as_millis() as u64,
                 Some(*aggregation),
                 *warmup_policy,
             )),
-            Self::RollingRange {
+            TransformerOperation::RollingRange {
                 window,
                 warmup_policy,
-                ..
             } => Some((StatisticKind::Range, *window as u64, None, *warmup_policy)),
-            Self::RollingRangeTimed {
+            TransformerOperation::RollingRangeTimed {
                 window,
                 warmup_policy,
                 aggregation,
-                ..
             } => Some((
                 StatisticKind::Range,
                 window.as_millis() as u64,
@@ -782,11 +723,13 @@ impl TransformerDefinition {
         lag_window: Duration,
         aggregation: Duration,
     ) -> Self {
-        Self::LaggedTimed {
+        Self {
             input,
             output,
-            lag_window,
-            aggregation,
+            operation: TransformerOperation::LaggedTimed {
+                lag_window,
+                aggregation,
+            },
         }
     }
 
@@ -804,11 +747,13 @@ impl TransformerDefinition {
         lag_window: Duration,
         aggregation: Duration,
     ) -> Self {
-        Self::DeltaTimed {
+        Self {
             input,
             output,
-            lag_window,
-            aggregation,
+            operation: TransformerOperation::DeltaTimed {
+                lag_window,
+                aggregation,
+            },
         }
     }
 
@@ -831,11 +776,13 @@ impl TransformerDefinition {
         lag_window: Duration,
         aggregation: Duration,
     ) -> Self {
-        Self::SimpleReturnTimed {
+        Self {
             input,
             output,
-            lag_window,
-            aggregation,
+            operation: TransformerOperation::SimpleReturnTimed {
+                lag_window,
+                aggregation,
+            },
         }
     }
 
@@ -853,11 +800,13 @@ impl TransformerDefinition {
         lag_window: Duration,
         aggregation: Duration,
     ) -> Self {
-        Self::LogReturnTimed {
+        Self {
             input,
             output,
-            lag_window,
-            aggregation,
+            operation: TransformerOperation::LogReturnTimed {
+                lag_window,
+                aggregation,
+            },
         }
     }
 
@@ -868,11 +817,13 @@ impl TransformerDefinition {
         window: usize,
         warmup_policy: WarmupPolicy,
     ) -> Self {
-        Self::Ema {
+        Self {
             input,
             output,
-            window,
-            warmup_policy,
+            operation: TransformerOperation::Ema {
+                window,
+                warmup_policy,
+            },
         }
     }
 
@@ -883,168 +834,107 @@ impl TransformerDefinition {
         window: usize,
         warmup_policy: WarmupPolicy,
     ) -> Self {
-        Self::Sma {
+        Self {
             input,
             output,
-            window,
-            warmup_policy,
+            operation: TransformerOperation::Sma {
+                window,
+                warmup_policy,
+            },
         }
     }
 
     /// Creates an exact observation-based delta transformation.
     pub fn delta(input: FeatureId, output: FeatureId, lag_window: usize) -> Self {
-        Self::Delta {
+        Self {
             input,
             output,
-            lag_window,
+            operation: TransformerOperation::Delta { lag_window },
         }
     }
 
     /// Creates an exact observation-based simple return transformation.
     pub fn simple_return(input: FeatureId, output: FeatureId, lag_window: usize) -> Self {
-        Self::SimpleReturn {
+        Self {
             input,
             output,
-            lag_window,
+            operation: TransformerOperation::SimpleReturn { lag_window },
         }
     }
 
     /// Creates an exact observation-based log return transformation.
     pub fn log_return(input: FeatureId, output: FeatureId, lag_window: usize) -> Self {
-        Self::LogReturn {
+        Self {
             input,
             output,
-            lag_window,
+            operation: TransformerOperation::LogReturn { lag_window },
         }
     }
 
     /// Creates a scalar identity transformation.
     pub fn identity(input: FeatureId, output: FeatureId) -> Self {
-        Self::Identity { input, output }
+        Self {
+            input,
+            output,
+            operation: TransformerOperation::Identity,
+        }
     }
 
     /// Creates an event-lagged transformation with a positive history window.
     pub fn lagged(input: FeatureId, output: FeatureId, lag_window: usize) -> Self {
-        Self::Lagged {
+        Self {
             input,
             output,
-            lag_window,
+            operation: TransformerOperation::Lagged { lag_window },
         }
     }
 
     /// Creates a scalar standard-scaling transformation.
     pub fn standard_scale(input: FeatureId, output: FeatureId, mean: f64, scale: f64) -> Self {
-        Self::StandardScale {
+        Self {
             input,
             output,
-            mean,
-            scale,
-        }
-    }
-
-    pub(crate) fn input(&self) -> &FeatureId {
-        match self {
-            Self::RollingSlope { input, .. }
-            | Self::RollingPathLength { input, .. }
-            | Self::RollingPositiveMovement { input, .. }
-            | Self::RollingNegativeMovement { input, .. }
-            | Self::RollingDirectionChangeCount { input, .. }
-            | Self::RollingMaxDrawdown { input, .. }
-            | Self::RollingStd { input, .. }
-            | Self::RollingStdTimed { input, .. }
-            | Self::RollingMin { input, .. }
-            | Self::RollingMinTimed { input, .. }
-            | Self::RollingMax { input, .. }
-            | Self::RollingMaxTimed { input, .. }
-            | Self::RollingRange { input, .. }
-            | Self::RollingRangeTimed { input, .. }
-            | Self::LaggedTimed { input, .. }
-            | Self::DeltaTimed { input, .. }
-            | Self::SimpleReturnTimed { input, .. }
-            | Self::LogReturnTimed { input, .. }
-            | Self::Sma { input, .. }
-            | Self::Ema { input, .. }
-            | Self::Identity { input, .. }
-            | Self::Delta { input, .. }
-            | Self::SimpleReturn { input, .. }
-            | Self::LogReturn { input, .. }
-            | Self::Lagged { input, .. }
-            | Self::StandardScale { input, .. } => input,
-        }
-    }
-
-    pub(crate) fn output(&self) -> &FeatureId {
-        match self {
-            Self::RollingSlope { output, .. }
-            | Self::RollingPathLength { output, .. }
-            | Self::RollingPositiveMovement { output, .. }
-            | Self::RollingNegativeMovement { output, .. }
-            | Self::RollingDirectionChangeCount { output, .. }
-            | Self::RollingMaxDrawdown { output, .. }
-            | Self::RollingStd { output, .. }
-            | Self::RollingStdTimed { output, .. }
-            | Self::RollingMin { output, .. }
-            | Self::RollingMinTimed { output, .. }
-            | Self::RollingMax { output, .. }
-            | Self::RollingMaxTimed { output, .. }
-            | Self::RollingRange { output, .. }
-            | Self::RollingRangeTimed { output, .. }
-            | Self::LaggedTimed { output, .. }
-            | Self::DeltaTimed { output, .. }
-            | Self::SimpleReturnTimed { output, .. }
-            | Self::LogReturnTimed { output, .. }
-            | Self::Sma { output, .. }
-            | Self::Ema { output, .. }
-            | Self::Identity { output, .. }
-            | Self::Delta { output, .. }
-            | Self::SimpleReturn { output, .. }
-            | Self::LogReturn { output, .. }
-            | Self::Lagged { output, .. }
-            | Self::StandardScale { output, .. } => output,
+            operation: TransformerOperation::StandardScale { mean, scale },
         }
     }
 
     pub(crate) fn timed_window(&self) -> Option<(Duration, Duration)> {
-        match self {
-            Self::RollingStdTimed {
+        match &self.operation {
+            TransformerOperation::RollingStdTimed {
                 window,
                 aggregation,
                 ..
             }
-            | Self::RollingMinTimed {
+            | TransformerOperation::RollingMinTimed {
                 window,
                 aggregation,
                 ..
             }
-            | Self::RollingMaxTimed {
+            | TransformerOperation::RollingMaxTimed {
                 window,
                 aggregation,
                 ..
             }
-            | Self::RollingRangeTimed {
+            | TransformerOperation::RollingRangeTimed {
                 window,
                 aggregation,
                 ..
             } => Some((*window, *aggregation)),
-            Self::LaggedTimed {
+            TransformerOperation::LaggedTimed {
                 lag_window,
                 aggregation,
-                ..
             }
-            | Self::DeltaTimed {
+            | TransformerOperation::DeltaTimed {
                 lag_window,
                 aggregation,
-                ..
             }
-            | Self::SimpleReturnTimed {
+            | TransformerOperation::SimpleReturnTimed {
                 lag_window,
                 aggregation,
-                ..
             }
-            | Self::LogReturnTimed {
+            | TransformerOperation::LogReturnTimed {
                 lag_window,
                 aggregation,
-                ..
             } => Some((*lag_window, *aggregation)),
             _ => None,
         }
@@ -1064,15 +954,16 @@ impl TransformerDefinition {
             statistics::validate_capacity(window, aggregation.map(|a| a.as_millis() as i64))?;
         }
         if matches!(
-            self,
-            Self::Sma { window: 0, .. } | Self::Ema { window: 0, .. }
+            &self.operation,
+            TransformerOperation::Sma { window: 0, .. }
+                | TransformerOperation::Ema { window: 0, .. }
         ) {
             return Err(InvalidTransformationDefinitionError::WindowZero);
         }
-        if let Self::Lagged { lag_window, .. }
-        | Self::Delta { lag_window, .. }
-        | Self::SimpleReturn { lag_window, .. }
-        | Self::LogReturn { lag_window, .. } = self
+        if let TransformerOperation::Lagged { lag_window }
+        | TransformerOperation::Delta { lag_window }
+        | TransformerOperation::SimpleReturn { lag_window }
+        | TransformerOperation::LogReturn { lag_window } = &self.operation
         {
             if *lag_window == 0 {
                 return Err(InvalidTransformationDefinitionError::LagWindowZero);
@@ -1081,7 +972,7 @@ impl TransformerDefinition {
                 return Err(InvalidTransformationDefinitionError::LagWindowTooLarge);
             }
         }
-        if let Self::StandardScale { mean, scale, .. } = self {
+        if let TransformerOperation::StandardScale { mean, scale } = &self.operation {
             validate_standard_scale(*mean, *scale)?;
         }
         Ok(())
@@ -1110,13 +1001,13 @@ pub(crate) fn validate_standard_scale(
 /// Validates independent scalar outputs against the preceding active layout.
 pub(crate) fn validate(definitions: &[TransformerDefinition], inputs: &[FeatureId]) -> Result<()> {
     for (index, definition) in definitions.iter().enumerate() {
-        let reason = if !inputs.contains(definition.input()) {
+        let reason = if !inputs.contains(&definition.input) {
             Some(InvalidTransformationDefinitionError::InputFeatureNotFound)
-        } else if crate::features::is_reserved_feature_id(definition.output()) {
+        } else if crate::features::is_reserved_feature_id(&definition.output) {
             Some(InvalidTransformationDefinitionError::ReservedOutputFeature)
         } else if definitions[..index]
             .iter()
-            .any(|previous| previous.output() == definition.output())
+            .any(|previous| previous.output == definition.output)
         {
             Some(InvalidTransformationDefinitionError::DuplicateOutputFeature)
         } else {
@@ -1140,17 +1031,13 @@ pub(crate) fn validate(definitions: &[TransformerDefinition], inputs: &[FeatureI
 }
 
 fn average_key(definition: &TransformerDefinition) -> Option<(bool, &FeatureId, WarmupPolicy)> {
-    match definition {
-        TransformerDefinition::Sma {
-            input,
-            warmup_policy,
-            ..
-        } => Some((false, input, *warmup_policy)),
-        TransformerDefinition::Ema {
-            input,
-            warmup_policy,
-            ..
-        } => Some((true, input, *warmup_policy)),
+    match &definition.operation {
+        TransformerOperation::Sma { warmup_policy, .. } => {
+            Some((false, &definition.input, *warmup_policy))
+        }
+        TransformerOperation::Ema { warmup_policy, .. } => {
+            Some((true, &definition.input, *warmup_policy))
+        }
         _ => None,
     }
 }
@@ -1172,15 +1059,15 @@ pub(crate) fn compile(
     for (output_index, definition) in definitions.iter().enumerate() {
         let input_index = inputs
             .iter()
-            .position(|id| id == definition.input())
+            .position(|id| id == &definition.input)
             .expect("pipeline construction validated every input ID");
-        match definition {
-            TransformerDefinition::RollingSlope { .. }
-            | TransformerDefinition::RollingPathLength { .. }
-            | TransformerDefinition::RollingPositiveMovement { .. }
-            | TransformerDefinition::RollingNegativeMovement { .. }
-            | TransformerDefinition::RollingDirectionChangeCount { .. }
-            | TransformerDefinition::RollingMaxDrawdown { .. } => {
+        match &definition.operation {
+            TransformerOperation::RollingSlope { .. }
+            | TransformerOperation::RollingPathLength { .. }
+            | TransformerOperation::RollingPositiveMovement { .. }
+            | TransformerOperation::RollingNegativeMovement { .. }
+            | TransformerOperation::RollingDirectionChangeCount { .. }
+            | TransformerOperation::RollingMaxDrawdown { .. } => {
                 let (kind, window, warmup) = definition.trajectory().unwrap();
                 trajectories.entry(input_index).or_default().push((
                     kind,
@@ -1189,46 +1076,42 @@ pub(crate) fn compile(
                     output_index,
                 ));
             }
-            TransformerDefinition::RollingStd { .. }
-            | TransformerDefinition::RollingStdTimed { .. }
-            | TransformerDefinition::RollingMin { .. }
-            | TransformerDefinition::RollingMinTimed { .. }
-            | TransformerDefinition::RollingMax { .. }
-            | TransformerDefinition::RollingMaxTimed { .. }
-            | TransformerDefinition::RollingRange { .. }
-            | TransformerDefinition::RollingRangeTimed { .. } => {
+            TransformerOperation::RollingStd { .. }
+            | TransformerOperation::RollingStdTimed { .. }
+            | TransformerOperation::RollingMin { .. }
+            | TransformerOperation::RollingMinTimed { .. }
+            | TransformerOperation::RollingMax { .. }
+            | TransformerOperation::RollingMaxTimed { .. }
+            | TransformerOperation::RollingRange { .. }
+            | TransformerOperation::RollingRangeTimed { .. } => {
                 let (kind, window, aggregation, warmup) = definition.statistic().unwrap();
                 statistics
                     .entry((input_index, aggregation.map(|a| a.as_millis() as i64)))
                     .or_default()
                     .push((kind, window, warmup, output_index));
             }
-            TransformerDefinition::LaggedTimed {
+            TransformerOperation::LaggedTimed {
                 lag_window,
                 aggregation,
-                ..
             }
-            | TransformerDefinition::DeltaTimed {
+            | TransformerOperation::DeltaTimed {
                 lag_window,
                 aggregation,
-                ..
             }
-            | TransformerDefinition::SimpleReturnTimed {
+            | TransformerOperation::SimpleReturnTimed {
                 lag_window,
                 aggregation,
-                ..
             }
-            | TransformerDefinition::LogReturnTimed {
+            | TransformerOperation::LogReturnTimed {
                 lag_window,
                 aggregation,
-                ..
             } => {
-                let kind = match definition {
-                    TransformerDefinition::DeltaTimed { .. } => Some(ChangeKind::Delta),
-                    TransformerDefinition::SimpleReturnTimed { .. } => {
+                let kind = match &definition.operation {
+                    TransformerOperation::DeltaTimed { .. } => Some(ChangeKind::Delta),
+                    TransformerOperation::SimpleReturnTimed { .. } => {
                         Some(ChangeKind::SimpleReturn)
                     }
-                    TransformerDefinition::LogReturnTimed { .. } => Some(ChangeKind::LogReturn),
+                    TransformerOperation::LogReturnTimed { .. } => Some(ChangeKind::LogReturn),
                     _ => None,
                 };
                 timed_outputs
@@ -1236,19 +1119,18 @@ pub(crate) fn compile(
                     .or_default()
                     .push((kind, lag_window.as_millis() as i64, output_index));
             }
-            TransformerDefinition::Sma { window, .. }
-            | TransformerDefinition::Ema { window, .. } => {
+            TransformerOperation::Sma { window, .. } | TransformerOperation::Ema { window, .. } => {
                 let (ema, _, warmup) = average_key(definition).unwrap();
                 let (windows, outputs) = averages.entry((ema, input_index, warmup)).or_default();
                 windows.push(*window);
                 outputs.push(output_index);
             }
-            TransformerDefinition::Delta { lag_window, .. }
-            | TransformerDefinition::SimpleReturn { lag_window, .. }
-            | TransformerDefinition::LogReturn { lag_window, .. } => {
-                let kind = match definition {
-                    TransformerDefinition::Delta { .. } => ChangeKind::Delta,
-                    TransformerDefinition::SimpleReturn { .. } => ChangeKind::SimpleReturn,
+            TransformerOperation::Delta { lag_window }
+            | TransformerOperation::SimpleReturn { lag_window }
+            | TransformerOperation::LogReturn { lag_window } => {
+                let kind = match &definition.operation {
+                    TransformerOperation::Delta { .. } => ChangeKind::Delta,
+                    TransformerOperation::SimpleReturn { .. } => ChangeKind::SimpleReturn,
                     _ => ChangeKind::LogReturn,
                 };
                 changes
@@ -1256,15 +1138,15 @@ pub(crate) fn compile(
                     .or_default()
                     .push((kind, *lag_window, output_index));
             }
-            TransformerDefinition::Identity { .. } => operations.push(Transformer::Identity(
+            TransformerOperation::Identity => operations.push(Transformer::Identity(
                 IdentityTransformer::new(input_index, output_index),
             )),
-            TransformerDefinition::Lagged { lag_window, .. } => {
+            TransformerOperation::Lagged { lag_window } => {
                 let (windows, output_indices) = lagged_outputs.entry(input_index).or_default();
                 windows.push(*lag_window);
                 output_indices.push(output_index);
             }
-            TransformerDefinition::StandardScale { mean, scale, .. } => {
+            TransformerOperation::StandardScale { mean, scale } => {
                 operations.push(Transformer::StandardScale(StandardScaleTransformer::new(
                     input_index,
                     output_index,
@@ -1395,13 +1277,13 @@ pub(crate) fn clock_inputs(
     definitions
         .iter()
         .map(|definition| {
-            if matches!(definition, TransformerDefinition::Lagged { .. }) {
+            if matches!(&definition.operation, TransformerOperation::Lagged { .. }) {
                 None
             } else {
                 Some(
                     inputs
                         .iter()
-                        .position(|id| id == definition.input())
+                        .position(|id| id == &definition.input)
                         .expect("validated scalar input"),
                 )
             }

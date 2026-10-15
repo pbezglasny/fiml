@@ -102,7 +102,7 @@ impl PipelineSpec {
         if !stages.is_empty() {
             let base_ids = transformation_definitions
                 .iter()
-                .map(|definition| definition.output().clone())
+                .map(|definition| definition.output.clone())
                 .collect::<Vec<_>>();
             let mut inputs = std::borrow::Cow::Borrowed(base_ids.as_slice());
             for (index, stage) in stages.iter().enumerate() {
@@ -158,7 +158,7 @@ impl PipelineSpec {
             None => self
                 .transformation_definitions
                 .iter()
-                .map(|definition| definition.output().clone())
+                .map(|definition| definition.output.clone())
                 .collect(),
         }
     }
