@@ -57,6 +57,68 @@ fn count_allocations(operation: impl FnOnce()) -> usize {
     ALLOCATION_COUNT.with(Cell::get)
 }
 
+#[test]
+fn state_transformers_do_not_allocate_during_warmup_sign_changes_or_clock_refreshes() {
+    use fiml::{EventField, FittedStage, TransformerDefinition as T};
+    let id = FeatureId::new;
+    let raw = FeatureExtractorSpec::new([FeatureDefinition::new(
+        FeatureKey::Field {
+            symbol: Symbol::GLOBAL,
+            field: EventField::Price,
+        },
+        id("p"),
+    )])
+    .unwrap();
+    let mut pipeline = PipelineSpec::with_stages(
+        raw,
+        [T::delta(id("p"), id("signal"), 1)],
+        [FittedStage::Scalar {
+            transformations: vec![
+                T::positive_streak(id("signal"), id("positive_streak"), 0.5),
+                T::negative_streak(id("signal"), id("negative_streak"), 0.5),
+                T::observations_since_positive(
+                    id("signal"),
+                    id("observations_since_positive"),
+                    0.5,
+                ),
+                T::observations_since_negative(
+                    id("signal"),
+                    id("observations_since_negative"),
+                    0.5,
+                ),
+                T::observations_since_nonzero(id("signal"), id("observations_since_nonzero"), 0.5),
+                T::time_since_positive(id("signal"), id("time_since_positive"), 0.5),
+                T::time_since_negative(id("signal"), id("time_since_negative"), 0.5),
+                T::time_since_nonzero(id("signal"), id("time_since_nonzero"), 0.5),
+            ],
+        }],
+        8,
+        None,
+    )
+    .unwrap()
+    .build(
+        ArrayFeatureVector::<1>::new(),
+        ArrayFeatureVector::<8>::new(),
+    )
+    .unwrap();
+    assert_eq!(
+        count_allocations(|| {
+            for time in 0..128 {
+                let price = [2., 4., 4., 1.][time as usize % 4];
+                pipeline
+                    .handle_event(Event::price(Symbol::GLOBAL, price, time * 10))
+                    .unwrap();
+                pipeline
+                    .handle_event(Event::volume(Symbol::GLOBAL, 1., time * 10 + 5))
+                    .unwrap();
+                black_box(pipeline.values());
+            }
+        }),
+        0
+    );
+    assert!(pipeline.values().iter().all(|v| v.is_finite()));
+}
+
 fn pipeline_with<const N: usize>(
     transformations: [TransformerDefinition; N],
 ) -> Pipeline<ArrayFeatureVector<1>, ArrayFeatureVector<N>> {

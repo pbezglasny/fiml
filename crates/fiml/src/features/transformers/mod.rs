@@ -16,6 +16,8 @@ mod history;
 mod identity;
 mod lagged;
 mod standard_scale;
+mod state;
+use state::{StateKind, StateTransformer};
 mod trajectory;
 use trajectory::{TrajectoryKind, TrajectoryTransformer};
 mod statistics;
@@ -93,6 +95,14 @@ const WINDOW_MAX_SIZE: usize = 10_000;
 /// Updates and distinct-window queries cost `O(log max_window)` without allocation.
 /// Trajectory storage uses `2 * next_power_of_two(max_window)` summaries (96 bytes
 /// each on 64-bit targets), shared across kinds, windows, and warmup policies.
+///
+/// State transformers count finite signed observations or milliseconds since a matching
+/// signal. The inclusive interval `[-epsilon, epsilon]` is neutral and resets streaks.
+/// Nonfinite observations preserve state and emit NaN until the next finite input;
+/// unobserved inputs retain count outputs. Since-values are NaN until a match, then zero
+/// on each match. Counts saturate at 2^53. Time ages use source clocks, refresh on clock
+/// advances, ignore context updates, and use widened timestamp differences before f64
+/// conversion. State updates use constant space and allocate nothing.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TransformerDefinition {
     /// ID to read from the preceding stage's layout.
@@ -109,6 +119,46 @@ pub struct TransformerDefinition {
 /// retaining operation-specific configuration. See that type for history and clock behavior.
 #[derive(Debug, Clone, PartialEq)]
 pub enum TransformerOperation {
+    /// Consecutive observations greater than epsilon.
+    PositiveStreak {
+        /// Finite, nonnegative half-width of the inclusive neutral interval.
+        epsilon: f64,
+    },
+    /// Consecutive observations less than negative epsilon.
+    NegativeStreak {
+        /// Finite, nonnegative half-width of the inclusive neutral interval.
+        epsilon: f64,
+    },
+    /// Finite observations since the last value greater than epsilon.
+    ObservationsSincePositive {
+        /// Finite, nonnegative half-width of the inclusive neutral interval.
+        epsilon: f64,
+    },
+    /// Finite observations since the last value less than negative epsilon.
+    ObservationsSinceNegative {
+        /// Finite, nonnegative half-width of the inclusive neutral interval.
+        epsilon: f64,
+    },
+    /// Finite observations since the last value outside the neutral interval.
+    ObservationsSinceNonzero {
+        /// Finite, nonnegative half-width of the inclusive neutral interval.
+        epsilon: f64,
+    },
+    /// Elapsed milliseconds since the last value greater than epsilon.
+    TimeSincePositive {
+        /// Finite, nonnegative half-width of the inclusive neutral interval.
+        epsilon: f64,
+    },
+    /// Elapsed milliseconds since the last value less than negative epsilon.
+    TimeSinceNegative {
+        /// Finite, nonnegative half-width of the inclusive neutral interval.
+        epsilon: f64,
+    },
+    /// Elapsed milliseconds since the last value outside the neutral interval.
+    TimeSinceNonzero {
+        /// Finite, nonnegative half-width of the inclusive neutral interval.
+        epsilon: f64,
+    },
     /// Least-squares slope against sample indices; NaN with fewer than two observations.
     RollingSlope {
         /// Positive number of finite observations.
@@ -321,6 +371,112 @@ pub enum TransformerOperation {
 }
 
 impl TransformerDefinition {
+    /// Consecutive observations greater than epsilon.
+    pub fn positive_streak(input: FeatureId, output: FeatureId, epsilon: f64) -> Self {
+        Self {
+            input,
+            output,
+            operation: TransformerOperation::PositiveStreak { epsilon },
+        }
+    }
+
+    /// Consecutive observations less than negative epsilon.
+    pub fn negative_streak(input: FeatureId, output: FeatureId, epsilon: f64) -> Self {
+        Self {
+            input,
+            output,
+            operation: TransformerOperation::NegativeStreak { epsilon },
+        }
+    }
+
+    /// Finite observations since the last value greater than epsilon.
+    pub fn observations_since_positive(input: FeatureId, output: FeatureId, epsilon: f64) -> Self {
+        Self {
+            input,
+            output,
+            operation: TransformerOperation::ObservationsSincePositive { epsilon },
+        }
+    }
+
+    /// Finite observations since the last value less than negative epsilon.
+    pub fn observations_since_negative(input: FeatureId, output: FeatureId, epsilon: f64) -> Self {
+        Self {
+            input,
+            output,
+            operation: TransformerOperation::ObservationsSinceNegative { epsilon },
+        }
+    }
+
+    /// Finite observations since the last value outside the neutral interval.
+    pub fn observations_since_nonzero(input: FeatureId, output: FeatureId, epsilon: f64) -> Self {
+        Self {
+            input,
+            output,
+            operation: TransformerOperation::ObservationsSinceNonzero { epsilon },
+        }
+    }
+
+    /// Elapsed milliseconds since the last value greater than epsilon.
+    pub fn time_since_positive(input: FeatureId, output: FeatureId, epsilon: f64) -> Self {
+        Self {
+            input,
+            output,
+            operation: TransformerOperation::TimeSincePositive { epsilon },
+        }
+    }
+
+    /// Elapsed milliseconds since the last value less than negative epsilon.
+    pub fn time_since_negative(input: FeatureId, output: FeatureId, epsilon: f64) -> Self {
+        Self {
+            input,
+            output,
+            operation: TransformerOperation::TimeSinceNegative { epsilon },
+        }
+    }
+
+    /// Elapsed milliseconds since the last value outside the neutral interval.
+    pub fn time_since_nonzero(input: FeatureId, output: FeatureId, epsilon: f64) -> Self {
+        Self {
+            input,
+            output,
+            operation: TransformerOperation::TimeSinceNonzero { epsilon },
+        }
+    }
+
+    fn state(&self) -> Option<(StateKind, f64)> {
+        match &self.operation {
+            TransformerOperation::PositiveStreak { epsilon } => {
+                Some((StateKind::PositiveStreak, *epsilon))
+            }
+            TransformerOperation::NegativeStreak { epsilon } => {
+                Some((StateKind::NegativeStreak, *epsilon))
+            }
+            TransformerOperation::ObservationsSincePositive { epsilon } => {
+                Some((StateKind::ObservationsSincePositive, *epsilon))
+            }
+            TransformerOperation::ObservationsSinceNegative { epsilon } => {
+                Some((StateKind::ObservationsSinceNegative, *epsilon))
+            }
+            TransformerOperation::ObservationsSinceNonzero { epsilon } => {
+                Some((StateKind::ObservationsSinceNonzero, *epsilon))
+            }
+            TransformerOperation::TimeSincePositive { epsilon } => {
+                Some((StateKind::TimeSincePositive, *epsilon))
+            }
+            TransformerOperation::TimeSinceNegative { epsilon } => {
+                Some((StateKind::TimeSinceNegative, *epsilon))
+            }
+            TransformerOperation::TimeSinceNonzero { epsilon } => {
+                Some((StateKind::TimeSinceNonzero, *epsilon))
+            }
+            _ => None,
+        }
+    }
+
+    pub(crate) fn needs_clock(&self) -> bool {
+        self.timed_window().is_some() || self.state().is_some_and(|(kind, _)| kind.is_timed())
+    }
+
     /// Least-squares slope against sample indices; NaN with fewer than two observations.
     pub fn rolling_slope(
         input: FeatureId,
@@ -941,6 +1097,11 @@ impl TransformerDefinition {
     }
 
     pub(crate) fn validate(&self) -> std::result::Result<(), InvalidTransformationDefinitionError> {
+        if let Some((_, epsilon)) = self.state()
+            && (!epsilon.is_finite() || epsilon < 0.)
+        {
+            return Err(InvalidTransformationDefinitionError::InvalidEpsilon);
+        }
         if let Some((window, aggregation)) = self.timed_window() {
             timed::validate_window(window, aggregation)?;
         }
@@ -1062,6 +1223,22 @@ pub(crate) fn compile(
             .position(|id| id == &definition.input)
             .expect("pipeline construction validated every input ID");
         match &definition.operation {
+            TransformerOperation::PositiveStreak { .. }
+            | TransformerOperation::NegativeStreak { .. }
+            | TransformerOperation::ObservationsSincePositive { .. }
+            | TransformerOperation::ObservationsSinceNegative { .. }
+            | TransformerOperation::ObservationsSinceNonzero { .. }
+            | TransformerOperation::TimeSincePositive { .. }
+            | TransformerOperation::TimeSinceNegative { .. }
+            | TransformerOperation::TimeSinceNonzero { .. } => {
+                let (kind, epsilon) = definition.state().unwrap();
+                operations.push(Transformer::State(StateTransformer::new(
+                    input_index,
+                    output_index,
+                    kind,
+                    epsilon,
+                )));
+            }
             TransformerOperation::RollingSlope { .. }
             | TransformerOperation::RollingPathLength { .. }
             | TransformerOperation::RollingPositiveMovement { .. }
@@ -1201,6 +1378,7 @@ pub(crate) fn compile(
 
 /// Resolved scalar operation for allocation-free writes into model input.
 pub(crate) enum Transformer {
+    State(StateTransformer),
     Trajectory(TrajectoryTransformer),
     Statistics(StatisticsTransformer),
     Timed(TimedTransformer),
@@ -1221,6 +1399,13 @@ impl Transformer {
         evaluation: Evaluation<'_>,
     ) {
         match self {
+            Self::State(transformer) => transformer.apply(
+                raw_values,
+                observed,
+                model_vector,
+                output_observed,
+                evaluation,
+            ),
             Self::Trajectory(transformer) => {
                 transformer.apply(raw_values, observed, model_vector, output_observed)
             }

@@ -31,6 +31,7 @@
     },
     "transformation": {
       "oneOf": [
+        { "$ref": "#/$defs/state" },
         { "$ref": "#/$defs/average" },
         { "$ref": "#/$defs/rolling_statistic" },
         { "$ref": "#/$defs/rolling_statistic_timed" },
@@ -40,6 +41,16 @@
         { "$ref": "#/$defs/timed_change" },
         { "$ref": "#/$defs/standard_scale" }
       ]
+    },
+    "state": {
+      "type": "object", "additionalProperties": false,
+      "required": ["type", "input", "output", "epsilon"],
+      "properties": {
+        "type": { "enum": ["positive_streak", "negative_streak", "observations_since_positive", "observations_since_negative", "observations_since_nonzero", "time_since_positive", "time_since_negative", "time_since_nonzero"] },
+        "input": { "$ref": "#/$defs/feature_id" },
+        "output": { "$ref": "#/$defs/output_feature_id" },
+        "epsilon": { "type": "number", "minimum": 0 }
+      }
     },
     "average": {
       "type": "object", "additionalProperties": false,

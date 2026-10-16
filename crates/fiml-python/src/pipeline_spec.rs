@@ -77,6 +77,139 @@ pub struct ScalarStage {
 
 #[pymethods]
 impl ScalarStage {
+    /// Consecutive observations greater than epsilon.
+    #[pyo3(signature = (input, *, epsilon=0., output=None))]
+    fn positive_streak<'py>(
+        mut slf: PyRefMut<'py, Self>,
+        input: &str,
+        epsilon: f64,
+        output: Option<&str>,
+    ) -> PyRefMut<'py, Self> {
+        slf.definitions.push(TransformerDefinition::positive_streak(
+            FeatureId::new(input),
+            FeatureId::new(output.unwrap_or(input)),
+            epsilon,
+        ));
+        slf
+    }
+
+    /// Consecutive observations less than negative epsilon.
+    #[pyo3(signature = (input, *, epsilon=0., output=None))]
+    fn negative_streak<'py>(
+        mut slf: PyRefMut<'py, Self>,
+        input: &str,
+        epsilon: f64,
+        output: Option<&str>,
+    ) -> PyRefMut<'py, Self> {
+        slf.definitions.push(TransformerDefinition::negative_streak(
+            FeatureId::new(input),
+            FeatureId::new(output.unwrap_or(input)),
+            epsilon,
+        ));
+        slf
+    }
+
+    /// Finite observations since the last value greater than epsilon.
+    #[pyo3(signature = (input, *, epsilon=0., output=None))]
+    fn observations_since_positive<'py>(
+        mut slf: PyRefMut<'py, Self>,
+        input: &str,
+        epsilon: f64,
+        output: Option<&str>,
+    ) -> PyRefMut<'py, Self> {
+        slf.definitions
+            .push(TransformerDefinition::observations_since_positive(
+                FeatureId::new(input),
+                FeatureId::new(output.unwrap_or(input)),
+                epsilon,
+            ));
+        slf
+    }
+
+    /// Finite observations since the last value less than negative epsilon.
+    #[pyo3(signature = (input, *, epsilon=0., output=None))]
+    fn observations_since_negative<'py>(
+        mut slf: PyRefMut<'py, Self>,
+        input: &str,
+        epsilon: f64,
+        output: Option<&str>,
+    ) -> PyRefMut<'py, Self> {
+        slf.definitions
+            .push(TransformerDefinition::observations_since_negative(
+                FeatureId::new(input),
+                FeatureId::new(output.unwrap_or(input)),
+                epsilon,
+            ));
+        slf
+    }
+
+    /// Finite observations since the last value outside the neutral interval.
+    #[pyo3(signature = (input, *, epsilon=0., output=None))]
+    fn observations_since_nonzero<'py>(
+        mut slf: PyRefMut<'py, Self>,
+        input: &str,
+        epsilon: f64,
+        output: Option<&str>,
+    ) -> PyRefMut<'py, Self> {
+        slf.definitions
+            .push(TransformerDefinition::observations_since_nonzero(
+                FeatureId::new(input),
+                FeatureId::new(output.unwrap_or(input)),
+                epsilon,
+            ));
+        slf
+    }
+
+    /// Elapsed milliseconds since the last value greater than epsilon.
+    #[pyo3(signature = (input, *, epsilon=0., output=None))]
+    fn time_since_positive<'py>(
+        mut slf: PyRefMut<'py, Self>,
+        input: &str,
+        epsilon: f64,
+        output: Option<&str>,
+    ) -> PyRefMut<'py, Self> {
+        slf.definitions
+            .push(TransformerDefinition::time_since_positive(
+                FeatureId::new(input),
+                FeatureId::new(output.unwrap_or(input)),
+                epsilon,
+            ));
+        slf
+    }
+
+    /// Elapsed milliseconds since the last value less than negative epsilon.
+    #[pyo3(signature = (input, *, epsilon=0., output=None))]
+    fn time_since_negative<'py>(
+        mut slf: PyRefMut<'py, Self>,
+        input: &str,
+        epsilon: f64,
+        output: Option<&str>,
+    ) -> PyRefMut<'py, Self> {
+        slf.definitions
+            .push(TransformerDefinition::time_since_negative(
+                FeatureId::new(input),
+                FeatureId::new(output.unwrap_or(input)),
+                epsilon,
+            ));
+        slf
+    }
+
+    /// Elapsed milliseconds since the last value outside the neutral interval.
+    #[pyo3(signature = (input, *, epsilon=0., output=None))]
+    fn time_since_nonzero<'py>(
+        mut slf: PyRefMut<'py, Self>,
+        input: &str,
+        epsilon: f64,
+        output: Option<&str>,
+    ) -> PyRefMut<'py, Self> {
+        slf.definitions
+            .push(TransformerDefinition::time_since_nonzero(
+                FeatureId::new(input),
+                FeatureId::new(output.unwrap_or(input)),
+                epsilon,
+            ));
+        slf
+    }
     /// Least-squares slope against sample indices; NaN with fewer than two observations.
     #[pyo3(signature = (input, *, window, warmup=PyWarmupPolicy::FullWindow, output=None))]
     fn rolling_slope<'py>(
@@ -657,6 +790,133 @@ impl PipelineSpec {
 
 #[pymethods]
 impl PipelineSpec {
+    /// Consecutive observations greater than epsilon.
+    #[pyo3(signature = (input, *, epsilon=0., output=None))]
+    fn positive_streak<'py>(
+        mut slf: PyRefMut<'py, Self>,
+        input: &str,
+        epsilon: f64,
+        output: Option<&str>,
+    ) -> PyResult<PyRefMut<'py, Self>> {
+        slf.add_transformation(TransformerDefinition::positive_streak(
+            FeatureId::new(input),
+            FeatureId::new(output.unwrap_or(input)),
+            epsilon,
+        ))?;
+        Ok(slf)
+    }
+
+    /// Consecutive observations less than negative epsilon.
+    #[pyo3(signature = (input, *, epsilon=0., output=None))]
+    fn negative_streak<'py>(
+        mut slf: PyRefMut<'py, Self>,
+        input: &str,
+        epsilon: f64,
+        output: Option<&str>,
+    ) -> PyResult<PyRefMut<'py, Self>> {
+        slf.add_transformation(TransformerDefinition::negative_streak(
+            FeatureId::new(input),
+            FeatureId::new(output.unwrap_or(input)),
+            epsilon,
+        ))?;
+        Ok(slf)
+    }
+
+    /// Finite observations since the last value greater than epsilon.
+    #[pyo3(signature = (input, *, epsilon=0., output=None))]
+    fn observations_since_positive<'py>(
+        mut slf: PyRefMut<'py, Self>,
+        input: &str,
+        epsilon: f64,
+        output: Option<&str>,
+    ) -> PyResult<PyRefMut<'py, Self>> {
+        slf.add_transformation(TransformerDefinition::observations_since_positive(
+            FeatureId::new(input),
+            FeatureId::new(output.unwrap_or(input)),
+            epsilon,
+        ))?;
+        Ok(slf)
+    }
+
+    /// Finite observations since the last value less than negative epsilon.
+    #[pyo3(signature = (input, *, epsilon=0., output=None))]
+    fn observations_since_negative<'py>(
+        mut slf: PyRefMut<'py, Self>,
+        input: &str,
+        epsilon: f64,
+        output: Option<&str>,
+    ) -> PyResult<PyRefMut<'py, Self>> {
+        slf.add_transformation(TransformerDefinition::observations_since_negative(
+            FeatureId::new(input),
+            FeatureId::new(output.unwrap_or(input)),
+            epsilon,
+        ))?;
+        Ok(slf)
+    }
+
+    /// Finite observations since the last value outside the neutral interval.
+    #[pyo3(signature = (input, *, epsilon=0., output=None))]
+    fn observations_since_nonzero<'py>(
+        mut slf: PyRefMut<'py, Self>,
+        input: &str,
+        epsilon: f64,
+        output: Option<&str>,
+    ) -> PyResult<PyRefMut<'py, Self>> {
+        slf.add_transformation(TransformerDefinition::observations_since_nonzero(
+            FeatureId::new(input),
+            FeatureId::new(output.unwrap_or(input)),
+            epsilon,
+        ))?;
+        Ok(slf)
+    }
+
+    /// Elapsed milliseconds since the last value greater than epsilon.
+    #[pyo3(signature = (input, *, epsilon=0., output=None))]
+    fn time_since_positive<'py>(
+        mut slf: PyRefMut<'py, Self>,
+        input: &str,
+        epsilon: f64,
+        output: Option<&str>,
+    ) -> PyResult<PyRefMut<'py, Self>> {
+        slf.add_transformation(TransformerDefinition::time_since_positive(
+            FeatureId::new(input),
+            FeatureId::new(output.unwrap_or(input)),
+            epsilon,
+        ))?;
+        Ok(slf)
+    }
+
+    /// Elapsed milliseconds since the last value less than negative epsilon.
+    #[pyo3(signature = (input, *, epsilon=0., output=None))]
+    fn time_since_negative<'py>(
+        mut slf: PyRefMut<'py, Self>,
+        input: &str,
+        epsilon: f64,
+        output: Option<&str>,
+    ) -> PyResult<PyRefMut<'py, Self>> {
+        slf.add_transformation(TransformerDefinition::time_since_negative(
+            FeatureId::new(input),
+            FeatureId::new(output.unwrap_or(input)),
+            epsilon,
+        ))?;
+        Ok(slf)
+    }
+
+    /// Elapsed milliseconds since the last value outside the neutral interval.
+    #[pyo3(signature = (input, *, epsilon=0., output=None))]
+    fn time_since_nonzero<'py>(
+        mut slf: PyRefMut<'py, Self>,
+        input: &str,
+        epsilon: f64,
+        output: Option<&str>,
+    ) -> PyResult<PyRefMut<'py, Self>> {
+        slf.add_transformation(TransformerDefinition::time_since_nonzero(
+            FeatureId::new(input),
+            FeatureId::new(output.unwrap_or(input)),
+            epsilon,
+        ))?;
+        Ok(slf)
+    }
     /// Least-squares slope against sample indices; NaN with fewer than two observations.
     #[pyo3(signature = (input, *, window, warmup=PyWarmupPolicy::FullWindow, output=None))]
     fn rolling_slope<'py>(

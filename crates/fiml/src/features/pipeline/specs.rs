@@ -213,7 +213,7 @@ impl PipelineSpec {
                     })
                     .flatten(),
             )
-            .any(|definition| definition.timed_window().is_some());
+            .any(TransformerDefinition::needs_clock);
         let stages = StageRuntime::new(
             &self.transformation_definitions,
             &self.stages,

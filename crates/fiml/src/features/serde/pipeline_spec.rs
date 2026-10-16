@@ -282,6 +282,46 @@ impl From<StageWire> for FittedStage {
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 enum TransformationWire {
+    PositiveStreak {
+        input: String,
+        output: String,
+        epsilon: f64,
+    },
+    NegativeStreak {
+        input: String,
+        output: String,
+        epsilon: f64,
+    },
+    ObservationsSincePositive {
+        input: String,
+        output: String,
+        epsilon: f64,
+    },
+    ObservationsSinceNegative {
+        input: String,
+        output: String,
+        epsilon: f64,
+    },
+    ObservationsSinceNonzero {
+        input: String,
+        output: String,
+        epsilon: f64,
+    },
+    TimeSincePositive {
+        input: String,
+        output: String,
+        epsilon: f64,
+    },
+    TimeSinceNegative {
+        input: String,
+        output: String,
+        epsilon: f64,
+    },
+    TimeSinceNonzero {
+        input: String,
+        output: String,
+        epsilon: f64,
+    },
     RollingSlope {
         input: String,
         output: String,
@@ -533,6 +573,52 @@ impl From<&TransformerDefinition> for TransformationWire {
         let input = definition.input.as_str().to_owned();
         let output = definition.output.as_str().to_owned();
         match &definition.operation {
+            TransformerOperation::PositiveStreak { epsilon } => Self::PositiveStreak {
+                input,
+                output,
+                epsilon: *epsilon,
+            },
+            TransformerOperation::NegativeStreak { epsilon } => Self::NegativeStreak {
+                input,
+                output,
+                epsilon: *epsilon,
+            },
+            TransformerOperation::ObservationsSincePositive { epsilon } => {
+                Self::ObservationsSincePositive {
+                    input,
+                    output,
+                    epsilon: *epsilon,
+                }
+            }
+            TransformerOperation::ObservationsSinceNegative { epsilon } => {
+                Self::ObservationsSinceNegative {
+                    input,
+                    output,
+                    epsilon: *epsilon,
+                }
+            }
+            TransformerOperation::ObservationsSinceNonzero { epsilon } => {
+                Self::ObservationsSinceNonzero {
+                    input,
+                    output,
+                    epsilon: *epsilon,
+                }
+            }
+            TransformerOperation::TimeSincePositive { epsilon } => Self::TimeSincePositive {
+                input,
+                output,
+                epsilon: *epsilon,
+            },
+            TransformerOperation::TimeSinceNegative { epsilon } => Self::TimeSinceNegative {
+                input,
+                output,
+                epsilon: *epsilon,
+            },
+            TransformerOperation::TimeSinceNonzero { epsilon } => Self::TimeSinceNonzero {
+                input,
+                output,
+                epsilon: *epsilon,
+            },
             TransformerOperation::RollingSlope {
                 window,
                 warmup_policy,
@@ -808,6 +894,58 @@ impl TryFrom<PipelineSpecWire> for PipelineSpec {
 impl From<TransformationWire> for TransformerDefinition {
     fn from(transformation: TransformationWire) -> Self {
         match transformation {
+            TransformationWire::PositiveStreak {
+                input,
+                output,
+                epsilon,
+            } => Self::positive_streak(FeatureId::new(input), FeatureId::new(output), epsilon),
+            TransformationWire::NegativeStreak {
+                input,
+                output,
+                epsilon,
+            } => Self::negative_streak(FeatureId::new(input), FeatureId::new(output), epsilon),
+            TransformationWire::ObservationsSincePositive {
+                input,
+                output,
+                epsilon,
+            } => Self::observations_since_positive(
+                FeatureId::new(input),
+                FeatureId::new(output),
+                epsilon,
+            ),
+            TransformationWire::ObservationsSinceNegative {
+                input,
+                output,
+                epsilon,
+            } => Self::observations_since_negative(
+                FeatureId::new(input),
+                FeatureId::new(output),
+                epsilon,
+            ),
+            TransformationWire::ObservationsSinceNonzero {
+                input,
+                output,
+                epsilon,
+            } => Self::observations_since_nonzero(
+                FeatureId::new(input),
+                FeatureId::new(output),
+                epsilon,
+            ),
+            TransformationWire::TimeSincePositive {
+                input,
+                output,
+                epsilon,
+            } => Self::time_since_positive(FeatureId::new(input), FeatureId::new(output), epsilon),
+            TransformationWire::TimeSinceNegative {
+                input,
+                output,
+                epsilon,
+            } => Self::time_since_negative(FeatureId::new(input), FeatureId::new(output), epsilon),
+            TransformationWire::TimeSinceNonzero {
+                input,
+                output,
+                epsilon,
+            } => Self::time_since_nonzero(FeatureId::new(input), FeatureId::new(output), epsilon),
             TransformationWire::RollingSlope {
                 input,
                 output,

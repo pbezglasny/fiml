@@ -491,6 +491,8 @@ pub enum InvalidIndicatorDefinitionError {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum InvalidTransformationDefinitionError {
+    /// A sign-neutrality threshold is negative, NaN, or infinite.
+    InvalidEpsilon,
     /// Sample windows must be positive.
     WindowZero,
     /// Compatible averages exceed the calculator output limit.
@@ -864,6 +866,7 @@ impl Display for InvalidIndicatorDefinitionError {
 impl Display for InvalidTransformationDefinitionError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
+            Self::InvalidEpsilon => "epsilon must be finite and nonnegative",
             Self::TrajectoryHistoryTooLarge => "rolling trajectory history is too large",
             Self::StatisticsHistoryTooLarge => "rolling statistics history is too large",
             Self::InputFeatureNotFound => "input feature ID does not exist in the preceding layout",
