@@ -137,6 +137,67 @@ Version `3.0` JSON uses the six names above as `type`, with required `input`,
 `output`, `window`, and `warmup_policy` fields. Existing artifacts retain their
 behavior; older runtimes cannot read these new types.
 
+## Streak and state-age transformations
+
+These transformations classify the value of any preceding-stage scalar. Apply
+them after `delta`, `simple_return`, or `log_return` to measure persistence of
+changes, or directly to signed features such as order-book imbalance.
+`nonzero` means a signal outside the neutral interval; it does not compare
+successive input values itself.
+
+| Operation | Output |
+| --- | --- |
+| `positive_streak` | Consecutive finite observations greater than epsilon |
+| `negative_streak` | Consecutive finite observations less than negative epsilon |
+| `observations_since_positive` | Finite observations since the last positive signal |
+| `observations_since_negative` | Finite observations since the last negative signal |
+| `observations_since_nonzero` | Finite observations since either sign last occurred |
+| `time_since_positive` | Milliseconds since the last positive signal |
+| `time_since_negative` | Milliseconds since the last negative signal |
+| `time_since_nonzero` | Milliseconds since either sign last occurred |
+
+Rust constructors take `(input, output, epsilon)`. Python `PipelineSpec` and
+`ScalarStage` methods take `(input, *, epsilon=0.0, output=None)`. Epsilon must be
+finite and nonnegative. Both boundaries of `[-epsilon, epsilon]` are neutral,
+including signed zero. Neutral observations reset both streaks and advance any
+already-started observation ages. A matching observation makes its streak one
+larger and its age zero. All outputs begin as NaN; the first finite observation
+makes each streak zero or one. Since-values remain NaN until their first match.
+
+For example, with epsilon zero:
+
+| Time (ms) | Signal | Positive streak | Observations since positive | Time since positive (ms) |
+| ---: | ---: | ---: | ---: | ---: |
+| 0 | 1 | 1 | 0 | 0 |
+| 10 | 2 | 2 | 0 | 0 |
+| 20 | 0 | 0 | 1 | 10 |
+| 40 | -1 | 0 | 2 | 30 |
+| 70 | -2 | 0 | 3 | 60 |
+
+Observed NaN/infinity preserves counters and last-match timestamps but emits
+NaN until the next finite observation. Missing samples do not break a streak
+or increment observation ages. Unobserved inputs retain count outputs.
+Counts saturate at `2^53` (9,007,199,254,740,992), the largest consecutive integer
+exactly representable in `f64`, and still reset normally on a matching/neutral
+signal. Time differences use widened arithmetic across the entire `i64`
+timestamp domain and are converted to `f64`; ages above `2^53` ms may round.
+
+Time ages use the existing source clock and refresh on its advances, even
+without a new scalar observation. Such refreshes are marked observed for later
+stages but never create another sign match in this stage. For a single-symbol
+input, accepted events for that symbol advance its clock; other symbols and
+global time ticks do not. Composite inputs use the inherited maximum clock,
+including for observations arriving behind that clock. Repeated observations
+at one timestamp count separately and a matching signal resets time age to zero.
+An observed missing input suppresses time output until finite input resumes,
+while elapsed time still includes the missing interval. Context replacements
+do not advance these states; context-only inputs have no observations or clock.
+
+Each output uses constant-size state, no rolling history, and no per-update
+allocation. Version `3.0` JSON uses the operation names above as `type`, with
+required `input`, `output`, and `epsilon` fields. Existing artifacts are
+unchanged; older runtimes cannot load the new operation types.
+
 ## Current interface
 
 The Rust runtime intentionally exposes a small interface:

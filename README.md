@@ -285,6 +285,13 @@ Behavior and limits
   compatible outputs share allocation-free, logarithmic history updates.
   Slope requires two observations, zero deltas do not count as reversals, and
   drawdown uses absolute input units. See [definitions and examples](docs/pipeline.md#rolling-trajectory-shape).
+* **Streak and state-age transformations:** `positive_streak`, `negative_streak`,
+  `observations_since_positive`/`negative`/`nonzero`, and
+  `time_since_positive`/`negative`/`nonzero` summarize persistence of signed
+  inputs. Compose them after delta/return stages or use signed raw features.
+  Epsilon defines an inclusive neutral interval; time ages are milliseconds.
+  Updates use constant space and allocate nothing. See
+  [state semantics](docs/pipeline.md#streak-and-state-age-transformations).
 * **Input validation:** Extractors and pipelines reject NaN and infinity in
   numeric event payloads and reject out-of-order timestamps. Standalone
   indicators rely on the caller to supply finite inputs and ordered time.

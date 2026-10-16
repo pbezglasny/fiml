@@ -446,6 +446,30 @@ history. Outputs for one input share a preallocated tree across windows and
 warmup policies, with logarithmic updates and queries. Timed trajectory methods
 are not provided. See [trajectory definitions and memory costs](../../docs/pipeline.md#rolling-trajectory-shape).
 
+Streak and state-age methods are available on both `PipelineSpec` and
+`ScalarStage`, with `epsilon=0.0` and `output=None` defaults:
+
+```python
+raw = fiml.FeatureExtractorSpec().field("BTCUSDT", source="trade_price", id="price")
+spec = (fiml.PipelineSpec(raw)
+        .delta("price", lag_window=1, output="change")
+        .scalar_stage(fiml.ScalarStage()
+                      .positive_streak("change", epsilon=0.01, output="up_streak")
+                      .negative_streak("change", epsilon=0.01, output="down_streak")
+                      .observations_since_nonzero("change", epsilon=0.01, output="flat_count")
+                      .time_since_negative("change", epsilon=0.01, output="since_down_ms")))
+```
+
+The complete set also includes `observations_since_positive`,
+`observations_since_negative`, `time_since_positive`, and `time_since_nonzero`.
+Epsilon must be finite and nonnegative; both boundaries are neutral. Neutral
+values reset streaks, and since-values are NaN until their first matching signal,
+then zero on each match. NaN/infinity preserves state but emits NaN until finite
+input resumes. Count outputs ignore unrelated events; time outputs follow the
+source clock in milliseconds. Counts saturate at `2^53`. No warmup or window
+parameter is needed. See [state semantics](../../docs/pipeline.md#streak-and-state-age-transformations)
+for clocks, missing inputs, and numeric limits.
+
 `lagged_timed`, `delta_timed`, `simple_return_timed`, and `log_return_timed` are
 available on both `PipelineSpec` and `ScalarStage`. Use positive whole-millisecond
 duration strings such as `lag_window="100ms"`, `"500ms"`, or `"1s"`:
