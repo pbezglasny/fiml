@@ -802,6 +802,62 @@ See `examples/order_book_replay.py` for a runnable serialized pipeline example;
 `tests/fixtures/order_book_replay.json` is replayed by both Rust and Python tests
 with exact float64 expectations, including errors and missing values.
 
+### Order-book add/remove flow
+
+The builders `order_book_bid_added_volume(symbol)`,
+`order_book_bid_removed_volume(symbol)`, `order_book_ask_added_volume(symbol)`,
+and `order_book_ask_removed_volume(symbol)` expose raw volume for each applied
+delta. These names are also the JSON indicator kinds, with source
+`{"type": "order_book"}`, one scalar output, and no options or warmup policy.
+
+Each changed level contributes `max(new_size - old_size, 0)` to added volume
+or `max(old_size - new_size, 0)` to removed volume. Missing levels start at zero;
+zero replacement sizes delete levels. All changed levels are included, without
+a depth or price-distance filter. Repeated changes to one price are processed in
+payload order, so additions and removals both count even if the final size is
+unchanged. Decimal sizes are subtracted before conversion to `float64`; totals
+use `float64`. Removed volume includes any size reduction: aggregated book
+updates cannot distinguish cancellations from executions.
+
+Only directly applied live deltas create flow observations. An empty or unchanged
+applied delta observes four zeros. Initial snapshots, replacement snapshots,
+resynchronization, and all buffered history replay create no flow observations.
+Buffered/stale updates also create none, and rejected updates preserve feature
+values and histories. Values start at `NaN` and otherwise retain the previous
+flow until the next applied delta. Flow source timestamps advance only on those
+deltas. Existing sequence policies and buffer limits still apply.
+
+Sample SMA/EMA histories retain their state across resynchronization, and skip
+snapshots, replay, buffered/stale updates, and unrelated events. For example:
+
+```python
+raw = (fiml.FeatureExtractorSpec()
+       .configure_order_book("BTCUSDT", update_policy="contiguous", buffer_size=8)
+       .order_book_bid_added_volume("BTCUSDT")
+       .order_book_ask_removed_volume("BTCUSDT"))
+bid_added, ask_removed = raw.feature_ids()
+spec = (fiml.PipelineSpec(raw)
+        .sma(bid_added, window=2, output="bid_add_mean")
+        .ema(ask_removed, window=2, output="ask_remove_ema"))
+pipeline = fiml.ModelInputPipeline(spec)
+rows = pipeline.transform_order_book([
+    fiml.OrderBookEvent.snapshot("BTCUSDT", 0, 10,
+        [("100", "2")], [("101", "5")]),
+    fiml.OrderBookEvent.delta("BTCUSDT", 1, 11,
+        [("bid", "100", "5"), ("ask", "101", "4")]),
+    fiml.OrderBookEvent.delta("BTCUSDT", 2, 12,
+        [("bid", "99", "1"), ("ask", "101", "2")]),
+])
+# rows: [[nan, nan], [nan, nan], [2.0, 1.6666666666666665]]
+```
+
+Both averages default to full-window warmup; `warmup=fiml.WarmupPolicy.FIRST_VALUE`
+emits partial-window values. A full-window SMA multiplied by its window length
+gives the sum over that many applied deltas. Generic delta/return transformers
+remain available for changes in spread, microprice, and depth.
+`tests/fixtures/order_book_flow.json` exercises the same flow and smoothing
+artifact in Rust and Python with sparse and dense storage.
+
 ### Binance depth stream example
 
 [`examples/binance_depth.py`](examples/binance_depth.py) loads the included real

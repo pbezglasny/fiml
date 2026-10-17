@@ -189,6 +189,10 @@ fn canonical_sort_key(key: &FeatureKey) -> (bool, String, u8, u8, u8, u128, u128
             (*symbol, 24, 32, 0, 0, 0, 0)
         }
         FeatureKey::OrderBookVolumeBetweenPrices { symbol, .. } => (*symbol, 25, 32, 0, 0, 0, 0),
+        FeatureKey::OrderBookBidAddedVolume { symbol, .. } => (*symbol, 31, 32, 0, 0, 0, 0),
+        FeatureKey::OrderBookBidRemovedVolume { symbol, .. } => (*symbol, 32, 32, 0, 0, 0, 0),
+        FeatureKey::OrderBookAskAddedVolume { symbol, .. } => (*symbol, 33, 32, 0, 0, 0, 0),
+        FeatureKey::OrderBookAskRemovedVolume { symbol, .. } => (*symbol, 34, 32, 0, 0, 0, 0),
         FeatureKey::OrderBookMidPrice { symbol, .. } => (*symbol, 8, 32, 0, 0, 0, 0),
         FeatureKey::OrderBookSpread { symbol, .. } => (*symbol, 9, 32, 0, 0, 0, 0),
         FeatureKey::OrderBookSpreadBps { symbol, .. } => (*symbol, 10, 32, 0, 0, 0, 0),

@@ -29,7 +29,7 @@ where
         }
     }
 
-    /// Adds a scalar output definition, including quote, level, and depth queries.
+    /// Adds a scalar output definition, including book quotes, depth, and add/remove flow.
     /// Query parameters are validated at build time; book queries also require
     /// [`Self::add_order_book`] for their symbol.
     pub fn add_feature(mut self, feature_definition: FeatureDefinition) -> Self {
@@ -51,6 +51,7 @@ where
     /// reserved cells. Values appear as features receive events and warm up.
     /// Book features require a book supplied through [`Self::add_order_book`]
     /// for their symbol and remain `NaN` until an applied book update.
+    /// Add/remove flow requires a directly applied delta; snapshots and replay do not observe it.
     pub fn build(self) -> Result<FeatureExtractor<V>, FimlError> {
         let compilation = compiler::compile(self.definitions, self.output_vector.len())?;
         FeatureExtractor::new(self.output_vector, compilation, self.order_books)

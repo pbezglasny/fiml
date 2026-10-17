@@ -49,6 +49,10 @@ pub(crate) enum OrderBookIndicator {
     BestBidSize,
     BestAskPrice,
     BestAskSize,
+    BidAddedVolume,
+    BidRemovedVolume,
+    AskAddedVolume,
+    AskRemovedVolume,
     MidPrice,
     Spread,
     SpreadBps,
@@ -69,7 +73,18 @@ impl OrderBookFeature {
         book: &OrderBook,
         output_range: OutputRange,
         output: &mut O,
-    ) {
+    ) -> bool {
+        if book.flow().is_none()
+            && matches!(
+                self.indicator,
+                OrderBookIndicator::BidAddedVolume
+                    | OrderBookIndicator::BidRemovedVolume
+                    | OrderBookIndicator::AskAddedVolume
+                    | OrderBookIndicator::AskRemovedVolume
+            )
+        {
+            return false;
+        }
         // ponytail: independent depth queries repeat scans; share traversal if profiling warrants it.
         write_outputs(output_range, output, |index| {
             let value = match &self.indicator {
@@ -105,6 +120,18 @@ impl OrderBookFeature {
                 OrderBookIndicator::BestBidSize => book.best_bid().map(|level| level.size),
                 OrderBookIndicator::BestAskPrice => book.best_ask().map(|level| level.price),
                 OrderBookIndicator::BestAskSize => book.best_ask().map(|level| level.size),
+                OrderBookIndicator::BidAddedVolume => {
+                    return book.flow().map(|flow| flow.bid_added);
+                }
+                OrderBookIndicator::BidRemovedVolume => {
+                    return book.flow().map(|flow| flow.bid_removed);
+                }
+                OrderBookIndicator::AskAddedVolume => {
+                    return book.flow().map(|flow| flow.ask_added);
+                }
+                OrderBookIndicator::AskRemovedVolume => {
+                    return book.flow().map(|flow| flow.ask_removed);
+                }
                 OrderBookIndicator::MidPrice => book.mid_price(),
                 OrderBookIndicator::Spread => book.spread(),
                 OrderBookIndicator::SpreadBps => book.spread_bps(),
@@ -114,5 +141,6 @@ impl OrderBookFeature {
             };
             value.and_then(|value| value.to_f64())
         });
+        true
     }
 }

@@ -148,6 +148,62 @@ fn configured_raw_and_model_runtimes_match_shared_book_replay() {
 }
 
 #[test]
+fn flow_fixture_preserves_observations_and_smoothing_through_resynchronization() {
+    let fixture: Value =
+        serde_json::from_str(include_str!("../../../tests/fixtures/order_book_flow.json")).unwrap();
+    for dense in [false, true] {
+        let mut document = fixture["pipeline"].clone();
+        if dense {
+            document["feature_extractor"]["order_books"][0]["dense"] = serde_json::json!({
+                "tick_size": "1", "min_price": "90", "max_price": "110"
+            });
+        }
+        let spec: PipelineSpec = serde_json::from_value(document.clone()).unwrap();
+        assert_eq!(serde_json::to_value(&spec).unwrap(), document);
+        let mut pipeline = spec
+            .build(VecFeatureVector::new(5), VecFeatureVector::new(2))
+            .unwrap();
+        let symbol = Symbol::new("btc").unwrap();
+        let mut flow_timestamp = None;
+        for (index, step) in fixture["steps"].as_array().unwrap().iter().enumerate() {
+            let previous_timestamp = pipeline.last_timestamp();
+            let previous_observations = pipeline.raw_observations().to_vec();
+            let result = pipeline.handle_event(event(&step["event"]));
+            if let Some(error) = step["error"].as_str() {
+                assert!(
+                    result.unwrap_err().to_string().contains(error),
+                    "step {index}"
+                );
+                assert_eq!(pipeline.last_timestamp(), previous_timestamp);
+                assert_eq!(pipeline.raw_observations(), previous_observations);
+            } else {
+                let result = result.unwrap();
+                assert_eq!(
+                    result
+                        .order_book_outcome
+                        .map(|outcome| format!("{outcome:?}")),
+                    step["outcome"].as_str().map(str::to_owned),
+                    "step {index}"
+                );
+                let observed = step["flow_observed"].as_bool().unwrap();
+                assert_eq!(&pipeline.raw_observations()[1..], [observed; 4]);
+                assert_eq!(pipeline.output_observations(), [observed; 2]);
+                if observed {
+                    flow_timestamp = step["event"]["timestamp"].as_i64();
+                }
+            }
+            for slot in 1..5 {
+                let source = &pipeline.raw_feature_sources(slot).unwrap()[0];
+                assert_eq!(source.symbol, symbol);
+                assert_eq!(source.timestamp_millis, flow_timestamp, "step {index}");
+            }
+            assert_values(pipeline.raw_values(), &step["raw"]);
+            assert_values(pipeline.values(), &step["model"]);
+        }
+    }
+}
+
+#[test]
 fn book_configurations_validate_before_constructing_runtime_state() {
     use fiml::order_book::{OrderBookConfig, UpdatePolicy};
     use fiml::{FeatureDefinition, FeatureKey, FimlError, InvalidArgumentError};

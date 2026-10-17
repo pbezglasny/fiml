@@ -196,6 +196,18 @@ fn write_feature_key(id: &mut String, key: &FeatureKey) -> fmt::Result {
                 to_price.normalize()
             )
         }
+        FeatureKey::OrderBookBidAddedVolume { symbol } => {
+            write_prefix(id, "order_book_bid_added_volume", *symbol, "order_book")
+        }
+        FeatureKey::OrderBookBidRemovedVolume { symbol } => {
+            write_prefix(id, "order_book_bid_removed_volume", *symbol, "order_book")
+        }
+        FeatureKey::OrderBookAskAddedVolume { symbol } => {
+            write_prefix(id, "order_book_ask_added_volume", *symbol, "order_book")
+        }
+        FeatureKey::OrderBookAskRemovedVolume { symbol } => {
+            write_prefix(id, "order_book_ask_removed_volume", *symbol, "order_book")
+        }
         FeatureKey::OrderBookMidPrice { symbol } => {
             write_prefix(id, "order_book_mid_price", *symbol, "order_book")
         }

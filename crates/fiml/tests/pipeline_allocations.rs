@@ -548,9 +548,14 @@ fn configured_book_derivation_and_transformation_do_not_allocate() {
             symbol,
             n_levels: 10,
         },
+        FeatureKey::OrderBookBidAddedVolume { symbol },
+        FeatureKey::OrderBookBidRemovedVolume { symbol },
+        FeatureKey::OrderBookAskAddedVolume { symbol },
+        FeatureKey::OrderBookAskRemovedVolume { symbol },
     ]
     .map(FeatureDefinition::with_default_id);
     let input = definitions[0].id.clone();
+    let flow = definitions[19].id.clone();
     let spec = FeatureExtractorSpec::new(definitions)
         .unwrap()
         .with_order_books([OrderBookConfig::new(symbol, UpdatePolicy::Contiguous, 128)])
@@ -565,13 +570,19 @@ fn configured_book_derivation_and_transformation_do_not_allocate() {
                 2.0,
             ),
             TransformerDefinition::lagged(input, FeatureId::new("previous_quote"), 1),
+            TransformerDefinition::sma(
+                flow,
+                FeatureId::new("flow_sma"),
+                3,
+                WarmupPolicy::FullWindow,
+            ),
         ],
     )
     .unwrap();
     let mut extractor = model
         .build(
-            ArrayFeatureVector::<19>::new(),
-            ArrayFeatureVector::<2>::new(),
+            ArrayFeatureVector::<23>::new(),
+            ArrayFeatureVector::<3>::new(),
         )
         .unwrap();
     extractor
@@ -604,12 +615,12 @@ fn configured_book_derivation_and_transformation_do_not_allocate() {
         for event in events {
             assert_eq!(
                 black_box(extractor.handle_event(event).unwrap()).features_updated,
-                18
+                22
             );
             black_box(extractor.raw_feature_ids());
             black_box(extractor.raw_observations());
             black_box(extractor.output_observations());
-            for index in 0..19 {
+            for index in 0..23 {
                 black_box(extractor.raw_feature_sources(index));
             }
         }
@@ -627,10 +638,13 @@ fn book_source_tracking_does_not_allocate_during_buffering_or_replay() {
 
     let symbol = Symbol::new("source-replay-allocations").unwrap();
     let id = FeatureId::new("bid");
-    let raw = FeatureExtractorSpec::new([FeatureDefinition::new(
-        FeatureKey::OrderBookBestBidPrice { symbol },
-        id.clone(),
-    )])
+    let raw = FeatureExtractorSpec::new([
+        FeatureDefinition::new(FeatureKey::OrderBookBestBidPrice { symbol }, id.clone()),
+        FeatureDefinition::with_default_id(FeatureKey::OrderBookBidAddedVolume { symbol }),
+        FeatureDefinition::with_default_id(FeatureKey::OrderBookBidRemovedVolume { symbol }),
+        FeatureDefinition::with_default_id(FeatureKey::OrderBookAskAddedVolume { symbol }),
+        FeatureDefinition::with_default_id(FeatureKey::OrderBookAskRemovedVolume { symbol }),
+    ])
     .unwrap()
     .with_order_books([
         OrderBookConfig::new(symbol, UpdatePolicy::Contiguous, 8).with_dense(
@@ -646,7 +660,7 @@ fn book_source_tracking_does_not_allocate_during_buffering_or_replay() {
     )
     .unwrap()
     .build(
-        ArrayFeatureVector::<1>::new(),
+        ArrayFeatureVector::<5>::new(),
         ArrayFeatureVector::<1>::new(),
     )
     .unwrap();
@@ -678,6 +692,7 @@ fn book_source_tracking_does_not_allocate_during_buffering_or_replay() {
         (delta(202, 13), None), // Retained sequence gap, reported as an error.
         (delta(203, 14), Some(Outcome::Buffered)),
         (snapshot(204, 12), Some(Outcome::Resynchronized)),
+        (delta(205, 15), Some(Outcome::Applied)),
     ];
     assert_eq!(
         count_allocations(|| {
@@ -701,7 +716,7 @@ fn book_source_tracking_does_not_allocate_during_buffering_or_replay() {
     );
     assert_eq!(
         pipeline.raw_feature_sources(0).unwrap()[0].timestamp_millis,
-        Some(203)
+        Some(205)
     );
 }
 

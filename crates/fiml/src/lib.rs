@@ -362,6 +362,14 @@ pub enum IndicatorKind {
     OrderBookDepthUntilSizeTotalSize,
     /// Total size in a half-open price range.
     OrderBookVolumeBetweenPrices,
+    /// Per-delta bid added volume across all book levels.
+    OrderBookBidAddedVolume,
+    /// Per-delta bid removed volume across all book levels.
+    OrderBookBidRemovedVolume,
+    /// Per-delta ask added volume across all book levels.
+    OrderBookAskAddedVolume,
+    /// Per-delta ask removed volume across all book levels.
+    OrderBookAskRemovedVolume,
     /// Midpoint of the best bid and ask.
     OrderBookMidPrice,
     /// Best ask minus best bid.
@@ -770,6 +778,10 @@ impl Display for IndicatorKind {
             Self::OrderBookDepthUntilSizePriceTo => "order book depth until size price to",
             Self::OrderBookDepthUntilSizeTotalSize => "order book depth until size total size",
             Self::OrderBookVolumeBetweenPrices => "order book volume between prices",
+            Self::OrderBookBidAddedVolume => "order-book bid added volume",
+            Self::OrderBookBidRemovedVolume => "order-book bid removed volume",
+            Self::OrderBookAskAddedVolume => "order-book ask added volume",
+            Self::OrderBookAskRemovedVolume => "order-book ask removed volume",
             Self::OrderBookMidPrice => "order-book mid-price",
             Self::OrderBookSpread => "order-book spread",
             Self::OrderBookSpreadBps => "order-book spread in basis points",
