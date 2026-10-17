@@ -3,7 +3,7 @@
 use std::collections::VecDeque;
 use std::fmt;
 
-use rust_decimal::Decimal;
+use rust_decimal::{Decimal, prelude::ToPrimitive};
 
 use crate::{
     FimlError,
@@ -168,13 +168,41 @@ pub enum OrderBookSyncState {
     RequireResync,
 }
 
-fn apply_delta_update(bids: &mut BookSide, asks: &mut BookSide, delta: &OrderBookDelta) {
+/// Per-delta liquidity changes across all levels, retained for feature extraction.
+#[derive(Default)]
+pub(crate) struct OrderBookFlow {
+    pub(crate) bid_added: f64,
+    pub(crate) bid_removed: f64,
+    pub(crate) ask_added: f64,
+    pub(crate) ask_removed: f64,
+}
+
+fn apply_delta_update(
+    bids: &mut BookSide,
+    asks: &mut BookSide,
+    delta: &OrderBookDelta,
+) -> OrderBookFlow {
+    let mut flow = OrderBookFlow::default();
     for level_update in &delta.changes {
-        match level_update.side {
-            Side::Bid => bids.update_level(level_update.price, level_update.size),
-            Side::Ask => asks.update_level(level_update.price, level_update.size),
+        let (side, added, removed) = match level_update.side {
+            Side::Bid => (&mut *bids, &mut flow.bid_added, &mut flow.bid_removed),
+            Side::Ask => (&mut *asks, &mut flow.ask_added, &mut flow.ask_removed),
+        };
+        let old_size = side
+            .get_level_size(level_update.price)
+            .unwrap_or(Decimal::ZERO);
+        // Subtract before conversion to preserve small changes in large Decimal sizes.
+        let change = (level_update.size - old_size)
+            .to_f64()
+            .expect("Decimal fits f64");
+        if change > 0.0 {
+            *added += change;
+        } else {
+            *removed -= change;
         }
+        side.update_level(level_update.price, level_update.size);
     }
+    flow
 }
 
 fn has_contiguous_gap(
@@ -205,6 +233,7 @@ pub struct OrderBook {
     last_update_id: Option<OrderBookUpdateId>,
     last_snapshot_update_id: Option<OrderBookUpdateId>,
     source_timestamp: Option<i64>,
+    flow: Option<OrderBookFlow>,
 }
 
 /// Allocation-free plan for applying an update after all fallible checks finish.
@@ -310,6 +339,7 @@ impl OrderBook {
             last_update_id: None,
             last_snapshot_update_id: None,
             source_timestamp: None,
+            flow: None,
         }
     }
 
@@ -382,6 +412,7 @@ impl OrderBook {
         self.last_snapshot_update_id = Some(snapshot.last_update_id);
         self.source_timestamp = Some(timestamp);
         self.replay_history_after_snapshot(snapshot.last_update_id);
+        self.flow = None;
         self.sync_state = OrderBookSyncState::Live;
     }
 
@@ -504,7 +535,7 @@ impl OrderBook {
                 Ok(OrderBookUpdateOutcome::Buffered)
             }
             (PreparedUpdateAction::ApplyDelta, OrderBookUpdate::Delta(delta)) => {
-                apply_delta_update(&mut self.bids, &mut self.asks, &delta);
+                self.flow = Some(apply_delta_update(&mut self.bids, &mut self.asks, &delta));
                 self.last_update_id = Some(delta.update_id);
                 self.source_timestamp = Some(timestamp);
                 self.update_buffer.push_back((delta, timestamp));
@@ -578,6 +609,11 @@ impl OrderBook {
     /// and clock validity separately; this method never clamps timestamps to now.
     pub fn source_timestamp(&self) -> Option<i64> {
         self.source_timestamp
+    }
+
+    /// Flow of the latest directly applied delta; snapshots and their replay have no flow.
+    pub(crate) fn flow(&self) -> Option<&OrderBookFlow> {
+        self.flow.as_ref()
     }
 
     /// Returns the last sequence ID applied to visible levels, or `None` before initialization.

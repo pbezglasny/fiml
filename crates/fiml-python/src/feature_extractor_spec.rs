@@ -586,6 +586,50 @@ impl FeatureExtractorSpec {
         Ok(slf)
     }
 
+    /// Adds per-delta bid added volume across all book levels.
+    fn order_book_bid_added_volume<'py>(
+        mut slf: PyRefMut<'py, Self>,
+        symbol: &str,
+    ) -> PyResult<PyRefMut<'py, Self>> {
+        slf.add_group([definition(FeatureKey::OrderBookBidAddedVolume {
+            symbol: intern_symbol(symbol)?,
+        })])?;
+        Ok(slf)
+    }
+
+    /// Adds per-delta bid removed volume across all book levels.
+    fn order_book_bid_removed_volume<'py>(
+        mut slf: PyRefMut<'py, Self>,
+        symbol: &str,
+    ) -> PyResult<PyRefMut<'py, Self>> {
+        slf.add_group([definition(FeatureKey::OrderBookBidRemovedVolume {
+            symbol: intern_symbol(symbol)?,
+        })])?;
+        Ok(slf)
+    }
+
+    /// Adds per-delta ask added volume across all book levels.
+    fn order_book_ask_added_volume<'py>(
+        mut slf: PyRefMut<'py, Self>,
+        symbol: &str,
+    ) -> PyResult<PyRefMut<'py, Self>> {
+        slf.add_group([definition(FeatureKey::OrderBookAskAddedVolume {
+            symbol: intern_symbol(symbol)?,
+        })])?;
+        Ok(slf)
+    }
+
+    /// Adds per-delta ask removed volume across all book levels.
+    fn order_book_ask_removed_volume<'py>(
+        mut slf: PyRefMut<'py, Self>,
+        symbol: &str,
+    ) -> PyResult<PyRefMut<'py, Self>> {
+        slf.add_group([definition(FeatureKey::OrderBookAskRemovedVolume {
+            symbol: intern_symbol(symbol)?,
+        })])?;
+        Ok(slf)
+    }
+
     /// Adds the order_book_mid_price scalar output for a configured book.
     fn order_book_mid_price<'py>(
         mut slf: PyRefMut<'py, Self>,

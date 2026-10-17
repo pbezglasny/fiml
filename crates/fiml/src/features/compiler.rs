@@ -116,6 +116,18 @@ enum GroupKey {
     OrderBookBestAskSize {
         symbol: Symbol,
     },
+    OrderBookBidAddedVolume {
+        symbol: Symbol,
+    },
+    OrderBookBidRemovedVolume {
+        symbol: Symbol,
+    },
+    OrderBookAskAddedVolume {
+        symbol: Symbol,
+    },
+    OrderBookAskRemovedVolume {
+        symbol: Symbol,
+    },
     OrderBookMidPrice {
         symbol: Symbol,
     },
@@ -241,6 +253,10 @@ impl GroupKey {
             | Self::OrderBookDepthUntilSizePriceTo { symbol, .. }
             | Self::OrderBookDepthUntilSizeTotalSize { symbol, .. }
             | Self::OrderBookVolumeBetweenPrices { symbol, .. }
+            | Self::OrderBookBidAddedVolume { symbol, .. }
+            | Self::OrderBookBidRemovedVolume { symbol, .. }
+            | Self::OrderBookAskAddedVolume { symbol, .. }
+            | Self::OrderBookAskRemovedVolume { symbol, .. }
             | Self::OrderBookMidPrice { symbol, .. }
             | Self::OrderBookSpread { symbol, .. }
             | Self::OrderBookSpreadBps { symbol, .. }
@@ -277,6 +293,10 @@ impl GroupKey {
             | Self::OrderBookDepthUntilSizePriceTo { .. }
             | Self::OrderBookDepthUntilSizeTotalSize { .. }
             | Self::OrderBookVolumeBetweenPrices { .. }
+            | Self::OrderBookBidAddedVolume { .. }
+            | Self::OrderBookBidRemovedVolume { .. }
+            | Self::OrderBookAskAddedVolume { .. }
+            | Self::OrderBookAskRemovedVolume { .. }
             | Self::OrderBookMidPrice { .. }
             | Self::OrderBookSpread { .. }
             | Self::OrderBookSpreadBps { .. }
@@ -727,6 +747,22 @@ fn group_key(index: usize, key: &FeatureKey) -> Result<(GroupKey, GroupOutput)> 
                 GroupOutput::Scalar,
             ))
         }
+        FeatureKey::OrderBookBidAddedVolume { symbol } => Ok((
+            GroupKey::OrderBookBidAddedVolume { symbol },
+            GroupOutput::Scalar,
+        )),
+        FeatureKey::OrderBookBidRemovedVolume { symbol } => Ok((
+            GroupKey::OrderBookBidRemovedVolume { symbol },
+            GroupOutput::Scalar,
+        )),
+        FeatureKey::OrderBookAskAddedVolume { symbol } => Ok((
+            GroupKey::OrderBookAskAddedVolume { symbol },
+            GroupOutput::Scalar,
+        )),
+        FeatureKey::OrderBookAskRemovedVolume { symbol } => Ok((
+            GroupKey::OrderBookAskRemovedVolume { symbol },
+            GroupOutput::Scalar,
+        )),
         FeatureKey::OrderBookMidPrice { symbol } => {
             Ok((GroupKey::OrderBookMidPrice { symbol }, GroupOutput::Scalar))
         }
@@ -1065,6 +1101,30 @@ fn build_group(group: &FeatureGroup) -> Result<FeatureDerivation> {
                 to_price: *to_price,
             },
         })),
+        (GroupKey::OrderBookBidAddedVolume { symbol }, GroupOutputs::Scalar) => {
+            Ok(FeatureDerivation::OrderBook(OrderBookFeature {
+                symbol: *symbol,
+                indicator: OrderBookIndicator::BidAddedVolume,
+            }))
+        }
+        (GroupKey::OrderBookBidRemovedVolume { symbol }, GroupOutputs::Scalar) => {
+            Ok(FeatureDerivation::OrderBook(OrderBookFeature {
+                symbol: *symbol,
+                indicator: OrderBookIndicator::BidRemovedVolume,
+            }))
+        }
+        (GroupKey::OrderBookAskAddedVolume { symbol }, GroupOutputs::Scalar) => {
+            Ok(FeatureDerivation::OrderBook(OrderBookFeature {
+                symbol: *symbol,
+                indicator: OrderBookIndicator::AskAddedVolume,
+            }))
+        }
+        (GroupKey::OrderBookAskRemovedVolume { symbol }, GroupOutputs::Scalar) => {
+            Ok(FeatureDerivation::OrderBook(OrderBookFeature {
+                symbol: *symbol,
+                indicator: OrderBookIndicator::AskRemovedVolume,
+            }))
+        }
         (GroupKey::OrderBookMidPrice { symbol }, GroupOutputs::Scalar) => {
             Ok(FeatureDerivation::OrderBook(OrderBookFeature {
                 symbol: *symbol,
@@ -1395,6 +1455,10 @@ fn group_kind(key: &GroupKey) -> IndicatorKind {
         GroupKey::OrderBookVolumeBetweenPrices { .. } => {
             IndicatorKind::OrderBookVolumeBetweenPrices
         }
+        GroupKey::OrderBookBidAddedVolume { .. } => IndicatorKind::OrderBookBidAddedVolume,
+        GroupKey::OrderBookBidRemovedVolume { .. } => IndicatorKind::OrderBookBidRemovedVolume,
+        GroupKey::OrderBookAskAddedVolume { .. } => IndicatorKind::OrderBookAskAddedVolume,
+        GroupKey::OrderBookAskRemovedVolume { .. } => IndicatorKind::OrderBookAskRemovedVolume,
         GroupKey::OrderBookMidPrice { .. } => IndicatorKind::OrderBookMidPrice,
         GroupKey::OrderBookSpread { .. } => IndicatorKind::OrderBookSpread,
         GroupKey::OrderBookSpreadBps { .. } => IndicatorKind::OrderBookSpreadBps,
@@ -1443,6 +1507,10 @@ fn group_kind_from_feature_key(key: &FeatureKey) -> IndicatorKind {
         FeatureKey::OrderBookVolumeBetweenPrices { .. } => {
             IndicatorKind::OrderBookVolumeBetweenPrices
         }
+        FeatureKey::OrderBookBidAddedVolume { .. } => IndicatorKind::OrderBookBidAddedVolume,
+        FeatureKey::OrderBookBidRemovedVolume { .. } => IndicatorKind::OrderBookBidRemovedVolume,
+        FeatureKey::OrderBookAskAddedVolume { .. } => IndicatorKind::OrderBookAskAddedVolume,
+        FeatureKey::OrderBookAskRemovedVolume { .. } => IndicatorKind::OrderBookAskRemovedVolume,
         FeatureKey::OrderBookMidPrice { .. } => IndicatorKind::OrderBookMidPrice,
         FeatureKey::OrderBookSpread { .. } => IndicatorKind::OrderBookSpread,
         FeatureKey::OrderBookSpreadBps { .. } => IndicatorKind::OrderBookSpreadBps,

@@ -80,10 +80,18 @@ Window sizes, sample lags, symbols, and applicable input sources are configurabl
 | Calendar | UTC day of week and elapsed time since the first event of the day, with a configurable fixed UTC offset for day boundaries. |
 | Order-book quotes | Best bid/ask prices and sizes, mid-price, spread, spread in basis points, weighted mid-price, and microprice. |
 | Order-book depth | Size at a price, price or size at a chosen depth, cumulative depth through a price, price range and total size needed to reach a target size, volume between prices, and bid/ask imbalance. |
+| Order-book flow | Bid/ask volume added and removed across all levels of each directly applied delta. Snapshots and replay do not contribute flow. |
 
 Timed indicators use configurable aggregation buckets. CVD requires the trade's
 aggressor side; order-book features require a configured book fed with snapshots
 and deltas.
+
+Rust flow keys are `OrderBookBidAddedVolume`, `OrderBookBidRemovedVolume`,
+`OrderBookAskAddedVolume`, and `OrderBookAskRemovedVolume`, each with a `symbol`.
+Add them through `FeatureExtractor::builder(...).add_feature(...)` or
+`FeatureExtractorSpec` with a configured book. Feed their IDs into the usual
+SMA/EMA scalar transformers; [the Python flow example](crates/fiml-python/README.md#order-book-addremove-flow)
+shows the same artifact and snapshot/replay contract.
 
 ### Transformations
 

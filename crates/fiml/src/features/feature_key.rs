@@ -118,6 +118,30 @@ pub enum FeatureKey {
         /// Market symbol whose events or order book supply this output.
         symbol: Symbol,
     },
+    /// Bid volume added across all levels of each directly applied delta.
+    /// Snapshots (including replay), buffered and stale updates do not observe this output.
+    OrderBookBidAddedVolume {
+        /// Market symbol whose configured book supplies this output.
+        symbol: Symbol,
+    },
+    /// Bid volume removed across all levels of each directly applied delta.
+    /// Snapshots (including replay), buffered and stale updates do not observe this output.
+    OrderBookBidRemovedVolume {
+        /// Market symbol whose configured book supplies this output.
+        symbol: Symbol,
+    },
+    /// Ask volume added across all levels of each directly applied delta.
+    /// Snapshots (including replay), buffered and stale updates do not observe this output.
+    OrderBookAskAddedVolume {
+        /// Market symbol whose configured book supplies this output.
+        symbol: Symbol,
+    },
+    /// Ask volume removed across all levels of each directly applied delta.
+    /// Snapshots (including replay), buffered and stale updates do not observe this output.
+    OrderBookAskRemovedVolume {
+        /// Market symbol whose configured book supplies this output.
+        symbol: Symbol,
+    },
     /// Midpoint of the best bid and ask in a configured order book.
     OrderBookMidPrice {
         /// Market symbol whose events or order book supply this output.

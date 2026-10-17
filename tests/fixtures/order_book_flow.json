@@ -1,0 +1,795 @@
+{
+  "pipeline": {
+    "version": "3.0",
+    "feature_extractor": {
+      "version": "2.0",
+      "capacity": 5,
+      "length": 5,
+      "required_events": [
+        {
+          "symbol": "btc",
+          "event": "order_book_delta"
+        },
+        {
+          "symbol": "btc",
+          "event": "order_book_snapshot"
+        }
+      ],
+      "features": [
+        {
+          "symbol": "btc",
+          "indicators": [
+            {
+              "kind": "order_book_best_bid_size",
+              "source": {
+                "type": "order_book"
+              },
+              "outputs": [
+                {
+                  "id": "size"
+                }
+              ]
+            },
+            {
+              "kind": "order_book_bid_added_volume",
+              "source": {
+                "type": "order_book"
+              },
+              "outputs": [
+                {
+                  "id": "bid_added"
+                }
+              ]
+            },
+            {
+              "kind": "order_book_bid_removed_volume",
+              "source": {
+                "type": "order_book"
+              },
+              "outputs": [
+                {
+                  "id": "bid_removed"
+                }
+              ]
+            },
+            {
+              "kind": "order_book_ask_added_volume",
+              "source": {
+                "type": "order_book"
+              },
+              "outputs": [
+                {
+                  "id": "ask_added"
+                }
+              ]
+            },
+            {
+              "kind": "order_book_ask_removed_volume",
+              "source": {
+                "type": "order_book"
+              },
+              "outputs": [
+                {
+                  "id": "ask_removed"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "order_books": [
+        {
+          "symbol": "btc",
+          "update_policy": "contiguous",
+          "buffer_size": 16
+        }
+      ]
+    },
+    "model_input": {
+      "capacity": 2,
+      "length": 2,
+      "transformations": [
+        {
+          "type": "sma",
+          "input": "bid_added",
+          "output": "bid_added_sma",
+          "window": 2,
+          "warmup_policy": "first_value"
+        },
+        {
+          "type": "ema",
+          "input": "ask_removed",
+          "output": "ask_removed_ema",
+          "window": 3,
+          "warmup_policy": "first_value"
+        }
+      ],
+      "stages": []
+    }
+  },
+  "raw_names": [
+    "size",
+    "bid_added",
+    "bid_removed",
+    "ask_added",
+    "ask_removed"
+  ],
+  "model_names": [
+    "bid_added_sma",
+    "ask_removed_ema"
+  ],
+  "steps": [
+    {
+      "event": {
+        "kind": "delta",
+        "symbol": "btc",
+        "timestamp": 0,
+        "update_id": 11,
+        "changes": [
+          [
+            "bid",
+            "100",
+            "3"
+          ],
+          [
+            "ask",
+            "101",
+            "2"
+          ]
+        ]
+      },
+      "raw": [
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "model": [
+        null,
+        null
+      ],
+      "outcome": "Buffered",
+      "flow_observed": false,
+      "error": null
+    },
+    {
+      "event": {
+        "kind": "snapshot",
+        "symbol": "btc",
+        "timestamp": 1,
+        "update_id": 10,
+        "bids": [
+          [
+            "100",
+            "2"
+          ],
+          [
+            "99",
+            "3"
+          ]
+        ],
+        "asks": [
+          [
+            "101",
+            "4"
+          ],
+          [
+            "102",
+            "5"
+          ]
+        ]
+      },
+      "raw": [
+        3,
+        null,
+        null,
+        null,
+        null
+      ],
+      "model": [
+        null,
+        null
+      ],
+      "outcome": "Applied",
+      "flow_observed": false,
+      "error": null
+    },
+    {
+      "event": {
+        "kind": "delta",
+        "symbol": "btc",
+        "timestamp": 2,
+        "update_id": 12,
+        "changes": [
+          [
+            "bid",
+            "98",
+            "4"
+          ],
+          [
+            "ask",
+            "103",
+            "6"
+          ]
+        ]
+      },
+      "raw": [
+        3,
+        4,
+        0,
+        6,
+        0
+      ],
+      "model": [
+        4,
+        0
+      ],
+      "outcome": "Applied",
+      "flow_observed": true,
+      "error": null
+    },
+    {
+      "event": {
+        "kind": "delta",
+        "symbol": "btc",
+        "timestamp": 3,
+        "update_id": 13,
+        "changes": [
+          [
+            "bid",
+            "100",
+            "5"
+          ],
+          [
+            "ask",
+            "101",
+            "7"
+          ]
+        ]
+      },
+      "raw": [
+        5,
+        2,
+        0,
+        5,
+        0
+      ],
+      "model": [
+        3,
+        0
+      ],
+      "outcome": "Applied",
+      "flow_observed": true,
+      "error": null
+    },
+    {
+      "event": {
+        "kind": "delta",
+        "symbol": "btc",
+        "timestamp": 4,
+        "update_id": 14,
+        "changes": [
+          [
+            "bid",
+            "100",
+            "1"
+          ],
+          [
+            "ask",
+            "101",
+            "4"
+          ]
+        ]
+      },
+      "raw": [
+        1,
+        0,
+        4,
+        0,
+        3
+      ],
+      "model": [
+        1,
+        1.5
+      ],
+      "outcome": "Applied",
+      "flow_observed": true,
+      "error": null
+    },
+    {
+      "event": {
+        "kind": "delta",
+        "symbol": "btc",
+        "timestamp": 5,
+        "update_id": 15,
+        "changes": [
+          [
+            "bid",
+            "99",
+            "0"
+          ],
+          [
+            "ask",
+            "102",
+            "0"
+          ]
+        ]
+      },
+      "raw": [
+        1,
+        0,
+        3,
+        0,
+        5
+      ],
+      "model": [
+        0,
+        3.25
+      ],
+      "outcome": "Applied",
+      "flow_observed": true,
+      "error": null
+    },
+    {
+      "event": {
+        "kind": "delta",
+        "symbol": "btc",
+        "timestamp": 6,
+        "update_id": 16,
+        "changes": [
+          [
+            "bid",
+            "100",
+            "4"
+          ],
+          [
+            "bid",
+            "100",
+            "2"
+          ],
+          [
+            "bid",
+            "98",
+            "0"
+          ],
+          [
+            "bid",
+            "97",
+            "8"
+          ],
+          [
+            "ask",
+            "101",
+            "1"
+          ],
+          [
+            "ask",
+            "101",
+            "5"
+          ],
+          [
+            "ask",
+            "103",
+            "0"
+          ],
+          [
+            "ask",
+            "104",
+            "2"
+          ]
+        ]
+      },
+      "raw": [
+        2,
+        11,
+        6,
+        6,
+        9
+      ],
+      "model": [
+        5.5,
+        6.125
+      ],
+      "outcome": "Applied",
+      "flow_observed": true,
+      "error": null
+    },
+    {
+      "event": {
+        "kind": "delta",
+        "symbol": "btc",
+        "timestamp": 7,
+        "update_id": 16,
+        "changes": [
+          [
+            "bid",
+            "100",
+            "999"
+          ]
+        ]
+      },
+      "raw": [
+        2,
+        11,
+        6,
+        6,
+        9
+      ],
+      "model": [
+        5.5,
+        6.125
+      ],
+      "outcome": "IgnoredStale",
+      "flow_observed": false,
+      "error": null
+    },
+    {
+      "event": {
+        "kind": "delta",
+        "symbol": "btc",
+        "timestamp": 8,
+        "update_id": 17,
+        "changes": [
+          [
+            "bid",
+            "100",
+            "9"
+          ],
+          [
+            "ask",
+            "101",
+            "-1"
+          ]
+        ]
+      },
+      "raw": [
+        2,
+        11,
+        6,
+        6,
+        9
+      ],
+      "model": [
+        5.5,
+        6.125
+      ],
+      "outcome": null,
+      "flow_observed": false,
+      "error": "invalid Ask level",
+      "python_error": "nonnegative"
+    },
+    {
+      "event": {
+        "kind": "delta",
+        "symbol": "btc",
+        "timestamp": 8,
+        "update_id": 17,
+        "changes": []
+      },
+      "raw": [
+        2,
+        0,
+        0,
+        0,
+        0
+      ],
+      "model": [
+        5.5,
+        3.0625
+      ],
+      "outcome": "Applied",
+      "flow_observed": true,
+      "error": null
+    },
+    {
+      "event": {
+        "kind": "delta",
+        "symbol": "btc",
+        "timestamp": 9,
+        "update_id": 19,
+        "changes": [
+          [
+            "bid",
+            "100",
+            "20"
+          ],
+          [
+            "ask",
+            "101",
+            "20"
+          ]
+        ]
+      },
+      "raw": [
+        2,
+        0,
+        0,
+        0,
+        0
+      ],
+      "model": [
+        5.5,
+        3.0625
+      ],
+      "outcome": null,
+      "flow_observed": false,
+      "error": "expected update ID 18, received 19"
+    },
+    {
+      "event": {
+        "kind": "delta",
+        "symbol": "btc",
+        "timestamp": 10,
+        "update_id": 20,
+        "changes": [
+          [
+            "bid",
+            "100",
+            "21"
+          ],
+          [
+            "ask",
+            "101",
+            "22"
+          ]
+        ]
+      },
+      "raw": [
+        2,
+        0,
+        0,
+        0,
+        0
+      ],
+      "model": [
+        5.5,
+        3.0625
+      ],
+      "outcome": "Buffered",
+      "flow_observed": false,
+      "error": null
+    },
+    {
+      "event": {
+        "kind": "snapshot",
+        "symbol": "btc",
+        "timestamp": 11,
+        "update_id": 18,
+        "bids": [
+          [
+            "100",
+            "10"
+          ]
+        ],
+        "asks": [
+          [
+            "101",
+            "10"
+          ]
+        ]
+      },
+      "raw": [
+        21,
+        0,
+        0,
+        0,
+        0
+      ],
+      "model": [
+        5.5,
+        3.0625
+      ],
+      "outcome": "Resynchronized",
+      "flow_observed": false,
+      "error": null
+    },
+    {
+      "event": {
+        "kind": "delta",
+        "symbol": "btc",
+        "timestamp": 12,
+        "update_id": 21,
+        "changes": [
+          [
+            "bid",
+            "100",
+            "22"
+          ],
+          [
+            "ask",
+            "101",
+            "20"
+          ]
+        ]
+      },
+      "raw": [
+        22,
+        1,
+        0,
+        0,
+        2
+      ],
+      "model": [
+        0.5,
+        2.53125
+      ],
+      "outcome": "Applied",
+      "flow_observed": true,
+      "error": null
+    },
+    {
+      "event": {
+        "kind": "snapshot",
+        "symbol": "btc",
+        "timestamp": 13,
+        "update_id": 19,
+        "bids": [
+          [
+            "100",
+            "100"
+          ]
+        ],
+        "asks": [
+          [
+            "101",
+            "100"
+          ]
+        ]
+      },
+      "raw": [
+        22,
+        1,
+        0,
+        0,
+        2
+      ],
+      "model": [
+        0.5,
+        2.53125
+      ],
+      "outcome": "Applied",
+      "flow_observed": false,
+      "error": null
+    },
+    {
+      "event": {
+        "kind": "snapshot",
+        "symbol": "btc",
+        "timestamp": 14,
+        "update_id": 19,
+        "bids": [],
+        "asks": []
+      },
+      "raw": [
+        22,
+        1,
+        0,
+        0,
+        2
+      ],
+      "model": [
+        0.5,
+        2.53125
+      ],
+      "outcome": null,
+      "flow_observed": false,
+      "error": "is not newer"
+    },
+    {
+      "event": {
+        "kind": "delta",
+        "symbol": "btc",
+        "timestamp": 12,
+        "update_id": 22,
+        "changes": [
+          [
+            "bid",
+            "100",
+            "999"
+          ]
+        ]
+      },
+      "raw": [
+        22,
+        1,
+        0,
+        0,
+        2
+      ],
+      "model": [
+        0.5,
+        2.53125
+      ],
+      "outcome": null,
+      "flow_observed": false,
+      "error": "timestamp"
+    },
+    {
+      "event": {
+        "kind": "price",
+        "symbol": "eth",
+        "timestamp": -100,
+        "price": 1
+      },
+      "raw": [
+        22,
+        1,
+        0,
+        0,
+        2
+      ],
+      "model": [
+        0.5,
+        2.53125
+      ],
+      "outcome": null,
+      "flow_observed": false,
+      "error": null
+    },
+    {
+      "event": {
+        "kind": "time",
+        "timestamp": 100
+      },
+      "raw": [
+        22,
+        1,
+        0,
+        0,
+        2
+      ],
+      "model": [
+        0.5,
+        2.53125
+      ],
+      "outcome": null,
+      "flow_observed": false,
+      "error": null
+    },
+    {
+      "event": {
+        "kind": "delta",
+        "symbol": "btc",
+        "timestamp": 15,
+        "update_id": 22,
+        "changes": [
+          [
+            "bid",
+            "100",
+            "22"
+          ],
+          [
+            "ask",
+            "101",
+            "20"
+          ],
+          [
+            "bid",
+            "90",
+            "0"
+          ],
+          [
+            "ask",
+            "110",
+            "0"
+          ]
+        ]
+      },
+      "raw": [
+        22,
+        0,
+        0,
+        0,
+        0
+      ],
+      "model": [
+        0.5,
+        1.265625
+      ],
+      "outcome": "Applied",
+      "flow_observed": true,
+      "error": null
+    }
+  ]
+}

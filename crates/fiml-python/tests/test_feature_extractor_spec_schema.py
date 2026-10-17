@@ -296,6 +296,10 @@ def test_schema_and_core_reject_invalid_vwap_wire_shapes():
 
 
 @pytest.mark.parametrize("kind", [
+    "order_book_bid_added_volume",
+    "order_book_bid_removed_volume",
+    "order_book_ask_added_volume",
+    "order_book_ask_removed_volume",
     "order_book_mid_price", "order_book_spread", "order_book_spread_bps",
     "order_book_weighted_mid_price", "order_book_microprice", "order_book_imbalance",
     "order_book_best_bid_price", "order_book_best_bid_size",

@@ -458,6 +458,10 @@ fn serialize_definition(
         | FeatureKey::OrderBookDepthUntilSizePriceTo { .. }
         | FeatureKey::OrderBookDepthUntilSizeTotalSize { .. }
         | FeatureKey::OrderBookVolumeBetweenPrices { .. }
+        | FeatureKey::OrderBookBidAddedVolume { .. }
+        | FeatureKey::OrderBookBidRemovedVolume { .. }
+        | FeatureKey::OrderBookAskAddedVolume { .. }
+        | FeatureKey::OrderBookAskRemovedVolume { .. }
         | FeatureKey::OrderBookMidPrice { .. }
         | FeatureKey::OrderBookSpread { .. }
         | FeatureKey::OrderBookSpreadBps { .. }
@@ -1192,6 +1196,10 @@ fn serialize_order_book_definition(
             FeatureKey::OrderBookBestBidSize { .. } => ("order_book_best_bid_size", None),
             FeatureKey::OrderBookBestAskPrice { .. } => ("order_book_best_ask_price", None),
             FeatureKey::OrderBookBestAskSize { .. } => ("order_book_best_ask_size", None),
+            FeatureKey::OrderBookBidAddedVolume { .. } => ("order_book_bid_added_volume", None),
+            FeatureKey::OrderBookBidRemovedVolume { .. } => ("order_book_bid_removed_volume", None),
+            FeatureKey::OrderBookAskAddedVolume { .. } => ("order_book_ask_added_volume", None),
+            FeatureKey::OrderBookAskRemovedVolume { .. } => ("order_book_ask_removed_volume", None),
             FeatureKey::OrderBookMidPrice { .. } => ("order_book_mid_price", None),
             FeatureKey::OrderBookSpread { .. } => ("order_book_spread", None),
             FeatureKey::OrderBookSpreadBps { .. } => ("order_book_spread_bps", None),
@@ -1332,6 +1340,10 @@ fn deserialize_order_book_indicator(
         "order_book_best_bid_size" => FeatureKey::OrderBookBestBidSize { symbol },
         "order_book_best_ask_price" => FeatureKey::OrderBookBestAskPrice { symbol },
         "order_book_best_ask_size" => FeatureKey::OrderBookBestAskSize { symbol },
+        "order_book_bid_added_volume" => FeatureKey::OrderBookBidAddedVolume { symbol },
+        "order_book_bid_removed_volume" => FeatureKey::OrderBookBidRemovedVolume { symbol },
+        "order_book_ask_added_volume" => FeatureKey::OrderBookAskAddedVolume { symbol },
+        "order_book_ask_removed_volume" => FeatureKey::OrderBookAskRemovedVolume { symbol },
         "order_book_mid_price" => FeatureKey::OrderBookMidPrice { symbol },
         "order_book_spread" => FeatureKey::OrderBookSpread { symbol },
         "order_book_spread_bps" => FeatureKey::OrderBookSpreadBps { symbol },
@@ -1444,6 +1456,10 @@ fn symbol_of(key: &FeatureKey) -> Symbol {
         | FeatureKey::OrderBookDepthUntilSizePriceTo { symbol, .. }
         | FeatureKey::OrderBookDepthUntilSizeTotalSize { symbol, .. }
         | FeatureKey::OrderBookVolumeBetweenPrices { symbol, .. }
+        | FeatureKey::OrderBookBidAddedVolume { symbol, .. }
+        | FeatureKey::OrderBookBidRemovedVolume { symbol, .. }
+        | FeatureKey::OrderBookAskAddedVolume { symbol, .. }
+        | FeatureKey::OrderBookAskRemovedVolume { symbol, .. }
         | FeatureKey::OrderBookMidPrice { symbol, .. }
         | FeatureKey::OrderBookSpread { symbol, .. }
         | FeatureKey::OrderBookSpreadBps { symbol, .. }
