@@ -94,10 +94,7 @@ impl FeatureDerivation {
         output: &mut O,
     ) -> bool {
         match self {
-            Self::OrderBook(feature) => {
-                feature.update(order_book, output_range, output);
-                true
-            }
+            Self::OrderBook(feature) => feature.update(order_book, output_range, output),
             Self::Cvd(_)
             | Self::Field(_)
             | Self::SmaTimed(_)

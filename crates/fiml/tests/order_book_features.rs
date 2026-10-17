@@ -67,6 +67,112 @@ fn assert_values(actual: &[f64], expected: &[f64]) {
 }
 
 #[test]
+fn flow_builder_counts_decimal_changes_before_float_conversion() {
+    let symbol = Symbol::new("decimal-book-flow").unwrap();
+    let keys = [
+        FeatureKey::OrderBookBidAddedVolume { symbol },
+        FeatureKey::OrderBookBidRemovedVolume { symbol },
+        FeatureKey::OrderBookAskAddedVolume { symbol },
+        FeatureKey::OrderBookAskRemovedVolume { symbol },
+    ];
+    let mut builder = FeatureExtractor::builder(ArrayFeatureVector::<4>::new())
+        .add_order_book(symbol, OrderBook::new(UpdatePolicy::Monotonic, 4));
+    for key in keys {
+        builder = builder.add_feature(FeatureDefinition::with_default_id(key));
+    }
+    let mut extractor = builder.build().unwrap();
+    extractor
+        .handle_event(Event::order_book_snapshot(
+            symbol,
+            0,
+            OrderBookSnapshot::new(
+                0,
+                vec![OrderBookLevel::new(dec!(100), dec!(10000000000000000.1))],
+                vec![OrderBookLevel::new(dec!(101), dec!(10000000000000000.2))],
+            ),
+        ))
+        .unwrap();
+    assert!(
+        extractor
+            .feature_vector()
+            .values()
+            .iter()
+            .all(|v| v.is_nan())
+    );
+    // A monotonic feed accepts gaps; subtracting f64-converted sizes would lose both changes.
+    extractor
+        .handle_event(Event::order_book_delta(
+            symbol,
+            1,
+            OrderBookDelta::new(
+                10,
+                vec![
+                    OrderBookLevelUpdate::new(Side::Bid, dec!(100), dec!(10000000000000000.2)),
+                    OrderBookLevelUpdate::new(Side::Ask, dec!(101), dec!(10000000000000000.1)),
+                ],
+            ),
+        ))
+        .unwrap();
+    assert_eq!(extractor.feature_vector().values(), [0.1, 0., 0., 0.1]);
+    // The sum of valid levels can exceed Decimal::MAX; feature totals remain representable in f64.
+    extractor
+        .handle_event(Event::order_book_delta(
+            symbol,
+            2,
+            OrderBookDelta::new(
+                11,
+                vec![
+                    OrderBookLevelUpdate::new(Side::Bid, dec!(99), Decimal::MAX),
+                    OrderBookLevelUpdate::new(Side::Bid, dec!(98), Decimal::MAX),
+                ],
+            ),
+        ))
+        .unwrap();
+    assert_eq!(
+        extractor.feature_vector().values(),
+        [2. * 79228162514264337593543950335_f64, 0., 0., 0.]
+    );
+}
+
+#[test]
+fn flow_capacity_errors_and_failed_snapshots_do_not_change_outputs() {
+    let symbol = Symbol::new("capacity-book-flow").unwrap();
+    let mut extractor = FeatureExtractor::builder(ArrayFeatureVector::<1>::new())
+        .add_order_book(symbol, OrderBook::new(UpdatePolicy::Contiguous, 1))
+        .add_feature(FeatureDefinition::with_default_id(
+            FeatureKey::OrderBookBidAddedVolume { symbol },
+        ))
+        .build()
+        .unwrap();
+    extractor
+        .handle_event(Event::order_book_snapshot(symbol, 0, snapshot(0)))
+        .unwrap();
+    extractor
+        .handle_event(delta(symbol, 1, 1, dec!(5)))
+        .unwrap();
+    assert_eq!(extractor.feature_vector().values(), [3.]);
+    assert!(
+        extractor
+            .handle_event(delta(symbol, 2, 2, dec!(20)))
+            .is_err()
+    );
+    assert!(
+        extractor
+            .handle_event(Event::order_book_snapshot(symbol, 2, snapshot(0)))
+            .is_err()
+    );
+    assert_eq!(extractor.feature_vector().values(), [3.]);
+    extractor
+        .handle_event(Event::order_book_snapshot(symbol, 2, snapshot(2)))
+        .unwrap();
+    assert_eq!(extractor.feature_vector().values(), [3.]);
+    extractor
+        .handle_event(delta(symbol, 3, 3, dec!(3)))
+        .unwrap();
+    assert_eq!(extractor.feature_vector().values(), [1.]);
+}
+
+#[test]
 fn derives_all_indicators_with_grouped_depths_and_missing_values() {
     let symbol = Symbol::new("book-values").unwrap();
     let definitions = keys(symbol).map(FeatureDefinition::with_default_id);

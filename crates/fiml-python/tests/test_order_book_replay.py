@@ -9,6 +9,10 @@ FIXTURE = json.loads(
     (Path(__file__).resolve().parents[3] / "tests/fixtures/order_book_replay.json").read_text()
 )
 
+FLOW_FIXTURE = json.loads(
+    (Path(__file__).resolve().parents[3] / "tests/fixtures/order_book_flow.json").read_text()
+)
+
 
 def book_event(event):
     payload = {key: value for key, value in event.items() if key != "kind"}
@@ -35,17 +39,24 @@ def runtime(model, buffer_size=8):
     return fiml.FeatureExtractor(spec)
 
 
+@pytest.mark.parametrize("fixture", [FIXTURE, FLOW_FIXTURE])
+@pytest.mark.parametrize("dense", [False, True])
 @pytest.mark.parametrize("model", [False, True])
-def test_shared_book_fixture_matches_rust_exactly(model):
-    document = FIXTURE["pipeline"] if model else FIXTURE["pipeline"]["feature_extractor"]
+def test_shared_book_fixture_matches_rust_exactly(model, dense, fixture):
+    document = fixture["pipeline"] if model else fixture["pipeline"]["feature_extractor"]
+    document = json.loads(json.dumps(document))
+    if dense:
+        raw = document["feature_extractor"] if model else document
+        for config in raw["order_books"]:
+            config["dense"] = {"tick_size": "1", "min_price": "0", "max_price": "1000"}
     cls = fiml.ModelInputPipeline if model else fiml.FeatureExtractor
     instance = cls.from_json(json.dumps(document))
-    assert instance.feature_names() == FIXTURE["model_names" if model else "raw_names"]
+    assert instance.feature_names() == fixture["model_names" if model else "raw_names"]
     assert np.isnan(instance.values()).all()
     if model:
-        assert instance.raw_feature_names() == FIXTURE["raw_names"]
+        assert instance.raw_feature_names() == fixture["raw_names"]
         assert np.isnan(instance.raw_values()).all()
-    for step in FIXTURE["steps"]:
+    for step in fixture["steps"]:
         event = step["event"]
         def apply():
             if event["kind"] in ("snapshot", "delta"):
@@ -56,7 +67,7 @@ def test_shared_book_fixture_matches_rust_exactly(model):
                 instance.update(fiml.KIND_PRICE, instance.symbol(event["symbol"]),
                                 event["timestamp"], price=event["price"])
         if step["error"]:
-            with pytest.raises(ValueError, match=step["error"]):
+            with pytest.raises(ValueError, match=step.get("python_error", step["error"])):
                 apply()
         else:
             apply()
@@ -253,3 +264,36 @@ def test_dense_json_configuration_selects_storage_and_preserves_grid(model):
         assert list(validator.iter_errors(document))
         with pytest.raises(ValueError):
             fiml.FeatureExtractorSpec.from_json(json.dumps(document))
+
+
+def test_flow_builders_roundtrip_and_feed_scalar_averages():
+    from test_pipeline_spec_schema import VALIDATOR
+
+    raw = (fiml.FeatureExtractorSpec()
+           .configure_order_book("BTC", update_policy="contiguous", buffer_size=16)
+           .order_book_best_bid_size("BTC")
+           .order_book_bid_added_volume("BTC")
+           .order_book_bid_removed_volume("BTC")
+           .order_book_ask_added_volume("BTC")
+           .order_book_ask_removed_volume("BTC"))
+    names = raw.feature_ids()
+    assert names == [f"{kind}:symbol=3:btc:source=order_book" for kind in [
+        "order_book_best_bid_size", "order_book_bid_added_volume",
+        "order_book_bid_removed_volume", "order_book_ask_added_volume",
+        "order_book_ask_removed_volume",
+    ]]
+    spec = (fiml.PipelineSpec(raw)
+            .sma(names[1], window=2, warmup=fiml.WarmupPolicy.FIRST_VALUE, output="bid_added_sma")
+            .ema(names[4], window=3, warmup=fiml.WarmupPolicy.FIRST_VALUE, output="ask_removed_ema"))
+    document = json.loads(spec.to_json())
+    VALIDATOR.validate(document)
+    VALIDATOR.validate(FLOW_FIXTURE["pipeline"])
+    assert json.loads(fiml.PipelineSpec.from_json(spec.to_json()).to_json()) == document
+    runtime = fiml.ModelInputPipeline(spec)
+    # The first buffered update and snapshot must not seed the sample averages.
+    events = [book_event(step["event"]) for step in FLOW_FIXTURE["steps"][:7]]
+    actual = runtime.transform_order_book(events)
+    np.testing.assert_equal(actual, np.array([s["model"] for s in FLOW_FIXTURE["steps"][:7]], dtype=float))
+    runtime.reset()
+    chunks = [runtime.transform_order_book(events[:2]), runtime.transform_order_book(events[2:])]
+    np.testing.assert_equal(np.concatenate(chunks), actual)
