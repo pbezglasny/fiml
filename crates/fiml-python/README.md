@@ -446,6 +446,25 @@ history. Outputs for one input share a preallocated tree across windows and
 warmup policies, with logarithmic updates and queries. Timed trajectory methods
 are not provided. See [trajectory definitions and memory costs](../../docs/pipeline.md#rolling-trajectory-shape).
 
+An experimental rolling level-2 path-signature stage expands one scalar into
+six coordinates:
+
+```python
+raw = fiml.FeatureExtractorSpec().field("BTCUSDT", source="trade_price", id="price")
+spec = (fiml.PipelineSpec(raw).identity("price")
+        .rolling_path_signature_stage("price", window=20, output_prefix="sig",
+                                      warmup=fiml.WarmupPolicy.FULL_WINDOW))
+```
+
+Output IDs are `sig__t`, `sig__x`, `sig__tt`, `sig__tx`, `sig__xt`, `sig__xx`
+in that order; `output_prefix` defaults to the input ID. Time is the retained
+observation index normalized to `[0, 1]`, independent of event timestamps.
+`window` counts finite observations. Missing observed values emit NaNs without
+entering history; unrelated events and context refreshes retain outputs.
+`FIRST_VALUE` exposes partial windows, including six zeros for a singleton.
+The stage replaces the preceding layout and supports JSON replay without fitting.
+See [coordinate definitions, normalization, limits, and memory costs](../../docs/pipeline.md#experimental-rolling-path-signatures).
+
 Streak and state-age methods are available on both `PipelineSpec` and
 `ScalarStage`, with `epsilon=0.0` and `output=None` defaults:
 

@@ -15,7 +15,8 @@ METHODS = ['rolling_' + kind + suffix for kind in ['std', 'min', 'max', 'range']
            for suffix in ['', '_timed']] + TRAJECTORY_METHODS
 
 
-@pytest.mark.parametrize('fixture_name', ['rolling_statistics.json', 'rolling_trajectory.json'])
+@pytest.mark.parametrize('fixture_name', ['rolling_statistics.json', 'rolling_trajectory.json',
+                                        'rolling_path_signature.json'])
 def test_shared_artifact_streaming_chunks_reset_and_schema(fixture_name):
     fixture = json.loads((Path(__file__).resolve().parents[3] /
                          'tests/fixtures' / fixture_name).read_text())
