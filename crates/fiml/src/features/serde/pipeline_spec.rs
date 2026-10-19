@@ -41,6 +41,12 @@ struct ModelInputWire {
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 enum StageWire {
+    RollingPathSignature {
+        input: String,
+        outputs: Vec<String>,
+        window: usize,
+        warmup_policy: crate::WarmupPolicy,
+    },
     Scalar {
         transformations: Vec<TransformationWire>,
     },
@@ -107,6 +113,17 @@ impl From<&FittedStage> for StageWire {
             .map(|id| id.as_str().to_owned())
             .collect();
         match stage {
+            FittedStage::RollingPathSignature {
+                input,
+                window,
+                warmup_policy,
+                ..
+            } => Self::RollingPathSignature {
+                input: input.as_str().to_owned(),
+                outputs,
+                window: *window,
+                warmup_policy: *warmup_policy,
+            },
             FittedStage::Scalar { transformations } => Self::Scalar {
                 transformations: transformations
                     .iter()
@@ -189,6 +206,17 @@ impl From<&FittedStage> for StageWire {
 impl From<StageWire> for FittedStage {
     fn from(stage: StageWire) -> Self {
         match stage {
+            StageWire::RollingPathSignature {
+                input,
+                outputs,
+                window,
+                warmup_policy,
+            } => Self::RollingPathSignature {
+                input: FeatureId::new(input),
+                outputs: outputs.into_iter().map(FeatureId::new).collect(),
+                window,
+                warmup_policy,
+            },
             StageWire::Scalar { transformations } => Self::Scalar {
                 transformations: transformations
                     .into_iter()

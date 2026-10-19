@@ -207,6 +207,17 @@
       "oneOf": [
         {
           "type": "object", "additionalProperties": false,
+          "required": ["type", "input", "outputs", "window", "warmup_policy"],
+          "properties": {
+            "type": { "const": "rolling_path_signature" },
+            "input": { "$ref": "#/$defs/feature_id" },
+            "outputs": { "$ref": "#/$defs/stage_outputs", "minItems": 6, "maxItems": 6 },
+            "window": { "type": "integer", "minimum": 1 },
+            "warmup_policy": { "enum": ["first_value", "full_window"] }
+          }
+        },
+        {
+          "type": "object", "additionalProperties": false,
           "required": ["type", "outputs", "input_indices"],
           "properties": {
             "type": { "const": "select" },

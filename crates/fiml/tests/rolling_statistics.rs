@@ -40,6 +40,7 @@ fn shared_artifacts_replay_rolling_summaries() {
     for text in [
         include_str!("../../../tests/fixtures/rolling_statistics.json"),
         include_str!("../../../tests/fixtures/rolling_trajectory.json"),
+        include_str!("../../../tests/fixtures/rolling_path_signature.json"),
     ] {
         let fixture: serde_json::Value = serde_json::from_str(text).unwrap();
         let spec: PipelineSpec = serde_json::from_value(fixture["pipeline"].clone()).unwrap();

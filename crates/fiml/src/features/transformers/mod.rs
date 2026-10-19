@@ -15,6 +15,7 @@ mod change;
 mod history;
 mod identity;
 mod lagged;
+pub(crate) mod path_signature;
 mod standard_scale;
 mod state;
 use state::{StateKind, StateTransformer};

@@ -58,6 +58,58 @@ fn count_allocations(operation: impl FnOnce()) -> usize {
 }
 
 #[test]
+fn path_signature_does_not_allocate_during_warmup_missing_values_or_eviction() {
+    use fiml::{EventField, FittedStage, TransformerDefinition as T};
+    let id = FeatureId::new;
+    let raw = FeatureExtractorSpec::new([FeatureDefinition::new(
+        FeatureKey::Field {
+            symbol: Symbol::GLOBAL,
+            field: EventField::Price,
+        },
+        id("p"),
+    )])
+    .unwrap();
+    let mut pipeline = PipelineSpec::with_stages(
+        raw,
+        [T::standard_scale(id("p"), id("x"), 0., 0.5)],
+        [FittedStage::rolling_path_signature(
+            id("x"),
+            "sig",
+            17,
+            WarmupPolicy::FullWindow,
+        )],
+        6,
+        None,
+    )
+    .unwrap()
+    .build(
+        ArrayFeatureVector::<1>::new(),
+        ArrayFeatureVector::<6>::new(),
+    )
+    .unwrap();
+    assert_eq!(
+        count_allocations(|| {
+            for time in 0..1024 {
+                let price = if time % 19 == 0 {
+                    f64::MAX
+                } else {
+                    (time % 17) as f64
+                };
+                pipeline
+                    .handle_event(Event::price(Symbol::GLOBAL, price, time))
+                    .unwrap();
+                pipeline
+                    .handle_event(Event::volume(Symbol::GLOBAL, 1., time))
+                    .unwrap();
+                black_box(pipeline.values());
+            }
+        }),
+        0
+    );
+    assert!(pipeline.values().iter().all(|v| v.is_finite()));
+}
+
+#[test]
 fn state_transformers_do_not_allocate_during_warmup_sign_changes_or_clock_refreshes() {
     use fiml::{EventField, FittedStage, TransformerDefinition as T};
     let id = FeatureId::new;

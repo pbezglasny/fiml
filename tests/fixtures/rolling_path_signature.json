@@ -1,0 +1,454 @@
+{
+  "pipeline": {
+    "version": "3.0",
+    "feature_extractor": {
+      "version": "2.0",
+      "capacity": 2,
+      "length": 2,
+      "required_events": [
+        {
+          "symbol": "a",
+          "event": "trade"
+        },
+        {
+          "symbol": "b",
+          "event": "trade"
+        }
+      ],
+      "features": [
+        {
+          "symbol": "a",
+          "indicators": [
+            {
+              "kind": "field",
+              "source": {
+                "type": "field",
+                "event": "trade",
+                "field": "price"
+              },
+              "outputs": [
+                {
+                  "id": "p"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "symbol": "b",
+          "indicators": [
+            {
+              "kind": "field",
+              "source": {
+                "type": "field",
+                "event": "trade",
+                "field": "price"
+              },
+              "outputs": [
+                {
+                  "id": "q"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "model_input": {
+      "capacity": 6,
+      "length": 6,
+      "transformations": [
+        {
+          "type": "identity",
+          "input": "q",
+          "output": "q"
+        },
+        {
+          "type": "standard_scale",
+          "input": "p",
+          "output": "x",
+          "mean": 0.0,
+          "scale": 0.5
+        }
+      ],
+      "stages": [
+        {
+          "type": "rolling_path_signature",
+          "input": "x",
+          "window": 3,
+          "warmup_policy": "full_window",
+          "outputs": [
+            "sig__t",
+            "sig__x",
+            "sig__tt",
+            "sig__tx",
+            "sig__xt",
+            "sig__xx"
+          ]
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "event": {
+        "kind": "trade",
+        "symbol": "b",
+        "price": 50.0,
+        "timestamp": 0
+      },
+      "expected": [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "observed": [
+        false,
+        false,
+        false,
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "event": {
+        "kind": "trade",
+        "symbol": "a",
+        "price": 0.0,
+        "timestamp": 1
+      },
+      "expected": [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "observed": [
+        true,
+        true,
+        true,
+        true,
+        true,
+        true
+      ]
+    },
+    {
+      "event": {
+        "kind": "trade",
+        "symbol": "a",
+        "price": 1.0,
+        "timestamp": 4
+      },
+      "expected": [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "observed": [
+        true,
+        true,
+        true,
+        true,
+        true,
+        true
+      ]
+    },
+    {
+      "event": {
+        "kind": "trade",
+        "symbol": "a",
+        "price": 3.0,
+        "timestamp": 9
+      },
+      "expected": [
+        1.0,
+        6.0,
+        0.5,
+        3.5,
+        2.5,
+        18.0
+      ],
+      "observed": [
+        true,
+        true,
+        true,
+        true,
+        true,
+        true
+      ]
+    },
+    {
+      "event": {
+        "kind": "trade",
+        "symbol": "b",
+        "price": 90.0,
+        "timestamp": 16
+      },
+      "expected": [
+        1.0,
+        6.0,
+        0.5,
+        3.5,
+        2.5,
+        18.0
+      ],
+      "observed": [
+        false,
+        false,
+        false,
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "event": {
+        "kind": "trade",
+        "symbol": "a",
+        "price": 0.0,
+        "timestamp": 25
+      },
+      "expected": [
+        1.0,
+        -2.0,
+        0.5,
+        -3.5,
+        1.5,
+        2.0
+      ],
+      "observed": [
+        true,
+        true,
+        true,
+        true,
+        true,
+        true
+      ]
+    },
+    {
+      "event": {
+        "kind": "trade",
+        "symbol": "a",
+        "price": 2.0,
+        "timestamp": 36
+      },
+      "expected": [
+        1.0,
+        -2.0,
+        0.5,
+        1.5,
+        -3.5,
+        2.0
+      ],
+      "observed": [
+        true,
+        true,
+        true,
+        true,
+        true,
+        true
+      ]
+    },
+    {
+      "event": {
+        "kind": "trade",
+        "symbol": "a",
+        "price": 3.0,
+        "timestamp": 49
+      },
+      "expected": [
+        1.0,
+        6.0,
+        0.5,
+        2.5,
+        3.5,
+        18.0
+      ],
+      "observed": [
+        true,
+        true,
+        true,
+        true,
+        true,
+        true
+      ]
+    },
+    {
+      "event": {
+        "kind": "trade",
+        "symbol": "a",
+        "price": 1.7976931348623157e+308,
+        "timestamp": 64
+      },
+      "expected": [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "observed": [
+        true,
+        true,
+        true,
+        true,
+        true,
+        true
+      ]
+    },
+    {
+      "event": {
+        "kind": "trade",
+        "symbol": "b",
+        "price": 20.0,
+        "timestamp": 81
+      },
+      "expected": [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "observed": [
+        false,
+        false,
+        false,
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "event": {
+        "kind": "trade",
+        "symbol": "a",
+        "price": -1.0,
+        "timestamp": 100
+      },
+      "expected": [
+        1.0,
+        -6.0,
+        0.5,
+        -5.5,
+        -0.5,
+        18.0
+      ],
+      "observed": [
+        true,
+        true,
+        true,
+        true,
+        true,
+        true
+      ]
+    },
+    {
+      "event": {
+        "kind": "trade",
+        "symbol": "a",
+        "price": 4.0,
+        "timestamp": 121
+      },
+      "expected": [
+        1.0,
+        2.0,
+        0.5,
+        5.5,
+        -3.5,
+        2.0
+      ],
+      "observed": [
+        true,
+        true,
+        true,
+        true,
+        true,
+        true
+      ]
+    },
+    {
+      "event": {
+        "kind": "trade",
+        "symbol": "a",
+        "price": 4.0,
+        "timestamp": 144
+      },
+      "expected": [
+        1.0,
+        10.0,
+        0.5,
+        2.5,
+        7.5,
+        50.0
+      ],
+      "observed": [
+        true,
+        true,
+        true,
+        true,
+        true,
+        true
+      ]
+    },
+    {
+      "event": {
+        "kind": "trade",
+        "symbol": "a",
+        "price": 2.0,
+        "timestamp": 169
+      },
+      "expected": [
+        1.0,
+        -4.0,
+        0.5,
+        -3.0,
+        -1.0,
+        8.0
+      ],
+      "observed": [
+        true,
+        true,
+        true,
+        true,
+        true,
+        true
+      ]
+    },
+    {
+      "event": {
+        "kind": "trade",
+        "symbol": "a",
+        "price": 0.0,
+        "timestamp": 196
+      },
+      "expected": [
+        1.0,
+        -8.0,
+        0.5,
+        -4.0,
+        -4.0,
+        32.0
+      ],
+      "observed": [
+        true,
+        true,
+        true,
+        true,
+        true,
+        true
+      ]
+    }
+  ]
+}

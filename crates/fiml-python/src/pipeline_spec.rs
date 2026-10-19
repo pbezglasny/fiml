@@ -1401,6 +1401,27 @@ impl PipelineSpec {
         Ok(slf)
     }
 
+    /// Append an experimental level-2 signature of (normalized observation index, input).
+    /// Emits prefix__t, __x, __tt, __tx, __xt, __xx; prefix defaults to the input ID.
+    /// Finite observations enter history; observed nonfinite inputs emit NaNs without advancing.
+    /// Unobserved events and context refreshes retain outputs. Singleton paths emit zeros.
+    #[pyo3(signature = (input, *, window, warmup=PyWarmupPolicy::FullWindow, output_prefix=None))]
+    fn rolling_path_signature_stage<'py>(
+        mut slf: PyRefMut<'py, Self>,
+        input: &str,
+        window: usize,
+        warmup: PyWarmupPolicy,
+        output_prefix: Option<&str>,
+    ) -> PyResult<PyRefMut<'py, Self>> {
+        slf.add_stage(FittedStage::rolling_path_signature(
+            FeatureId::new(input),
+            output_prefix.unwrap_or(input),
+            window,
+            warmup.into(),
+        ))?;
+        Ok(slf)
+    }
+
     /// Number of already fitted vector stages.
     #[getter]
     fn stage_count(&self) -> usize {

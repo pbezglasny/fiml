@@ -2,15 +2,32 @@
 
 use std::borrow::Cow;
 
+use crate::features::transformers::path_signature::{self, PathSignature};
 use crate::features::transformers::{
     self, Evaluation, Transformer, clock_inputs, inherit_clocks, validate_standard_scale,
 };
-use crate::{FeatureId, FeatureVector, TransformerDefinition, VecFeatureVector};
+use crate::{FeatureId, FeatureVector, TransformerDefinition, VecFeatureVector, WarmupPolicy};
 
 /// Deployable scalar definitions or learned numeric state consuming the preceding active vector.
 /// Training stays outside Rust; these definitions freeze inference and output order.
 #[derive(Debug, Clone, PartialEq)]
 pub enum FittedStage {
+    /// Experimental level-2 signature of the piecewise-linear path `(t, x)`.
+    /// Time is the finite-observation index normalized to `[0, 1]` within the current window,
+    /// independent of event timestamps. A singleton has six zero coordinates.
+    /// Observed nonfinite inputs emit NaNs without entering history; unobserved events and
+    /// context refreshes retain the previous outputs. Nonfinite arithmetic emits NaN.
+    RollingPathSignature {
+        /// Scalar ID in the preceding active layout.
+        input: FeatureId,
+        /// Exactly six unique IDs in coordinate order: `t, x, tt, tx, xt, xx`.
+        /// The constant level-zero coordinate is omitted; `ij` integrates i before j.
+        outputs: Vec<FeatureId>,
+        /// Positive number of finite observations retained, including both endpoints.
+        window: usize,
+        /// FullWindow waits for `window` observations; FirstValue exposes partial windows.
+        warmup_policy: WarmupPolicy,
+    },
     /// Independent scalar outputs reading IDs from the preceding stage.
     /// Use successive stages when one scalar must consume another scalar's output.
     Scalar {
@@ -99,6 +116,24 @@ pub enum FittedStage {
 }
 
 impl FittedStage {
+    /// Creates a signature stage with IDs `{output_prefix}__t`, `__x`, `__tt`, `__tx`,
+    /// `__xt`, `__xx`, in that order. Parameters are validated by [`crate::PipelineSpec`].
+    pub fn rolling_path_signature(
+        input: FeatureId,
+        output_prefix: &str,
+        window: usize,
+        warmup_policy: WarmupPolicy,
+    ) -> Self {
+        Self::RollingPathSignature {
+            input,
+            outputs: ["t", "x", "tt", "tx", "xt", "xx"]
+                .map(|coordinate| FeatureId::new(format!("{output_prefix}__{coordinate}")))
+                .into(),
+            window,
+            warmup_policy,
+        }
+    }
+
     /// Active output IDs in the order written by this stage.
     /// Scalar IDs are collected on this cold configuration path.
     pub fn outputs(&self) -> Cow<'_, [FeatureId]> {
@@ -108,7 +143,8 @@ impl FittedStage {
                 .map(|definition| definition.output.clone())
                 .collect::<Vec<_>>()
                 .into(),
-            Self::Select { outputs, .. }
+            Self::RollingPathSignature { outputs, .. }
+            | Self::Select { outputs, .. }
             | Self::StandardScale { outputs, .. }
             | Self::MinMaxScale { outputs, .. }
             | Self::PowerTransform { outputs, .. }
@@ -132,7 +168,8 @@ impl FittedStage {
             }
         }
         let rows = match self {
-            Self::Scalar { .. }
+            Self::RollingPathSignature { .. }
+            | Self::Scalar { .. }
             | Self::Select { .. }
             | Self::StandardScale { .. }
             | Self::MinMaxScale { .. }
@@ -148,6 +185,20 @@ impl FittedStage {
             .filter(|&bytes| bytes <= isize::MAX as usize)
             .ok_or("stage dimensions exceed addressable storage")?;
         match self {
+            Self::RollingPathSignature { input, window, .. } => {
+                if !inputs.contains(input) {
+                    return Err(format!(
+                        "path signature input {:?} is unknown",
+                        input.as_str()
+                    ));
+                }
+                if outputs.len() != 6 {
+                    return Err(
+                        "path signature requires six outputs ordered t, x, tt, tx, xt, xx".into(),
+                    );
+                }
+                path_signature::validate_window(*window)?;
+            }
             Self::Scalar { transformations } => {
                 transformers::validate(transformations, inputs)
                     .map_err(|error| error.to_string())?;
@@ -413,6 +464,7 @@ fn dot(left: &[f64], right: &[f64]) -> f64 {
 
 /// Contiguous fitted state compiled once for numeric-only event processing.
 enum CompiledStage {
+    RollingPathSignature(PathSignature),
     Scalar {
         operations: Box<[Transformer]>,
         output_width: usize,
@@ -460,6 +512,19 @@ enum CompiledStage {
 impl CompiledStage {
     fn new(stage: &FittedStage, inputs: &[FeatureId], timed: bool) -> Self {
         match stage {
+            FittedStage::RollingPathSignature {
+                input,
+                window,
+                warmup_policy,
+                ..
+            } => Self::RollingPathSignature(PathSignature::new(
+                inputs
+                    .iter()
+                    .position(|id| id == input)
+                    .expect("validated input"),
+                *window,
+                *warmup_policy,
+            )),
             FittedStage::Scalar { transformations } => Self::Scalar {
                 operations: transformers::compile(transformations, inputs),
                 output_width: transformations.len(),
@@ -550,6 +615,11 @@ impl CompiledStage {
         output_clocks.fill(None);
         output_observed.fill(false);
         match self {
+            Self::RollingPathSignature(signature) => {
+                if !output_clocks.is_empty() {
+                    output_clocks[..6].fill(evaluation.timestamps[signature.input]);
+                }
+            }
             Self::Scalar { clock_sources, .. } => {
                 inherit_clocks(clock_sources, evaluation, output_clocks);
             }
@@ -603,6 +673,14 @@ impl CompiledStage {
             }
         }
         match self {
+            Self::RollingPathSignature(signature) => {
+                signature.apply(
+                    input[signature.input],
+                    evaluation.advance && observed[signature.input],
+                    output,
+                    output_observed,
+                );
+            }
             Self::Scalar {
                 operations,
                 output_width,

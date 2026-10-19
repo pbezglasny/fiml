@@ -137,6 +137,75 @@ Version `3.0` JSON uses the six names above as `type`, with required `input`,
 `output`, `window`, and `warmup_policy` fields. Existing artifacts retain their
 behavior; older runtimes cannot read these new types.
 
+## Experimental rolling path signatures
+
+`FittedStage::rolling_path_signature(input, output_prefix, window, warmup_policy)`
+consumes one scalar from the preceding layout and replaces that layout with six
+coordinates. In Python use `PipelineSpec.rolling_path_signature_stage(input,
+window=..., warmup=..., output_prefix=...)` after the base transformations.
+The prefix defaults to the input ID in Python. No fitting or new dependencies
+are needed. Later stages can select or scale the resulting coordinates.
+
+For the retained finite values `x[0..n]`, join points `(i/(n-1), x[i])` with
+straight lines. Time means **observation index**, independent of timestamps,
+and spans `[0, 1]` whenever `n >= 2`, including partial windows. Values keep
+their original units. The path's starting position is irrelevant; signatures
+describe increments. A singleton has all six coordinates equal to zero.
+
+| Coordinate order | Default ID suffix | Definition |
+| --- | --- | --- |
+| 1 | `__t` | Total time increment (1 for at least two observations) |
+| 2 | `__x` | `x[last] - x[first]` |
+| 3 | `__tt` | Half the squared time increment (0.5 for at least two observations) |
+| 4 | `__tx` | Integral of `(t - t[start]) dx` |
+| 5 | `__xt` | Integral of `(x - x[start]) dt` |
+| 6 | `__xx` | Half the squared value increment |
+
+Level zero (the constant 1) is omitted. In `ij`, channel `i` is integrated
+before channel `j`. For `[0, 1, 3]`, outputs are
+`[1, 3, 0.5, 1.75, 1.25, 4.5]`; ordering the same increments as `[0, 2, 3]`
+gives `[1, 3, 0.5, 1.25, 1.75, 4.5]`. Endpoints alone cannot distinguish these
+paths. Level 2 still loses information: for a fixed observation count and
+endpoints, permuting interior values leaves these coordinates unchanged.
+
+`window` is a positive observation count, including endpoints. `FullWindow`
+(the Python default) emits NaNs until that many finite observations arrive;
+`FirstValue` exposes partial windows. Only observed finite inputs enter history.
+An observed NaN or infinity emits six NaNs, preserves history, and does not
+consume a time step. The next finite observation connects to the previous finite
+one. Unobserved events retain the last output and mark it unobserved. Context
+refreshes do not advance history or change outputs. All six coordinates inherit
+the selected input's clock for downstream timed stages. Nonfinite arithmetic
+results emit NaN per coordinate and recover after affected samples are evicted.
+
+The implementation composes tensor levels using
+`S1(AB) = S1(A) + S1(B)` and
+`S2(AB) = S2(A) + S1(A) tensor S1(B) + S2(B)`
+([Chen's identity](https://arxiv.org/abs/1603.03788)). Each tree node summarizes
+an observation range; merging ranges includes the connecting segment. Reusing
+the circular summary tree gives `O(log window)` updates and queries without
+recomputing the full window or subtracting accumulated signatures on eviction.
+Time normalization is applied only when writing output. Endpoint formulas for
+`x` and `xx` avoid cancellation when a large excursion returns near the start.
+Construction reserves
+`2 * next_power_of_two(window)` summaries of 72 bytes each on 64-bit targets
+(about 18 MiB for 100,000 observations); each signature stage owns its history.
+There are no heap allocations during warmup, updates, or eviction.
+
+Version `3.0` JSON adds stage type `rolling_path_signature`, with required
+`input`, `outputs`, `window`, and `warmup_policy`. `outputs` contains exactly six
+unique, nonreserved IDs in the order above. Existing artifacts keep their
+behavior; older runtimes reject this new stage type. Runtime history is not
+serialized: loading a spec starts a fresh replay.
+
+Rust and Python replay `tests/fixtures/rolling_path_signature.json`, including
+eviction, unrelated-symbol events, and missing intermediate values. Independent
+Python tests integrate each straight segment directly, without the runtime's
+tree/Chen composition. Reference and replay checks use
+`abs(actual - expected) <= 1e-12 + 1e-12 * abs(expected)` (matching NaNs).
+This is the tested tolerance for the fixtures, not an error bound for arbitrary
+input magnitudes. Criterion coverage: `cargo bench -p fiml --bench path_signature`.
+
 ## Streak and state-age transformations
 
 These transformations classify the value of any preceding-stage scalar. Apply
