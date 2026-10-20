@@ -150,11 +150,8 @@ impl FeatureExtractor {
         *,
         price=None,
         volume=None,
-        side=None,
-        bid=None,
-        ask=None
+        side=None
     ))]
-    #[allow(clippy::too_many_arguments)] // payload columns are the Python keyword API
     fn update(
         &mut self,
         kind: u8,
@@ -163,11 +160,9 @@ impl FeatureExtractor {
         price: Option<f64>,
         volume: Option<f64>,
         side: Option<u8>,
-        bid: Option<f64>,
-        ask: Option<f64>,
     ) -> PyResult<()> {
         self.driver
-            .update(kind, symbol, timestamp, price, volume, side, bid, ask)
+            .update(kind, symbol, timestamp, price, volume, side)
     }
 
     /// Replay a full event stream and return one feature row per input row.
@@ -202,8 +197,6 @@ impl FeatureExtractor {
         price=None,
         volume=None,
         side=None,
-        bid=None,
-        ask=None,
         context_updates=None
     ))]
     #[allow(clippy::too_many_arguments)] // payload columns are the Python keyword API
@@ -216,8 +209,6 @@ impl FeatureExtractor {
         price: Option<PyReadonlyArray1<'py, f64>>,
         volume: Option<PyReadonlyArray1<'py, f64>>,
         side: Option<PyReadonlyArray1<'py, u8>>,
-        bid: Option<PyReadonlyArray1<'py, f64>>,
-        ask: Option<PyReadonlyArray1<'py, f64>>,
         context_updates: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<Py<PyAny>> {
         self.driver.transform(
@@ -228,8 +219,6 @@ impl FeatureExtractor {
             price,
             volume,
             side,
-            bid,
-            ask,
             context_updates,
         )
     }

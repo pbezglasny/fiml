@@ -213,7 +213,7 @@ def test_event_constructors_validate_ids_timestamps_and_sides():
 def test_legacy_placeholder_fails_before_numeric_batch_mutation(model):
     instance = runtime(model)
     with pytest.raises(ValueError, match="use OrderBookEvent"):
-        instance.update(fiml.KIND_ORDERBOOK, 0, 0, bid=98.0, ask=102.0)
+        instance.update(fiml.KIND_ORDERBOOK, 0, 0)
     with pytest.raises(ValueError, match="row 1.*use OrderBookEvent"):
         instance.transform(np.array([fiml.KIND_TIME, fiml.KIND_ORDERBOOK], dtype=np.uint8),
                            np.array([0, 0], dtype=np.int64), np.array([0, 1], dtype=np.int64))

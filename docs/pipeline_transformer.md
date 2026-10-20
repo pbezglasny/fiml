@@ -136,7 +136,7 @@ last stage, with the existing distinction between capacity and active length.
 | Method | Behavior |
 | --- | --- |
 | `add_transformation(estimator, *, name)` | Check supported concrete type and options, snapshot an unfitted clone, append it, and invalidate the fitted result. Allow configuration before the first successful fit or event replay; create a new pipeline to change an established recipe. |
-| `fit(kind, symbol, timestamp, *, price=None, volume=None, side=None, bid=None, ask=None, fit_mask=None)` | Replay from a fresh base runtime, fit cloned estimators sequentially, compile a candidate spec, and return `self`. On success install it with cold event state. |
+| `fit(kind, symbol, timestamp, *, price=None, volume=None, side=None, fit_mask=None, context_updates=None)` | Replay from a fresh base runtime, fit cloned estimators sequentially, compile a candidate spec, and return `self`. On success install it with cold event state. |
 | `transform(...)` | Keep the current event-column signature. Apply frozen parameters through Rust and return all event rows. Never learn or reset implicitly. |
 | `fit_transform(..., fit_mask=None)` | Call `fit`, then replay the same events through `transform`. Return all rows, including warm-up rows. Fitting replays each completed prefix; the final replay returns all rows. |
 | `reset()` | Rebuild from the fitted spec, clearing indicators, lag histories, books, and timestamps while retaining fitted parameters and existing symbol-handle mappings. |

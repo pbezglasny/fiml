@@ -156,11 +156,8 @@ impl ModelInputPipeline {
         *,
         price=None,
         volume=None,
-        side=None,
-        bid=None,
-        ask=None
+        side=None
     ))]
-    #[allow(clippy::too_many_arguments)]
     fn update(
         &mut self,
         kind: u8,
@@ -169,11 +166,9 @@ impl ModelInputPipeline {
         price: Option<f64>,
         volume: Option<f64>,
         side: Option<u8>,
-        bid: Option<f64>,
-        ask: Option<f64>,
     ) -> PyResult<()> {
         self.driver
-            .update(kind, symbol, timestamp, price, volume, side, bid, ask)
+            .update(kind, symbol, timestamp, price, volume, side)
     }
 
     /// Replay an event stream and return one final model row per event.
@@ -189,8 +184,6 @@ impl ModelInputPipeline {
         price=None,
         volume=None,
         side=None,
-        bid=None,
-        ask=None,
         context_updates=None
     ))]
     #[allow(clippy::too_many_arguments)]
@@ -203,8 +196,6 @@ impl ModelInputPipeline {
         price: Option<PyReadonlyArray1<'py, f64>>,
         volume: Option<PyReadonlyArray1<'py, f64>>,
         side: Option<PyReadonlyArray1<'py, u8>>,
-        bid: Option<PyReadonlyArray1<'py, f64>>,
-        ask: Option<PyReadonlyArray1<'py, f64>>,
         context_updates: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<Py<PyAny>> {
         self.driver.transform(
@@ -215,8 +206,6 @@ impl ModelInputPipeline {
             price,
             volume,
             side,
-            bid,
-            ask,
             context_updates,
         )
     }
