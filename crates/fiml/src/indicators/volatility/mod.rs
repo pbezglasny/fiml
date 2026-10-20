@@ -1,6 +1,5 @@
 //! Rolling population volatility over simple returns.
 
-use std::mem::MaybeUninit;
 use std::time::Duration;
 
 use crate::ring_buffer::{
@@ -87,7 +86,7 @@ where
     R: RingBuffer<Item = f64>,
 {
     data: R,
-    windows: [MaybeUninit<VolatilityWindow>; WINDOWS],
+    windows: [VolatilityWindow; WINDOWS],
     window_count: usize,
     warmup_policy: WarmupPolicy,
     previous_value: Option<f64>,
@@ -100,7 +99,16 @@ where
     fn new(data: R, warmup_policy: WarmupPolicy) -> Self {
         Self {
             data,
-            windows: [const { MaybeUninit::uninit() }; WINDOWS],
+            windows: [const {
+                VolatilityWindow {
+                    period: 0,
+                    moments: Moments {
+                        count: 0,
+                        mean: 0.0,
+                        m2: 0.0,
+                    },
+                }
+            }; WINDOWS],
             window_count: 0,
             warmup_policy,
             previous_value: None,
@@ -137,10 +145,10 @@ where
                 },
             ));
         }
-        self.windows[self.window_count].write(VolatilityWindow {
+        self.windows[self.window_count] = VolatilityWindow {
             period,
             moments: Moments::default(),
-        });
+        };
         self.window_count += 1;
         Ok(())
     }
@@ -157,8 +165,7 @@ where
         }
         let current_return = (value - previous_value) / previous_value;
         let evicted = self.data.push_back(current_return);
-        for index in 0..self.window_count {
-            let window = unsafe { self.windows[index].assume_init_mut() };
+        for window in &mut self.windows[..self.window_count] {
             let expired = if window.period == self.data.capacity() {
                 evicted.as_ref()
             } else {
@@ -175,11 +182,7 @@ where
     /// Also returns `None` when no return observations are available.
     pub fn value_at(&self, index: usize) -> Option<f64> {
         self.is_ready_at(index)
-            .then(|| {
-                unsafe { self.windows[index].assume_init_ref() }
-                    .moments
-                    .volatility()
-            })
+            .then(|| self.windows[index].moments.volatility())
             .flatten()
     }
 
@@ -189,7 +192,7 @@ where
         if index >= self.window_count {
             return false;
         }
-        let window = unsafe { self.windows[index].assume_init_ref() };
+        let window = &self.windows[index];
         match self.warmup_policy {
             WarmupPolicy::FirstValue => self.previous_value.is_some(),
             WarmupPolicy::FullWindow => self.data.len() >= window.period,
@@ -261,7 +264,7 @@ where
 {
     data: R,
     aggregation_millis: i64,
-    windows: [MaybeUninit<TimedVolatilityWindow>; WINDOWS],
+    windows: [TimedVolatilityWindow; WINDOWS],
     window_count: usize,
     warmup_policy: WarmupPolicy,
     previous_value: Option<f64>,
@@ -295,7 +298,18 @@ where
         Ok(Self {
             data,
             aggregation_millis,
-            windows: [const { MaybeUninit::uninit() }; WINDOWS],
+            windows: [const {
+                TimedVolatilityWindow {
+                    duration: 0,
+                    bucket_count: 0,
+                    moments: Moments {
+                        count: 0,
+                        mean: 0.0,
+                        m2: 0.0,
+                    },
+                    ready: false,
+                }
+            }; WINDOWS],
             window_count: 0,
             warmup_policy,
             previous_value: None,
@@ -345,12 +359,12 @@ where
                 .ok_or(FimlError::InvalidArgument(
                     InvalidArgumentError::WindowDurationOutOfRange,
                 ))?;
-        self.windows[self.window_count].write(TimedVolatilityWindow {
+        self.windows[self.window_count] = TimedVolatilityWindow {
             duration,
             bucket_count: 0,
             moments: Moments::default(),
             ready: false,
-        });
+        };
         self.window_count += 1;
         Ok(())
     }
@@ -397,8 +411,7 @@ where
     }
 
     fn update_readiness(&mut self, now: i64) {
-        for index in 0..self.window_count {
-            let window = unsafe { self.windows[index].assume_init_mut() };
+        for window in &mut self.windows[..self.window_count] {
             if !window.ready {
                 window.ready = match (self.warmup_policy, self.first_timestamp) {
                     (WarmupPolicy::FirstValue, Some(_)) => true,
@@ -420,8 +433,7 @@ where
             return false;
         }
         self.last_observed_timestamp = Some(now);
-        for index in 0..self.window_count {
-            let window = unsafe { self.windows[index].assume_init_mut() };
+        for window in &mut self.windows[..self.window_count] {
             while window.bucket_count > 0 {
                 let bucket = self
                     .data
@@ -466,8 +478,7 @@ where
             let mut bucket = self.data.pop_back().unwrap();
             bucket.moments.add_value(current_return);
             self.data.push_back(bucket);
-            for index in 0..self.window_count {
-                let window = unsafe { self.windows[index].assume_init_mut() };
+            for window in &mut self.windows[..self.window_count] {
                 if window.bucket_count > 0 {
                     window.moments.add_value(current_return);
                 } else if bucket_start + window.duration > timestamp {
@@ -485,8 +496,7 @@ where
             timestamp: bucket_start,
             moments,
         });
-        for index in 0..self.window_count {
-            let window = unsafe { self.windows[index].assume_init_mut() };
+        for window in &mut self.windows[..self.window_count] {
             if let Some(bucket) = evicted
                 && window.bucket_count == len_before
             {
@@ -502,18 +512,14 @@ where
     /// Also returns `None` when no return observations are available.
     pub fn value_at(&self, index: usize) -> Option<f64> {
         self.is_ready_at(index)
-            .then(|| {
-                unsafe { self.windows[index].assume_init_ref() }
-                    .moments
-                    .volatility()
-            })
+            .then(|| self.windows[index].moments.volatility())
             .flatten()
     }
 
     /// Reports whether the zero-based window has met its warm-up policy; false if absent.
     /// Readiness does not guarantee a value when no returns are available.
     pub fn is_ready_at(&self, index: usize) -> bool {
-        index < self.window_count && unsafe { self.windows[index].assume_init_ref() }.ready
+        index < self.window_count && self.windows[index].ready
     }
 
     /// Returns true when at least one window exists and all windows meet their warm-up policy.

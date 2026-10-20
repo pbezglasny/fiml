@@ -1,7 +1,6 @@
 //! Implements allocation-free exponential moving averages over multiple sample windows.
 //!
 use std::fmt::Display;
-use std::mem::MaybeUninit;
 
 use crate::{FimlError, IntegerTarget, InvalidArgumentError, Result, WarmupPolicy};
 
@@ -34,7 +33,7 @@ impl Display for EmaWindow {
 /// Number of windows is fixed at compile time, but they can be added dynamically until number of
 /// windows is reached. Windows must be added before any data is added to the EMA.
 pub struct ExponentialMovingAverage<const WINDOWS: usize> {
-    windows: [MaybeUninit<EmaWindow>; WINDOWS],
+    windows: [EmaWindow; WINDOWS],
     window_count: usize,
     update_count: usize,
     warmup_policy: WarmupPolicy,
@@ -43,8 +42,7 @@ pub struct ExponentialMovingAverage<const WINDOWS: usize> {
 impl<const WINDOWS: usize> Display for ExponentialMovingAverage<WINDOWS> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "EMA with {} windows:", self.window_count)?;
-        for i in 0..self.window_count {
-            let window = unsafe { self.windows[i].assume_init_ref() };
+        for window in &self.windows[..self.window_count] {
             writeln!(f, "  {}", window)?;
         }
         Ok(())
@@ -55,7 +53,13 @@ impl<const WINDOWS: usize> ExponentialMovingAverage<WINDOWS> {
     /// Creates an EMA with no windows and the chosen warm-up policy.
     pub fn new(warmup_policy: WarmupPolicy) -> Self {
         Self {
-            windows: [const { MaybeUninit::<EmaWindow>::uninit() }; WINDOWS],
+            windows: [const {
+                EmaWindow {
+                    period: 0,
+                    multiplier: 0.0,
+                    moving_avg: None,
+                }
+            }; WINDOWS],
             window_count: 0,
             update_count: 0,
             warmup_policy,
@@ -91,11 +95,11 @@ impl<const WINDOWS: usize> ExponentialMovingAverage<WINDOWS> {
             },
         ))?;
         let multiplier = 2.0 / divisor as f64;
-        self.windows[self.window_count].write(EmaWindow {
+        self.windows[self.window_count] = EmaWindow {
             period,
             multiplier,
             moving_avg: None,
-        });
+        };
         self.window_count += 1;
         #[cfg(feature = "tracing")]
         tracing::debug!(
@@ -113,8 +117,7 @@ impl<const WINDOWS: usize> ExponentialMovingAverage<WINDOWS> {
     /// The caller must supply a finite value.
     pub fn update(&mut self, value: f64) {
         self.update_count += 1;
-        for i in 0..self.window_count {
-            let window = unsafe { self.windows[i].assume_init_mut() };
+        for window in &mut self.windows[..self.window_count] {
             window.moving_avg = Some(if let Some(moving_avg) = window.moving_avg {
                 let retained = 1.0 - window.multiplier;
                 value * window.multiplier + moving_avg * retained
@@ -129,7 +132,7 @@ impl<const WINDOWS: usize> ExponentialMovingAverage<WINDOWS> {
         if !self.is_ready_at(index) {
             return None;
         }
-        let window = unsafe { self.windows[index].assume_init_ref() };
+        let window = &self.windows[index];
         window.moving_avg
     }
 
@@ -138,7 +141,7 @@ impl<const WINDOWS: usize> ExponentialMovingAverage<WINDOWS> {
         if index >= self.window_count {
             return false;
         }
-        let window = unsafe { self.windows[index].assume_init_ref() };
+        let window = &self.windows[index];
         match self.warmup_policy {
             WarmupPolicy::FirstValue => self.update_count > 0,
             WarmupPolicy::FullWindow => self.update_count >= window.period,
