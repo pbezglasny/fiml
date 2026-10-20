@@ -285,7 +285,6 @@ where
             })
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn build_event(
         &self,
         kind: u8,
@@ -294,8 +293,6 @@ where
         price: Option<f64>,
         volume: Option<f64>,
         side: Option<u8>,
-        _bid: Option<f64>,
-        _ask: Option<f64>,
     ) -> PyResult<Event> {
         let event = match kind {
             KIND_PRICE => {
@@ -332,7 +329,6 @@ where
         Ok(event)
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub(crate) fn update(
         &mut self,
         kind: u8,
@@ -341,10 +337,8 @@ where
         price: Option<f64>,
         volume: Option<f64>,
         side: Option<u8>,
-        bid: Option<f64>,
-        ask: Option<f64>,
     ) -> PyResult<()> {
-        let event = self.build_event(kind, symbol, timestamp, price, volume, side, bid, ask)?;
+        let event = self.build_event(kind, symbol, timestamp, price, volume, side)?;
         self.inner
             .handle_event(event)
             .map_err(|error| PyValueError::new_err(error.to_string()))
@@ -360,8 +354,6 @@ where
         price: Option<PyReadonlyArray1<'py, f64>>,
         volume: Option<PyReadonlyArray1<'py, f64>>,
         side: Option<PyReadonlyArray1<'py, u8>>,
-        bid: Option<PyReadonlyArray1<'py, f64>>,
-        ask: Option<PyReadonlyArray1<'py, f64>>,
         context_updates: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<Py<PyAny>> {
         let kind = kind.as_slice()?;
@@ -377,8 +369,6 @@ where
         let price = column("price", &price, n_rows)?;
         let volume = column("volume", &volume, n_rows)?;
         let side = column("side", &side, n_rows)?;
-        let bid = column("bid", &bid, n_rows)?;
-        let ask = column("ask", &ask, n_rows)?;
 
         let mut events = Vec::with_capacity(n_rows);
         for row in 0..n_rows {
@@ -390,8 +380,6 @@ where
                     price.map(|values| values[row]),
                     volume.map(|values| values[row]),
                     side.map(|values| values[row]),
-                    bid.map(|values| values[row]),
-                    ask.map(|values| values[row]),
                 )
                 .map_err(|error| {
                     PyValueError::new_err(format!("row {row}: {}", error.value(py)))

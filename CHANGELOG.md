@@ -13,6 +13,12 @@ a release that supports the format they load.
 
 ### Breaking changes and migration
 
+- Python scalar `update` and `transform` no longer accept `bid` or `ask`;
+  neither do pipeline `fit` and `fit_transform`. Remove these keywords even
+  when their value is `None`; passing them now raises `TypeError`. For book
+  snapshots and deltas, pass `OrderBookEvent` to `update_order_book` or
+  `transform_order_book`. Event-kind numeric codes are unchanged, and scalar
+  `KIND_ORDERBOOK` still raises a migration error.
 - Rust `TransformerDefinition` is now a struct with public `input`, `output`,
   and `operation` fields. Existing convenience constructors are unchanged.
   Replace direct enum construction with the struct and a `TransformerOperation`

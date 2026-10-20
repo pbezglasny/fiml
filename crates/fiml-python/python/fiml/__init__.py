@@ -316,7 +316,7 @@ class ModelInputPipeline:
 
     def fit(
         self, kind, symbol, timestamp, *, price=None, volume=None, side=None,
-        bid=None, ask=None, fit_mask=None, context_updates=None,
+        fit_mask=None, context_updates=None,
     ):
         """Fit on selected event snapshots; replay all events to preserve history.
 
@@ -333,7 +333,7 @@ class ModelInputPipeline:
         def replay_candidate():
             replay = self._new_runtime(candidate, "float64")
             return replay.transform(
-                kind, symbol, timestamp, price=price, volume=volume, side=side, bid=bid, ask=ask,
+                kind, symbol, timestamp, price=price, volume=volume, side=side,
                 context_updates=context_updates,
             )[:, :candidate.active_feature_count]
 
@@ -449,11 +449,11 @@ class ModelInputPipeline:
 
     def transform(
         self, kind, symbol, timestamp, *, price=None, volume=None, side=None,
-        bid=None, ask=None, context_updates=None,
+        context_updates=None,
     ):
         """Replay event columns, applying context_updates just before indexed rows."""
         return self._runtime.transform(
-            kind, symbol, timestamp, price=price, volume=volume, side=side, bid=bid, ask=ask,
+            kind, symbol, timestamp, price=price, volume=volume, side=side,
             context_updates=context_updates,
         )
 

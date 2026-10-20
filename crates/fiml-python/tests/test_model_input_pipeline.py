@@ -11,6 +11,22 @@ def raw_spec():
     return fiml.FeatureExtractorSpec(checksum="raw-checksum").day_of_week()
 
 
+@pytest.mark.parametrize("method", ["fit", "fit_transform"])
+@pytest.mark.parametrize("keyword", ["bid", "ask"])
+@pytest.mark.parametrize("value", [None, np.array([100.0])])
+def test_fitting_rejects_removed_book_keywords(method, keyword, value):
+    raw = raw_spec()
+    pipeline = fiml.ModelInputPipeline(fiml.PipelineSpec(raw).identity(raw.feature_ids()[0]))
+    args = (np.array([fiml.KIND_TIME], dtype=np.uint8),
+            np.array([0], dtype=np.int64), np.array([0], dtype=np.int64))
+    pipeline.fit_transform(*args)
+    before_json, before_values = pipeline.to_json(), pipeline.values()
+    with pytest.raises(TypeError, match=f"unexpected keyword argument '{keyword}'"):
+        getattr(pipeline, method)(*args, **{keyword: value})
+    assert pipeline.to_json() == before_json
+    np.testing.assert_equal(pipeline.values(), before_values)
+
+
 @pytest.mark.parametrize("restore", [False, True])
 def test_grouped_lags_preserve_json_layout_and_individual_warmup(restore):
     raw = raw_spec()

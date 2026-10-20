@@ -744,6 +744,13 @@ are dispatched in array order. `update(...)` takes the same keyword payloads as
 scalars. The obsolete `KIND_ORDERBOOK` placeholder raises a migration error;
 use `OrderBookEvent` for real snapshots and deltas.
 
+Migration: remove `bid` and `ask` keywords from `update`, `transform`, and
+pipeline `fit` / `fit_transform`, including `bid=None` and `ask=None`.
+These removed keywords now raise `TypeError`. Pass book snapshots and deltas
+as `OrderBookEvent` to `update_order_book` or `transform_order_book`.
+Event-kind codes remain `0=price`, `1=volume`, `2=trade`, `3=orderbook`
+(rejected by scalar replay), and `4=time`.
+
 For both extractors and pipelines, required price and volume payloads must be
 finite, even for unsubscribed symbols. NaN and ±infinity raise `ValueError`
 before changing raw/final snapshots, timed-feature state, or the timestamp

@@ -5,6 +5,34 @@ import pytest
 import fiml
 
 
+def test_event_kind_codes_remain_stable():
+    assert (fiml.KIND_PRICE, fiml.KIND_VOLUME, fiml.KIND_TRADE,
+            fiml.KIND_ORDERBOOK, fiml.KIND_TIME) == (0, 1, 2, 3, 4)
+
+
+@pytest.mark.parametrize("api", [fiml, fiml._fiml], ids=["public", "native"])
+@pytest.mark.parametrize("model", [False, True])
+@pytest.mark.parametrize("method", ["update", "transform"])
+@pytest.mark.parametrize("keyword", ["bid", "ask"])
+@pytest.mark.parametrize("value", [None, 100.0])
+def test_scalar_replay_rejects_removed_book_keywords(api, model, method, keyword, value):
+    spec = fiml.FeatureExtractorSpec().day_of_week()
+    instance = (api.ModelInputPipeline(fiml.PipelineSpec(spec).identity(spec.feature_ids()[0]))
+                if model else api.FeatureExtractor(spec))
+    args = (fiml.KIND_TIME, 0, 0)
+    if method == "transform":
+        args = tuple(np.array([item], dtype=dtype)
+                     for item, dtype in zip(args, [np.uint8, np.int64, np.int64]))
+        if value is not None:
+            value = np.array([value], dtype=np.float64)
+    with pytest.raises(TypeError, match=f"unexpected keyword argument '{keyword}'"):
+        getattr(instance, method)(*args, **{keyword: value})
+    assert np.isnan(instance.values()).all()
+    instance.output_dtype = "float32"
+    instance.update(fiml.KIND_TIME, 0, 0)
+    np.testing.assert_equal(instance.values(), [4.0])
+
+
 def sample_name(kind, symbol, source, window, warmup="full_window"):
     source_name = {
         "price": "field.price",
