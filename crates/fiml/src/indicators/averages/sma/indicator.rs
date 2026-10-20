@@ -1,7 +1,6 @@
 //! Implements simple moving averages over multiple sample or time windows.
 //!
 use std::fmt::Display;
-use std::mem::MaybeUninit;
 use std::time::Duration;
 
 use crate::ring_buffer::{
@@ -37,7 +36,7 @@ where
     R: RingBuffer<Item = f64>,
 {
     data: R,
-    windows: [MaybeUninit<SmaWindow>; WINDOWS],
+    windows: [SmaWindow; WINDOWS],
     window_count: usize,
     warmup_policy: WarmupPolicy,
 }
@@ -48,8 +47,7 @@ where
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "SMA with {} windows:", self.window_count)?;
-        for i in 0..self.window_count {
-            let window = unsafe { self.windows[i].assume_init_ref() };
+        for window in &self.windows[..self.window_count] {
             writeln!(f, "  {}", window)?;
         }
         Ok(())
@@ -60,14 +58,16 @@ impl<R, const WINDOWS: usize> SimpleMovingAverage<R, WINDOWS>
 where
     R: RingBuffer<Item = f64>,
 {
-    fn new(
-        data: R,
-        windows: [MaybeUninit<SmaWindow>; WINDOWS],
-        warmup_policy: WarmupPolicy,
-    ) -> Self {
+    fn new(data: R, warmup_policy: WarmupPolicy) -> Self {
         Self {
             data,
-            windows,
+            windows: [const {
+                SmaWindow {
+                    period: 0,
+                    sum: 0.0,
+                    moving_avg: 0.0,
+                }
+            }; WINDOWS],
             window_count: 0,
             warmup_policy,
         }
@@ -84,8 +84,7 @@ impl<const PERIODS: usize, const WINDOWS: usize>
     /// Panics if the compile-time history capacity is zero.
     pub fn new_stack(warmup_policy: WarmupPolicy) -> Self {
         let stack_data = new_stack_ring_buffer::<PERIODS, f64>();
-        let windows = [const { MaybeUninit::<SmaWindow>::uninit() }; WINDOWS];
-        Self::new(stack_data, windows, warmup_policy)
+        Self::new(stack_data, warmup_policy)
     }
 }
 
@@ -97,8 +96,7 @@ impl<const WINDOWS: usize> SimpleMovingAverage<HeapRingBuffer<f64>, WINDOWS> {
     /// Panics if `periods` is zero.
     pub fn new_heap(periods: usize, warmup_policy: WarmupPolicy) -> Self {
         let heap_data = new_heap_ring_buffer::<f64>(periods);
-        let windows = [const { MaybeUninit::<SmaWindow>::uninit() }; WINDOWS];
-        Self::new(heap_data, windows, warmup_policy)
+        Self::new(heap_data, warmup_policy)
     }
 }
 
@@ -136,11 +134,11 @@ where
                 InvalidArgumentError::WindowPeriodZero,
             ));
         }
-        self.windows[self.window_count].write(SmaWindow {
+        self.windows[self.window_count] = SmaWindow {
             period,
             sum: 0.0,
             moving_avg: 0.0,
-        });
+        };
         self.window_count += 1;
         #[cfg(feature = "tracing")]
         tracing::debug!(
@@ -157,8 +155,7 @@ where
     /// Records a finite sample and updates each rolling average in place.
     pub fn update(&mut self, value: f64) {
         let old_value = self.data.push_back(value);
-        for i in 0..self.window_count {
-            let window = unsafe { self.windows[i].assume_init_mut() };
+        for window in &mut self.windows[..self.window_count] {
             let prev_value = if window.period == self.data.capacity() {
                 old_value.as_ref()
             } else if window.period < self.data.capacity() {
@@ -178,7 +175,7 @@ where
         if !self.is_ready_at(window_id) {
             return None;
         }
-        let window = unsafe { self.windows[window_id].assume_init_ref() };
+        let window = &self.windows[window_id];
         Some(window.moving_avg)
     }
 
@@ -187,7 +184,7 @@ where
         if index >= self.window_count {
             return false;
         }
-        let window = unsafe { self.windows[index].assume_init_ref() };
+        let window = &self.windows[index];
         match self.warmup_policy {
             WarmupPolicy::FirstValue => !self.data.is_empty(),
             WarmupPolicy::FullWindow => self.data.len() >= window.period,
@@ -233,7 +230,7 @@ where
     millis_aggregation: i64,
     last_sum: Option<f64>,
     last_cnt: usize,
-    windows: [MaybeUninit<SmaWindowTimed>; WINDOWS],
+    windows: [SmaWindowTimed; WINDOWS],
     window_count: usize,
     warmup_policy: WarmupPolicy,
     first_timestamp: Option<i64>,
@@ -310,7 +307,15 @@ where
             millis_aggregation,
             last_sum: None,
             last_cnt: 0,
-            windows: [const { MaybeUninit::<SmaWindowTimed>::uninit() }; WINDOWS],
+            windows: [const {
+                SmaWindowTimed {
+                    duration: 0,
+                    bucket_count: 0,
+                    sum: 0.0,
+                    moving_avg: 0.0,
+                    ready: false,
+                }
+            }; WINDOWS],
             window_count: 0,
             warmup_policy,
             first_timestamp: None,
@@ -359,13 +364,13 @@ where
                 .ok_or(FimlError::InvalidArgument(
                     InvalidArgumentError::WindowDurationOutOfRange,
                 ))?;
-        self.windows[self.window_count].write(SmaWindowTimed {
+        self.windows[self.window_count] = SmaWindowTimed {
             duration,
             bucket_count: 0,
             sum: 0.0,
             moving_avg: 0.0,
             ready: false,
-        });
+        };
         self.window_count += 1;
         #[cfg(feature = "tracing")]
         tracing::debug!(
@@ -450,8 +455,7 @@ where
 
     fn update_readiness(&mut self, now: i64) {
         let first_timestamp = self.first_timestamp;
-        for i in 0..self.window_count {
-            let window = unsafe { self.windows[i].assume_init_mut() };
+        for window in &mut self.windows[..self.window_count] {
             if !window.ready {
                 window.ready = match (self.warmup_policy, first_timestamp) {
                     (WarmupPolicy::FirstValue, Some(_)) => true,
@@ -473,8 +477,7 @@ where
             return false;
         }
         self.last_observed_timestamp = Some(now);
-        for i in 0..self.window_count {
-            let window = unsafe { self.windows[i].assume_init_mut() };
+        for window in &mut self.windows[..self.window_count] {
             Self::expire_old_buckets(&self.data, window, now);
         }
         self.update_readiness(now);
@@ -504,8 +507,7 @@ where
             let (prev_date, prev_value) = self.data.pop_back().unwrap();
             let new_value = self.last_sum.unwrap() / self.last_cnt as f64;
             self.data.push_back((prev_date, new_value));
-            for i in 0..self.window_count {
-                let window = unsafe { self.windows[i].assume_init_mut() };
+            for window in &mut self.windows[..self.window_count] {
                 if window.bucket_count > 0 {
                     window.sum = window.sum - prev_value + new_value;
                 } else if prev_date + window.duration > event_timestamp {
@@ -519,8 +521,7 @@ where
             self.last_cnt = 1;
             let len_before = self.data.len();
             let old_value = self.data.push_back((bucket_start, value));
-            for i in 0..self.window_count {
-                let window = unsafe { self.windows[i].assume_init_mut() };
+            for window in &mut self.windows[..self.window_count] {
                 if let Some((_, old_value)) = old_value.as_ref()
                     && window.bucket_count == len_before
                 {
@@ -541,7 +542,7 @@ where
         if !self.is_ready_at(index) {
             return None;
         }
-        let window = unsafe { self.windows[index].assume_init_ref() };
+        let window = &self.windows[index];
         (window.bucket_count > 0).then_some(window.moving_avg)
     }
 
@@ -550,7 +551,7 @@ where
         if index >= self.window_count {
             return false;
         }
-        let window = unsafe { self.windows[index].assume_init_ref() };
+        let window = &self.windows[index];
         window.ready
     }
 
@@ -586,7 +587,7 @@ mod tests {
     where
         R: RingBuffer<Item = (i64, f64)>,
     {
-        let window = unsafe { sma.windows[index].assume_init_ref() };
+        let window = &sma.windows[index];
         window.moving_avg
     }
 
@@ -597,7 +598,7 @@ mod tests {
     where
         R: RingBuffer<Item = (i64, f64)>,
     {
-        let window = unsafe { sma.windows[index].assume_init_ref() };
+        let window = &sma.windows[index];
         window.bucket_count
     }
 

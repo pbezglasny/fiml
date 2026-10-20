@@ -1,6 +1,5 @@
 //! Provides shared fixed-bucket rolling sums for time-window indicators.
 //!
-use std::mem::MaybeUninit;
 use std::time::Duration;
 
 use crate::ring_buffer::{
@@ -27,7 +26,7 @@ where
 {
     data: R,
     millis_aggregation: i64,
-    windows: [MaybeUninit<TimedSumWindow<VALUES>>; WINDOWS],
+    windows: [TimedSumWindow<VALUES>; WINDOWS],
     window_count: usize,
     warmup_policy: WarmupPolicy,
     first_timestamp: Option<i64>,
@@ -109,7 +108,14 @@ where
         Ok(Self {
             data,
             millis_aggregation,
-            windows: [const { MaybeUninit::<TimedSumWindow<VALUES>>::uninit() }; WINDOWS],
+            windows: [const {
+                TimedSumWindow {
+                    duration: 0,
+                    values: [0.0; VALUES],
+                    ready: false,
+                    front_offset: 0,
+                }
+            }; WINDOWS],
             window_count: 0,
             warmup_policy,
             first_timestamp: None,
@@ -152,12 +158,12 @@ where
                 .ok_or(FimlError::InvalidArgument(
                     InvalidArgumentError::WindowDurationOutOfRange,
                 ))?;
-        self.windows[self.window_count].write(TimedSumWindow {
+        self.windows[self.window_count] = TimedSumWindow {
             duration,
             values: [0.0; VALUES],
             ready: false,
             front_offset: 0,
-        });
+        };
         self.window_count += 1;
         Ok(())
     }
@@ -168,8 +174,7 @@ where
 
     fn expire_old_buckets(&mut self, current_window_start: i64) {
         let data_len = self.data.len();
-        for index in 0..self.window_count {
-            let window = unsafe { self.windows[index].assume_init_mut() };
+        for window in &mut self.windows[..self.window_count] {
             while window.front_offset < data_len {
                 let Some(bucket) = self.data.peek_front_at(window.front_offset) else {
                     break;
@@ -189,8 +194,7 @@ where
     }
 
     fn add_to_windows(&mut self, values: [f64; VALUES]) {
-        for index in 0..self.window_count {
-            let window = unsafe { self.windows[index].assume_init_mut() };
+        for window in &mut self.windows[..self.window_count] {
             for (sum, value) in window.values.iter_mut().zip(values) {
                 *sum += value;
             }
@@ -198,8 +202,7 @@ where
     }
 
     fn update_readiness(&mut self, now: i64) {
-        for index in 0..self.window_count {
-            let window = unsafe { self.windows[index].assume_init_mut() };
+        for window in &mut self.windows[..self.window_count] {
             if !window.ready {
                 window.ready = match (self.warmup_policy, self.first_timestamp) {
                     (WarmupPolicy::FirstValue, Some(_)) => true,
@@ -247,8 +250,7 @@ where
             })
             .is_some()
         {
-            for index in 0..self.window_count {
-                let window = unsafe { self.windows[index].assume_init_mut() };
+            for window in &mut self.windows[..self.window_count] {
                 debug_assert!(window.front_offset > 0);
                 window.front_offset = window.front_offset.saturating_sub(1);
             }
@@ -258,12 +260,12 @@ where
 
     pub(crate) fn window_value(&self, index: usize, value_index: usize) -> Option<f64> {
         self.is_ready_at(index)
-            .then(|| unsafe { self.windows[index].assume_init_ref() })
+            .then(|| &self.windows[index])
             .and_then(|window| window.values.get(value_index).copied())
     }
 
     pub(crate) fn is_ready_at(&self, index: usize) -> bool {
-        index < self.window_count && unsafe { self.windows[index].assume_init_ref() }.ready
+        index < self.window_count && self.windows[index].ready
     }
 
     pub(crate) fn is_ready(&self) -> bool {

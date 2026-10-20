@@ -1,7 +1,5 @@
 //! Implements cumulative volume delta over multiple sample windows.
 //!
-use std::mem::MaybeUninit;
-
 use crate::event::TradeSide;
 use crate::ring_buffer::{
     HeapRingBuffer, RingBuffer, StackRingBuffer, new_heap_ring_buffer, new_stack_ring_buffer,
@@ -22,7 +20,7 @@ where
     R: RingBuffer<Item = f64>,
 {
     data: R,
-    windows: [MaybeUninit<CvdWindow>; WINDOWS],
+    windows: [CvdWindow; WINDOWS],
     window_count: usize,
     warmup_policy: WarmupPolicy,
 }
@@ -34,11 +32,7 @@ impl<const N: usize, const WINDOWS: usize> CumulativeVolumeDelta<StackRingBuffer
     ///
     /// Panics if the compile-time history capacity is zero.
     pub fn new_stack(warmup_policy: WarmupPolicy) -> Self {
-        Self::new(
-            new_stack_ring_buffer(),
-            [const { MaybeUninit::<CvdWindow>::uninit() }; WINDOWS],
-            warmup_policy,
-        )
+        Self::new(new_stack_ring_buffer(), warmup_policy)
     }
 }
 
@@ -49,11 +43,7 @@ impl<const WINDOWS: usize> CumulativeVolumeDelta<HeapRingBuffer<f64>, WINDOWS> {
     ///
     /// Panics if `periods` is zero.
     pub fn new_heap(periods: usize, warmup_policy: WarmupPolicy) -> Self {
-        Self::new(
-            new_heap_ring_buffer(periods),
-            [const { MaybeUninit::<CvdWindow>::uninit() }; WINDOWS],
-            warmup_policy,
-        )
+        Self::new(new_heap_ring_buffer(periods), warmup_policy)
     }
 }
 
@@ -61,14 +51,15 @@ impl<R, const WINDOWS: usize> CumulativeVolumeDelta<R, WINDOWS>
 where
     R: RingBuffer<Item = f64>,
 {
-    fn new(
-        data: R,
-        windows: [MaybeUninit<CvdWindow>; WINDOWS],
-        warmup_policy: WarmupPolicy,
-    ) -> Self {
+    fn new(data: R, warmup_policy: WarmupPolicy) -> Self {
         Self {
             data,
-            windows,
+            windows: [const {
+                CvdWindow {
+                    period: 0,
+                    current_value: 0.0,
+                }
+            }; WINDOWS],
             window_count: 0,
             warmup_policy,
         }
@@ -105,10 +96,10 @@ where
             ));
         }
 
-        self.windows[self.window_count].write(CvdWindow {
+        self.windows[self.window_count] = CvdWindow {
             period,
             current_value: 0.0,
-        });
+        };
 
         self.window_count += 1;
         Ok(())
@@ -126,8 +117,7 @@ where
             TradeSide::AggressorBuy => volume,
             TradeSide::AggressorSell => -volume,
         };
-        for window in 0..self.window_count {
-            let window = unsafe { self.windows[window].assume_init_mut() };
+        for window in &mut self.windows[..self.window_count] {
             window.current_value += delta;
             if let Some(old_value) = self.data.peek_back_at(window.period - 1) {
                 window.current_value -= *old_value;
@@ -141,7 +131,7 @@ where
         if !self.is_ready_at(index) {
             return None;
         }
-        let window = unsafe { self.windows[index].assume_init_ref() };
+        let window = &self.windows[index];
         Some(window.current_value)
     }
 
@@ -150,7 +140,7 @@ where
         if index >= self.window_count {
             return false;
         }
-        let window = unsafe { self.windows[index].assume_init_ref() };
+        let window = &self.windows[index];
         match self.warmup_policy {
             WarmupPolicy::FirstValue => !self.data.is_empty(),
             WarmupPolicy::FullWindow => self.data.len() >= window.period,

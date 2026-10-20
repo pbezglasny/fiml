@@ -1,6 +1,5 @@
 //! Implements on-balance volume over rolling time windows.
 //!
-use std::mem::MaybeUninit;
 use std::time::Duration;
 
 use crate::ring_buffer::{
@@ -46,7 +45,7 @@ where
 {
     data: R,
     millis_aggregation: i64,
-    windows: [MaybeUninit<ObvWindowTimed>; WINDOWS],
+    windows: [ObvWindowTimed; WINDOWS],
     window_count: usize,
     warmup_policy: WarmupPolicy,
     first_timestamp: Option<i64>,
@@ -131,7 +130,14 @@ where
         Ok(Self {
             data,
             millis_aggregation,
-            windows: [const { MaybeUninit::<ObvWindowTimed>::uninit() }; WINDOWS],
+            windows: [const {
+                ObvWindowTimed {
+                    duration: 0,
+                    value: 0.0,
+                    ready: false,
+                    front_offset: 0,
+                }
+            }; WINDOWS],
             window_count: 0,
             warmup_policy,
             first_timestamp: None,
@@ -181,12 +187,12 @@ where
                 .ok_or(FimlError::InvalidArgument(
                     InvalidArgumentError::WindowDurationOutOfRange,
                 ))?;
-        self.windows[self.window_count].write(ObvWindowTimed {
+        self.windows[self.window_count] = ObvWindowTimed {
             duration,
             value: 0.0,
             ready: false,
             front_offset: 0,
-        });
+        };
         self.window_count += 1;
 
         #[cfg(feature = "tracing")]
@@ -222,9 +228,7 @@ where
     }
 
     fn expire_old_buckets(&mut self, current_window_start: i64) {
-        for window_index in 0..self.window_count {
-            let window = unsafe { self.windows[window_index].assume_init_mut() };
-
+        for window in &mut self.windows[..self.window_count] {
             // Buckets are time-ordered and the cursor only advances, so resume
             // from the oldest bucket still inside the window rather than from
             // the front of the ring.
@@ -245,8 +249,7 @@ where
     /// bucket. That bucket is the oldest, so `periods < capacity` guarantees it
     /// already expired from every window and was subtracted from each value.
     fn shift_front_offsets_after_eviction(&mut self) {
-        for window_index in 0..self.window_count {
-            let window = unsafe { self.windows[window_index].assume_init_mut() };
+        for window in &mut self.windows[..self.window_count] {
             debug_assert!(
                 window.front_offset > 0,
                 "evicted a bucket that is still inside a window",
@@ -256,16 +259,14 @@ where
     }
 
     fn add_delta_to_windows(&mut self, delta: f64) {
-        for window_index in 0..self.window_count {
-            let window = unsafe { self.windows[window_index].assume_init_mut() };
+        for window in &mut self.windows[..self.window_count] {
             window.value += delta;
         }
     }
 
     fn update_readiness(&mut self, now: i64) {
         let first_timestamp = self.first_timestamp;
-        for window_index in 0..self.window_count {
-            let window = unsafe { self.windows[window_index].assume_init_mut() };
+        for window in &mut self.windows[..self.window_count] {
             if !window.ready {
                 window.ready = match (self.warmup_policy, first_timestamp) {
                     (WarmupPolicy::FirstValue, Some(_)) => true,
@@ -341,7 +342,7 @@ where
         if !self.is_ready_at(window_idx) {
             return None;
         }
-        let window = unsafe { self.windows[window_idx].assume_init_ref() };
+        let window = &self.windows[window_idx];
         Some(window.value)
     }
 
@@ -350,7 +351,7 @@ where
         if index >= self.window_count {
             return false;
         }
-        let window = unsafe { self.windows[index].assume_init_ref() };
+        let window = &self.windows[index];
         window.ready
     }
 
