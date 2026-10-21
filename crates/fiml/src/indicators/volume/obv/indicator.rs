@@ -20,7 +20,7 @@ struct ObvWindowTimed {
 
 /// One time bucket of close price and signed volume, used as OBV ring-buffer storage.
 pub struct ObvBucket {
-    timestamp: i64,
+    index: i64,
     close_price: f64,
     commulative_volume: f64,
     sign: f64,
@@ -39,6 +39,8 @@ impl ObvBucket {
 /// volume is signed by comparing its close price with the previous bucket's
 /// close price, and each configured window exposes the rolling sum
 /// of those signed bucket deltas.
+/// The full `i64` timestamp range is supported; buckets are aligned down to
+/// multiples of aggregation, including before the Unix epoch.
 pub struct OnBalanceVolumeTimed<R, const WINDOWS: usize>
 where
     R: RingBuffer<Item = ObvBucket>,
@@ -208,10 +210,6 @@ where
         Ok(())
     }
 
-    fn bucket_start(&self, timestamp: i64) -> i64 {
-        timestamp - timestamp.rem_euclid(self.millis_aggregation)
-    }
-
     #[inline]
     fn sign(prev_price: Option<f64>, current_price: f64) -> f64 {
         if let Some(prev_price) = prev_price {
@@ -227,7 +225,7 @@ where
         }
     }
 
-    fn expire_old_buckets(&mut self, current_window_start: i64) {
+    fn expire_old_buckets(&mut self, now: i64) {
         for window in &mut self.windows[..self.window_count] {
             // Buckets are time-ordered and the cursor only advances, so resume
             // from the oldest bucket still inside the window rather than from
@@ -236,7 +234,8 @@ where
                 let Some(bucket) = self.data.peek_front_at(window.front_offset) else {
                     break;
                 };
-                if bucket.timestamp + window.duration > current_window_start {
+                let start = i128::from(bucket.index) * i128::from(self.millis_aggregation);
+                if start + i128::from(window.duration) > i128::from(now) {
                     break;
                 }
                 window.value -= bucket.signed_volume();
@@ -288,7 +287,7 @@ where
             return false;
         }
         self.last_observed_timestamp = Some(now);
-        self.expire_old_buckets(self.bucket_start(now));
+        self.expire_old_buckets(now);
         self.update_readiness(now);
         true
     }
@@ -302,14 +301,15 @@ where
             self.update_readiness(now);
         }
         let _ = self.observe(now);
-        let insert_bucket_start = self.bucket_start(now);
+        // Bucket indices fit in i64 even when the aligned start precedes i64::MIN.
+        let bucket_index = now.div_euclid(self.millis_aggregation);
 
         // are we in the same bucket as the last trade? if so, update the last bucket instead of
         // creating a new one
         if self
             .data
             .peek_back()
-            .is_some_and(|bucket| bucket.timestamp == insert_bucket_start)
+            .is_some_and(|bucket| bucket.index == bucket_index)
         {
             let previous_close = self.data.peek_back_at(1).map(|bucket| bucket.close_price);
             let sign = Self::sign(previous_close, price);
@@ -325,7 +325,7 @@ where
             let previous_close = self.data.peek_back().map(|bucket| bucket.close_price);
             let sign = Self::sign(previous_close, price);
             let bucket = ObvBucket {
-                timestamp: insert_bucket_start,
+                index: bucket_index,
                 close_price: price,
                 commulative_volume: volume,
                 sign,

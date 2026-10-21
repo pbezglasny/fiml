@@ -338,60 +338,81 @@ fn returns_and_rolling_volatility_updates_do_not_allocate() {
 }
 
 #[test]
-fn rolling_trade_volume_and_vwap_updates_do_not_allocate() {
+fn timed_indicator_updates_do_not_allocate_at_timestamp_extremes() {
     let symbol = Symbol::new("trade-volume-allocations").unwrap();
-    let mut extractor = FeatureExtractorSpec::new([
-        FeatureDefinition::with_default_id(FeatureKey::TradeVolumeTimed {
-            symbol,
-            aggregation: Duration::from_millis(1),
-            window: Duration::from_millis(4),
-            warmup_policy: WarmupPolicy::FirstValue,
-        }),
-        FeatureDefinition::with_default_id(FeatureKey::TradeVolumeTimed {
-            symbol,
-            aggregation: Duration::from_millis(1),
-            window: Duration::from_millis(8),
-            warmup_policy: WarmupPolicy::FirstValue,
-        }),
-        FeatureDefinition::with_default_id(FeatureKey::VwapTimed {
-            symbol,
-            aggregation: Duration::from_millis(1),
-            window: Duration::from_millis(4),
-            warmup_policy: WarmupPolicy::FirstValue,
-        }),
-        FeatureDefinition::with_default_id(FeatureKey::VwapTimed {
-            symbol,
-            aggregation: Duration::from_millis(1),
-            window: Duration::from_millis(8),
-            warmup_policy: WarmupPolicy::FirstValue,
-        }),
-    ])
-    .unwrap()
-    .build(ArrayFeatureVector::<4>::new())
-    .unwrap();
+    for offset in [i64::MIN, 0, i64::MAX - 127] {
+        let mut extractor = FeatureExtractorSpec::new([
+            FeatureDefinition::with_default_id(FeatureKey::TradeVolumeTimed {
+                symbol,
+                aggregation: Duration::from_millis(1),
+                window: Duration::from_millis(4),
+                warmup_policy: WarmupPolicy::FirstValue,
+            }),
+            FeatureDefinition::with_default_id(FeatureKey::TradeVolumeTimed {
+                symbol,
+                aggregation: Duration::from_millis(1),
+                window: Duration::from_millis(8),
+                warmup_policy: WarmupPolicy::FirstValue,
+            }),
+            FeatureDefinition::with_default_id(FeatureKey::VwapTimed {
+                symbol,
+                aggregation: Duration::from_millis(1),
+                window: Duration::from_millis(4),
+                warmup_policy: WarmupPolicy::FirstValue,
+            }),
+            FeatureDefinition::with_default_id(FeatureKey::VwapTimed {
+                symbol,
+                aggregation: Duration::from_millis(1),
+                window: Duration::from_millis(8),
+                warmup_policy: WarmupPolicy::FirstValue,
+            }),
+            FeatureDefinition::with_default_id(FeatureKey::SmaTimed {
+                symbol,
+                source: fiml::EventField::TradePrice,
+                aggregation: Duration::from_millis(1),
+                window: Duration::from_millis(4),
+                warmup_policy: WarmupPolicy::FirstValue,
+            }),
+            FeatureDefinition::with_default_id(FeatureKey::ObvTimed {
+                symbol,
+                aggregation: Duration::from_millis(1),
+                window: Duration::from_millis(4),
+                warmup_policy: WarmupPolicy::FirstValue,
+            }),
+            FeatureDefinition::with_default_id(FeatureKey::TradeCountTimed {
+                symbol,
+                aggregation: Duration::from_millis(1),
+                window: Duration::from_millis(4),
+                warmup_policy: WarmupPolicy::FirstValue,
+            }),
+        ])
+        .unwrap()
+        .build(ArrayFeatureVector::<7>::new())
+        .unwrap();
 
-    assert_eq!(
-        count_allocations(|| {
-            for timestamp in 0..128 {
-                black_box(
-                    extractor
-                        .handle_event(Event::trade(
-                            symbol,
-                            100.0,
-                            timestamp as f64 + 1.0,
-                            timestamp,
-                            None,
-                        ))
-                        .unwrap(),
-                );
-            }
-        }),
-        0
-    );
-    assert_eq!(
-        extractor.feature_vector().values(),
-        &[506.0, 996.0, 100.0, 100.0]
-    );
+        assert_eq!(
+            count_allocations(|| {
+                for timestamp in 0..128 {
+                    black_box(
+                        extractor
+                            .handle_event(Event::trade(
+                                symbol,
+                                100.0,
+                                timestamp as f64 + 1.0,
+                                offset + timestamp,
+                                None,
+                            ))
+                            .unwrap(),
+                    );
+                }
+            }),
+            0
+        );
+        assert_eq!(
+            extractor.feature_vector().values(),
+            &[0.0, 100.0, 4.0, 506.0, 996.0, 100.0, 100.0]
+        );
+    }
 }
 
 #[test]

@@ -222,6 +222,8 @@ struct SmaWindowTimed {
 /// nonempty buckets it contains. Durations must use whole milliseconds, with
 /// positive aggregation and windows that are exact multiples of aggregation.
 /// Add all windows before recording input values.
+/// The full `i64` timestamp range is supported; buckets are aligned down to
+/// multiples of aggregation, including before the Unix epoch.
 pub struct SimpleMovingAverageTimed<R, const WINDOWS: usize>
 where
     R: RingBuffer<Item = (i64, f64)>,
@@ -423,11 +425,12 @@ where
         self.add_window_with_periods(period_in_aggregations)
     }
 
-    fn expire_old_buckets(data: &R, window: &mut SmaWindowTimed, now: i64) {
+    fn expire_old_buckets(data: &R, window: &mut SmaWindowTimed, aggregation: i64, now: i64) {
         while window.bucket_count > 0 {
             let index = data.len() - window.bucket_count;
-            let (date, value) = data.peek_front_at(index).unwrap();
-            if *date + window.duration > now {
+            let (bucket, value) = data.peek_front_at(index).unwrap();
+            let start = i128::from(*bucket) * i128::from(aggregation);
+            if start + i128::from(window.duration) > i128::from(now) {
                 break;
             }
             window.sum -= *value;
@@ -447,10 +450,6 @@ where
         } else {
             0.0
         };
-    }
-
-    fn bucket_start(&self, timestamp: i64) -> i64 {
-        timestamp - timestamp.rem_euclid(self.millis_aggregation)
     }
 
     fn update_readiness(&mut self, now: i64) {
@@ -478,7 +477,7 @@ where
         }
         self.last_observed_timestamp = Some(now);
         for window in &mut self.windows[..self.window_count] {
-            Self::expire_old_buckets(&self.data, window, now);
+            Self::expire_old_buckets(&self.data, window, self.millis_aggregation, now);
         }
         self.update_readiness(now);
         true
@@ -493,24 +492,26 @@ where
             self.update_readiness(event_timestamp);
         }
         let _ = self.observe(event_timestamp);
-        let bucket_start = self.bucket_start(event_timestamp);
+        // Bucket indices fit in i64 even when the aligned start precedes i64::MIN.
+        let bucket_index = event_timestamp.div_euclid(self.millis_aggregation);
 
         let update_last_bucket = self
             .data
             .peek_back()
-            .is_some_and(|(date, _)| *date == bucket_start);
+            .is_some_and(|(index, _)| *index == bucket_index);
 
         // We are in the same aggregation bucket as the last update. Update the last value
         if update_last_bucket {
             self.last_sum = self.last_sum.or(Some(0.0)).map(|v| v + value);
             self.last_cnt += 1;
-            let (prev_date, prev_value) = self.data.pop_back().unwrap();
+            let (prev_index, prev_value) = self.data.pop_back().unwrap();
             let new_value = self.last_sum.unwrap() / self.last_cnt as f64;
-            self.data.push_back((prev_date, new_value));
+            self.data.push_back((prev_index, new_value));
+            let start = i128::from(prev_index) * i128::from(self.millis_aggregation);
             for window in &mut self.windows[..self.window_count] {
                 if window.bucket_count > 0 {
                     window.sum = window.sum - prev_value + new_value;
-                } else if prev_date + window.duration > event_timestamp {
+                } else if start + i128::from(window.duration) > i128::from(event_timestamp) {
                     window.sum += new_value;
                     window.bucket_count = 1;
                 }
@@ -520,7 +521,7 @@ where
             self.last_sum = Some(value);
             self.last_cnt = 1;
             let len_before = self.data.len();
-            let old_value = self.data.push_back((bucket_start, value));
+            let old_value = self.data.push_back((bucket_index, value));
             for window in &mut self.windows[..self.window_count] {
                 if let Some((_, old_value)) = old_value.as_ref()
                     && window.bucket_count == len_before

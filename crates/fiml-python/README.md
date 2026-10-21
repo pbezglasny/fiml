@@ -744,6 +744,14 @@ are dispatched in array order. `update(...)` takes the same keyword payloads as
 scalars. The obsolete `KIND_ORDERBOOK` placeholder raises a migration error;
 use `OrderBookEvent` for real snapshots and deltas.
 
+Timed SMA, OBV, trade count, trade volume, and VWAP accept the full signed-int64
+timestamp range in both extractors and pipelines, for streaming and batch calls.
+Buckets align down to multiples of aggregation, including negative timestamps,
+and expire when `bucket_start + window <= timestamp`. Bucket starts and expiry
+times may lie outside int64 without restricting input timestamps. Durations must
+still be positive whole milliseconds at most `9223372036854775807ms`, with windows
+an exact multiple of aggregation and subject to history capacity limits.
+
 Migration: remove `bid` and `ask` keywords from `update`, `transform`, and
 pipeline `fit` / `fit_transform`, including `bid=None` and `ask=None`.
 These removed keywords now raise `TypeError`. Pass book snapshots and deltas

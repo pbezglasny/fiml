@@ -1,0 +1,55 @@
+[
+  {
+    "aggregation_ms": 1000,
+    "window_ms": 2000,
+    "steps": [
+      {"timestamp": -9223372036854775808, "price": 10, "volume": 1, "expected": [0, 10, 1, 1, 10]},
+      {"timestamp": -9223372036854775807, "price": 30, "volume": 3, "expected": [0, 20, 2, 4, 25]},
+      {"timestamp": -9223372036854775001, "expected": [0, 20, 2, 4, 25]},
+      {"timestamp": -9223372036854775000, "price": 40, "volume": 2, "expected": [2, 30, 3, 6, 30]},
+      {"timestamp": -9223372036854774001, "expected": [2, 30, 3, 6, 30]},
+      {"timestamp": -9223372036854774000, "expected": [2, 40, 1, 2, 40]},
+      {"timestamp": -9223372036854773000, "expected": [0, null, 0, 0, null]},
+      {"timestamp": -1001, "price": 20, "volume": 1, "expected": [-1, 20, 1, 1, 20]},
+      {"timestamp": -1000, "price": 10, "volume": 3, "expected": [-4, 15, 2, 4, 12.5]},
+      {"timestamp": -1, "expected": [-4, 15, 2, 4, 12.5]},
+      {"timestamp": 0, "expected": [-3, 10, 1, 3, 10]},
+      {"timestamp": 0, "price": 30, "volume": 1, "expected": [-2, 20, 2, 4, 15]},
+      {"timestamp": 1000, "expected": [1, 30, 1, 1, 30]},
+      {"timestamp": 2000, "expected": [0, null, 0, 0, null]},
+      {"timestamp": 9223372036854774000, "price": 20, "volume": 2, "expected": [-2, 20, 1, 2, 20]},
+      {"timestamp": 9223372036854775000, "price": 40, "volume": 3, "expected": [1, 30, 2, 5, 32]},
+      {"timestamp": 9223372036854775806, "expected": [1, 30, 2, 5, 32]},
+      {"timestamp": 9223372036854775807, "price": 60, "volume": 2, "expected": [3, 35, 3, 7, 40]},
+      {"timestamp": 9223372036854775807, "expected": [3, 35, 3, 7, 40]}
+    ]
+  },
+  {
+    "aggregation_ms": 9223372036854775807,
+    "window_ms": 9223372036854775807,
+    "steps": [
+      {"timestamp": -9223372036854775808, "price": 10, "volume": 1, "expected": [0, 10, 1, 1, 10]},
+      {"timestamp": -9223372036854775807, "price": 20, "volume": 2, "expected": [2, 20, 1, 2, 20]},
+      {"timestamp": -2, "expected": [2, 20, 1, 2, 20]},
+      {"timestamp": -1, "expected": [2, 20, 1, 2, 20]},
+      {"timestamp": 0, "expected": [0, null, 0, 0, null]},
+      {"timestamp": 0, "price": 30, "volume": 3, "expected": [3, 30, 1, 3, 30]},
+      {"timestamp": 9223372036854775806, "price": 10, "volume": 1, "expected": [-4, 20, 2, 4, 25]},
+      {"timestamp": 9223372036854775807, "expected": [0, null, 0, 0, null]},
+      {"timestamp": 9223372036854775807, "price": 40, "volume": 2, "expected": [2, 40, 1, 2, 40]}
+    ]
+  },
+  {
+    "aggregation_ms": 1,
+    "window_ms": 2,
+    "steps": [
+      {"timestamp": -9223372036854775808, "price": 10, "volume": 1, "expected": [0, 10, 1, 1, 10]},
+      {"timestamp": -9223372036854775807, "price": 20, "volume": 1, "expected": [1, 15, 2, 2, 15]},
+      {"timestamp": -9223372036854775806, "expected": [1, 20, 1, 1, 20]},
+      {"timestamp": 9223372036854775806, "expected": [0, null, 0, 0, null]},
+      {"timestamp": 9223372036854775806, "price": 30, "volume": 1, "expected": [1, 30, 1, 1, 30]},
+      {"timestamp": 9223372036854775807, "price": 40, "volume": 1, "expected": [2, 35, 2, 2, 35]},
+      {"timestamp": 9223372036854775807, "expected": [2, 35, 2, 2, 35]}
+    ]
+  }
+]
