@@ -152,7 +152,6 @@ enum GroupKey {
     },
     Cvd {
         symbol: Symbol,
-        source: FeatureSource,
         warmup_policy: WarmupPolicy,
     },
     Returns {
@@ -179,30 +178,25 @@ enum GroupKey {
     },
     ObvTimed {
         symbol: Symbol,
-        source: FeatureSource,
         aggregation: Duration,
         warmup_policy: WarmupPolicy,
     },
     Vpt {
         symbol: Symbol,
-        source: FeatureSource,
     },
     TradeCountTimed {
         symbol: Symbol,
-        source: FeatureSource,
         aggregation: Duration,
         window: Duration,
         warmup_policy: WarmupPolicy,
     },
     TradeVolumeTimed {
         symbol: Symbol,
-        source: FeatureSource,
         aggregation: Duration,
         warmup_policy: WarmupPolicy,
     },
     VwapTimed {
         symbol: Symbol,
-        source: FeatureSource,
         aggregation: Duration,
         warmup_policy: WarmupPolicy,
     },
@@ -306,10 +300,8 @@ impl GroupKey {
             Self::Field { field: source, .. }
             | Self::Returns { source, .. }
             | Self::Volatility { source, .. } => FeatureRoute::Kind(source.event_kind()),
-            Self::Cvd { source, .. }
-            | Self::Vpt { source, .. }
-            | Self::DayOfWeek { source, .. }
-            | Self::TimeSinceFirstEventOfDay { source, .. } => {
+            Self::Cvd { .. } | Self::Vpt { .. } => FeatureRoute::Kind(EventKind::Trade),
+            Self::DayOfWeek { source, .. } | Self::TimeSinceFirstEventOfDay { source, .. } => {
                 route_for_source(*source, self.symbol())
             }
             Self::SmaTimed { .. }
@@ -798,16 +790,13 @@ fn group_key(index: usize, key: &FeatureKey) -> Result<(GroupKey, GroupOutput)> 
         }
         FeatureKey::Cvd {
             symbol,
-            source,
             window,
             warmup_policy,
         } => {
-            validate_trade_source(index, key, source)?;
             validate_sample_window(index, key, window, true)?;
             Ok((
                 GroupKey::Cvd {
                     symbol,
-                    source,
                     warmup_policy,
                 },
                 GroupOutput::SampleWindow(window),
@@ -823,7 +812,7 @@ fn group_key(index: usize, key: &FeatureKey) -> Result<(GroupKey, GroupOutput)> 
             Ok((
                 GroupKey::Returns {
                     symbol,
-                    source: scalar_source(index, key, source)?,
+                    source,
                     kind,
                 },
                 GroupOutput::SampleWindow(lag),
@@ -839,7 +828,7 @@ fn group_key(index: usize, key: &FeatureKey) -> Result<(GroupKey, GroupOutput)> 
             Ok((
                 GroupKey::Volatility {
                     symbol,
-                    source: scalar_source(index, key, source)?,
+                    source,
                     warmup_policy,
                 },
                 GroupOutput::SampleWindow(window),
@@ -854,7 +843,7 @@ fn group_key(index: usize, key: &FeatureKey) -> Result<(GroupKey, GroupOutput)> 
         } => Ok((
             GroupKey::SmaTimed {
                 symbol,
-                source: scalar_source(index, key, source)?,
+                source,
                 aggregation,
                 warmup_policy,
             },
@@ -862,22 +851,17 @@ fn group_key(index: usize, key: &FeatureKey) -> Result<(GroupKey, GroupOutput)> 
         )),
         FeatureKey::ObvTimed {
             symbol,
-            source,
             aggregation,
             window,
             warmup_policy,
-        } => {
-            validate_trade_source(index, key, source)?;
-            Ok((
-                GroupKey::ObvTimed {
-                    symbol,
-                    source,
-                    aggregation,
-                    warmup_policy,
-                },
-                GroupOutput::TimedPeriod(validate_timed_window(index, key, aggregation, window)?),
-            ))
-        }
+        } => Ok((
+            GroupKey::ObvTimed {
+                symbol,
+                aggregation,
+                warmup_policy,
+            },
+            GroupOutput::TimedPeriod(validate_timed_window(index, key, aggregation, window)?),
+        )),
         FeatureKey::VolatilityTimed {
             symbol,
             source,
@@ -887,29 +871,23 @@ fn group_key(index: usize, key: &FeatureKey) -> Result<(GroupKey, GroupOutput)> 
         } => Ok((
             GroupKey::VolatilityTimed {
                 symbol,
-                source: scalar_source(index, key, source)?,
+                source,
                 aggregation,
                 warmup_policy,
             },
             GroupOutput::TimedPeriod(validate_timed_window(index, key, aggregation, window)?),
         )),
-        FeatureKey::Vpt { symbol, source } => {
-            validate_trade_source(index, key, source)?;
-            Ok((GroupKey::Vpt { symbol, source }, GroupOutput::Scalar))
-        }
+        FeatureKey::Vpt { symbol } => Ok((GroupKey::Vpt { symbol }, GroupOutput::Scalar)),
         FeatureKey::TradeCountTimed {
             symbol,
-            source,
             aggregation,
             window,
             warmup_policy,
         } => {
-            validate_trade_source(index, key, source)?;
             validate_timed_window(index, key, aggregation, window)?;
             Ok((
                 GroupKey::TradeCountTimed {
                     symbol,
-                    source,
                     aggregation,
                     window,
                     warmup_policy,
@@ -919,40 +897,30 @@ fn group_key(index: usize, key: &FeatureKey) -> Result<(GroupKey, GroupOutput)> 
         }
         FeatureKey::TradeVolumeTimed {
             symbol,
-            source,
             aggregation,
             window,
             warmup_policy,
-        } => {
-            validate_trade_source(index, key, source)?;
-            Ok((
-                GroupKey::TradeVolumeTimed {
-                    symbol,
-                    source,
-                    aggregation,
-                    warmup_policy,
-                },
-                GroupOutput::TimedPeriod(validate_timed_window(index, key, aggregation, window)?),
-            ))
-        }
+        } => Ok((
+            GroupKey::TradeVolumeTimed {
+                symbol,
+                aggregation,
+                warmup_policy,
+            },
+            GroupOutput::TimedPeriod(validate_timed_window(index, key, aggregation, window)?),
+        )),
         FeatureKey::VwapTimed {
             symbol,
-            source,
             aggregation,
             window,
             warmup_policy,
-        } => {
-            validate_trade_source(index, key, source)?;
-            Ok((
-                GroupKey::VwapTimed {
-                    symbol,
-                    source,
-                    aggregation,
-                    warmup_policy,
-                },
-                GroupOutput::TimedPeriod(validate_timed_window(index, key, aggregation, window)?),
-            ))
-        }
+        } => Ok((
+            GroupKey::VwapTimed {
+                symbol,
+                aggregation,
+                warmup_policy,
+            },
+            GroupOutput::TimedPeriod(validate_timed_window(index, key, aggregation, window)?),
+        )),
         FeatureKey::DayOfWeek { symbol, source } => {
             Ok((GroupKey::DayOfWeek { symbol, source }, GroupOutput::Scalar))
         }
@@ -1290,29 +1258,6 @@ fn build_group(group: &FeatureGroup) -> Result<FeatureDerivation> {
     }
 }
 
-fn scalar_source(index: usize, key: &FeatureKey, source: FeatureSource) -> Result<EventField> {
-    match source {
-        FeatureSource::Field(field) => Ok(field),
-        _ => invalid_definition(
-            index,
-            key,
-            InvalidIndicatorDefinitionError::ScalarEventFieldSourceRequired,
-        ),
-    }
-}
-
-fn validate_trade_source(index: usize, key: &FeatureKey, source: FeatureSource) -> Result<()> {
-    if source == FeatureSource::Event(EventKind::Trade) {
-        Ok(())
-    } else {
-        invalid_definition(
-            index,
-            key,
-            InvalidIndicatorDefinitionError::TradeEventSourceRequired,
-        )
-    }
-}
-
 fn validate_sample_window(
     index: usize,
     key: &FeatureKey,
@@ -1569,19 +1514,18 @@ mod tests {
         let symbol = Symbol::new("compiler-grouped").unwrap();
         let volatility_one = FeatureKey::Volatility {
             symbol,
-            source: FeatureSource::Field(EventField::Price),
+            source: EventField::Price,
             window: 1,
             warmup_policy: WarmupPolicy::FullWindow,
         };
         let cvd_two = FeatureKey::Cvd {
             symbol,
-            source: FeatureSource::Event(EventKind::Trade),
             window: 2,
             warmup_policy: WarmupPolicy::FullWindow,
         };
         let volatility_two = FeatureKey::Volatility {
             symbol,
-            source: FeatureSource::Field(EventField::Price),
+            source: EventField::Price,
             window: 2,
             warmup_policy: WarmupPolicy::FullWindow,
         };
@@ -1636,22 +1580,10 @@ mod tests {
     }
 
     #[test]
-    fn rejects_non_scalar_volatility_source() {
-        let definition = definition(FeatureKey::Volatility {
-            symbol: Symbol::new("compiler-source").unwrap(),
-            source: FeatureSource::Event(EventKind::Trade),
-            window: 2,
-            warmup_policy: WarmupPolicy::FullWindow,
-        });
-
-        assert!(compile(vec![definition], 1).is_err());
-    }
-
-    #[test]
     fn validates_output_count_and_timed_windows() {
         let key = FeatureKey::SmaTimed {
             symbol: Symbol::new("compiler-timed").unwrap(),
-            source: FeatureSource::Field(EventField::Price),
+            source: EventField::Price,
             aggregation: Duration::from_secs(1),
             window: Duration::from_millis(1_500),
             warmup_policy: WarmupPolicy::FullWindow,
@@ -1680,7 +1612,7 @@ mod tests {
                 compile(
                     vec![definition(FeatureKey::Return {
                         symbol,
-                        source: FeatureSource::Field(EventField::Price),
+                        source: EventField::Price,
                         kind: ReturnKind::Simple,
                         lag,
                     })],

@@ -235,10 +235,16 @@ fn write_feature_key(id: &mut String, key: &FeatureKey) -> fmt::Result {
         ),
         FeatureKey::Cvd {
             symbol,
-            source,
             window,
             warmup_policy,
-        } => write_sample_window(id, "cvd", *symbol, *source, *window, *warmup_policy),
+        } => write_sample_window(
+            id,
+            "cvd",
+            *symbol,
+            FeatureSource::Event(crate::EventKind::Trade),
+            *window,
+            *warmup_policy,
+        ),
         FeatureKey::Return {
             symbol,
             source,
@@ -252,7 +258,7 @@ fn write_feature_key(id: &mut String, key: &FeatureKey) -> fmt::Result {
                     ReturnKind::Log => "log_return",
                 },
                 *symbol,
-                source.canonical_name(),
+                FeatureSource::Field(*source).canonical_name(),
             )?;
             write!(id, ":lag={lag}")
         }
@@ -261,7 +267,14 @@ fn write_feature_key(id: &mut String, key: &FeatureKey) -> fmt::Result {
             source,
             window,
             warmup_policy,
-        } => write_sample_window(id, "volatility", *symbol, *source, *window, *warmup_policy),
+        } => write_sample_window(
+            id,
+            "volatility",
+            *symbol,
+            FeatureSource::Field(*source),
+            *window,
+            *warmup_policy,
+        ),
         FeatureKey::SmaTimed {
             symbol,
             source,
@@ -272,14 +285,13 @@ fn write_feature_key(id: &mut String, key: &FeatureKey) -> fmt::Result {
             id,
             "sma_timed",
             *symbol,
-            *source,
+            FeatureSource::Field(*source),
             aggregation.as_nanos(),
             window.as_nanos(),
             *warmup_policy,
         ),
         FeatureKey::ObvTimed {
             symbol,
-            source,
             aggregation,
             window,
             warmup_policy,
@@ -287,7 +299,7 @@ fn write_feature_key(id: &mut String, key: &FeatureKey) -> fmt::Result {
             id,
             "obv_timed",
             *symbol,
-            *source,
+            FeatureSource::Event(crate::EventKind::Trade),
             aggregation.as_nanos(),
             window.as_nanos(),
             *warmup_policy,
@@ -302,17 +314,19 @@ fn write_feature_key(id: &mut String, key: &FeatureKey) -> fmt::Result {
             id,
             "volatility_timed",
             *symbol,
-            *source,
+            FeatureSource::Field(*source),
             aggregation.as_nanos(),
             window.as_nanos(),
             *warmup_policy,
         ),
-        FeatureKey::Vpt { symbol, source } => {
-            write_prefix(id, "vpt", *symbol, source.canonical_name())
-        }
+        FeatureKey::Vpt { symbol } => write_prefix(
+            id,
+            "vpt",
+            *symbol,
+            FeatureSource::Event(crate::EventKind::Trade).canonical_name(),
+        ),
         FeatureKey::TradeCountTimed {
             symbol,
-            source,
             aggregation,
             window,
             warmup_policy,
@@ -320,14 +334,13 @@ fn write_feature_key(id: &mut String, key: &FeatureKey) -> fmt::Result {
             id,
             "trade_count_timed",
             *symbol,
-            *source,
+            FeatureSource::Event(crate::EventKind::Trade),
             aggregation.as_nanos(),
             window.as_nanos(),
             *warmup_policy,
         ),
         FeatureKey::TradeVolumeTimed {
             symbol,
-            source,
             aggregation,
             window,
             warmup_policy,
@@ -335,14 +348,13 @@ fn write_feature_key(id: &mut String, key: &FeatureKey) -> fmt::Result {
             id,
             "trade_volume_timed",
             *symbol,
-            *source,
+            FeatureSource::Event(crate::EventKind::Trade),
             aggregation.as_nanos(),
             window.as_nanos(),
             *warmup_policy,
         ),
         FeatureKey::VwapTimed {
             symbol,
-            source,
             aggregation,
             window,
             warmup_policy,
@@ -350,7 +362,7 @@ fn write_feature_key(id: &mut String, key: &FeatureKey) -> fmt::Result {
             id,
             "vwap_timed",
             *symbol,
-            *source,
+            FeatureSource::Event(crate::EventKind::Trade),
             aggregation.as_nanos(),
             window.as_nanos(),
             *warmup_policy,
@@ -449,7 +461,6 @@ mod tests {
     fn creates_canonical_id_for_timed_feature() {
         let key = FeatureKey::ObvTimed {
             symbol: Symbol::new("ETHUSD").unwrap(),
-            source: FeatureSource::Event(crate::EventKind::Trade),
             aggregation: Duration::from_millis(100),
             window: Duration::from_secs(5),
             warmup_policy: WarmupPolicy::FirstValue,
@@ -465,7 +476,6 @@ mod tests {
     fn creates_canonical_id_for_timed_trade_volume() {
         let key = FeatureKey::TradeVolumeTimed {
             symbol: Symbol::new("ETHUSD").unwrap(),
-            source: FeatureSource::Event(crate::EventKind::Trade),
             aggregation: std::time::Duration::from_millis(100),
             window: std::time::Duration::from_secs(5),
             warmup_policy: WarmupPolicy::FirstValue,
@@ -480,7 +490,6 @@ mod tests {
     fn creates_canonical_id_for_timed_vwap() {
         let key = FeatureKey::VwapTimed {
             symbol: Symbol::new("ETHUSD").unwrap(),
-            source: FeatureSource::Event(crate::EventKind::Trade),
             aggregation: std::time::Duration::from_millis(100),
             window: std::time::Duration::from_secs(5),
             warmup_policy: WarmupPolicy::FirstValue,
@@ -495,7 +504,7 @@ mod tests {
     fn creates_canonical_id_for_log_return() {
         let key = FeatureKey::Return {
             symbol: Symbol::new("BTCUSD").unwrap(),
-            source: FeatureSource::Field(EventField::TradePrice),
+            source: EventField::TradePrice,
             kind: ReturnKind::Log,
             lag: 5,
         };

@@ -13,6 +13,14 @@ a release that supports the format they load.
 
 ### Breaking changes and migration
 
+- Rust `FeatureKey::{Cvd, ObvTimed, Vpt, TradeCountTimed, TradeVolumeTimed,
+  VwapTimed}` no longer take a `source`; they always consume trades.
+  `FeatureKey::{Return, Volatility, SmaTimed, VolatilityTimed}` now take an
+  `EventField` directly: replace `source: FeatureSource::Field(field)` with
+  `source: field`. The unreachable `ScalarEventFieldSourceRequired` and
+  `TradeEventSourceRequired` error variants are removed. Python signatures,
+  JSON source fields and validation, artifact versions, feature IDs, output
+  order, and calculation behavior are unchanged.
 - Python scalar `update` and `transform` no longer accept `bid` or `ask`;
   neither do pipeline `fit` and `fit_transform`. Remove these keywords even
   when their value is `None`; passing them now raises `TypeError`. For book

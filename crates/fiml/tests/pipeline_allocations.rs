@@ -288,26 +288,26 @@ fn returns_and_rolling_volatility_updates_do_not_allocate() {
     let mut extractor = FeatureExtractorSpec::new([
         FeatureDefinition::with_default_id(FeatureKey::Volatility {
             symbol,
-            source: FeatureSource::Field(fiml::EventField::Price),
+            source: fiml::EventField::Price,
             window: 4,
             warmup_policy: WarmupPolicy::FirstValue,
         }),
         FeatureDefinition::with_default_id(FeatureKey::VolatilityTimed {
             symbol,
-            source: FeatureSource::Field(fiml::EventField::Price),
+            source: fiml::EventField::Price,
             aggregation: Duration::from_millis(1),
             window: Duration::from_millis(4),
             warmup_policy: WarmupPolicy::FirstValue,
         }),
         FeatureDefinition::with_default_id(FeatureKey::Return {
             symbol,
-            source: FeatureSource::Field(fiml::EventField::Price),
+            source: fiml::EventField::Price,
             kind: ReturnKind::Simple,
             lag: 4,
         }),
         FeatureDefinition::with_default_id(FeatureKey::Return {
             symbol,
-            source: FeatureSource::Field(fiml::EventField::Price),
+            source: fiml::EventField::Price,
             kind: ReturnKind::Log,
             lag: 4,
         }),
@@ -343,28 +343,24 @@ fn rolling_trade_volume_and_vwap_updates_do_not_allocate() {
     let mut extractor = FeatureExtractorSpec::new([
         FeatureDefinition::with_default_id(FeatureKey::TradeVolumeTimed {
             symbol,
-            source: FeatureSource::Event(fiml::EventKind::Trade),
             aggregation: Duration::from_millis(1),
             window: Duration::from_millis(4),
             warmup_policy: WarmupPolicy::FirstValue,
         }),
         FeatureDefinition::with_default_id(FeatureKey::TradeVolumeTimed {
             symbol,
-            source: FeatureSource::Event(fiml::EventKind::Trade),
             aggregation: Duration::from_millis(1),
             window: Duration::from_millis(8),
             warmup_policy: WarmupPolicy::FirstValue,
         }),
         FeatureDefinition::with_default_id(FeatureKey::VwapTimed {
             symbol,
-            source: FeatureSource::Event(fiml::EventKind::Trade),
             aggregation: Duration::from_millis(1),
             window: Duration::from_millis(4),
             warmup_policy: WarmupPolicy::FirstValue,
         }),
         FeatureDefinition::with_default_id(FeatureKey::VwapTimed {
             symbol,
-            source: FeatureSource::Event(fiml::EventKind::Trade),
             aggregation: Duration::from_millis(1),
             window: Duration::from_millis(8),
             warmup_policy: WarmupPolicy::FirstValue,

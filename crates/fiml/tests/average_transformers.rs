@@ -376,7 +376,6 @@ fn invoked_handlers_without_writes_do_not_sample() {
     let raw = FeatureExtractorSpec::new([FeatureDefinition::new(
         FeatureKey::Cvd {
             symbol,
-            source: fiml::FeatureSource::Event(fiml::EventKind::Trade),
             window: 1,
             warmup_policy: WarmupPolicy::FirstValue,
         },

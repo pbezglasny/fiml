@@ -132,6 +132,66 @@ def test_schema_accepts_every_non_book_indicator_contract():
     assert json.loads(fiml.FeatureExtractorSpec.from_json(spec.to_json()).to_json()) == document
 
 
+@pytest.mark.parametrize("method,args,scalar", [
+    ("cvd", ([2],), False),
+    ("obv_timed", ("1s", ["2s"]), False),
+    ("vpt", (), False),
+    ("trade_count_timed", ("1s", "2s"), False),
+    ("trade_volume_timed", ("1s", ["2s"]), False),
+    ("vwap_timed", ("1s", ["2s"]), False),
+    ("simple_returns", ([1],), True),
+    ("log_returns", ([1],), True),
+    ("volatility", ([2],), True),
+    ("sma_timed", ("1s", ["2s"]), True),
+    ("volatility_timed", ("1s", ["2s"]), True),
+])
+@pytest.mark.parametrize("source,canonical", [
+    ({"type": "field", "event": "price", "field": "value"}, "field.price"),
+    ({"type": "field", "event": "volume", "field": "value"}, "field.volume"),
+    ({"type": "field", "event": "trade", "field": "price"}, "field.trade_price"),
+    ({"type": "field", "event": "trade", "field": "volume"}, "field.trade_volume"),
+    ({"type": "event", "event": "price"}, "event.price"),
+    ({"type": "event", "event": "volume"}, "event.volume"),
+    ({"type": "event", "event": "trade"}, "event.trade"),
+    ({"type": "event", "event": "time"}, "event.time"),
+    ({"type": "event", "event": "order_book_delta"}, "event.order_book_delta"),
+    ({"type": "event", "event": "order_book_snapshot"}, "event.order_book_snapshot"),
+    ({"type": "any_event"}, "any_event"),
+    ({"type": "order_book"}, "order_book"),
+])
+def test_narrow_key_sources_preserve_wire_contract(method, args, scalar, source, canonical):
+    spec = getattr(fiml.FeatureExtractorSpec(), method)("BTCUSDT", *args)
+    document = json.loads(spec.to_json())
+    indicator = only_indicator(document)
+    indicator["source"] = source
+    document["required_events"] = document_with_source(source)["required_events"]
+    valid = source["type"] == "field" if scalar else canonical == "event.trade"
+    if not valid:
+        assert list(VALIDATOR.iter_errors(document))
+        with pytest.raises(ValueError):
+            fiml.FeatureExtractorSpec.from_json(json.dumps(document))
+        return
+
+    assert not list(VALIDATOR.iter_errors(document))
+    restored = fiml.FeatureExtractorSpec.from_json(json.dumps(document))
+    assert json.loads(restored.to_json()) == document
+    kwargs = {"source": canonical.removeprefix("field.")} if scalar else {}
+    built = getattr(fiml.FeatureExtractorSpec(), method)("BTCUSDT", *args, **kwargs)
+    assert built.to_json() == restored.to_json()
+
+    kind = indicator["kind"]
+    if kind.endswith("_timed"):
+        suffix = ":aggregation_ns=1000000000:window_ns=2000000000:warmup=full_window"
+    elif kind.endswith("_return"):
+        suffix = ":lag=1"
+    elif kind == "vpt":
+        suffix = ""
+    else:
+        suffix = ":window=2:warmup=full_window"
+    expected_id = f"{kind}:symbol=7:btcusdt:source={canonical}{suffix}"
+    assert restored.feature_ids() == built.feature_ids() == [expected_id]
+
+
 @pytest.mark.parametrize(
     ("spec", "mutate"),
     [

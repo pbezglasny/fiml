@@ -92,7 +92,8 @@ flowchart LR
     Definition["FeatureDefinition"] *-- Key["FeatureKey"]
     Definition *-- Id["FeatureId"]
     Key o-- Symbol
-    Key o-- Source["FeatureSource"]
+    Key o--|calendar routing| Source["FeatureSource"]
+    Key o--|scalar inputs| Field["EventField"]
     Key o-- WarmupPolicy
     Source --> Field["EventField"]
     Source --> Kind["EventKind"]
@@ -111,7 +112,7 @@ flowchart LR
 | Type | Visibility | Meaning |
 |---|---|---|
 | `FeatureDefinition` | Public | A structural `FeatureKey` paired with a stable user-facing `FeatureId`. |
-| `FeatureKey` | Public closed enum | Complete calculation identity for one scalar output, including symbol, source, window, and warm-up policy. |
+| `FeatureKey` | Public closed enum | Complete calculation identity for one scalar output. Trade-only keys have an implicit trade source; scalar indicators take `EventField`; calendar keys take `FeatureSource`. |
 | `FeatureId` | Public | Output lookup/schema name; it may be explicit or deterministically generated from a key. |
 | `FeatureSource` | Public | `Field(EventField)`, `Event(EventKind)`, or `AnyEvent`. |
 | `EventField` | Public | Extractable scalar event fields: price, volume, trade price, and trade volume. |
@@ -120,9 +121,11 @@ flowchart LR
 | `OutputRange` | Internal | Start/count of adjacent output cells written by one derivation. |
 | `Compilation` | Internal | Validated derivations, spans, IDs, and routing state handed to the extractor. |
 
-The compiler rejects duplicate keys and IDs, validates windows and sources,
+The compiler rejects duplicate keys and IDs, validates windows,
 groups compatible definitions, assigns contiguous output ranges, and constructs
-the router. Temporary maps are dropped before event processing.
+the router. Source types prevent unsupported Rust configurations; JSON readers
+validate the existing source fields before constructing keys. Temporary maps are
+dropped before event processing.
 
 ### Key-to-runtime mapping
 

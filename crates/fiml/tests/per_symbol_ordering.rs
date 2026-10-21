@@ -79,21 +79,19 @@ fn timed_spec(symbols: &[Symbol], warmup_policy: WarmupPolicy) -> FeatureExtract
         [
             FeatureKey::SmaTimed {
                 symbol,
-                source: FeatureSource::Field(EventField::TradePrice),
+                source: EventField::TradePrice,
                 aggregation,
                 window,
                 warmup_policy,
             },
             FeatureKey::ObvTimed {
                 symbol,
-                source: FeatureSource::Event(EventKind::Trade),
                 aggregation,
                 window,
                 warmup_policy,
             },
             FeatureKey::TradeCountTimed {
                 symbol,
-                source: FeatureSource::Event(EventKind::Trade),
                 aggregation,
                 window,
                 warmup_policy,
@@ -179,7 +177,6 @@ fn timed_features_match_independent_symbol_replay_through_warmup_and_expiration(
         for symbol in [btc, eth] {
             let id = FeatureId::from(&FeatureKey::TradeCountTimed {
                 symbol,
-                source: FeatureSource::Event(EventKind::Trade),
                 aggregation: Duration::from_millis(10),
                 window: Duration::from_millis(20),
                 warmup_policy: policy,

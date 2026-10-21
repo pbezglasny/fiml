@@ -269,16 +269,16 @@ enum IndicatorIdentity {
     OrderBook(&'static str),
     OrderBookQuery(FeatureKey),
     Field(EventField),
-    Cvd(FeatureSource, WarmupPolicy),
-    Returns(ReturnKind, FeatureSource),
-    Volatility(FeatureSource, WarmupPolicy),
-    SmaTimed(FeatureSource, Duration, WarmupPolicy),
-    ObvTimed(FeatureSource, Duration, WarmupPolicy),
-    VolatilityTimed(FeatureSource, Duration, WarmupPolicy),
-    Vpt(FeatureSource),
-    TradeCountTimed(FeatureSource, Duration, Duration, WarmupPolicy),
-    TradeVolumeTimed(FeatureSource, Duration, WarmupPolicy),
-    VwapTimed(FeatureSource, Duration, WarmupPolicy),
+    Cvd(WarmupPolicy),
+    Returns(ReturnKind, EventField),
+    Volatility(EventField, WarmupPolicy),
+    SmaTimed(EventField, Duration, WarmupPolicy),
+    ObvTimed(Duration, WarmupPolicy),
+    VolatilityTimed(EventField, Duration, WarmupPolicy),
+    Vpt,
+    TradeCountTimed(Duration, Duration, WarmupPolicy),
+    TradeVolumeTimed(Duration, WarmupPolicy),
+    VwapTimed(Duration, WarmupPolicy),
     DayOfWeek(FeatureSource),
     TimeSinceFirstEventOfDay(FeatureSource, i64),
 }
@@ -479,14 +479,13 @@ fn serialize_definition(
             None,
         ),
         FeatureKey::Cvd {
-            source,
             window,
             warmup_policy,
             ..
         } => (
-            IndicatorIdentity::Cvd(source, warmup_policy),
+            IndicatorIdentity::Cvd(warmup_policy),
             "cvd",
-            source,
+            FeatureSource::Event(EventKind::Trade),
             Some(warmup_policy),
             None,
             Some(WindowWire::Samples(window)),
@@ -500,7 +499,7 @@ fn serialize_definition(
                     ReturnKind::Simple => "simple_return",
                     ReturnKind::Log => "log_return",
                 },
-                source,
+                FeatureSource::Field(source),
                 None,
                 None,
                 None,
@@ -514,7 +513,7 @@ fn serialize_definition(
         } => (
             IndicatorIdentity::Volatility(source, warmup_policy),
             "volatility",
-            source,
+            FeatureSource::Field(source),
             Some(warmup_policy),
             None,
             Some(WindowWire::Samples(window)),
@@ -528,7 +527,7 @@ fn serialize_definition(
         } => (
             IndicatorIdentity::SmaTimed(source, aggregation, warmup_policy),
             "sma_timed",
-            source,
+            FeatureSource::Field(source),
             Some(warmup_policy),
             Some(OptionsWire {
                 aggregation: Some(format_duration(aggregation)?),
@@ -538,15 +537,14 @@ fn serialize_definition(
             Some(WindowWire::Duration(format_duration(window)?)),
         ),
         FeatureKey::ObvTimed {
-            source,
             aggregation,
             window,
             warmup_policy,
             ..
         } => (
-            IndicatorIdentity::ObvTimed(source, aggregation, warmup_policy),
+            IndicatorIdentity::ObvTimed(aggregation, warmup_policy),
             "obv_timed",
-            source,
+            FeatureSource::Event(EventKind::Trade),
             Some(warmup_policy),
             Some(OptionsWire {
                 aggregation: Some(format_duration(aggregation)?),
@@ -564,7 +562,7 @@ fn serialize_definition(
         } => (
             IndicatorIdentity::VolatilityTimed(source, aggregation, warmup_policy),
             "volatility_timed",
-            source,
+            FeatureSource::Field(source),
             Some(warmup_policy),
             Some(OptionsWire {
                 aggregation: Some(format_duration(aggregation)?),
@@ -573,24 +571,23 @@ fn serialize_definition(
             }),
             Some(WindowWire::Duration(format_duration(window)?)),
         ),
-        FeatureKey::Vpt { source, .. } => (
-            IndicatorIdentity::Vpt(source),
+        FeatureKey::Vpt { .. } => (
+            IndicatorIdentity::Vpt,
             "vpt",
-            source,
+            FeatureSource::Event(EventKind::Trade),
             None,
             None,
             None,
         ),
         FeatureKey::TradeCountTimed {
-            source,
             aggregation,
             window,
             warmup_policy,
             ..
         } => (
-            IndicatorIdentity::TradeCountTimed(source, aggregation, window, warmup_policy),
+            IndicatorIdentity::TradeCountTimed(aggregation, window, warmup_policy),
             "trade_count_timed",
-            source,
+            FeatureSource::Event(EventKind::Trade),
             Some(warmup_policy),
             Some(OptionsWire {
                 aggregation: Some(format_duration(aggregation)?),
@@ -600,15 +597,14 @@ fn serialize_definition(
             Some(WindowWire::Duration(format_duration(window)?)),
         ),
         FeatureKey::TradeVolumeTimed {
-            source,
             aggregation,
             window,
             warmup_policy,
             ..
         } => (
-            IndicatorIdentity::TradeVolumeTimed(source, aggregation, warmup_policy),
+            IndicatorIdentity::TradeVolumeTimed(aggregation, warmup_policy),
             "trade_volume_timed",
-            source,
+            FeatureSource::Event(EventKind::Trade),
             Some(warmup_policy),
             Some(OptionsWire {
                 aggregation: Some(format_duration(aggregation)?),
@@ -618,15 +614,14 @@ fn serialize_definition(
             Some(WindowWire::Duration(format_duration(window)?)),
         ),
         FeatureKey::VwapTimed {
-            source,
             aggregation,
             window,
             warmup_policy,
             ..
         } => (
-            IndicatorIdentity::VwapTimed(source, aggregation, warmup_policy),
+            IndicatorIdentity::VwapTimed(aggregation, warmup_policy),
             "vwap_timed",
-            source,
+            FeatureSource::Event(EventKind::Trade),
             Some(warmup_policy),
             Some(OptionsWire {
                 aggregation: Some(format_duration(aggregation)?),
@@ -867,7 +862,7 @@ fn deserialize_indicator(
         "field" => {
             reject_warmup(&indicator)?;
             require_empty_options(&indicator.kind, &options)?;
-            let FeatureSource::Field(field) = source else { return Err("field requires a scalar field source".into()); };
+            let field = scalar_source(source)?;
             definitions.push(scalar_definition(FeatureKey::Field { symbol, field }, outputs, &indicator.kind)?);
         }
         "sma" | "ema" => return Err("sample averages moved to transformers; use field extraction plus an sma/ema pipeline transformation".into()),
@@ -888,7 +883,7 @@ fn deserialize_indicator(
                     .ok_or_else(|| format!("{} output requires an integer lag", indicator.kind))?;
                 let key = FeatureKey::Return {
                     symbol,
-                    source,
+                    source: scalar_source(source)?,
                     kind,
                     lag,
                 };
@@ -915,13 +910,12 @@ fn deserialize_indicator(
                 let key = match indicator.kind.as_str() {
                     "cvd" => FeatureKey::Cvd {
                         symbol,
-                        source,
                         window,
                         warmup_policy: warmup,
                     },
                     _ => FeatureKey::Volatility {
                         symbol,
-                        source,
+                        source: scalar_source(source)?,
                         window,
                         warmup_policy: warmup,
                     },
@@ -962,42 +956,38 @@ fn deserialize_indicator(
                 let key = match indicator.kind.as_str() {
                     "sma_timed" => FeatureKey::SmaTimed {
                         symbol,
-                        source,
+                        source: scalar_source(source)?,
                         aggregation,
                         window,
                         warmup_policy: warmup,
                     },
                     "obv_timed" => FeatureKey::ObvTimed {
                         symbol,
-                        source,
                         aggregation,
                         window,
                         warmup_policy: warmup,
                     },
                     "trade_count_timed" => FeatureKey::TradeCountTimed {
                         symbol,
-                        source,
                         aggregation,
                         window,
                         warmup_policy: warmup,
                     },
                     "trade_volume_timed" => FeatureKey::TradeVolumeTimed {
                         symbol,
-                        source,
                         aggregation,
                         window,
                         warmup_policy: warmup,
                     },
                     "vwap_timed" => FeatureKey::VwapTimed {
                         symbol,
-                        source,
                         aggregation,
                         window,
                         warmup_policy: warmup,
                     },
                     _ => FeatureKey::VolatilityTimed {
                         symbol,
-                        source,
+                        source: scalar_source(source)?,
                         aggregation,
                         window,
                         warmup_policy: warmup,
@@ -1010,7 +1000,7 @@ fn deserialize_indicator(
             reject_warmup(&indicator)?;
             require_empty_options(&indicator.kind, &options)?;
             definitions.push(scalar_definition(
-                FeatureKey::Vpt { symbol, source },
+                FeatureKey::Vpt { symbol },
                 outputs,
                 &indicator.kind,
             )?);
@@ -1535,6 +1525,13 @@ fn serialize_source(source: FeatureSource) -> SourceWire {
     }
 }
 
+fn scalar_source(source: FeatureSource) -> Result<EventField, String> {
+    match source {
+        FeatureSource::Field(field) => Ok(field),
+        _ => Err("requires a scalar field source".into()),
+    }
+}
+
 fn deserialize_source(source: SourceWire) -> Result<FeatureSource, String> {
     match source.source_type.as_str() {
         "field" => {
@@ -1674,28 +1671,27 @@ mod tests {
             [
                 default(FeatureKey::TradeCountTimed {
                     symbol: btc,
-                    source: FeatureSource::Event(EventKind::Trade),
                     aggregation: Duration::from_millis(100),
                     window: Duration::from_secs(10),
                     warmup_policy: WarmupPolicy::FullWindow,
                 }),
                 default(FeatureKey::SmaTimed {
                     symbol: btc,
-                    source: FeatureSource::Field(EventField::Price),
+                    source: EventField::Price,
                     aggregation: Duration::from_secs(1),
                     window: Duration::from_secs(60),
                     warmup_policy: WarmupPolicy::FirstValue,
                 }),
                 default(FeatureKey::Volatility {
                     symbol: btc,
-                    source: FeatureSource::Field(EventField::TradePrice),
+                    source: EventField::TradePrice,
                     window: 3,
                     warmup_policy: WarmupPolicy::FullWindow,
                 }),
                 FeatureDefinition::new(
                     FeatureKey::Volatility {
                         symbol: btc,
-                        source: FeatureSource::Field(EventField::TradePrice),
+                        source: EventField::TradePrice,
                         window: 2,
                         warmup_policy: WarmupPolicy::FullWindow,
                     },
@@ -1707,46 +1703,41 @@ mod tests {
                 }),
                 default(FeatureKey::Cvd {
                     symbol: btc,
-                    source: FeatureSource::Event(EventKind::Trade),
                     window: 5,
                     warmup_policy: WarmupPolicy::FullWindow,
                 }),
                 default(FeatureKey::Return {
                     symbol: btc,
-                    source: FeatureSource::Field(EventField::TradePrice),
+                    source: EventField::TradePrice,
                     kind: ReturnKind::Simple,
                     lag: 1,
                 }),
                 default(FeatureKey::Return {
                     symbol: btc,
-                    source: FeatureSource::Field(EventField::TradePrice),
+                    source: EventField::TradePrice,
                     kind: ReturnKind::Log,
                     lag: 5,
                 }),
                 default(FeatureKey::ObvTimed {
                     symbol: btc,
-                    source: FeatureSource::Event(EventKind::Trade),
                     aggregation: Duration::from_millis(500),
                     window: Duration::from_secs(5),
                     warmup_policy: WarmupPolicy::FullWindow,
                 }),
                 default(FeatureKey::Volatility {
                     symbol: btc,
-                    source: FeatureSource::Field(EventField::TradePrice),
+                    source: EventField::TradePrice,
                     window: 20,
                     warmup_policy: WarmupPolicy::FullWindow,
                 }),
                 default(FeatureKey::VolatilityTimed {
                     symbol: btc,
-                    source: FeatureSource::Field(EventField::Price),
+                    source: EventField::Price,
                     aggregation: Duration::from_secs(1),
                     window: Duration::from_secs(30),
                     warmup_policy: WarmupPolicy::FirstValue,
                 }),
-                default(FeatureKey::Vpt {
-                    symbol: btc,
-                    source: FeatureSource::Event(EventKind::Trade),
-                }),
+                default(FeatureKey::Vpt { symbol: btc }),
                 default(FeatureKey::DayOfWeek {
                     symbol: Symbol::GLOBAL,
                     source: FeatureSource::AnyEvent,
@@ -1858,14 +1849,12 @@ mod tests {
         let spec = FeatureExtractorSpec::new([
             default(FeatureKey::TradeVolumeTimed {
                 symbol: btc,
-                source: FeatureSource::Event(EventKind::Trade),
                 aggregation: Duration::from_secs(1),
                 window: Duration::from_secs(2),
                 warmup_policy: WarmupPolicy::FullWindow,
             }),
             default(FeatureKey::TradeVolumeTimed {
                 symbol: btc,
-                source: FeatureSource::Event(EventKind::Trade),
                 aggregation: Duration::from_secs(1),
                 window: Duration::from_secs(5),
                 warmup_policy: WarmupPolicy::FullWindow,
@@ -1888,14 +1877,12 @@ mod tests {
         let spec = FeatureExtractorSpec::new([
             default(FeatureKey::VwapTimed {
                 symbol: btc,
-                source: FeatureSource::Event(EventKind::Trade),
                 aggregation: Duration::from_secs(1),
                 window: Duration::from_secs(2),
                 warmup_policy: WarmupPolicy::FullWindow,
             }),
             default(FeatureKey::VwapTimed {
                 symbol: btc,
-                source: FeatureSource::Event(EventKind::Trade),
                 aggregation: Duration::from_secs(1),
                 window: Duration::from_secs(5),
                 warmup_policy: WarmupPolicy::FullWindow,

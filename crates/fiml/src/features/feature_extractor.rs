@@ -805,7 +805,7 @@ mod tests {
                 }))
                 .add_feature(FeatureDefinition::with_default_id(FeatureKey::SmaTimed {
                     symbol,
-                    source: FeatureSource::Field(EventField::Price),
+                    source: EventField::Price,
                     aggregation: std::time::Duration::from_secs(1),
                     window: std::time::Duration::from_secs(2),
                     warmup_policy: WarmupPolicy::FirstValue,
