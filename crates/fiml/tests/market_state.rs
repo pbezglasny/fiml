@@ -41,7 +41,7 @@ fn raw_identity_sources_and_masks_follow_active_grouped_layouts() {
     let symbol = Symbol::new("metadata-layout").unwrap();
     let returns = |lag| FeatureKey::Return {
         symbol,
-        source: FeatureSource::Field(EventField::Price),
+        source: EventField::Price,
         kind: ReturnKind::Simple,
         lag,
     };
@@ -182,46 +182,41 @@ fn timed_recalculation_does_not_refresh_market_inputs() {
     let aggregation = Duration::from_millis(1000);
     let window = Duration::from_millis(2000);
     let warmup_policy = WarmupPolicy::FirstValue;
-    let source = FeatureSource::Event(EventKind::Trade);
     let keys = [
         FeatureKey::SmaTimed {
             symbol,
-            source: FeatureSource::Field(EventField::Price),
+            source: EventField::Price,
             aggregation,
             window,
             warmup_policy,
         },
         FeatureKey::VolatilityTimed {
             symbol,
-            source: FeatureSource::Field(EventField::Price),
+            source: EventField::Price,
             aggregation,
             window,
             warmup_policy,
         },
         FeatureKey::ObvTimed {
             symbol,
-            source,
             aggregation,
             window,
             warmup_policy,
         },
         FeatureKey::TradeCountTimed {
             symbol,
-            source,
             aggregation,
             window,
             warmup_policy,
         },
         FeatureKey::TradeVolumeTimed {
             symbol,
-            source,
             aggregation,
             window,
             warmup_policy,
         },
         FeatureKey::VwapTimed {
             symbol,
-            source,
             aggregation,
             window,
             warmup_policy,
@@ -303,7 +298,6 @@ fn source_acceptance_respects_trade_side_and_calendar_routing() {
             "cvd",
             FeatureKey::Cvd {
                 symbol: btc,
-                source: FeatureSource::Event(EventKind::Trade),
                 window: 2,
                 warmup_policy: WarmupPolicy::FullWindow,
             },

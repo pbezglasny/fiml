@@ -15,6 +15,28 @@ use super::feature_source::FeatureSource;
 /// Equal keys describe the same feature. Indicators with multiple windows
 /// therefore have one key per window rather than one key for the complete
 /// runtime indicator.
+/// Trade-only indicators have an implicit trade source; scalar indicators take
+/// an [`EventField`](crate::EventField) directly. Calendar features retain
+/// configurable [`FeatureSource`] routing.
+///
+/// Trade-only keys cannot select another source:
+/// ```compile_fail
+/// use fiml::{FeatureKey, FeatureSource, Symbol};
+/// let key = FeatureKey::Vpt {
+///     symbol: Symbol::new("BTCUSDT").unwrap(),
+///     source: FeatureSource::AnyEvent,
+/// };
+/// ```
+/// Scalar keys cannot consume a complete event:
+/// ```compile_fail
+/// use fiml::{EventKind, FeatureKey, FeatureSource, ReturnKind, Symbol};
+/// let key = FeatureKey::Return {
+///     symbol: Symbol::new("BTCUSDT").unwrap(),
+///     source: FeatureSource::Event(EventKind::Trade),
+///     kind: ReturnKind::Simple,
+///     lag: 1,
+/// };
+/// ```
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum FeatureKey {
     /// Caller-supplied value retained until explicitly replaced or cleared.
@@ -186,8 +208,6 @@ pub enum FeatureKey {
     Cvd {
         /// Market symbol whose events or order book supply this output.
         symbol: Symbol,
-        /// Must be `FeatureSource::Event(EventKind::Trade)`.
-        source: FeatureSource,
         /// Positive number of samples in the rolling window.
         window: usize,
         /// Controls when output becomes available while history fills.
@@ -197,8 +217,8 @@ pub enum FeatureKey {
     Return {
         /// Market symbol whose events or order book supply this output.
         symbol: Symbol,
-        /// Must be `FeatureSource::Field` selecting a scalar event field.
-        source: FeatureSource,
+        /// Scalar event field supplying the observations.
+        source: crate::EventField,
         /// Simple fractional change or natural-log price ratio.
         kind: ReturnKind,
         /// Positive sample distance to the earlier value.
@@ -208,8 +228,8 @@ pub enum FeatureKey {
     Volatility {
         /// Market symbol whose events or order book supply this output.
         symbol: Symbol,
-        /// Must be `FeatureSource::Field` selecting a scalar event field.
-        source: FeatureSource,
+        /// Scalar event field supplying the observations.
+        source: crate::EventField,
         /// Positive number of simple returns; requires one additional price sample.
         window: usize,
         /// Controls when output becomes available while history fills.
@@ -219,8 +239,8 @@ pub enum FeatureKey {
     SmaTimed {
         /// Market symbol whose events or order book supply this output.
         symbol: Symbol,
-        /// Must be `FeatureSource::Field` selecting a scalar event field.
-        source: FeatureSource,
+        /// Scalar event field supplying the observations.
+        source: crate::EventField,
         /// Positive bucket duration in whole milliseconds, representable as `i64` milliseconds.
         aggregation: Duration,
         /// Rolling duration: a positive multiple of `aggregation`, in whole `i64` milliseconds.
@@ -232,8 +252,8 @@ pub enum FeatureKey {
     VolatilityTimed {
         /// Market symbol whose events or order book supply this output.
         symbol: Symbol,
-        /// Must be `FeatureSource::Field` selecting a scalar event field.
-        source: FeatureSource,
+        /// Scalar event field supplying the observations.
+        source: crate::EventField,
         /// Positive bucket duration in whole milliseconds, representable as `i64` milliseconds.
         aggregation: Duration,
         /// Rolling duration: a positive multiple of `aggregation`, in whole `i64` milliseconds.
@@ -245,8 +265,6 @@ pub enum FeatureKey {
     ObvTimed {
         /// Market symbol whose events or order book supply this output.
         symbol: Symbol,
-        /// Must be `FeatureSource::Event(EventKind::Trade)`.
-        source: FeatureSource,
         /// Positive bucket duration in whole milliseconds, representable as `i64` milliseconds.
         aggregation: Duration,
         /// Rolling duration: a positive multiple of `aggregation`, in whole `i64` milliseconds.
@@ -258,15 +276,11 @@ pub enum FeatureKey {
     Vpt {
         /// Market symbol whose events or order book supply this output.
         symbol: Symbol,
-        /// Must be `FeatureSource::Event(EventKind::Trade)`.
-        source: FeatureSource,
     },
     /// Trade count over a rolling timed window.
     TradeCountTimed {
         /// Market symbol whose events or order book supply this output.
         symbol: Symbol,
-        /// Must be `FeatureSource::Event(EventKind::Trade)`.
-        source: FeatureSource,
         /// Positive bucket duration in whole milliseconds, representable as `i64` milliseconds.
         aggregation: Duration,
         /// Rolling duration: a positive multiple of `aggregation`, in whole `i64` milliseconds.
@@ -278,8 +292,6 @@ pub enum FeatureKey {
     TradeVolumeTimed {
         /// Market symbol whose events or order book supply this output.
         symbol: Symbol,
-        /// Must be `FeatureSource::Event(EventKind::Trade)`.
-        source: FeatureSource,
         /// Positive bucket duration in whole milliseconds, representable as `i64` milliseconds.
         aggregation: Duration,
         /// Rolling duration: a positive multiple of `aggregation`, in whole `i64` milliseconds.
@@ -291,8 +303,6 @@ pub enum FeatureKey {
     VwapTimed {
         /// Market symbol whose events or order book supply this output.
         symbol: Symbol,
-        /// Must be `FeatureSource::Event(EventKind::Trade)`.
-        source: FeatureSource,
         /// Positive bucket duration in whole milliseconds, representable as `i64` milliseconds.
         aggregation: Duration,
         /// Rolling duration: a positive multiple of `aggregation`, in whole `i64` milliseconds.

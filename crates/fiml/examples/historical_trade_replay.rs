@@ -14,9 +14,8 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use fiml::{
-    Event, EventField, EventKind, FeatureDefinition, FeatureExtractorSpec, FeatureId, FeatureKey,
-    FeatureSource, Pipeline, PipelineSpec, Symbol, TradeSide, TransformerDefinition,
-    VecFeatureVector, WarmupPolicy,
+    Event, EventField, FeatureDefinition, FeatureExtractorSpec, FeatureId, FeatureKey, Pipeline,
+    PipelineSpec, Symbol, TradeSide, TransformerDefinition, VecFeatureVector, WarmupPolicy,
 };
 
 const INPUT_HEADER: &str = "timestamp,symbol,price,quantity,aggressor_side";
@@ -102,7 +101,6 @@ where
 fn build_extractor(
     symbol: Symbol,
 ) -> Result<Pipeline<VecFeatureVector, VecFeatureVector>, fiml::FimlError> {
-    let trade_event = FeatureSource::Event(EventKind::Trade);
     let definitions = [
         FeatureKey::Field {
             symbol,
@@ -114,13 +112,11 @@ fn build_extractor(
         },
         FeatureKey::Cvd {
             symbol,
-            source: trade_event,
             window: 3,
             warmup_policy: WarmupPolicy::FullWindow,
         },
         FeatureKey::TradeCountTimed {
             symbol,
-            source: trade_event,
             aggregation: Duration::from_secs(1),
             window: Duration::from_secs(3),
             warmup_policy: WarmupPolicy::FullWindow,

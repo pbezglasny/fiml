@@ -210,13 +210,12 @@ fn canonical_sort_key(key: &FeatureKey) -> (bool, String, u8, u8, u8, u128, u128
         ),
         FeatureKey::Cvd {
             symbol,
-            source,
             warmup_policy,
             ..
         } => (
             *symbol,
             0,
-            source_rank(*source),
+            source_rank(FeatureSource::Event(crate::EventKind::Trade)),
             warmup_rank(*warmup_policy),
             0,
             0,
@@ -233,7 +232,7 @@ fn canonical_sort_key(key: &FeatureKey) -> (bool, String, u8, u8, u8, u128, u128
                 crate::ReturnKind::Simple => 29,
                 crate::ReturnKind::Log => 30,
             },
-            source_rank(*source),
+            source_rank(FeatureSource::Field(*source)),
             0,
             0,
             0,
@@ -247,7 +246,7 @@ fn canonical_sort_key(key: &FeatureKey) -> (bool, String, u8, u8, u8, u128, u128
         } => (
             *symbol,
             27,
-            source_rank(*source),
+            source_rank(FeatureSource::Field(*source)),
             warmup_rank(*warmup_policy),
             0,
             0,
@@ -262,7 +261,7 @@ fn canonical_sort_key(key: &FeatureKey) -> (bool, String, u8, u8, u8, u128, u128
         } => (
             *symbol,
             5,
-            source_rank(*source),
+            source_rank(FeatureSource::Field(*source)),
             warmup_rank(*warmup_policy),
             aggregation.as_nanos(),
             0,
@@ -270,14 +269,13 @@ fn canonical_sort_key(key: &FeatureKey) -> (bool, String, u8, u8, u8, u128, u128
         ),
         FeatureKey::ObvTimed {
             symbol,
-            source,
             aggregation,
             warmup_policy,
             ..
         } => (
             *symbol,
             3,
-            source_rank(*source),
+            source_rank(FeatureSource::Event(crate::EventKind::Trade)),
             warmup_rank(*warmup_policy),
             aggregation.as_nanos(),
             0,
@@ -292,23 +290,30 @@ fn canonical_sort_key(key: &FeatureKey) -> (bool, String, u8, u8, u8, u128, u128
         } => (
             *symbol,
             28,
-            source_rank(*source),
+            source_rank(FeatureSource::Field(*source)),
             warmup_rank(*warmup_policy),
             aggregation.as_nanos(),
             0,
             0,
         ),
-        FeatureKey::Vpt { symbol, source } => (*symbol, 26, source_rank(*source), 0, 0, 0, 0),
+        FeatureKey::Vpt { symbol } => (
+            *symbol,
+            26,
+            source_rank(FeatureSource::Event(crate::EventKind::Trade)),
+            0,
+            0,
+            0,
+            0,
+        ),
         FeatureKey::TradeCountTimed {
             symbol,
-            source,
             aggregation,
             window,
             warmup_policy,
         } => (
             *symbol,
             7,
-            source_rank(*source),
+            source_rank(FeatureSource::Event(crate::EventKind::Trade)),
             warmup_rank(*warmup_policy),
             aggregation.as_nanos(),
             window.as_nanos(),
@@ -316,14 +321,13 @@ fn canonical_sort_key(key: &FeatureKey) -> (bool, String, u8, u8, u8, u128, u128
         ),
         FeatureKey::TradeVolumeTimed {
             symbol,
-            source,
             aggregation,
             warmup_policy,
             ..
         } => (
             *symbol,
             31,
-            source_rank(*source),
+            source_rank(FeatureSource::Event(crate::EventKind::Trade)),
             warmup_rank(*warmup_policy),
             aggregation.as_nanos(),
             0,
@@ -331,14 +335,13 @@ fn canonical_sort_key(key: &FeatureKey) -> (bool, String, u8, u8, u8, u128, u128
         ),
         FeatureKey::VwapTimed {
             symbol,
-            source,
             aggregation,
             warmup_policy,
             ..
         } => (
             *symbol,
             32,
-            source_rank(*source),
+            source_rank(FeatureSource::Event(crate::EventKind::Trade)),
             warmup_rank(*warmup_policy),
             aggregation.as_nanos(),
             0,

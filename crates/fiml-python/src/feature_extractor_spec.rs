@@ -4,8 +4,8 @@ use std::time::Duration;
 
 use fiml::order_book::{OrderBookConfig, UpdatePolicy};
 use fiml::{
-    EventField, EventKind, FeatureDefinition, FeatureExtractorSpec as CoreFeatureExtractorSpec,
-    FeatureKey, FeatureSource, ReturnKind, Symbol, WarmupPolicy as CoreWarmupPolicy,
+    EventField, FeatureDefinition, FeatureExtractorSpec as CoreFeatureExtractorSpec, FeatureKey,
+    FeatureSource, ReturnKind, Symbol, WarmupPolicy as CoreWarmupPolicy,
 };
 use pyo3::{exceptions::PyValueError, prelude::*};
 
@@ -153,7 +153,7 @@ impl FeatureExtractorSpec {
             return Err(PyValueError::new_err("lags are too large"));
         }
         let symbol = intern_symbol(symbol)?;
-        let source = FeatureSource::Field(parse_value_source("source", source)?);
+        let source = parse_value_source("source", source)?;
         self.add_group(lags.into_iter().map(|lag| {
             definition(FeatureKey::Return {
                 symbol,
@@ -289,7 +289,6 @@ impl FeatureExtractorSpec {
         slf.add_group(windows.into_iter().map(|window| {
             definition(FeatureKey::Cvd {
                 symbol,
-                source: FeatureSource::Event(EventKind::Trade),
                 window,
                 warmup_policy,
             })
@@ -338,7 +337,7 @@ impl FeatureExtractorSpec {
     ) -> PyResult<PyRefMut<'py, Self>> {
         Self::require_windows(&windows)?;
         let symbol = intern_symbol(symbol)?;
-        let source = FeatureSource::Field(parse_value_source("source", source)?);
+        let source = parse_value_source("source", source)?;
         let warmup_policy = warmup.into();
         slf.add_group(windows.into_iter().map(|window| {
             definition(FeatureKey::Volatility {
@@ -377,7 +376,7 @@ impl FeatureExtractorSpec {
         slf.add_group(windows.into_iter().map(|window| {
             definition(FeatureKey::SmaTimed {
                 symbol,
-                source: FeatureSource::Field(field),
+                source: field,
                 aggregation,
                 window,
                 warmup_policy,
@@ -405,7 +404,7 @@ impl FeatureExtractorSpec {
     ) -> PyResult<PyRefMut<'py, Self>> {
         Self::require_windows(&windows)?;
         let symbol = intern_symbol(symbol)?;
-        let source = FeatureSource::Field(parse_value_source("source", source)?);
+        let source = parse_value_source("source", source)?;
         let aggregation = parse_duration("aggregation", aggregation)?;
         let windows = parse_durations("windows", windows)?;
         let warmup_policy = warmup.into();
@@ -444,7 +443,6 @@ impl FeatureExtractorSpec {
         slf.add_group(windows.into_iter().map(|window| {
             definition(FeatureKey::ObvTimed {
                 symbol,
-                source: FeatureSource::Event(EventKind::Trade),
                 aggregation,
                 window,
                 warmup_policy,
@@ -476,7 +474,6 @@ impl FeatureExtractorSpec {
         slf.add_group(windows.into_iter().map(|window| {
             definition(FeatureKey::TradeVolumeTimed {
                 symbol,
-                source: FeatureSource::Event(EventKind::Trade),
                 aggregation,
                 window,
                 warmup_policy,
@@ -508,7 +505,6 @@ impl FeatureExtractorSpec {
         slf.add_group(windows.into_iter().map(|window| {
             definition(FeatureKey::VwapTimed {
                 symbol,
-                source: FeatureSource::Event(EventKind::Trade),
                 aggregation,
                 window,
                 warmup_policy,
@@ -521,7 +517,6 @@ impl FeatureExtractorSpec {
     fn vpt<'py>(mut slf: PyRefMut<'py, Self>, symbol: &str) -> PyResult<PyRefMut<'py, Self>> {
         slf.add_group([definition(FeatureKey::Vpt {
             symbol: intern_symbol(symbol)?,
-            source: FeatureSource::Event(EventKind::Trade),
         })])?;
         Ok(slf)
     }
@@ -547,7 +542,6 @@ impl FeatureExtractorSpec {
         let window = parse_duration("window", window)?;
         slf.add_group([definition(FeatureKey::TradeCountTimed {
             symbol,
-            source: FeatureSource::Event(EventKind::Trade),
             aggregation,
             window,
             warmup_policy: warmup.into(),

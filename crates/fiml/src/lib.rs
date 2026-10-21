@@ -439,10 +439,6 @@ pub enum InvalidIndicatorDefinitionError {
     DuplicateFeatureKey,
     /// Two definitions use the same output ID.
     DuplicateFeatureId,
-    /// The indicator requires a scalar event field as input.
-    ScalarEventFieldSourceRequired,
-    /// The indicator requires complete trade events as input.
-    TradeEventSourceRequired,
     /// A sample window or lag is zero.
     WindowTooShort,
     /// A sample window or lag exceeds the supported maximum.
@@ -830,10 +826,6 @@ impl Display for InvalidIndicatorDefinitionError {
             }
             Self::DuplicateFeatureKey => f.write_str("duplicates an earlier feature key"),
             Self::DuplicateFeatureId => f.write_str("duplicates an earlier feature ID"),
-            Self::ScalarEventFieldSourceRequired => {
-                f.write_str("requires a scalar event-field source")
-            }
-            Self::TradeEventSourceRequired => f.write_str("requires Event(Trade) as its source"),
             Self::WindowTooShort => f.write_str("window must be at least 1"),
             Self::WindowTooLarge => f.write_str("window is too large"),
             Self::AggregationTooShort => f.write_str("aggregation must be at least 1 millisecond"),
