@@ -45,6 +45,10 @@ name = "ring_buffer"
 harness = false
 
 [[bench]]
+name = "compiled_dispatch"
+harness = false
+
+[[bench]]
 name = "quantile_transform"
 harness = false
 
