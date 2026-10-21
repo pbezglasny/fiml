@@ -359,6 +359,29 @@ just test-python  # Run only Python tests
 just marimo       # Open the notebook editor
 ```
 
+Run the compiled event-to-vector throughput benchmark with:
+
+```bash
+cargo bench -p fiml --bench compiled_dispatch
+# Run the workload assertions once without collecting timings:
+cargo bench -p fiml --bench compiled_dispatch -- --test
+```
+
+It compares `FeatureExtractor::handle_event` and `Pipeline::handle_event` for
+1, 4, and 16 subscribed symbols, with 1, 3, and 4 windows respectively (8–512
+samples or time buckets). Benchmark IDs include raw/model output counts.
+The deterministic stream mixes price, volume, trade, and clock events, plus
+an unrelated symbol that still advances the global elapsed-time feature.
+Extractors compute timed SMAs and trade counts; pipelines add identity,
+standard scaling, sample SMA/EMA, and grouped event-lag transformations.
+
+Construction, full-window warm-up, output assertions, and event batch creation
+are outside measurement. Each timed iteration drains a prebuilt batch into a
+persistent runtime, consumes outputs with `black_box`, and continues timestamps
+from the previous batch. Throughput counts all dispatched events, including
+unrelated symbols and clock ticks. Allocation guarantees remain covered by
+`cargo test -p fiml --test pipeline_allocations`; timings have no CI threshold.
+
 Other docs
 ----
 
