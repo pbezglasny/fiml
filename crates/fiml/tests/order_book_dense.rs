@@ -57,13 +57,22 @@ fn assert_books_equal(tree: &OrderBook, dense: &OrderBook) {
         }
         for (from, to) in [
             (dec!(94), dec!(106)),
+            (dec!(94), dec!(95)),
+            (dec!(95), dec!(95.25)),
             (dec!(95), dec!(100)),
             (dec!(97.13), dec!(103.17)),
+            (dec!(104.75), dec!(105)),
+            (dec!(105), dec!(106)),
+            (dec!(106), dec!(107)),
         ] {
             assert_eq!(
                 tree.volume_between_prices(side, from, to).unwrap(),
                 dense.volume_between_prices(side, from, to).unwrap()
             );
+        }
+        for (from, to) in [(dec!(100), dec!(100)), (dec!(101), dec!(100))] {
+            assert!(tree.volume_between_prices(side, from, to).is_err());
+            assert!(dense.volume_between_prices(side, from, to).is_err());
         }
     }
     assert_eq!(

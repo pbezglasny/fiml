@@ -529,6 +529,41 @@ fn quantile_transform_stage_does_not_allocate_per_event() {
 }
 
 #[test]
+fn sparse_book_queries_on_both_sides_do_not_allocate() {
+    use fiml::order_book::{OrderBook, OrderBookLevel, OrderBookUpdate, Side, UpdatePolicy};
+    use rust_decimal::{Decimal, dec};
+
+    let mut book = OrderBook::new(UpdatePolicy::Contiguous, 1);
+    let levels: Vec<_> = (1..=64)
+        .map(|price| OrderBookLevel::new(Decimal::from(price), Decimal::ONE))
+        .collect();
+    book.apply_update(OrderBookUpdate::new_snapshot(0, levels.clone(), levels), 0)
+        .unwrap();
+    let allocations = count_allocations(|| {
+        black_box(book.best_bid());
+        black_box(book.best_ask());
+        for side in [Side::Bid, Side::Ask] {
+            black_box(book.level(side, dec!(32)));
+            for n in [0, 1, 10, usize::MAX] {
+                for level in book.top_n(side, n) {
+                    black_box(level);
+                }
+                black_box(book.imbalance(n));
+            }
+            black_box(book.depth_until_price(side, dec!(32)));
+            for size in [dec!(0), dec!(1), dec!(64), dec!(65)] {
+                black_box(book.depth_until_total_size(side, size));
+            }
+            black_box(
+                book.volume_between_prices(side, dec!(16), dec!(48))
+                    .unwrap(),
+            );
+        }
+    });
+    assert_eq!(allocations, 0);
+}
+
+#[test]
 fn configured_book_derivation_and_transformation_do_not_allocate() {
     use fiml::order_book::{
         OrderBookConfig, OrderBookDelta, OrderBookLevel, OrderBookLevelUpdate, OrderBookSnapshot,
