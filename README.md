@@ -269,6 +269,13 @@ Behavior and limits
   extractor, timed windows advance on events for their own symbol. Global
   `Time` events do not advance other symbols' windows. Standalone timed
   indicators expose `observe(timestamp)` to advance time without adding data.
+  Timed SMA, OBV, trade count, trade volume, and VWAP support the full signed
+  `i64` timestamp range in standalone indicators, extractors, and pipelines.
+  Buckets align down to multiples of aggregation, including negative times;
+  they expire when `bucket_start + window <= timestamp`, even when the bucket
+  start or expiry lies outside `i64`. Aggregation and window durations remain
+  positive whole milliseconds bounded by `i64::MAX`, with windows an exact
+  multiple of aggregation and subject to history capacity limits.
 * **Elapsed-time transformations:** `TransformerDefinition::lagged_timed`,
   `delta_timed`, `simple_return_timed`, and `log_return_timed` accept a positive
   whole-millisecond `Duration`. For example,

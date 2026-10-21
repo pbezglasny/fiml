@@ -9,7 +9,7 @@ use crate::{DurationField, FimlError, IntegerTarget, InvalidArgumentError, Resul
 
 /// One fixed-duration bucket used by fixed-width rolling timed sums.
 pub struct TimedSumBucket<const VALUES: usize> {
-    timestamp: i64,
+    index: i64,
     values: [f64; VALUES],
 }
 
@@ -168,18 +168,15 @@ where
         Ok(())
     }
 
-    fn bucket_start(&self, timestamp: i64) -> i64 {
-        timestamp - timestamp.rem_euclid(self.millis_aggregation)
-    }
-
-    fn expire_old_buckets(&mut self, current_window_start: i64) {
+    fn expire_old_buckets(&mut self, now: i64) {
         let data_len = self.data.len();
         for window in &mut self.windows[..self.window_count] {
             while window.front_offset < data_len {
                 let Some(bucket) = self.data.peek_front_at(window.front_offset) else {
                     break;
                 };
-                if bucket.timestamp + window.duration > current_window_start {
+                let start = i128::from(bucket.index) * i128::from(self.millis_aggregation);
+                if start + i128::from(window.duration) > i128::from(now) {
                     break;
                 }
                 for (sum, value) in window.values.iter_mut().zip(bucket.values) {
@@ -220,7 +217,7 @@ where
             return false;
         }
         self.last_observed_timestamp = Some(now);
-        self.expire_old_buckets(self.bucket_start(now));
+        self.expire_old_buckets(now);
         self.update_readiness(now);
         true
     }
@@ -231,11 +228,12 @@ where
             self.update_readiness(now);
         }
         let _ = self.observe(now);
-        let bucket_start = self.bucket_start(now);
+        // Bucket indices fit in i64 even when the aligned start precedes i64::MIN.
+        let bucket_index = now.div_euclid(self.millis_aggregation);
         if self
             .data
             .peek_back()
-            .is_some_and(|bucket| bucket.timestamp == bucket_start)
+            .is_some_and(|bucket| bucket.index == bucket_index)
         {
             let mut bucket = self.data.pop_back().unwrap();
             for (sum, value) in bucket.values.iter_mut().zip(values) {
@@ -245,7 +243,7 @@ where
         } else if self
             .data
             .push_back(TimedSumBucket {
-                timestamp: bucket_start,
+                index: bucket_index,
                 values,
             })
             .is_some()

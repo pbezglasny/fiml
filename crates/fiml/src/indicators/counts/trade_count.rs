@@ -13,6 +13,9 @@ use crate::{
 pub type CountBucket = TimedSumBucket<1>;
 
 /// Number of trades within a single rolling time window.
+///
+/// The full `i64` timestamp range is supported; buckets are aligned down to
+/// multiples of aggregation, including before the Unix epoch.
 pub struct TradeCountTimed<R>
 where
     R: RingBuffer<Item = CountBucket>,
