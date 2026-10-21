@@ -8,37 +8,10 @@ use crate::order_book::{OrderBookLevel, Side};
 
 use super::{DenseBookSide, DepthUntilSizeResult, OrderBookUpdateError};
 
-use std::ops::Bound::{Excluded, Included};
-#[derive(Eq, PartialEq)]
-struct BookSideKey {
-    side: Side,
-    price: Decimal,
-}
-
-impl PartialOrd for BookSideKey {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl Ord for BookSideKey {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        match self.side {
-            Side::Bid => self.price.cmp(&other.price).reverse(),
-            Side::Ask => self.price.cmp(&other.price),
-        }
-    }
-}
-
-impl BookSideKey {
-    fn new(side: Side, price: Decimal) -> Self {
-        Self { side, price }
-    }
-}
 /// Sparse price-level storage backed by a BTreeMap.
 pub struct BTreeBookSide {
     side: Side,
-    levels: BTreeMap<BookSideKey, Decimal>,
+    levels: BTreeMap<Decimal, Decimal>,
 }
 
 impl BTreeBookSide {
@@ -57,11 +30,10 @@ impl BookSideStorage for BTreeBookSide {
     }
 
     fn update_level(&mut self, price: Decimal, new_size: Decimal) {
-        let key = BookSideKey::new(self.side, price);
         if new_size == Decimal::ZERO {
-            self.levels.remove(&key);
+            self.levels.remove(&price);
         } else {
-            self.levels.insert(key, new_size);
+            self.levels.insert(price, new_size);
         }
     }
 
@@ -70,39 +42,37 @@ impl BookSideStorage for BTreeBookSide {
     }
 
     fn best_level(&self) -> Option<OrderBookLevel> {
-        self.levels
-            .first_key_value()
-            .map(|(key, size)| OrderBookLevel {
-                price: key.price,
-                size: *size,
-            })
+        match self.side {
+            Side::Bid => self.levels.last_key_value(),
+            Side::Ask => self.levels.first_key_value(),
+        }
+        .map(|(price, size)| OrderBookLevel::new(*price, *size))
     }
 
     fn get_level_size(&self, price: Decimal) -> Option<Decimal> {
-        self.levels
-            .get(&BookSideKey::new(self.side, price))
-            .cloned()
+        self.levels.get(&price).copied()
     }
 
     fn top_n(&self, n: usize) -> impl Iterator<Item = OrderBookLevel> {
-        self.levels
-            .iter()
-            .take(n)
-            .map(|(key, size)| OrderBookLevel::new(key.price, *size))
+        let mut levels = self.levels.iter();
+        std::iter::from_fn(move || match self.side {
+            Side::Bid => levels.next_back(),
+            Side::Ask => levels.next(),
+        })
+        .take(n)
+        .map(|(price, size)| OrderBookLevel::new(*price, *size))
     }
 
     fn volume_between_prices(&self, from_price: Decimal, to_price: Decimal) -> Decimal {
-        let from_key = BookSideKey::new(self.side, from_price);
-        let to_key = BookSideKey::new(self.side, to_price);
-        let bounds = match self.side {
-            Side::Bid => (Excluded(to_key), Included(from_key)),
-            Side::Ask => (Included(from_key), Excluded(to_key)),
-        };
-        self.levels.range(bounds).map(|(_, size)| size).sum()
-    }
-
-    fn top_n_size(&self, n: usize) -> Decimal {
-        self.levels.values().take(n).sum()
+        let sizes = self
+            .levels
+            .range(from_price..to_price)
+            .map(|(_, size)| size);
+        // Preserve summation order because Decimal addition can round at its precision limit.
+        match self.side {
+            Side::Bid => sizes.rev().sum(),
+            Side::Ask => sizes.sum(),
+        }
     }
 }
 
