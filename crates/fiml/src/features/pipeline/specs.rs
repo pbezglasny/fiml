@@ -1,242 +1,199 @@
-//! Defines validated raw-feature and model-input pipeline layouts.
-//!
-use super::{FittedStage, Pipeline, StageRuntime};
-use crate::{
-    FeatureExtractorSpec, FeatureVector, FimlError, InvalidArgumentError, Result,
-    TransformerDefinition,
-};
+//! Owns and validates an append-only graph before compiling independent runtimes.
 
-/// Validated configuration for raw extraction and the final model-input layout.
-///
-/// Scalar transformations define the base order; each fitted stage consumes that
-/// layout or the preceding stage, as do additional scalar stages.
-/// The last stage owns the final vector layout.
-/// Layouts have separate ID namespaces and may therefore reuse names.
+use std::borrow::Cow;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+use super::{FittedStage, Pipeline};
+use crate::{FeatureExtractorSpec, FeatureId, FimlError, Result};
+
+pub(super) fn owner_id() -> u64 {
+    static NEXT: AtomicU64 = AtomicU64::new(1);
+    NEXT.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1))
+        .expect("pipeline owner IDs exhausted")
+}
+
+pub(super) fn invalid(reason: impl Into<String>) -> FimlError {
+    FimlError::InvalidPipeline {
+        reason: reason.into(),
+    }
+}
+
+/// Opaque reference to a node in its originating builder; does not borrow it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct NodeId {
+    owner: u64,
+    index: usize,
+}
+
+/// A transformation consuming an earlier node's active vector.
 #[derive(Debug, Clone, PartialEq)]
+pub struct PipelineNode {
+    /// Root is index zero; transformation indexes start at one.
+    pub parent: usize,
+    /// Numeric configuration, independent of runtime histories.
+    pub stage: FittedStage,
+}
+
+/// An ordered name exposing an existing node without copying its values.
+#[derive(Debug, Clone, PartialEq)]
+pub struct OutputSpec {
+    /// Unique, nonblank name outside the reserved namespace.
+    pub name: String,
+    /// Index in the graph, including the extractor at zero.
+    pub node: usize,
+}
+
+/// Append-only graph configuration; each build creates independent runtime state.
+#[derive(Debug)]
 pub struct PipelineSpec {
-    raw_feature_extractor_spec: FeatureExtractorSpec,
-    transformation_definitions: Vec<TransformerDefinition>,
-    stages: Vec<FittedStage>,
-    feature_vector_capacity: usize,
+    owner: u64,
+    extractor: FeatureExtractorSpec,
+    nodes: Vec<PipelineNode>,
+    outputs: Vec<OutputSpec>,
     checksum: Option<String>,
 }
 
+impl Clone for PipelineSpec {
+    fn clone(&self) -> Self {
+        Self {
+            owner: owner_id(),
+            extractor: self.extractor.clone(),
+            nodes: self.nodes.clone(),
+            outputs: self.outputs.clone(),
+            checksum: self.checksum.clone(),
+        }
+    }
+}
+
+impl PartialEq for PipelineSpec {
+    fn eq(&self, other: &Self) -> bool {
+        self.extractor == other.extractor
+            && self.nodes == other.nodes
+            && self.outputs == other.outputs
+            && self.checksum == other.checksum
+    }
+}
+
 impl PipelineSpec {
-    /// Creates a spec whose final width equals its transformation count.
-    pub fn new(
-        raw_feature_extractor_spec: FeatureExtractorSpec,
-        transformation_definitions: impl IntoIterator<Item = TransformerDefinition>,
-    ) -> Result<Self> {
-        let transformation_definitions = transformation_definitions.into_iter().collect::<Vec<_>>();
-        let capacity = transformation_definitions.len();
-        Self::with_metadata(
-            raw_feature_extractor_spec,
-            transformation_definitions,
-            capacity,
-            None,
-        )
-    }
-
-    /// Creates a spec with explicit final width and trailing reserved cells.
-    pub fn with_capacity(
-        raw_feature_extractor_spec: FeatureExtractorSpec,
-        transformation_definitions: impl IntoIterator<Item = TransformerDefinition>,
-        feature_vector_capacity: usize,
-    ) -> Result<Self> {
-        Self::with_metadata(
-            raw_feature_extractor_spec,
-            transformation_definitions,
-            feature_vector_capacity,
-            None,
-        )
-    }
-
-    /// Creates a spec with explicit final width and opaque checksum metadata.
-    pub fn with_metadata(
-        raw_feature_extractor_spec: FeatureExtractorSpec,
-        transformation_definitions: impl IntoIterator<Item = TransformerDefinition>,
-        feature_vector_capacity: usize,
-        checksum: Option<String>,
-    ) -> Result<Self> {
-        Self::with_stages(
-            raw_feature_extractor_spec,
-            transformation_definitions,
-            [],
-            feature_vector_capacity,
-            checksum,
-        )
-    }
-
-    /// Validates a base scalar layout followed by scalar or fitted vector stages.
-    /// Capacity describes the final output, independently of intermediate widths.
-    pub fn with_stages(
-        raw_feature_extractor_spec: FeatureExtractorSpec,
-        transformation_definitions: impl IntoIterator<Item = TransformerDefinition>,
-        stages: impl IntoIterator<Item = FittedStage>,
-        feature_vector_capacity: usize,
-        checksum: Option<String>,
-    ) -> Result<Self> {
-        let transformation_definitions = transformation_definitions.into_iter().collect::<Vec<_>>();
-        let stages = stages.into_iter().collect::<Vec<_>>();
-        let final_length = stages
-            .last()
-            .map_or(transformation_definitions.len(), |stage| {
-                stage.outputs().len()
-            });
-        if feature_vector_capacity < final_length {
-            return Err(FimlError::InvalidArgument(
-                InvalidArgumentError::FeatureVectorCapacityTooSmall {
-                    capacity: feature_vector_capacity,
-                    active_length: final_length,
-                },
-            ));
+    /// Creates an extractor root with no transformations or registered outputs.
+    pub fn new(extractor: FeatureExtractorSpec) -> Self {
+        Self {
+            owner: owner_id(),
+            extractor,
+            nodes: Vec::new(),
+            outputs: Vec::new(),
+            checksum: None,
         }
+    }
 
-        let raw_ids = raw_feature_extractor_spec
-            .definitions()
-            .iter()
-            .map(|definition| definition.id.clone())
-            .collect::<Vec<_>>();
-        crate::features::transformers::validate(&transformation_definitions, &raw_ids)?;
-
-        if !stages.is_empty() {
-            let base_ids = transformation_definitions
-                .iter()
-                .map(|definition| definition.output.clone())
-                .collect::<Vec<_>>();
-            let mut inputs = std::borrow::Cow::Borrowed(base_ids.as_slice());
-            for (index, stage) in stages.iter().enumerate() {
-                stage
-                    .validate(&inputs)
-                    .map_err(|reason| FimlError::InvalidPipelineStage { index, reason })?;
-                inputs = stage.outputs();
-            }
+    /// Returns a reusable root handle belonging to this builder.
+    pub fn root(&self) -> NodeId {
+        NodeId {
+            owner: self.owner,
+            index: 0,
         }
+    }
 
-        Ok(Self {
-            raw_feature_extractor_spec,
-            transformation_definitions,
-            stages,
-            feature_vector_capacity,
-            checksum,
+    /// Resolves an artifact-local index into a handle owned by this builder.
+    pub fn node(&self, index: usize) -> Option<NodeId> {
+        (index <= self.nodes.len()).then_some(NodeId {
+            owner: self.owner,
+            index,
         })
     }
 
-    /// Returns the raw feature-extraction configuration.
-    pub fn raw_feature_extractor_spec(&self) -> &FeatureExtractorSpec {
-        &self.raw_feature_extractor_spec
+    fn check_node(&self, node: NodeId) -> Result<usize> {
+        if node.owner != self.owner || node.index > self.nodes.len() {
+            return Err(invalid("node belongs to another pipeline builder"));
+        }
+        Ok(node.index)
     }
 
-    /// Returns scalar transformations in base-vector order.
-    pub fn transformation_definitions(&self) -> &[TransformerDefinition] {
-        &self.transformation_definitions
+    /// Validates and appends a stage, leaving existing nodes unchanged.
+    pub fn add(&mut self, parent: NodeId, stage: FittedStage) -> Result<NodeId> {
+        let parent = self.check_node(parent)?;
+        stage.validate(&self.node_ids(parent)).map_err(|reason| {
+            FimlError::InvalidPipelineStage {
+                index: self.nodes.len() + 1,
+                reason,
+            }
+        })?;
+        self.nodes.push(PipelineNode { parent, stage });
+        Ok(self.node(self.nodes.len()).expect("appended node"))
     }
 
-    /// Returns the complete final width, including reserved cells.
-    pub fn feature_vector_capacity(&self) -> usize {
-        self.feature_vector_capacity
+    /// Registers a name without rebinding an existing output or adding computation.
+    pub fn output(&mut self, name: impl Into<String>, node: NodeId) -> Result<()> {
+        let node = self.check_node(node)?;
+        let name = name.into();
+        if name.trim().is_empty() || name.starts_with("__reserved_") {
+            return Err(invalid(
+                "output name must be nonblank and outside the reserved namespace",
+            ));
+        }
+        if self.outputs.iter().any(|output| output.name == name) {
+            return Err(invalid(format!("duplicate output name {name:?}")));
+        }
+        self.outputs.push(OutputSpec { name, node });
+        Ok(())
     }
 
-    /// Returns the number of active final outputs.
-    pub fn feature_vector_length(&self) -> usize {
-        self.stages
-            .last()
-            .map_or(self.transformation_definitions.len(), |stage| {
-                stage.outputs().len()
-            })
+    /// Checks the runnable-output contract before building or exporting.
+    pub fn validate(&self) -> Result<()> {
+        if self.outputs.is_empty() {
+            return Err(invalid("pipeline requires at least one named output"));
+        }
+        for output in &self.outputs {
+            if self.node_ids(output.node).is_empty() {
+                return Err(invalid(format!(
+                    "output {:?} must contain at least one active feature",
+                    output.name
+                )));
+            }
+        }
+        Ok(())
     }
 
-    /// Scalar and fitted vector stages in execution order.
-    pub fn stages(&self) -> &[FittedStage] {
-        &self.stages
-    }
-
-    /// Final active IDs, resolved on the cold configuration path.
-    pub fn output_ids(&self) -> Vec<crate::FeatureId> {
-        match self.stages.last() {
-            Some(stage) => stage.outputs().to_vec(),
-            None => self
-                .transformation_definitions
+    pub(super) fn node_ids(&self, index: usize) -> Cow<'_, [FeatureId]> {
+        if index == 0 {
+            self.extractor
+                .definitions()
                 .iter()
-                .map(|definition| definition.output.clone())
-                .collect(),
+                .map(|definition| definition.id.clone())
+                .collect::<Vec<_>>()
+                .into()
+        } else {
+            self.nodes[index - 1].stage.outputs()
         }
     }
 
-    /// Returns opaque checksum metadata without interpreting or verifying it.
+    /// Active IDs for a node; names resolve only against its direct parent.
+    pub fn feature_ids(&self, node: NodeId) -> Result<Vec<FeatureId>> {
+        Ok(self.node_ids(self.check_node(node)?).into_owned())
+    }
+
+    /// Extractor configuration, including its independently versioned storage layout.
+    pub fn raw_feature_extractor_spec(&self) -> &FeatureExtractorSpec {
+        &self.extractor
+    }
+    /// Transformation nodes in creation order, excluding the extractor root.
+    pub fn nodes(&self) -> &[PipelineNode] {
+        &self.nodes
+    }
+    /// Named outputs in registration order.
+    pub fn outputs(&self) -> &[OutputSpec] {
+        &self.outputs
+    }
+    /// Opaque application metadata; never interpreted or verified.
     pub fn checksum(&self) -> Option<&str> {
         self.checksum.as_deref()
     }
-
-    /// Compiles this spec into caller-supplied raw and final storage.
-    pub fn build<RawV, ModelV>(
-        &self,
-        raw_vector: RawV,
-        mut model_vector: ModelV,
-    ) -> Result<Pipeline<RawV, ModelV>>
-    where
-        RawV: FeatureVector,
-        ModelV: FeatureVector,
-    {
-        if model_vector.capacity() != self.feature_vector_capacity {
-            return Err(FimlError::ModelVectorCapacityMismatch {
-                expected: self.feature_vector_capacity,
-                actual: model_vector.capacity(),
-            });
-        }
-        if model_vector.len() != self.feature_vector_length() {
-            return Err(FimlError::ModelVectorLengthMismatch {
-                expected: self.feature_vector_length(),
-                actual: model_vector.len(),
-            });
-        }
-
-        let feature_extractor = self.raw_feature_extractor_spec.build(raw_vector)?;
-        let operations = crate::features::transformers::compile(
-            &self.transformation_definitions,
-            feature_extractor.feature_ids(),
-        );
-        let output_ids = self.output_ids().into_boxed_slice();
-        for index in 0..model_vector.capacity() {
-            model_vector.set_value_at(index, f64::NAN);
-        }
-
-        let timed = self
-            .transformation_definitions
-            .iter()
-            .chain(
-                self.stages
-                    .iter()
-                    .filter_map(|stage| match stage {
-                        FittedStage::Scalar { transformations } => Some(transformations.as_slice()),
-                        _ => None,
-                    })
-                    .flatten(),
-            )
-            .any(TransformerDefinition::needs_clock);
-        let stages = StageRuntime::new(
-            &self.transformation_definitions,
-            &self.stages,
-            feature_extractor.feature_ids(),
-            timed,
-        );
-        let clocks = vec![
-            None;
-            if timed {
-                feature_extractor.feature_ids().len()
-            } else {
-                0
-            }
-        ]
-        .into_boxed_slice();
-        Ok(Pipeline {
-            feature_extractor,
-            clocks,
-            operations,
-            stages,
-            observations: vec![false; model_vector.capacity()].into_boxed_slice(),
-            model_vector,
-            output_ids,
-        })
+    /// Sets opaque application metadata without modifying the graph.
+    pub fn set_checksum(&mut self, checksum: Option<String>) {
+        self.checksum = checksum;
+    }
+    /// Compiles a snapshot into owned buffers and independent histories.
+    pub fn build(&self) -> Result<Pipeline> {
+        Pipeline::new(self)
     }
 }

@@ -1,6 +1,8 @@
+mod common;
+
 use fiml::{
-    ArrayFeatureVector, Event, EventField, FeatureDefinition, FeatureExtractorSpec, FeatureId,
-    FeatureKey, FittedStage, PipelineSpec, Symbol, TransformerDefinition as T, WarmupPolicy,
+    Event, EventField, FeatureDefinition, FeatureExtractorSpec, FeatureId, FeatureKey, FittedStage,
+    PipelineSpec, Symbol, TransformerDefinition as T, WarmupPolicy,
 };
 
 fn id(name: &str) -> FeatureId {
@@ -37,14 +39,9 @@ fn shared_artifact_preserves_order_and_observation_lags_across_symbols_and_stage
     .unwrap();
     let spec: PipelineSpec = serde_json::from_value(fixture["pipeline"].clone()).unwrap();
     assert_eq!(serde_json::to_value(&spec).unwrap(), fixture["pipeline"]);
-    let mut pipeline = spec
-        .build(
-            ArrayFeatureVector::<2>::new(),
-            ArrayFeatureVector::<8>::new(),
-        )
-        .unwrap();
+    let mut pipeline = spec.build().unwrap();
     assert_eq!(
-        pipeline.output_ids(),
+        pipeline.output("model").unwrap().feature_ids(),
         [
             "d3",
             "r1",
@@ -78,14 +75,14 @@ fn shared_artifact_preserves_order_and_observation_lags_across_symbols_and_stage
             .iter()
             .map(|value| value.as_f64().unwrap_or(f64::NAN))
             .collect();
-        equal(pipeline.values(), &expected);
+        equal(pipeline.output("model").unwrap().values(), &expected);
     }
 }
 
 #[test]
 fn changes_sample_only_finite_observations_after_sma_and_pca() {
     let symbol = Symbol::new("change-stages").unwrap();
-    let mut pipeline = PipelineSpec::with_stages(
+    let mut pipeline = common::linear_spec(
         raw(symbol),
         [T::standard_scale(id("p"), id("x"), 0., 0.5)],
         [
@@ -112,14 +109,10 @@ fn changes_sample_only_finite_observations_after_sma_and_pca() {
                 ],
             },
         ],
-        2,
         None,
     )
     .unwrap()
-    .build(
-        ArrayFeatureVector::<1>::new(),
-        ArrayFeatureVector::<2>::new(),
-    )
+    .build()
     .unwrap();
     for (timestamp, (price, expected)) in [
         (1., [f64::NAN, f64::NAN]),    // SMA warming up.
@@ -135,13 +128,19 @@ fn changes_sample_only_finite_observations_after_sma_and_pca() {
         pipeline
             .handle_event(Event::price(symbol, price, timestamp as i64))
             .unwrap();
-        equal(pipeline.values(), &expected);
-        assert_eq!(pipeline.output_observations(), &[true, true]);
+        equal(pipeline.output("model").unwrap().values(), &expected);
+        assert_eq!(
+            pipeline.output("model").unwrap().observations(),
+            &[true, true]
+        );
         pipeline
             .handle_event(Event::volume(symbol, 1., timestamp as i64))
             .unwrap();
-        equal(pipeline.values(), &expected);
-        assert_eq!(pipeline.output_observations(), &[false, false]);
+        equal(pipeline.output("model").unwrap().values(), &expected);
+        assert_eq!(
+            pipeline.output("model").unwrap().observations(),
+            &[false, false]
+        );
     }
 }
 
@@ -150,10 +149,29 @@ fn validates_lags_and_preserves_history_on_rejected_events_and_context_refresh()
     let symbol = Symbol::new("change-validation").unwrap();
     for constructor in [T::delta, T::simple_return, T::log_return] {
         for lag in [0, 10_001] {
-            assert!(PipelineSpec::new(raw(symbol), [constructor(id("p"), id("x"), lag)]).is_err());
+            assert!(
+                common::linear_spec(raw(symbol), [constructor(id("p"), id("x"), lag)], [], None)
+                    .is_err()
+            );
         }
-        assert!(PipelineSpec::new(raw(symbol), [constructor(id("p"), id("x"), 10_000)]).is_ok());
-        assert!(PipelineSpec::new(raw(symbol), [constructor(id("missing"), id("x"), 1)]).is_err());
+        assert!(
+            common::linear_spec(
+                raw(symbol),
+                [constructor(id("p"), id("x"), 10_000)],
+                [],
+                None
+            )
+            .is_ok()
+        );
+        assert!(
+            common::linear_spec(
+                raw(symbol),
+                [constructor(id("missing"), id("x"), 1)],
+                [],
+                None
+            )
+            .is_err()
+        );
     }
     let spec = FeatureExtractorSpec::new([
         raw(symbol).definitions()[0].clone(),
@@ -166,7 +184,7 @@ fn validates_lags_and_preserves_history_on_rejected_events_and_context_refresh()
         ),
     ])
     .unwrap();
-    let mut pipeline = PipelineSpec::with_stages(
+    let mut pipeline = common::linear_spec(
         spec,
         [
             T::delta(id("p"), id("d"), 1),
@@ -175,31 +193,27 @@ fn validates_lags_and_preserves_history_on_rejected_events_and_context_refresh()
         [FittedStage::Scalar {
             transformations: vec![T::delta(id("d"), id("dd"), 1)],
         }],
-        1,
         None,
     )
     .unwrap()
-    .build(
-        ArrayFeatureVector::<2>::new(),
-        ArrayFeatureVector::<1>::new(),
-    )
+    .build()
     .unwrap();
     for (timestamp, price) in [1., 3., 6.].into_iter().enumerate() {
         pipeline
             .handle_event(Event::price(symbol, price, timestamp as i64))
             .unwrap();
     }
-    equal(pipeline.values(), &[1.]);
+    equal(pipeline.output("model").unwrap().values(), &[1.]);
     pipeline.update_context(&[("context", Some(10.))]).unwrap();
-    equal(pipeline.values(), &[1.]);
-    assert_eq!(pipeline.output_observations(), &[false]);
+    equal(pipeline.output("model").unwrap().values(), &[1.]);
+    assert_eq!(pipeline.output("model").unwrap().observations(), &[false]);
     for event in [
         Event::price(symbol, f64::NAN, 3),
         Event::price(symbol, 99., 0),
     ] {
         assert!(pipeline.handle_event(event).is_err());
-        equal(pipeline.values(), &[1.]);
+        equal(pipeline.output("model").unwrap().values(), &[1.]);
     }
     pipeline.handle_event(Event::price(symbol, 10., 3)).unwrap();
-    equal(pipeline.values(), &[1.]);
+    equal(pipeline.output("model").unwrap().values(), &[1.]);
 }

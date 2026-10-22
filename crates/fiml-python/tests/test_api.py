@@ -1,3 +1,4 @@
+from pipeline_fixtures import LinearSpec, SingleOutput
 import numpy as np
 import pandas as pd
 import pytest
@@ -17,8 +18,15 @@ def test_event_kind_codes_remain_stable():
 @pytest.mark.parametrize("value", [None, 100.0])
 def test_scalar_replay_rejects_removed_book_keywords(api, model, method, keyword, value):
     spec = fiml.FeatureExtractorSpec().day_of_week()
-    instance = (api.ModelInputPipeline(fiml.PipelineSpec(spec).identity(spec.feature_ids()[0]))
-                if model else api.FeatureExtractor(spec))
+    if model:
+        graph = fiml.PipelineSpec(spec)
+        graph.output("model", graph.root())
+        native_spec = fiml._fiml.PipelineSpec.from_json(graph.to_json())
+        instance = api.ModelInputPipeline(graph if api is fiml else native_spec)
+        values = (lambda: instance.output("model").values()) if api is fiml else (lambda: instance.values("model"))
+    else:
+        instance = api.FeatureExtractor(spec)
+        values = instance.values
     args = (fiml.KIND_TIME, 0, 0)
     if method == "transform":
         args = tuple(np.array([item], dtype=dtype)
@@ -27,10 +35,10 @@ def test_scalar_replay_rejects_removed_book_keywords(api, model, method, keyword
             value = np.array([value], dtype=np.float64)
     with pytest.raises(TypeError, match=f"unexpected keyword argument '{keyword}'"):
         getattr(instance, method)(*args, **{keyword: value})
-    assert np.isnan(instance.values()).all()
+    assert np.isnan(values()).all()
     instance.output_dtype = "float32"
     instance.update(fiml.KIND_TIME, 0, 0)
-    np.testing.assert_equal(instance.values(), [4.0])
+    np.testing.assert_equal(values(), [4.0])
 
 
 def sample_name(kind, symbol, source, window, warmup="full_window"):
@@ -125,11 +133,11 @@ def test_compute_features_returns_one_multi_symbol_snapshot_per_trade():
 def test_grouped_sma_and_ema_can_consume_trade_price_and_volume():
     raw = (fiml.FeatureExtractorSpec().field("BTCUSDT", source="trade_price", id="price")
            .field("BTCUSDT", source="trade_volume", id="volume"))
-    spec = (fiml.PipelineSpec(raw)
+    spec = (LinearSpec(raw)
             .ema("volume", window=2, warmup=fiml.WarmupPolicy.FIRST_VALUE, output="ema")
             .sma("price", window=2, warmup=fiml.WarmupPolicy.FIRST_VALUE, output="sma2")
             .sma("price", window=3, warmup=fiml.WarmupPolicy.FIRST_VALUE, output="sma3"))
-    extractor = fiml.ModelInputPipeline(spec)
+    extractor = SingleOutput(spec)
     source = pd.DataFrame(dict(symbol=["BTCUSDT"]*4, ts=np.arange(4, dtype=np.int64),
                                price=[1., 1.1, 1.2, 1.], volume=[3., 4., 3., 2.]))
     result = extractor.compute_features(source)
@@ -360,7 +368,7 @@ def test_python_warmup_enum_matches_default_and_first_value_policies():
     assert fiml.WarmupPolicy.FIRST_VALUE != fiml.WarmupPolicy.FULL_WINDOW
     raw = fiml.FeatureExtractorSpec().field("BTCUSDT", source="trade_price", id="price")
     for warmup, missing in [(fiml.WarmupPolicy.FULL_WINDOW, True), (fiml.WarmupPolicy.FIRST_VALUE, False)]:
-        pipeline = fiml.ModelInputPipeline(fiml.PipelineSpec(raw).sma("price", window=2, warmup=warmup))
+        pipeline = SingleOutput(LinearSpec(raw).sma("price", window=2, warmup=warmup))
         pipeline.update(fiml.KIND_TRADE, pipeline.symbol("BTCUSDT"), 0, price=10., volume=1.)
         assert np.isnan(pipeline.values()[0]) == missing
 
@@ -375,10 +383,10 @@ def test_moving_average_source_is_validated():
 
 def test_compatible_feature_calls_are_grouped_and_empty_windows_are_rejected():
     raw = fiml.FeatureExtractorSpec().field("BTCUSDT", source="trade_price", id="price")
-    spec = fiml.PipelineSpec(raw).sma("price", window=2, output="sma2").sma("price", window=3, output="sma3")
+    spec = LinearSpec(raw).sma("price", window=2, output="sma2").sma("price", window=3, output="sma3")
     assert spec.feature_ids() == ["sma2", "sma3"]
     with pytest.raises(ValueError, match="window must be positive"):
-        fiml.PipelineSpec(raw).ema("price", window=0)
+        LinearSpec(raw).ema("price", window=0)
     assert not hasattr(raw, "sma") and not hasattr(raw, "ema")
 
 

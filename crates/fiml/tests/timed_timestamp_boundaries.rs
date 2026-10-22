@@ -1,3 +1,5 @@
+mod common;
+
 use std::time::Duration;
 
 use fiml::indicators::{
@@ -7,8 +9,7 @@ use fiml::indicators::{
 };
 use fiml::{
     ArrayFeatureVector, Event, EventField, FeatureDefinition, FeatureExtractorSpec, FeatureKey,
-    FeatureVector, HeapRingBuffer, PipelineSpec, StackRingBuffer, Symbol, TransformerDefinition,
-    WarmupPolicy,
+    FeatureVector, HeapRingBuffer, StackRingBuffer, Symbol, TransformerDefinition, WarmupPolicy,
 };
 
 fn assert_values(actual: &[f64], expected: &[f64]) {
@@ -77,10 +78,7 @@ fn timestamp_boundaries_match_in_standalone_extractor_and_pipeline() -> fiml::Re
                     TransformerDefinition::identity(definition.id.clone(), definition.id.clone())
                 })
                 .collect::<Vec<_>>();
-            let mut pipeline = PipelineSpec::new(raw, transformations)?.build(
-                ArrayFeatureVector::<5>::new(),
-                ArrayFeatureVector::<5>::new(),
-            )?;
+            let mut pipeline = common::linear_spec(raw, transformations, [], None)?.build()?;
             let mut sma = SimpleMovingAverageTimed::<StackRingBuffer<3, (i64, f64)>, 1>::new_stack(
                 aggregation,
                 warmup_policy,
@@ -168,7 +166,7 @@ fn timestamp_boundaries_match_in_standalone_extractor_and_pipeline() -> fiml::Re
                 );
                 assert_values(extractor.feature_vector().values(), &expected);
                 assert_values(pipeline.raw_values(), &expected);
-                assert_values(pipeline.values(), &expected);
+                assert_values(pipeline.output("model").unwrap().values(), &expected);
             }
         }
     }

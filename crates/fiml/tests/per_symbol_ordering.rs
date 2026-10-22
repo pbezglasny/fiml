@@ -1,9 +1,11 @@
+mod common;
+
 use std::time::Duration;
 
 use fiml::{
     ArrayFeatureVector, Event, EventField, EventKind, FeatureDefinition, FeatureExtractor,
-    FeatureExtractorSpec, FeatureId, FeatureKey, FeatureSource, FeatureVector, FimlError,
-    PipelineSpec, Symbol, TransformerDefinition, WarmupPolicy,
+    FeatureExtractorSpec, FeatureId, FeatureKey, FeatureSource, FeatureVector, FimlError, Symbol,
+    TransformerDefinition, WarmupPolicy,
     order_book::{OrderBookDelta, OrderBookSnapshot},
 };
 
@@ -248,31 +250,30 @@ fn pipeline_lags_follow_arrival_order_and_expose_symbol_timestamps() {
         FeatureId::new("price"),
     )])
     .unwrap();
-    let mut pipeline = PipelineSpec::new(
+    let mut pipeline = common::linear_spec(
         spec,
         [TransformerDefinition::lagged(
             FeatureId::new("price"),
             FeatureId::new("lag"),
             1,
         )],
+        [],
+        None,
     )
     .unwrap()
-    .build(
-        ArrayFeatureVector::<1>::new(),
-        ArrayFeatureVector::<1>::new(),
-    )
+    .build()
     .unwrap();
     assert_eq!(pipeline.last_timestamp_for_symbol(btc), None);
     pipeline.handle_event(Event::price(btc, 10.0, 100)).unwrap();
-    assert!(pipeline.values()[0].is_nan());
+    assert!(pipeline.output("model").unwrap().values()[0].is_nan());
     pipeline.handle_event(Event::price(btc, 11.0, 101)).unwrap();
-    assert_eq!(pipeline.values(), &[10.0]);
+    assert_eq!(pipeline.output("model").unwrap().values(), &[10.0]);
     pipeline.handle_event(Event::price(eth, 20.0, 90)).unwrap();
-    assert_eq!(pipeline.values(), &[11.0]);
+    assert_eq!(pipeline.output("model").unwrap().values(), &[11.0]);
     assert_eq!(pipeline.last_timestamp(), Some(90));
     assert_eq!(pipeline.last_timestamp_for_symbol(btc), Some(101));
     assert_eq!(pipeline.last_timestamp_for_symbol(eth), Some(90));
     assert!(pipeline.handle_event(Event::volume(btc, 1.0, 99)).is_err());
-    assert_eq!(pipeline.values(), &[11.0]);
+    assert_eq!(pipeline.output("model").unwrap().values(), &[11.0]);
     assert_eq!(pipeline.last_timestamp(), Some(90));
 }

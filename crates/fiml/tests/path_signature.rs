@@ -1,6 +1,8 @@
+mod common;
+
 use fiml::{
-    ArrayFeatureVector, Event, EventField, FeatureDefinition, FeatureExtractorSpec, FeatureId,
-    FeatureKey, FittedStage, PipelineSpec, Symbol, TransformerDefinition as T, WarmupPolicy,
+    Event, EventField, FeatureDefinition, FeatureExtractorSpec, FeatureId, FeatureKey, FittedStage,
+    Symbol, TransformerDefinition as T, WarmupPolicy,
 };
 
 fn id(name: &str) -> FeatureId {
@@ -55,7 +57,7 @@ fn rolling_signature_matches_integrals_through_eviction_and_partial_windows() {
     for window in [1, 2, 3, 8, 17, 64] {
         for origin in [0., 1e12] {
             for warmup in [WarmupPolicy::FirstValue, WarmupPolicy::FullWindow] {
-                let spec = PipelineSpec::with_stages(
+                let spec = common::linear_spec(
                     raw(),
                     [T::identity(id("p"), id("p"))],
                     [FittedStage::rolling_path_signature(
@@ -64,18 +66,12 @@ fn rolling_signature_matches_integrals_through_eviction_and_partial_windows() {
                         window,
                         warmup,
                     )],
-                    8,
                     None,
                 )
                 .unwrap();
-                let mut pipeline = spec
-                    .build(
-                        ArrayFeatureVector::<1>::new(),
-                        ArrayFeatureVector::<8>::new_of_length(6),
-                    )
-                    .unwrap();
+                let mut pipeline = spec.build().unwrap();
                 assert_eq!(
-                    pipeline.output_ids(),
+                    pipeline.output("model").unwrap().feature_ids(),
                     &[
                         id("sig__t"),
                         id("sig__x"),
@@ -97,9 +93,13 @@ fn rolling_signature_matches_integrals_through_eviction_and_partial_windows() {
                     } else {
                         reference(&values[values.len().saturating_sub(window)..])
                     };
-                    equal(&pipeline.values()[..6], &expected);
-                    assert_eq!(pipeline.output_observations(), &[true; 6]);
-                    assert!(pipeline.values()[6..].iter().all(|v| v.is_nan()));
+                    equal(&pipeline.output("model").unwrap().values()[..6], &expected);
+                    assert_eq!(pipeline.output("model").unwrap().observations(), &[true; 6]);
+                    assert!(
+                        pipeline.output("model").unwrap().values()[6..]
+                            .iter()
+                            .all(|v| v.is_nan())
+                    );
                 }
             }
         }
@@ -108,7 +108,7 @@ fn rolling_signature_matches_integrals_through_eviction_and_partial_windows() {
 
 #[test]
 fn missing_inputs_hold_history_and_context_refreshes_do_not_advance() {
-    let mut pipeline = PipelineSpec::with_stages(
+    let mut pipeline = common::linear_spec(
         raw(),
         [T::standard_scale(id("p"), id("x"), 0., 0.5)],
         [FittedStage::rolling_path_signature(
@@ -117,14 +117,10 @@ fn missing_inputs_hold_history_and_context_refreshes_do_not_advance() {
             2,
             WarmupPolicy::FullWindow,
         )],
-        6,
         None,
     )
     .unwrap()
-    .build(
-        ArrayFeatureVector::<1>::new(),
-        ArrayFeatureVector::<6>::new(),
-    )
+    .build()
     .unwrap();
     for (time, price, expected) in [
         (0, 1., [f64::NAN; 6]),
@@ -136,18 +132,21 @@ fn missing_inputs_hold_history_and_context_refreshes_do_not_advance() {
         pipeline
             .handle_event(Event::price(Symbol::GLOBAL, price, time))
             .unwrap();
-        equal(pipeline.values(), &expected);
+        equal(pipeline.output("model").unwrap().values(), &expected);
         pipeline
             .handle_event(Event::volume(Symbol::GLOBAL, 1., time))
             .unwrap();
-        equal(pipeline.values(), &expected);
-        assert_eq!(pipeline.output_observations(), &[false; 6]);
+        equal(pipeline.output("model").unwrap().values(), &expected);
+        assert_eq!(
+            pipeline.output("model").unwrap().observations(),
+            &[false; 6]
+        );
         assert!(
             pipeline
                 .handle_event(Event::price(Symbol::GLOBAL, f64::NAN, time))
                 .is_err()
         );
-        equal(pipeline.values(), &expected);
+        equal(pipeline.output("model").unwrap().values(), &expected);
     }
 
     let raw = FeatureExtractorSpec::new([FeatureDefinition::new(
@@ -158,7 +157,7 @@ fn missing_inputs_hold_history_and_context_refreshes_do_not_advance() {
         id("c"),
     )])
     .unwrap();
-    let mut pipeline = PipelineSpec::with_stages(
+    let mut pipeline = common::linear_spec(
         raw,
         [T::identity(id("c"), id("c"))],
         [FittedStage::rolling_path_signature(
@@ -167,25 +166,24 @@ fn missing_inputs_hold_history_and_context_refreshes_do_not_advance() {
             2,
             WarmupPolicy::FirstValue,
         )],
-        6,
         None,
     )
     .unwrap()
-    .build(
-        ArrayFeatureVector::<1>::new(),
-        ArrayFeatureVector::<6>::new(),
-    )
+    .build()
     .unwrap();
     for value in [1., 2., 3.] {
         pipeline.update_context(&[("c", Some(value))]).unwrap();
-        equal(pipeline.values(), &[f64::NAN; 6]);
-        assert_eq!(pipeline.output_observations(), &[false; 6]);
+        equal(pipeline.output("model").unwrap().values(), &[f64::NAN; 6]);
+        assert_eq!(
+            pipeline.output("model").unwrap().observations(),
+            &[false; 6]
+        );
     }
 }
 
 #[test]
 fn signature_inherits_selected_input_clock_for_later_timed_stages() {
-    let mut pipeline = PipelineSpec::with_stages(
+    let mut pipeline = common::linear_spec(
         raw(),
         [T::identity(id("p"), id("p"))],
         [
@@ -198,14 +196,10 @@ fn signature_inherits_selected_input_clock_for_later_timed_stages() {
                 )],
             },
         ],
-        1,
         None,
     )
     .unwrap()
-    .build(
-        ArrayFeatureVector::<1>::new(),
-        ArrayFeatureVector::<1>::new(),
-    )
+    .build()
     .unwrap();
     pipeline
         .handle_event(Event::price(Symbol::GLOBAL, 1., 0))
@@ -213,17 +207,17 @@ fn signature_inherits_selected_input_clock_for_later_timed_stages() {
     pipeline
         .handle_event(Event::price(Symbol::GLOBAL, 3., 10))
         .unwrap();
-    equal(pipeline.values(), &[2.]);
+    equal(pipeline.output("model").unwrap().values(), &[2.]);
     pipeline
         .handle_event(Event::volume(Symbol::GLOBAL, 1., 20))
         .unwrap();
-    equal(pipeline.values(), &[0.]);
-    assert_eq!(pipeline.output_observations(), &[true]);
+    equal(pipeline.output("model").unwrap().values(), &[0.]);
+    assert_eq!(pipeline.output("model").unwrap().observations(), &[true]);
 }
 
 #[test]
 fn large_excursions_preserve_endpoint_coordinates_and_overflow_recovers() {
-    let mut pipeline = PipelineSpec::with_stages(
+    let mut pipeline = common::linear_spec(
         raw(),
         [T::identity(id("p"), id("p"))],
         [FittedStage::rolling_path_signature(
@@ -232,14 +226,10 @@ fn large_excursions_preserve_endpoint_coordinates_and_overflow_recovers() {
             3,
             WarmupPolicy::FirstValue,
         )],
-        6,
         None,
     )
     .unwrap()
-    .build(
-        ArrayFeatureVector::<1>::new(),
-        ArrayFeatureVector::<6>::new(),
-    )
+    .build()
     .unwrap();
     for (time, value) in [0., 1e8, 1., f64::MAX, -f64::MAX, 2., 2., 2.]
         .into_iter()
@@ -250,17 +240,20 @@ fn large_excursions_preserve_endpoint_coordinates_and_overflow_recovers() {
             .unwrap();
         if time == 2 {
             equal(
-                pipeline.values(),
+                pipeline.output("model").unwrap().values(),
                 &[1., 1., 0.5, -49_999_999.25, 50_000_000.25, 0.5],
             );
         }
         if time == 4 {
-            assert!(pipeline.values()[3].is_nan());
-            assert!(pipeline.values()[4].is_nan());
-            assert!(pipeline.values()[5].is_nan());
+            assert!(pipeline.output("model").unwrap().values()[3].is_nan());
+            assert!(pipeline.output("model").unwrap().values()[4].is_nan());
+            assert!(pipeline.output("model").unwrap().values()[5].is_nan());
         }
     }
-    equal(pipeline.values(), &[1., 0., 0.5, 0., 0., 0.]);
+    equal(
+        pipeline.output("model").unwrap().values(),
+        &[1., 0., 0.5, 0., 0., 0.],
+    );
 }
 
 #[test]
@@ -269,8 +262,7 @@ fn invalid_signature_definitions_fail_before_allocating_history() {
         let stage =
             FittedStage::rolling_path_signature(id("p"), "sig", window, WarmupPolicy::FirstValue);
         assert!(
-            PipelineSpec::with_stages(raw(), [T::identity(id("p"), id("p"))], [stage], 6, None)
-                .is_err()
+            common::linear_spec(raw(), [T::identity(id("p"), id("p"))], [stage], None).is_err()
         );
     }
     for (input, outputs) in [
@@ -299,8 +291,7 @@ fn invalid_signature_definitions_fail_before_allocating_history() {
             warmup_policy: WarmupPolicy::FirstValue,
         };
         assert!(
-            PipelineSpec::with_stages(raw(), [T::identity(id("p"), id("p"))], [stage], 6, None)
-                .is_err()
+            common::linear_spec(raw(), [T::identity(id("p"), id("p"))], [stage], None).is_err()
         );
     }
 }

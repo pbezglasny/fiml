@@ -1,3 +1,4 @@
+from pipeline_fixtures import LinearSpec, SingleOutput
 import json
 import subprocess
 import sys
@@ -23,7 +24,7 @@ from sklearn.preprocessing import (
 
 def base_spec(*, capacity=None, full_window=False, lag=False):
     raw = fiml.FeatureExtractorSpec(capacity=4).field("BTCUSDT", source="trade_price", id="price")
-    spec = fiml.PipelineSpec(raw, capacity=capacity, checksum="training-test")
+    spec = LinearSpec(raw, checksum="training-test")
     warmup = fiml.WarmupPolicy.FULL_WINDOW if full_window else fiml.WarmupPolicy.FIRST_VALUE
     for window in [1, 2, 4]:
         spec.sma("price", window=window, warmup=warmup, output=f"sma{window}")
@@ -46,7 +47,7 @@ def events(pipeline, *, offset=0.0, constant=False):
 
 
 def base_matrix(spec, data):
-    base = fiml.ModelInputPipeline(spec)
+    base = SingleOutput(spec)
     base.symbol("unused")
     base.symbol("BTCUSDT")
     return base.transform(**data)[:, :spec.active_feature_count]
@@ -56,7 +57,7 @@ def variance_spec(*, capacity=None, full_window=False):
     raw = (fiml.FeatureExtractorSpec().field("BTCUSDT", source="trade_price", id="price")
            .field("BTCUSDT", source="trade_volume", id="volume"))
     warmup = fiml.WarmupPolicy.FULL_WINDOW if full_window else fiml.WarmupPolicy.FIRST_VALUE
-    return (fiml.PipelineSpec(raw, capacity=capacity)
+    return (LinearSpec(raw)
             .sma("price", window=1, warmup=warmup, output="sma1")
             .sma("price", window=4, warmup=warmup, output="sma4")
             .identity("volume"))
@@ -64,7 +65,7 @@ def variance_spec(*, capacity=None, full_window=False):
 
 def test_variance_threshold_removes_constants_preserves_layout_nans_and_json():
     spec = variance_spec(capacity=4, full_window=True)
-    pipeline = fiml.ModelInputPipeline(spec).add_transformation(
+    pipeline = SingleOutput(spec).add_transformation(
         VarianceThreshold(), name="variance"
     )
     data = events(pipeline)
@@ -78,35 +79,35 @@ def test_variance_threshold_removes_constants_preserves_layout_nans_and_json():
     np.testing.assert_array_equal(actual[:, : len(support)], expected)
     assert np.isnan(actual[:, len(support) :]).all()
     assert pipeline.active_feature_count() == len(support) == 2
-    assert pipeline.n_features() == 4
+    assert pipeline.n_features() == 2
     assert pipeline.feature_names()[: len(support)] == np.asarray(spec.feature_ids())[
         support
     ].tolist()
     assert np.isfinite(actual[0, 0]) and np.isnan(actual[0, 1])
 
     document = json.loads(pipeline.to_json())
-    stage = document["model_input"]["stages"][0]
-    assert document["version"] == "3.0"
+    stage = document["nodes"][2]["stage"]
+    assert document["version"] == "4.0"
     assert stage == {
         "type": "select",
         "outputs": np.asarray(spec.feature_ids())[support].tolist(),
         "input_indices": support.tolist(),
     }
-    restored = fiml.ModelInputPipeline.from_json(json.dumps(document))
+    restored = SingleOutput.from_json(json.dumps(document))
     events(restored)
     np.testing.assert_array_equal(restored.transform(**data), actual)
 
 
 def test_variance_threshold_positive_boundary_matches_sklearn():
     spec = base_spec()
-    probe = fiml.ModelInputPipeline(spec)
+    probe = SingleOutput(spec)
     data = events(probe)
     matrix = base_matrix(spec, data)
     threshold = np.min(VarianceThreshold().fit(matrix).variances_)
     fitted = VarianceThreshold(threshold=threshold).fit(matrix)
     assert 0 < fitted.get_support(indices=True).size < matrix.shape[1]
 
-    pipeline = fiml.ModelInputPipeline(spec).add_transformation(
+    pipeline = SingleOutput(spec).add_transformation(
         VarianceThreshold(threshold=threshold), name="variance"
     )
     actual_data = events(pipeline)
@@ -121,7 +122,7 @@ def test_variance_threshold_chains_with_scaler_and_pca(selector_first):
     selector = VarianceThreshold()
     scaler = StandardScaler()
     pca = PCA(n_components=1, svd_solver="full")
-    pipeline = fiml.ModelInputPipeline(spec)
+    pipeline = SingleOutput(spec)
     stages = (selector, scaler) if selector_first else (scaler, selector)
     for index, stage in enumerate((*stages, pca)):
         pipeline.add_transformation(stage, name=f"stage_{index}")
@@ -137,7 +138,7 @@ def test_variance_threshold_chains_with_scaler_and_pca(selector_first):
 
 
 def test_variance_threshold_fit_failures_are_atomic():
-    pipeline = fiml.ModelInputPipeline(base_spec()).add_transformation(
+    pipeline = SingleOutput(base_spec()).add_transformation(
         VarianceThreshold(), name="variance"
     )
     data = events(pipeline)
@@ -149,7 +150,7 @@ def test_variance_threshold_fit_failures_are_atomic():
     assert pipeline.to_json() == before_json
     np.testing.assert_array_equal(pipeline.values(), before_values)
 
-    warmup = fiml.ModelInputPipeline(base_spec(full_window=True)).add_transformation(
+    warmup = SingleOutput(base_spec(full_window=True)).add_transformation(
         VarianceThreshold(), name="variance"
     )
     with pytest.raises(ValueError, match="must be finite for fitting"):
@@ -165,7 +166,7 @@ def test_simple_imputer_strategies_indicators_and_json_reload(strategy, fill_val
     imputer = SimpleImputer(
         strategy=strategy, fill_value=fill_value, add_indicator=True
     )
-    pipeline = fiml.ModelInputPipeline(spec).add_transformation(imputer, name="impute")
+    pipeline = SingleOutput(spec).add_transformation(imputer, name="impute")
     data = events(pipeline)
     matrix = base_matrix(spec, data)
     fitted = imputer.fit(matrix)
@@ -178,13 +179,13 @@ def test_simple_imputer_strategies_indicators_and_json_reload(strategy, fill_val
     ).tolist()
 
     document = json.loads(pipeline.to_json())
-    stage = document["model_input"]["stages"][0]
-    assert document["version"] == "3.0"
+    stage = document["nodes"][2]["stage"]
+    assert document["version"] == "4.0"
     assert stage["type"] == "simple_impute"
     assert stage["retained_input_indices"] == [0, 1, 2]
     assert stage["indicator_input_indices"] == [1, 2]
     assert np.isfinite(stage["replacement_values"]).all()
-    restored = fiml.ModelInputPipeline.from_json(json.dumps(document))
+    restored = SingleOutput.from_json(json.dumps(document))
     events(restored)
     np.testing.assert_array_equal(restored.transform(**data), actual)
 
@@ -204,7 +205,7 @@ def test_simple_imputer_empty_columns_match_sklearn(
     if strategy == "constant":
         options["fill_value"] = -3.0
     imputer = SimpleImputer(**options)
-    pipeline = fiml.ModelInputPipeline(spec).add_transformation(imputer, name="impute")
+    pipeline = SingleOutput(spec).add_transformation(imputer, name="impute")
     data = events(pipeline)
     matrix = base_matrix(spec, data)
     fit_mask = np.arange(len(matrix)) < 2
@@ -223,7 +224,7 @@ def test_simple_imputer_then_scaler_and_pca_matches_sklearn():
     scaler = StandardScaler()
     pca = PCA(n_components=2, svd_solver="full")
     pipeline = (
-        fiml.ModelInputPipeline(spec)
+        SingleOutput(spec)
         .add_transformation(imputer, name="impute")
         .add_transformation(scaler, name="scale")
         .add_transformation(pca, name="pca")
@@ -242,7 +243,7 @@ def test_simple_imputer_then_scaler_and_pca_matches_sklearn():
 def test_simple_imputer_replaces_new_inference_nans_without_new_indicators():
     spec = base_spec(full_window=True)
     imputer = SimpleImputer(add_indicator=True)
-    pipeline = fiml.ModelInputPipeline(spec).add_transformation(imputer, name="impute")
+    pipeline = SingleOutput(spec).add_transformation(imputer, name="impute")
     data = events(pipeline)
     matrix = base_matrix(spec, data)
     fit_mask = np.arange(len(matrix)) >= 4
@@ -257,10 +258,10 @@ def test_simple_imputer_replaces_new_inference_nans_without_new_indicators():
 def test_simple_imputer_rejects_infinity_and_zero_output_atomically():
     raw = fiml.FeatureExtractorSpec().field("BTCUSDT", source="trade_price")
     input_id = raw.feature_ids()[0]
-    overflow = fiml.PipelineSpec(raw).standard_scale(
+    overflow = LinearSpec(raw).standard_scale(
         input_id, mean=-1e308, scale=1.0, output="overflow"
     )
-    pipeline = fiml.ModelInputPipeline(overflow).add_transformation(
+    pipeline = SingleOutput(overflow).add_transformation(
         SimpleImputer(), name="impute"
     )
     data = events(pipeline)
@@ -271,8 +272,8 @@ def test_simple_imputer_rejects_infinity_and_zero_output_atomically():
         pipeline.to_json()
 
     empty_raw = fiml.FeatureExtractorSpec().field("BTCUSDT", source="trade_price")
-    empty_spec = fiml.PipelineSpec(empty_raw).sma(empty_raw.feature_ids()[0], window=4)
-    empty = fiml.ModelInputPipeline(empty_spec).add_transformation(
+    empty_spec = LinearSpec(empty_raw).sma(empty_raw.feature_ids()[0], window=4)
+    empty = SingleOutput(empty_spec).add_transformation(
         SimpleImputer(), name="impute"
     )
     empty_data = events(empty)
@@ -281,7 +282,7 @@ def test_simple_imputer_rejects_infinity_and_zero_output_atomically():
     with pytest.raises(ValueError, match="zero output features"):
         empty.fit(**empty_data, fit_mask=mask)
 
-    indicators = fiml.ModelInputPipeline(empty_spec).add_transformation(
+    indicators = SingleOutput(empty_spec).add_transformation(
         SimpleImputer(add_indicator=True), name="impute"
     )
     indicator_data = events(indicators)
@@ -292,7 +293,7 @@ def test_simple_imputer_rejects_infinity_and_zero_output_atomically():
     np.testing.assert_array_equal(
         actual, expected.transform(base_matrix(empty_spec, indicator_data))
     )
-    stage = json.loads(indicators.to_json())["model_input"]["stages"][0]
+    stage = json.loads(indicators.to_json())["nodes"][2]["stage"]
     assert stage["retained_input_indices"] == []
     assert stage["replacement_values"] == []
     assert stage["indicator_input_indices"] == [0]
@@ -301,7 +302,7 @@ def test_simple_imputer_rejects_infinity_and_zero_output_atomically():
 def test_simple_imputer_failed_downstream_refit_preserves_runtime():
     spec = base_spec(full_window=True)
     pipeline = (
-        fiml.ModelInputPipeline(spec)
+        SingleOutput(spec)
         .add_transformation(SimpleImputer(strategy="constant"), name="impute")
         .add_transformation(PCA(n_components=2), name="pca")
     )
@@ -322,7 +323,7 @@ def test_fit_export_and_replay_match_sklearn(whiten, dtype):
     spec = base_spec()
     scaler = StandardScaler().set_output(transform="pandas")
     pca = PCA(n_components=2, whiten=whiten, svd_solver="full")
-    pipeline = (fiml.ModelInputPipeline(spec, output_dtype=dtype)
+    pipeline = (SingleOutput(spec, output_dtype=dtype)
                 .add_transformation(scaler, name="scale")
                 .add_transformation(pca, name="pca"))
     data = events(pipeline)
@@ -335,15 +336,15 @@ def test_fit_export_and_replay_match_sklearn(whiten, dtype):
     actual = pipeline.transform(**data)
     np.testing.assert_allclose(actual, expected.astype(dtype), rtol=1e-10 if dtype == "float64" else 1e-6, atol=1e-12 if dtype == "float64" else 1e-6)
     assert not hasattr(scaler, "scale_") and not hasattr(pca, "components_")
-    assert pipeline.feature_names() == ["pca__pc0", "pca__pc1"]
+    assert pipeline.feature_names() == ["pc0", "pc1"]
     assert pipeline.active_feature_count() == pipeline.n_features() == 2
     document = json.loads(pipeline.to_json())
-    assert document["version"] == "3.0"
-    assert document["feature_extractor"]["version"] == "2.0"
+    assert document["version"] == "4.0"
+    assert document["nodes"][0]["spec"]["version"] == "2.0"
     assert document["checksum"] == "training-test"
-    assert document["model_input"]["length"] == document["model_input"]["capacity"] == 2
-    assert set(document["model_input"]["stages"][1]) == {"type", "outputs", "mean", "components", "output_scale"}
-    restored = fiml.ModelInputPipeline.from_json(pipeline.to_json(), output_dtype=dtype)
+    assert len(document["nodes"][-1]["stage"]["outputs"]) == 2
+    assert set(document["nodes"][3]["stage"]) == {"type", "outputs", "mean", "components", "output_scale"}
+    restored = SingleOutput.from_json(pipeline.to_json(), output_dtype=dtype)
     events(restored)
     np.testing.assert_array_equal(restored.transform(**data), actual)
     np.testing.assert_array_equal(pipeline.reset().transform(**data), actual)
@@ -358,13 +359,13 @@ def test_fit_export_and_replay_match_sklearn(whiten, dtype):
 def test_scaling_flags_and_constant_columns(with_mean, with_std):
     spec = base_spec(capacity=5)
     scaler = StandardScaler(with_mean=with_mean, with_std=with_std)
-    pipeline = fiml.ModelInputPipeline(spec).add_transformation(scaler, name="scale")
+    pipeline = SingleOutput(spec).add_transformation(scaler, name="scale")
     data = events(pipeline, constant=True)
     expected = scaler.fit(base_matrix(spec, data)).transform(base_matrix(spec, data))
     result = pipeline.fit_transform(**data)
     np.testing.assert_allclose(result[:, :3], expected)
     assert np.isnan(result[:, 3:]).all()
-    assert pipeline.n_features() == 5
+    assert pipeline.n_features() == 3
 
 
 @pytest.mark.parametrize(
@@ -374,7 +375,7 @@ def test_scaling_flags_and_constant_columns(with_mean, with_std):
 def test_robust_scaling_flags_and_constant_columns(with_centering, with_scaling):
     spec = base_spec(capacity=5)
     scaler = RobustScaler(with_centering=with_centering, with_scaling=with_scaling)
-    pipeline = fiml.ModelInputPipeline(spec).add_transformation(scaler, name="robust")
+    pipeline = SingleOutput(spec).add_transformation(scaler, name="robust")
     data = events(pipeline, constant=True)
     matrix = base_matrix(spec, data)
     expected = scaler.fit(matrix).transform(matrix)
@@ -394,7 +395,7 @@ def test_robust_scaling_flags_and_constant_columns(with_centering, with_scaling)
 def test_robust_scaler_outliers_unseen_values_and_json_reload(options):
     spec = base_spec(full_window=True)
     scaler = RobustScaler(**options)
-    pipeline = fiml.ModelInputPipeline(spec).add_transformation(scaler, name="robust")
+    pipeline = SingleOutput(spec).add_transformation(scaler, name="robust")
     data = events(pipeline)
     data["price"][12] = 1_000_000.0
     data["price"][20:] = [-1_000.0, 500.0, 2_000.0, -500.0]
@@ -406,10 +407,10 @@ def test_robust_scaler_outliers_unseen_values_and_json_reload(options):
     np.testing.assert_array_equal(np.isnan(actual), np.isnan(matrix))
 
     document = json.loads(pipeline.to_json())
-    stage = document["model_input"]["stages"][0]
+    stage = document["nodes"][2]["stage"]
     np.testing.assert_array_equal(stage["mean"], scaler.center_)
     np.testing.assert_array_equal(stage["scale"], scaler.scale_)
-    restored = fiml.ModelInputPipeline.from_json(json.dumps(document))
+    restored = SingleOutput.from_json(json.dumps(document))
     events(restored)
     np.testing.assert_array_equal(restored.transform(**data), actual)
 
@@ -420,7 +421,7 @@ def test_min_max_scaler_range_clipping_constants_and_nans(options, clip):
     spec = base_spec(full_window=True)
     scaler = MinMaxScaler(**options, clip=clip)
     feature_range = scaler.feature_range
-    pipeline = fiml.ModelInputPipeline(spec).add_transformation(scaler, name="minmax")
+    pipeline = SingleOutput(spec).add_transformation(scaler, name="minmax")
     data = events(pipeline, constant=True)
     data["price"][18:] = [5.0, 20.0, 4.0, 25.0, 3.0, 30.0]
     matrix = base_matrix(spec, data)
@@ -436,13 +437,13 @@ def test_min_max_scaler_range_clipping_constants_and_nans(options, clip):
         assert finite.min() < feature_range[0] or finite.max() > feature_range[1]
 
     document = json.loads(pipeline.to_json())
-    stage = document["model_input"]["stages"][0]
-    assert document["version"] == "3.0"
+    stage = document["nodes"][2]["stage"]
+    assert document["version"] == "4.0"
     assert stage["type"] == "min_max_scale"
     np.testing.assert_array_equal(stage["scale"], fitted.scale_)
     np.testing.assert_array_equal(stage["min"], fitted.min_)
     assert stage.get("clip") == (list(feature_range) if clip else None)
-    restored = fiml.ModelInputPipeline.from_json(json.dumps(document))
+    restored = SingleOutput.from_json(json.dumps(document))
     events(restored)
     np.testing.assert_array_equal(restored.transform(**data), actual)
 
@@ -452,7 +453,7 @@ def test_max_abs_scaler_signed_constants_zeros_clipping_and_reload(clip):
     raw = (fiml.FeatureExtractorSpec()
            .field("BTCUSDT", source="trade_price")
            .field("BTCUSDT", source="trade_volume"))
-    spec = fiml.PipelineSpec(raw)
+    spec = LinearSpec(raw)
     price, volume = raw.feature_ids()
     spec.sma(price, window=4).identity(volume)
     scalar = (fiml.ScalarStage()
@@ -460,7 +461,7 @@ def test_max_abs_scaler_signed_constants_zeros_clipping_and_reload(clip):
               .identity(volume, output="constant")
               .standard_scale(volume, mean=2.0, scale=1.0, output="zero"))
     scaler = MaxAbsScaler(clip=clip)
-    pipeline = (fiml.ModelInputPipeline(spec)
+    pipeline = (SingleOutput(spec)
                 .add_transformation(scalar, name="inputs")
                 .add_transformation(scaler, name="maxabs"))
     data = events(pipeline)
@@ -485,8 +486,8 @@ def test_max_abs_scaler_signed_constants_zeros_clipping_and_reload(clip):
     assert pipeline.feature_names() == ["signed", "constant", "zero"]
 
     document = json.loads(pipeline.to_json())
-    stage = document["model_input"]["stages"][1]
-    assert document["version"] == "3.0"
+    stage = document["nodes"][3]["stage"]
+    assert document["version"] == "4.0"
     assert stage["type"] == ("min_max_scale" if clip else "standard_scale")
     if clip:
         np.testing.assert_array_equal(stage["scale"], np.reciprocal(fitted.scale_))
@@ -495,7 +496,7 @@ def test_max_abs_scaler_signed_constants_zeros_clipping_and_reload(clip):
     else:
         np.testing.assert_array_equal(stage["mean"], np.zeros(matrix.shape[1]))
         np.testing.assert_array_equal(stage["scale"], fitted.scale_)
-    restored = fiml.ModelInputPipeline.from_json(json.dumps(document))
+    restored = SingleOutput.from_json(json.dumps(document))
     events(restored)
     np.testing.assert_array_equal(restored.transform(**data), actual)
 
@@ -507,7 +508,7 @@ def test_max_abs_scaler_signed_constants_zeros_clipping_and_reload(clip):
 def test_fitted_component_count_and_pca_without_scaling(n_components, solver):
     spec = base_spec()
     options = dict(n_components=n_components, svd_solver=solver, random_state=42)
-    pipeline = fiml.ModelInputPipeline(spec).add_transformation(PCA(**options), name="reduce")
+    pipeline = SingleOutput(spec).add_transformation(PCA(**options), name="reduce")
     data = events(pipeline)
     matrix = base_matrix(spec, data)
     reference = PCA(**options).fit(matrix)
@@ -520,11 +521,11 @@ def test_fitted_component_count_and_pca_without_scaling(n_components, solver):
 def test_rank_deficient_whitening_has_bounded_roundoff_and_exact_reload(solver):
     raw = fiml.FeatureExtractorSpec().field("BTCUSDT", source="trade_price")
     raw_id = raw.feature_ids()[0]
-    spec = fiml.PipelineSpec(raw)
+    spec = LinearSpec(raw)
     for name in ("a", "b", "c"):
         spec.identity(raw_id, output=name)
     options = dict(n_components=3, whiten=True, svd_solver=solver)
-    pipeline = fiml.ModelInputPipeline(spec).add_transformation(PCA(**options), name="pca")
+    pipeline = SingleOutput(spec).add_transformation(PCA(**options), name="pca")
     data = events(pipeline)
     matrix = base_matrix(spec, data)
     reference = PCA(**options).fit(matrix)
@@ -543,7 +544,7 @@ def test_rank_deficient_whitening_has_bounded_roundoff_and_exact_reload(solver):
     bound = 2 * gamma * magnitude / divisor
     assert np.all(np.abs(actual - expected) <= bound)
 
-    restored = fiml.ModelInputPipeline.from_json(pipeline.to_json())
+    restored = SingleOutput.from_json(pipeline.to_json())
     events(restored)
     np.testing.assert_array_equal(restored.transform(**data), actual)
 
@@ -551,7 +552,7 @@ def test_rank_deficient_whitening_has_bounded_roundoff_and_exact_reload(solver):
 def test_large_offsets_and_zero_variance_whitening():
     spec = base_spec()
     for offset, constant, whiten, tolerance in [(1e12, False, False, 0.002), (0.0, True, True, 1e-12)]:
-        pipeline = fiml.ModelInputPipeline(spec).add_transformation(PCA(n_components=3, whiten=whiten, svd_solver="full"), name="pca")
+        pipeline = SingleOutput(spec).add_transformation(PCA(n_components=3, whiten=whiten, svd_solver="full"), name="pca")
         data = events(pipeline, offset=offset, constant=constant)
         matrix = base_matrix(spec, data)
         reference = PCA(n_components=3, whiten=whiten, svd_solver="full").fit(matrix)
@@ -560,13 +561,13 @@ def test_large_offsets_and_zero_variance_whitening():
         np.testing.assert_allclose(actual, reference.transform(matrix), rtol=1e-10, atol=tolerance)
         assert np.isfinite(actual).all()
         if constant:
-            scale = json.loads(pipeline.to_json())["model_input"]["stages"][0]["output_scale"]
+            scale = json.loads(pipeline.to_json())["nodes"][2]["stage"]["output_scale"]
             np.testing.assert_array_equal(scale, np.full(3, np.finfo(np.float64).eps))
 
 
 def test_warmup_mask_lags_chunks_and_failed_refit_are_atomic():
     spec = base_spec(full_window=True, lag=True)
-    pipeline = (fiml.ModelInputPipeline(spec)
+    pipeline = (SingleOutput(spec)
                 .add_transformation(StandardScaler(), name="scale")
                 .add_transformation(PCA(n_components=2), name="pca"))
     data = events(pipeline)
@@ -606,7 +607,7 @@ def test_warmup_mask_lags_chunks_and_failed_refit_are_atomic():
 
 
 def test_unfitted_guards_recipe_locking_and_cloning():
-    pipeline = fiml.ModelInputPipeline(base_spec())
+    pipeline = SingleOutput(base_spec())
     estimator = PCA(n_components=2)
     pipeline.add_transformation(estimator, name="pca")
     estimator.n_components = 99  # authoring captured its own template
@@ -622,20 +623,11 @@ def test_unfitted_guards_recipe_locking_and_cloning():
     for call in calls:
         with pytest.raises(ValueError, match="not fitted"):
             call()
-    assert pipeline.raw_feature_names()
-    with pytest.raises(ValueError, match="duplicate stage"):
-        pipeline.add_transformation(PCA(), name="pca")
     pipeline.fit(**data)
     assert pipeline.n_features() == 2
-    with pytest.raises(ValueError, match="established recipe"):
-        pipeline.add_transformation(StandardScaler(), name="scale")
+    assert not hasattr(pipeline.inner, "add_transformation")
     with pytest.raises(ValueError, match="inference-only"):
-        fiml.ModelInputPipeline.from_json(pipeline.to_json()).fit(**data)
-    runtime = fiml.ModelInputPipeline(base_spec())
-    runtime.update(fiml.KIND_TIME, 0, 0)
-    runtime.reset()
-    with pytest.raises(ValueError, match="established recipe"):
-        runtime.add_transformation(PCA(), name="pca")
+        SingleOutput.from_json(pipeline.to_json()).fit(**data)
 
 
 @pytest.mark.parametrize(
@@ -661,7 +653,7 @@ def test_unfitted_guards_recipe_locking_and_cloning():
     ],
 )
 def test_unsupported_estimators_do_not_change_pipeline(estimator):
-    pipeline = fiml.ModelInputPipeline(base_spec())
+    pipeline = SingleOutput(base_spec())
     before = pipeline.to_json()
     with pytest.raises((TypeError, ValueError)):
         pipeline.add_transformation(estimator, name="bad")
@@ -680,7 +672,7 @@ def test_unsupported_estimators_do_not_change_pipeline(estimator):
     ],
 )
 def test_simple_imputer_rejects_unsupported_configuration(imputer):
-    pipeline = fiml.ModelInputPipeline(base_spec())
+    pipeline = SingleOutput(base_spec())
     before = pipeline.to_json()
     with pytest.raises(ValueError):
         pipeline.add_transformation(imputer, name="bad")
@@ -692,7 +684,7 @@ def test_simple_imputer_rejects_unsupported_configuration(imputer):
     [PowerTransformer(method="bad"), PowerTransformer(standardize=1)],
 )
 def test_power_transformer_rejects_unsupported_configuration(transformer):
-    pipeline = fiml.ModelInputPipeline(base_spec())
+    pipeline = SingleOutput(base_spec())
     before = pipeline.to_json()
     with pytest.raises(ValueError):
         pipeline.add_transformation(transformer, name="bad")
@@ -700,7 +692,7 @@ def test_power_transformer_rejects_unsupported_configuration(transformer):
 
 
 def test_quantile_transformer_rejects_unsupported_configuration():
-    pipeline = fiml.ModelInputPipeline(base_spec())
+    pipeline = SingleOutput(base_spec())
     before = pipeline.to_json()
     with pytest.raises(ValueError, match="output_distribution"):
         pipeline.add_transformation(
@@ -711,7 +703,7 @@ def test_quantile_transformer_rejects_unsupported_configuration():
 
 @pytest.mark.parametrize("threshold", [-1.0, np.inf, np.nan, True, "0"])
 def test_variance_threshold_rejects_invalid_threshold(threshold):
-    pipeline = fiml.ModelInputPipeline(base_spec())
+    pipeline = SingleOutput(base_spec())
     before = pipeline.to_json()
     with pytest.raises(ValueError, match="finite nonnegative"):
         pipeline.add_transformation(VarianceThreshold(threshold=threshold), name="bad")
@@ -720,7 +712,7 @@ def test_variance_threshold_rejects_invalid_threshold(threshold):
 
 @pytest.mark.parametrize("quantile_range", [(25.0, 25.0), (0.0, 75.0), (25.0, 100.0)])
 def test_robust_scaler_rejects_invalid_unit_variance_range(quantile_range):
-    pipeline = fiml.ModelInputPipeline(base_spec())
+    pipeline = SingleOutput(base_spec())
     scaler = RobustScaler(unit_variance=True, quantile_range=quantile_range)
     with pytest.raises(ValueError, match="requires 0 < q_min < q_max < 100"):
         pipeline.add_transformation(scaler, name="bad")
@@ -731,7 +723,7 @@ def test_robust_scaler_ignores_unit_variance_range_without_scaling():
     scaler = RobustScaler(
         with_scaling=False, unit_variance=True, quantile_range=(25.0, 25.0)
     )
-    pipeline = fiml.ModelInputPipeline(spec).add_transformation(scaler, name="robust")
+    pipeline = SingleOutput(spec).add_transformation(scaler, name="robust")
     data = events(pipeline)
     matrix = base_matrix(spec, data)
     np.testing.assert_allclose(
@@ -743,7 +735,7 @@ def test_robust_scaler_ignores_unit_variance_range_without_scaling():
 @pytest.mark.parametrize("standardize", [False, True])
 def test_power_transformer_matches_sklearn_and_json_reload(method, standardize):
     spec = base_spec(full_window=True)
-    pipeline = fiml.ModelInputPipeline(spec)
+    pipeline = SingleOutput(spec)
     if method == "yeo-johnson":
         signed = fiml.ScalarStage()
         for index, feature_id in enumerate(spec.feature_ids()):
@@ -766,39 +758,39 @@ def test_power_transformer_matches_sklearn_and_json_reload(method, standardize):
     np.testing.assert_allclose(actual, expected, rtol=1e-10, atol=1e-12)
     np.testing.assert_array_equal(np.isnan(actual), np.isnan(matrix))
     document = json.loads(pipeline.to_json())
-    stage = document["model_input"]["stages"][-1]
-    assert document["version"] == "3.0"
+    stage = document["nodes"][-1]["stage"]
+    assert document["version"] == "4.0"
     assert stage["type"] == "power_transform"
     assert stage["method"] == method
     np.testing.assert_array_equal(stage["lambdas"], fitted.lambdas_)
     if not standardize:
         assert stage["mean"] == [0.0] * matrix.shape[1]
         assert stage["scale"] == [1.0] * matrix.shape[1]
-    restored = fiml.ModelInputPipeline.from_json(json.dumps(document))
+    restored = SingleOutput.from_json(json.dumps(document))
     events(restored)
     np.testing.assert_array_equal(restored.transform(**data), actual)
 
 
 def test_power_transformer_constants_and_box_cox_runtime_domain():
     spec = base_spec()
-    constant = fiml.ModelInputPipeline(spec).add_transformation(
+    constant = SingleOutput(spec).add_transformation(
         PowerTransformer(), name="power"
     )
     constant_data = events(constant, constant=True)
     actual = constant.fit_transform(**constant_data)
     assert np.all(actual[:, :3] == 0.0)
-    assert json.loads(constant.to_json())["model_input"]["stages"][0][
+    assert json.loads(constant.to_json())["nodes"][2]["stage"][
         "lambdas"
     ] == [1.0, 1.0, 1.0]
 
     raw = fiml.FeatureExtractorSpec().field("BTCUSDT", source="trade_price")
     feature_id = raw.feature_ids()[0]
-    box_cox_spec = fiml.PipelineSpec(raw).identity(feature_id)
+    box_cox_spec = LinearSpec(raw).identity(feature_id)
     signed = fiml.ScalarStage().standard_scale(
         feature_id, mean=15.0, scale=1.0, output="signed"
     )
     box_cox = (
-        fiml.ModelInputPipeline(box_cox_spec)
+        SingleOutput(box_cox_spec)
         .add_transformation(signed, name="signed")
         .add_transformation(PowerTransformer(method="box-cox"), name="power")
     )
@@ -814,10 +806,10 @@ def test_power_transformer_constants_and_box_cox_runtime_domain():
     )
     assert np.isnan(actual[~valid]).all()
 
-    restored = fiml.ModelInputPipeline.from_json(box_cox.to_json())
+    restored = SingleOutput.from_json(box_cox.to_json())
     events(restored)
     np.testing.assert_array_equal(restored.transform(**data), actual)
-    online = fiml.ModelInputPipeline.from_json(box_cox.to_json())
+    online = SingleOutput.from_json(box_cox.to_json())
     events(online)
     for kind, symbol, timestamp, price, volume in zip(
         data["kind"], data["symbol"], data["timestamp"], data["price"], data["volume"]
@@ -842,7 +834,7 @@ def test_quantile_transformer_matches_sklearn_boundaries_nans_and_json(
     transformer = QuantileTransformer(
         n_quantiles=7, output_distribution=output_distribution, random_state=42
     )
-    pipeline = fiml.ModelInputPipeline(spec).add_transformation(
+    pipeline = SingleOutput(spec).add_transformation(
         transformer, name="quantile"
     )
     data = events(pipeline)
@@ -860,8 +852,8 @@ def test_quantile_transformer_matches_sklearn_boundaries_nans_and_json(
     assert not hasattr(transformer, "quantiles_")
 
     document = json.loads(pipeline.to_json())
-    stage = document["model_input"]["stages"][0]
-    assert document["version"] == "3.0"
+    stage = document["nodes"][2]["stage"]
+    assert document["version"] == "4.0"
     assert stage["type"] == "quantile_transform"
     assert stage["output_distribution"] == output_distribution
     assert stage["bounds_threshold"] == 1e-7
@@ -870,7 +862,7 @@ def test_quantile_transformer_matches_sklearn_boundaries_nans_and_json(
     assert stage["all_nan_input_indices"] == []
     assert ("normal_clip" in stage) == (output_distribution == "normal")
 
-    restored = fiml.ModelInputPipeline.from_json(json.dumps(document))
+    restored = SingleOutput.from_json(json.dumps(document))
     events(restored)
     np.testing.assert_array_equal(restored.transform(**data), actual)
 
@@ -880,7 +872,7 @@ def test_quantile_transformer_accepts_training_nans_before_imputation():
     quantile = QuantileTransformer(n_quantiles=7)
     imputer = SimpleImputer(strategy="constant", fill_value=-1.0)
     pipeline = (
-        fiml.ModelInputPipeline(spec)
+        SingleOutput(spec)
         .add_transformation(quantile, name="quantile")
         .add_transformation(imputer, name="impute")
     )
@@ -908,7 +900,7 @@ def test_quantile_transformer_all_nan_column_is_exported_for_later_imputation(
         strategy="constant", fill_value=-1.0, keep_empty_features=True
     )
     pipeline = (
-        fiml.ModelInputPipeline(spec)
+        SingleOutput(spec)
         .add_transformation(quantile, name="quantile")
         .add_transformation(imputer, name="impute")
     )
@@ -922,10 +914,10 @@ def test_quantile_transformer_all_nan_column_is_exported_for_later_imputation(
     with pytest.warns(RuntimeWarning, match="All-NaN slice"):
         actual = pipeline.fit_transform(**data, fit_mask=fit_mask)
     np.testing.assert_allclose(actual, expected, rtol=2e-14, atol=2e-14)
-    stage = json.loads(pipeline.to_json())["model_input"]["stages"][0]
+    stage = json.loads(pipeline.to_json())["nodes"][2]["stage"]
     assert stage["all_nan_input_indices"] == [2]
     assert np.isfinite(stage["quantiles"]).all()
-    restored = fiml.ModelInputPipeline.from_json(pipeline.to_json())
+    restored = SingleOutput.from_json(pipeline.to_json())
     events(restored)
     np.testing.assert_array_equal(restored.transform(**data), actual)
 
@@ -938,7 +930,7 @@ def test_quantile_transformer_reduced_quantiles_repeated_values_and_constants(
     transformer = QuantileTransformer(
         n_quantiles=100, output_distribution=output_distribution
     )
-    pipeline = fiml.ModelInputPipeline(spec).add_transformation(
+    pipeline = SingleOutput(spec).add_transformation(
         transformer, name="quantile"
     )
     data = events(pipeline)
@@ -955,9 +947,9 @@ def test_quantile_transformer_reduced_quantiles_repeated_values_and_constants(
     np.testing.assert_allclose(
         actual, fitted.transform(matrix), rtol=2e-14, atol=2e-14
     )
-    assert len(json.loads(pipeline.to_json())["model_input"]["stages"][0]["references"]) == fit_mask.sum()
+    assert len(json.loads(pipeline.to_json())["nodes"][2]["stage"]["references"]) == fit_mask.sum()
 
-    constant = fiml.ModelInputPipeline(spec).add_transformation(
+    constant = SingleOutput(spec).add_transformation(
         QuantileTransformer(n_quantiles=1, output_distribution=output_distribution),
         name="constant",
     )
@@ -971,14 +963,14 @@ def test_quantile_transformer_reduced_quantiles_repeated_values_and_constants(
 
 
 def test_artifact_inference_does_not_import_sklearn():
-    pipeline = (fiml.ModelInputPipeline(base_spec())
+    pipeline = (SingleOutput(base_spec())
                 .add_transformation(SimpleImputer(), name="impute")
                 .add_transformation(VarianceThreshold(), name="variance")
                 .add_transformation(MaxAbsScaler(clip=True), name="maxabs")
                 .add_transformation(PowerTransformer(), name="power")
                 .add_transformation(QuantileTransformer(n_quantiles=8), name="quantile")
                 .add_transformation(PCA(n_components=2), name="pca")
-                .add_transformation(fiml.ScalarStage().identity("pca__pc1").lagged("pca__pc0", lag_window=1), name="lags"))
+                .add_transformation(fiml.ScalarStage().identity("pc1").lagged("pc0", lag_window=1), name="lags"))
     data = events(pipeline)
     pipeline.fit(**data, fit_mask=np.arange(len(data["timestamp"])) > 0)
     code = """
@@ -993,20 +985,21 @@ import fiml
 pipeline = fiml.ModelInputPipeline.from_json(sys.stdin.read())
 handle = pipeline.symbol('BTCUSDT')
 pipeline.update(fiml.KIND_TRADE, handle, 0, price=10., volume=1.)
-assert pipeline.n_features() == 2
+assert pipeline.output("model").n_features() == 2
 import numpy as np
-raw = fiml.FeatureExtractorSpec().field('BTCUSDT', source='trade_price')
-base = fiml.PipelineSpec(raw).identity(raw.feature_ids()[0], output='price')
-recipe = (fiml.ModelInputPipeline(base)
-          .add_transformation(fiml.ScalarStage().lagged('price', lag_window=1), name='lag')
-          .add_transformation(fiml.ScalarStage().standard_scale('price', mean=0., scale=2.), name='scale'))
+raw = fiml.FeatureExtractorSpec().field('BTCUSDT', source='trade_price', id='price')
+spec = fiml.PipelineSpec(raw)
+lag = spec.add(spec.root(), fiml.ScalarStage().lagged('price', lag_window=1))
+scaled = spec.add(lag, fiml.ScalarStage().standard_scale('price', mean=0., scale=2.))
+spec.output('model', scaled)
+recipe = spec.build()
 result = recipe.fit_transform(
     np.full(2, fiml.KIND_TRADE, dtype=np.uint8),
     np.full(2, recipe.symbol('BTCUSDT'), dtype=np.int64),
     np.arange(2, dtype=np.int64), price=np.array([10., 20.]), volume=np.ones(2),
     fit_mask=np.array([False, True]),
 )
-np.testing.assert_equal(result, [[np.nan], [5.]])
+np.testing.assert_equal(result['model'], [[np.nan], [5.]])
 assert 'sklearn' not in sys.modules
 """
     subprocess.run([sys.executable, "-c", code], input=pipeline.to_json(), text=True, check=True)
@@ -1021,19 +1014,19 @@ def test_shared_fixture_matches_real_sklearn_training():
     assert fixture["timestamp"] == data["timestamp"].tolist()
     oracle = np.array(fixture["expected"], dtype=np.float64)
     np.testing.assert_allclose(expected, oracle, rtol=1e-10, atol=1e-12)
-    restored = fiml.ModelInputPipeline.from_json(json.dumps(fixture["pipeline"]))
+    restored = SingleOutput.from_json(json.dumps(fixture["pipeline"]))
     restored.symbol("BTCUSDT")
-    assert restored.feature_names() == pipeline.feature_names()
+    assert restored.feature_names() == pipeline.output("model").feature_names()
     np.testing.assert_allclose(restored.transform(**data), oracle, rtol=1e-10, atol=1e-12)
 
 
 def test_scalar_stages_between_estimators_preserve_excluded_event_history():
     spec = base_spec(capacity=5)
     scalars = (fiml.ScalarStage()
-               .lagged("pca__pc0", lag_window=2, output="lag2")
-               .identity("pca__pc1", output="now")
-               .lagged("pca__pc0", lag_window=1, output="lag1"))
-    pipeline = (fiml.ModelInputPipeline(spec)
+               .lagged("pc0", lag_window=2, output="lag2")
+               .identity("pc1", output="now")
+               .lagged("pc0", lag_window=1, output="lag1"))
+    pipeline = (SingleOutput(spec)
                 .add_transformation(StandardScaler(), name="scale")
                 .add_transformation(PCA(n_components=2, svd_solver="full"), name="pca")
                 .add_transformation(scalars, name="lags")
@@ -1057,10 +1050,10 @@ def test_scalar_stages_between_estimators_preserve_excluded_event_history():
     actual = pipeline.fit_transform(**data, fit_mask=mask)
     np.testing.assert_allclose(actual[:, :3], expected, rtol=1e-10, atol=1e-12)
     assert np.isnan(actual[:, 3:]).all()
-    assert pipeline.feature_names() == ["scaled_lag", "now", "lag2", "__reserved_3", "__reserved_4"]
+    assert pipeline.feature_names() == ["scaled_lag", "now", "lag2"]
     document = pipeline.to_json()
-    assert json.loads(document)["version"] == "3.0"
-    restored = fiml.ModelInputPipeline.from_json(document)
+    assert json.loads(document)["version"] == "4.0"
+    restored = SingleOutput.from_json(document)
     events(restored)
     np.testing.assert_array_equal(restored.transform(**data), actual)
     pipeline.reset()
@@ -1078,7 +1071,7 @@ def test_scalar_stages_between_estimators_preserve_excluded_event_history():
 def test_scalar_selection_can_remove_warmup_before_fitting():
     spec = base_spec(lag=True)
     first = spec.feature_ids()[0]
-    pipeline = (fiml.ModelInputPipeline(spec)
+    pipeline = (SingleOutput(spec)
                 .add_transformation(fiml.ScalarStage().identity(first, output="selected"), name="select")
                 .add_transformation(StandardScaler(), name="scale"))
     data = events(pipeline)
@@ -1088,8 +1081,8 @@ def test_scalar_selection_can_remove_warmup_before_fitting():
 
 def test_training_prefix_can_be_wider_than_explicit_final_capacity():
     raw = fiml.FeatureExtractorSpec().field("BTCUSDT", source="trade_price")
-    spec = fiml.PipelineSpec(raw, capacity=1).identity(raw.feature_ids()[0], output="price")
-    pipeline = (fiml.ModelInputPipeline(spec)
+    spec = LinearSpec(raw).identity(raw.feature_ids()[0], output="price")
+    pipeline = (SingleOutput(spec)
                 .add_transformation(fiml.ScalarStage()
                                     .identity("price")
                                     .lagged("price", lag_window=1, output="lag"), name="expand")
@@ -1103,12 +1096,10 @@ def test_training_prefix_can_be_wider_than_explicit_final_capacity():
     np.testing.assert_allclose(actual[mask], reference, rtol=1e-10, atol=1e-12)
     assert np.isnan(actual[0]).all()
     assert pipeline.to_spec().capacity == 1
-    restored = fiml.ModelInputPipeline.from_json(pipeline.to_json())
+    restored = SingleOutput.from_json(pipeline.to_json())
     events(restored)
     np.testing.assert_array_equal(restored.transform(**data), actual)
-    too_wide = (fiml.ModelInputPipeline(spec)
+    too_wide = (SingleOutput(spec)
                 .add_transformation(fiml.ScalarStage().identity("price").identity("price", output="copy"), name="expand"))
-    with pytest.raises(ValueError, match="capacity"):
-        too_wide.fit(**events(too_wide))
-    with pytest.raises(ValueError, match="not fitted"):
-        too_wide.to_json()
+    too_wide.fit(**events(too_wide))
+    assert too_wide.n_features() == 2

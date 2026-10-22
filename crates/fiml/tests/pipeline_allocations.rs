@@ -1,3 +1,5 @@
+mod common;
+
 use std::{
     alloc::{GlobalAlloc, Layout, System},
     cell::Cell,
@@ -7,13 +9,14 @@ use std::{
 
 use fiml::{
     ArrayFeatureVector, Event, FeatureDefinition, FeatureExtractorSpec, FeatureId, FeatureKey,
-    FeatureSource, FeatureVector, Pipeline, PipelineSpec, ReturnKind, Symbol,
-    TransformerDefinition, WarmupPolicy,
+    FeatureSource, FeatureVector, Pipeline, ReturnKind, Symbol, TransformerDefinition,
+    WarmupPolicy,
 };
 
 thread_local! {
     static COUNT_ALLOCATIONS: Cell<bool> = const { Cell::new(false) };
     static ALLOCATION_COUNT: Cell<usize> = const { Cell::new(0) };
+    static RETAINED_BYTES: Cell<isize> = const { Cell::new(0) };
 }
 
 /// Test-only allocator that counts heap allocations on the thread under test.
@@ -25,20 +28,24 @@ static ALLOCATOR: CountingAllocator = CountingAllocator;
 unsafe impl GlobalAlloc for CountingAllocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         record_allocation();
+        record_bytes(layout.size() as isize);
         unsafe { System.alloc(layout) }
     }
 
     unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
         record_allocation();
+        record_bytes(layout.size() as isize);
         unsafe { System.alloc_zeroed(layout) }
     }
 
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+        record_bytes(-(layout.size() as isize));
         unsafe { System.dealloc(ptr, layout) }
     }
 
     unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
         record_allocation();
+        record_bytes(new_size as isize - layout.size() as isize);
         unsafe { System.realloc(ptr, layout, new_size) }
     }
 }
@@ -46,6 +53,12 @@ unsafe impl GlobalAlloc for CountingAllocator {
 fn record_allocation() {
     if COUNT_ALLOCATIONS.try_with(Cell::get).unwrap_or(false) {
         let _ = ALLOCATION_COUNT.try_with(|count| count.set(count.get() + 1));
+    }
+}
+
+fn record_bytes(change: isize) {
+    if COUNT_ALLOCATIONS.try_with(Cell::get).unwrap_or(false) {
+        let _ = RETAINED_BYTES.try_with(|count| count.set(count.get() + change));
     }
 }
 
@@ -69,7 +82,7 @@ fn path_signature_does_not_allocate_during_warmup_missing_values_or_eviction() {
         id("p"),
     )])
     .unwrap();
-    let mut pipeline = PipelineSpec::with_stages(
+    let mut pipeline = common::linear_spec(
         raw,
         [T::standard_scale(id("p"), id("x"), 0., 0.5)],
         [FittedStage::rolling_path_signature(
@@ -78,14 +91,10 @@ fn path_signature_does_not_allocate_during_warmup_missing_values_or_eviction() {
             17,
             WarmupPolicy::FullWindow,
         )],
-        6,
         None,
     )
     .unwrap()
-    .build(
-        ArrayFeatureVector::<1>::new(),
-        ArrayFeatureVector::<6>::new(),
-    )
+    .build()
     .unwrap();
     assert_eq!(
         count_allocations(|| {
@@ -101,12 +110,19 @@ fn path_signature_does_not_allocate_during_warmup_missing_values_or_eviction() {
                 pipeline
                     .handle_event(Event::volume(Symbol::GLOBAL, 1., time))
                     .unwrap();
-                black_box(pipeline.values());
+                black_box(pipeline.output("model").unwrap().values());
             }
         }),
         0
     );
-    assert!(pipeline.values().iter().all(|v| v.is_finite()));
+    assert!(
+        pipeline
+            .output("model")
+            .unwrap()
+            .values()
+            .iter()
+            .all(|v| v.is_finite())
+    );
 }
 
 #[test]
@@ -121,7 +137,7 @@ fn state_transformers_do_not_allocate_during_warmup_sign_changes_or_clock_refres
         id("p"),
     )])
     .unwrap();
-    let mut pipeline = PipelineSpec::with_stages(
+    let mut pipeline = common::linear_spec(
         raw,
         [T::delta(id("p"), id("signal"), 1)],
         [FittedStage::Scalar {
@@ -144,14 +160,10 @@ fn state_transformers_do_not_allocate_during_warmup_sign_changes_or_clock_refres
                 T::time_since_nonzero(id("signal"), id("time_since_nonzero"), 0.5),
             ],
         }],
-        8,
         None,
     )
     .unwrap()
-    .build(
-        ArrayFeatureVector::<1>::new(),
-        ArrayFeatureVector::<8>::new(),
-    )
+    .build()
     .unwrap();
     assert_eq!(
         count_allocations(|| {
@@ -163,17 +175,22 @@ fn state_transformers_do_not_allocate_during_warmup_sign_changes_or_clock_refres
                 pipeline
                     .handle_event(Event::volume(Symbol::GLOBAL, 1., time * 10 + 5))
                     .unwrap();
-                black_box(pipeline.values());
+                black_box(pipeline.output("model").unwrap().values());
             }
         }),
         0
     );
-    assert!(pipeline.values().iter().all(|v| v.is_finite()));
+    assert!(
+        pipeline
+            .output("model")
+            .unwrap()
+            .values()
+            .iter()
+            .all(|v| v.is_finite())
+    );
 }
 
-fn pipeline_with<const N: usize>(
-    transformations: [TransformerDefinition; N],
-) -> Pipeline<ArrayFeatureVector<1>, ArrayFeatureVector<N>> {
+fn pipeline_with<const N: usize>(transformations: [TransformerDefinition; N]) -> Pipeline {
     let raw_spec = FeatureExtractorSpec::new([FeatureDefinition::new(
         FeatureKey::DayOfWeek {
             symbol: Symbol::GLOBAL,
@@ -182,12 +199,9 @@ fn pipeline_with<const N: usize>(
         FeatureId::new("day"),
     )])
     .unwrap();
-    PipelineSpec::new(raw_spec, transformations)
+    common::linear_spec(raw_spec, transformations, [], None)
         .unwrap()
-        .build(
-            ArrayFeatureVector::<1>::new(),
-            ArrayFeatureVector::<N>::new(),
-        )
+        .build()
         .unwrap()
 }
 
@@ -203,7 +217,7 @@ fn changes_do_not_allocate_during_warmup_updates_or_stage_refreshes() {
         id("p"),
     )])
     .unwrap();
-    let spec = PipelineSpec::with_stages(
+    let spec = common::linear_spec(
         raw,
         [T::delta(id("p"), id("d"), 1), T::identity(id("p"), id("p"))],
         [FittedStage::Scalar {
@@ -214,17 +228,11 @@ fn changes_do_not_allocate_during_warmup_updates_or_stage_refreshes() {
                 T::delta(id("d"), id("dd"), 1),
             ],
         }],
-        4,
         None,
     )
     .unwrap();
     use TransformerDefinition as T;
-    let mut pipeline = spec
-        .build(
-            ArrayFeatureVector::<1>::new(),
-            ArrayFeatureVector::<4>::new(),
-        )
-        .unwrap();
+    let mut pipeline = spec.build().unwrap();
     let allocations = count_allocations(|| {
         for timestamp in 0..128 {
             black_box(
@@ -240,8 +248,8 @@ fn changes_do_not_allocate_during_warmup_updates_or_stage_refreshes() {
         }
     });
     assert_eq!(allocations, 0);
-    assert_eq!(pipeline.values()[0], 3.);
-    assert_eq!(pipeline.values()[3], 0.);
+    assert_eq!(pipeline.output("model").unwrap().values()[0], 3.);
+    assert_eq!(pipeline.output("model").unwrap().values()[3], 0.);
 }
 
 #[test]
@@ -269,7 +277,7 @@ fn lagged_pipeline_warmup_and_steady_state_do_not_allocate() {
         }
     });
     assert_eq!(allocations, 0);
-    assert_eq!(pipeline.values(), &[4.0; 4]);
+    assert_eq!(pipeline.output("model").unwrap().values(), &[4.0; 4]);
 }
 
 #[test]
@@ -426,7 +434,7 @@ fn fitted_stages_do_not_allocate_during_warmup_or_steady_state() {
         FeatureId::new("day"),
     )])
     .unwrap();
-    let spec = PipelineSpec::with_stages(
+    let spec = common::linear_spec(
         raw,
         [
             TransformerDefinition::identity(FeatureId::new("day"), FeatureId::new("day")),
@@ -480,16 +488,10 @@ fn fitted_stages_do_not_allocate_during_warmup_or_steady_state() {
                 )],
             },
         ],
-        1,
         None,
     )
     .unwrap();
-    let mut pipeline = spec
-        .build(
-            ArrayFeatureVector::<1>::new(),
-            ArrayFeatureVector::<1>::new(),
-        )
-        .unwrap();
+    let mut pipeline = spec.build().unwrap();
     assert_eq!(
         count_allocations(|| {
             for timestamp in 0..128 {
@@ -498,7 +500,7 @@ fn fitted_stages_do_not_allocate_during_warmup_or_steady_state() {
         }),
         0
     );
-    assert!((pipeline.values()[0] + 0.7).abs() < 1e-14);
+    assert!((pipeline.output("model").unwrap().values()[0] + 0.7).abs() < 1e-14);
 }
 
 #[test]
@@ -512,7 +514,7 @@ fn quantile_transform_stage_does_not_allocate_per_event() {
         FeatureId::new("day"),
     )])
     .unwrap();
-    let spec = PipelineSpec::with_stages(
+    let spec = common::linear_spec(
         raw,
         [TransformerDefinition::identity(
             FeatureId::new("day"),
@@ -527,16 +529,10 @@ fn quantile_transform_stage_does_not_allocate_per_event() {
             bounds_threshold: 1e-7,
             normal_clip: Some((-5.199_337_582_605_575, 5.199_337_582_703_42)),
         }],
-        1,
         None,
     )
     .unwrap();
-    let mut pipeline = spec
-        .build(
-            ArrayFeatureVector::<1>::new(),
-            ArrayFeatureVector::<1>::new(),
-        )
-        .unwrap();
+    let mut pipeline = spec.build().unwrap();
 
     assert_eq!(
         count_allocations(|| {
@@ -546,7 +542,7 @@ fn quantile_transform_stage_does_not_allocate_per_event() {
         }),
         0
     );
-    assert!(pipeline.values()[0].is_finite());
+    assert!(pipeline.output("model").unwrap().values()[0].is_finite());
 }
 
 #[test]
@@ -664,7 +660,7 @@ fn configured_book_derivation_and_transformation_do_not_allocate() {
         .unwrap()
         .with_order_books([OrderBookConfig::new(symbol, UpdatePolicy::Contiguous, 128)])
         .unwrap();
-    let model = PipelineSpec::new(
+    let model = common::linear_spec(
         spec,
         [
             TransformerDefinition::standard_scale(
@@ -681,14 +677,11 @@ fn configured_book_derivation_and_transformation_do_not_allocate() {
                 WarmupPolicy::FullWindow,
             ),
         ],
+        [],
+        None,
     )
     .unwrap();
-    let mut extractor = model
-        .build(
-            ArrayFeatureVector::<23>::new(),
-            ArrayFeatureVector::<3>::new(),
-        )
-        .unwrap();
+    let mut extractor = model.build().unwrap();
     extractor
         .handle_event(Event::order_book_snapshot(
             symbol,
@@ -723,7 +716,7 @@ fn configured_book_derivation_and_transformation_do_not_allocate() {
             );
             black_box(extractor.raw_feature_ids());
             black_box(extractor.raw_observations());
-            black_box(extractor.output_observations());
+            black_box(extractor.output("model").unwrap().observations());
             for index in 0..23 {
                 black_box(extractor.raw_feature_sources(index));
             }
@@ -758,15 +751,14 @@ fn book_source_tracking_does_not_allocate_during_buffering_or_replay() {
         ),
     ])
     .unwrap();
-    let mut pipeline = PipelineSpec::new(
+    let mut pipeline = common::linear_spec(
         raw,
         [TransformerDefinition::identity(id.clone(), id.clone())],
+        [],
+        None,
     )
     .unwrap()
-    .build(
-        ArrayFeatureVector::<5>::new(),
-        ArrayFeatureVector::<1>::new(),
-    )
+    .build()
     .unwrap();
     let delta = |timestamp, sequence| {
         Event::order_book_delta(
@@ -810,7 +802,7 @@ fn book_source_tracking_does_not_allocate_during_buffering_or_replay() {
                 black_box(pipeline.raw_feature_index(&id));
                 black_box(pipeline.raw_feature_sources(0));
                 black_box(pipeline.raw_observations());
-                black_box(pipeline.output_observations());
+                black_box(pipeline.output("model").unwrap().observations());
                 let book = pipeline.order_book_of_symbol(symbol).unwrap();
                 black_box(book.sync_state());
                 black_box(book.source_timestamp());
@@ -919,12 +911,9 @@ fn grouped_averages_and_staged_averages_never_allocate_during_updates() {
         } else {
             vec![]
         };
-        let mut pipeline = PipelineSpec::with_stages(raw, definitions, stages, 2, None)
+        let mut pipeline = common::linear_spec(raw, definitions, stages, None)
             .unwrap()
-            .build(
-                ArrayFeatureVector::<1>::new(),
-                ArrayFeatureVector::<2>::new(),
-            )
+            .build()
             .unwrap();
         assert_eq!(
             count_allocations(|| {
@@ -939,7 +928,14 @@ fn grouped_averages_and_staged_averages_never_allocate_during_updates() {
             }),
             0
         );
-        assert!(pipeline.values().iter().all(|value| value.is_finite()));
+        assert!(
+            pipeline
+                .output("model")
+                .unwrap()
+                .values()
+                .iter()
+                .all(|value| value.is_finite())
+        );
     }
 }
 
@@ -1040,7 +1036,7 @@ fn context_updates_and_staged_refreshes_allocate_nothing() {
     )])
     .unwrap();
     let mut extractor = raw.build(ArrayFeatureVector::<1>::new()).unwrap();
-    let mut pipeline = PipelineSpec::with_stages(
+    let mut pipeline = common::linear_spec(
         raw,
         [
             TransformerDefinition::identity(FeatureId::new("high"), FeatureId::new("high")),
@@ -1075,14 +1071,10 @@ fn context_updates_and_staged_refreshes_allocate_nothing() {
                 )],
             },
         ],
-        1,
         None,
     )
     .unwrap()
-    .build(
-        ArrayFeatureVector::<1>::new(),
-        ArrayFeatureVector::<1>::new(),
-    )
+    .build()
     .unwrap();
     assert_eq!(
         count_allocations(|| {
@@ -1119,7 +1111,7 @@ fn timed_transformers_do_not_allocate_during_warmup_wraparound_or_refresh() {
         id("p"),
     )])
     .unwrap();
-    let mut pipeline = PipelineSpec::with_stages(
+    let mut pipeline = common::linear_spec(
         raw,
         [
             T::delta_timed(id("p"), id("d"), Duration::from_millis(1)),
@@ -1148,14 +1140,10 @@ fn timed_transformers_do_not_allocate_during_warmup_wraparound_or_refresh() {
                 transformations: vec![T::identity(id("d"), id("d"))],
             },
         ],
-        1,
         None,
     )
     .unwrap()
-    .build(
-        ArrayFeatureVector::<1>::new(),
-        ArrayFeatureVector::<1>::new(),
-    )
+    .build()
     .unwrap();
     assert_eq!(
         count_allocations(|| {
@@ -1173,12 +1161,12 @@ fn timed_transformers_do_not_allocate_during_warmup_wraparound_or_refresh() {
                     .handle_event(Event::volume(a, 1., timestamp))
                     .unwrap();
             }
-            assert_eq!(pipeline.values(), &[7.]);
+            assert_eq!(pipeline.output("model").unwrap().values(), &[7.]);
             pipeline
                 .handle_event(Event::volume(a, 1., i64::MAX))
                 .unwrap();
-            assert_eq!(pipeline.values(), &[0.]);
-            black_box(pipeline.output_observations());
+            assert_eq!(pipeline.output("model").unwrap().values(), &[0.]);
+            black_box(pipeline.output("model").unwrap().observations());
         }),
         0
     );
@@ -1197,7 +1185,7 @@ fn rolling_summaries_do_not_allocate_during_warmup_wraparound_or_expiry() {
         id("p"),
     )])
     .unwrap();
-    let mut pipeline = PipelineSpec::new(
+    let mut pipeline = common::linear_spec(
         raw,
         [
             T::rolling_std(id("p"), id("s"), 7, WarmupPolicy::FullWindow),
@@ -1251,12 +1239,11 @@ fn rolling_summaries_do_not_allocate_during_warmup_wraparound_or_expiry() {
             ),
             T::rolling_max_drawdown(id("p"), id("max_drawdown"), 7, WarmupPolicy::FirstValue),
         ],
+        [],
+        None,
     )
     .unwrap()
-    .build(
-        ArrayFeatureVector::<1>::new(),
-        ArrayFeatureVector::<14>::new(),
-    )
+    .build()
     .unwrap();
     assert_eq!(
         count_allocations(|| {
@@ -1274,11 +1261,142 @@ fn rolling_summaries_do_not_allocate_during_warmup_wraparound_or_expiry() {
             pipeline
                 .handle_event(Event::volume(a, 1., i64::MAX))
                 .unwrap();
-            black_box(pipeline.values());
+            black_box(pipeline.output("model").unwrap().values());
         }),
         0
     );
-    assert!(pipeline.values()[..4].iter().all(|v| v.is_finite()));
-    assert!(pipeline.values()[4..8].iter().all(|v| v.is_nan()));
-    assert!(pipeline.values()[8..].iter().all(|v| v.is_finite()));
+    assert!(
+        pipeline.output("model").unwrap().values()[..4]
+            .iter()
+            .all(|v| v.is_finite())
+    );
+    assert!(
+        pipeline.output("model").unwrap().values()[4..8]
+            .iter()
+            .all(|v| v.is_nan())
+    );
+    assert!(
+        pipeline.output("model").unwrap().values()[8..]
+            .iter()
+            .all(|v| v.is_finite())
+    );
+}
+
+#[test]
+fn branching_graph_and_retained_output_reads_allocate_nothing() {
+    use fiml::{FittedStage, PipelineSpec};
+    let raw = FeatureExtractorSpec::new([FeatureDefinition::new(
+        FeatureKey::Field {
+            symbol: Symbol::GLOBAL,
+            field: fiml::EventField::Price,
+        },
+        FeatureId::new("price"),
+    )])
+    .unwrap();
+    let mut spec = PipelineSpec::new(raw);
+    let shared = spec
+        .add(
+            spec.root(),
+            FittedStage::Scalar {
+                transformations: vec![TransformerDefinition::sma(
+                    FeatureId::new("price"),
+                    FeatureId::new("mean"),
+                    8,
+                    WarmupPolicy::FullWindow,
+                )],
+            },
+        )
+        .unwrap();
+    for name in ["first", "second"] {
+        let node = spec
+            .add(
+                shared,
+                FittedStage::Scalar {
+                    transformations: vec![TransformerDefinition::lagged(
+                        FeatureId::new("mean"),
+                        FeatureId::new("lag"),
+                        3,
+                    )],
+                },
+            )
+            .unwrap();
+        spec.output(name, node).unwrap();
+    }
+    spec.output("shared", shared).unwrap();
+    let mut runtime = spec.build().unwrap();
+    let output = runtime.output("first").unwrap().id();
+    assert_eq!(
+        count_allocations(|| {
+            for timestamp in 0..1024 {
+                runtime
+                    .handle_event(Event::price(Symbol::GLOBAL, timestamp as f64, timestamp))
+                    .unwrap();
+                black_box(runtime.output_by_id(output).unwrap().values());
+            }
+        }),
+        0
+    );
+}
+
+#[test]
+fn shared_graph_retains_less_heap_than_independent_pipelines() {
+    fn spec(branches: usize) -> fiml::PipelineSpec {
+        use fiml::{FittedStage, PipelineSpec};
+        let raw = FeatureExtractorSpec::new([FeatureDefinition::new(
+            FeatureKey::Field {
+                symbol: Symbol::GLOBAL,
+                field: fiml::EventField::Price,
+            },
+            FeatureId::new("price"),
+        )])
+        .unwrap();
+        let mut spec = PipelineSpec::new(raw);
+        let shared = spec
+            .add(
+                spec.root(),
+                FittedStage::Scalar {
+                    transformations: vec![TransformerDefinition::sma(
+                        FeatureId::new("price"),
+                        FeatureId::new("mean"),
+                        128,
+                        WarmupPolicy::FirstValue,
+                    )],
+                },
+            )
+            .unwrap();
+        for index in 0..branches {
+            let node = spec
+                .add(
+                    shared,
+                    FittedStage::Scalar {
+                        transformations: vec![TransformerDefinition::lagged(
+                            FeatureId::new("mean"),
+                            FeatureId::new("lag"),
+                            3,
+                        )],
+                    },
+                )
+                .unwrap();
+            spec.output(format!("model{index}"), node).unwrap();
+        }
+        spec
+    }
+    fn measure(spec: &fiml::PipelineSpec) -> (fiml::Pipeline, isize) {
+        RETAINED_BYTES.with(|bytes| bytes.set(0));
+        COUNT_ALLOCATIONS.with(|enabled| enabled.set(true));
+        let runtime = spec.build().unwrap();
+        COUNT_ALLOCATIONS.with(|enabled| enabled.set(false));
+        (runtime, RETAINED_BYTES.with(Cell::get))
+    }
+    let shared_spec = spec(2);
+    let independent_spec = spec(1);
+    let (shared, shared_bytes) = measure(&shared_spec);
+    let (first, first_bytes) = measure(&independent_spec);
+    let (second, second_bytes) = measure(&independent_spec);
+    assert!(shared_bytes > 0 && shared_bytes < first_bytes + second_bytes);
+    println!(
+        "retained runtime heap: shared={shared_bytes} bytes, independent={} bytes",
+        first_bytes + second_bytes
+    );
+    black_box((shared, first, second));
 }

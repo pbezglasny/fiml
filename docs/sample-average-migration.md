@@ -1,6 +1,6 @@
 # Sample averages are pipeline transformations
 
-Extractor JSON is now version `2.0`; pipeline JSON is version `3.0`. Readers reject
+Extractor JSON is now version `2.0`; pipeline JSON is version `4.0`. Readers reject
 earlier versions. Rebuild and re-export configurations; there is no automatic
 legacy conversion. Standalone SMA/EMA calculators and functions remain available.
 Timed SMA, returns, volatility, and trade indicators remain extractor features.
@@ -14,17 +14,19 @@ model's column names. Raw layouts and raw IDs change.
 import fiml
 
 raw = fiml.FeatureExtractorSpec().field("BTCUSDT", source="trade_price", id="price")
-spec = (fiml.PipelineSpec(raw)
+stage = (fiml.ScalarStage()
         .sma("price", window=20, output="sma20")
         .ema("price", window=10, output="ema10"))
-pipeline = fiml.ModelInputPipeline(spec)
+spec = fiml.PipelineSpec(raw)
+spec.output("model", spec.add(spec.root(), stage))
+pipeline = spec.build()
 ```
 
 `field(symbol, *, source="price", id=None)` supports `price`, `volume`,
 `trade_price`, and `trade_volume`. It starts at NaN and retains the latest matching
 value between observations. Rust uses `FeatureKey::Field { symbol, field }`.
 
-`PipelineSpec` and `ScalarStage` both provide
+`ScalarStage` provides
 `sma(input, *, window, warmup=WarmupPolicy.FULL_WINDOW, output=None)` and `ema(...)`.
 Omitting `output` retains the input ID. Rust uses `TransformerDefinition::sma` and
 `::ema`, taking input ID, output ID, window, and warm-up policy. Windows must be
@@ -36,9 +38,11 @@ Definitions in one scalar stage read the same preceding layout. To compose
 operations, add successive stages:
 
 ```python
-scaled = fiml.PipelineSpec(raw).standard_scale("price", mean=100.0, scale=10.0)
-scaled.scalar_stage(fiml.ScalarStage().sma("price", window=20))
-scaled.scalar_stage(fiml.ScalarStage().lagged("price", lag_window=1))
+spec = fiml.PipelineSpec(raw)
+scaled = spec.add(spec.root(), fiml.ScalarStage().standard_scale("price", mean=100.0, scale=10.0))
+smoothed = spec.add(scaled, fiml.ScalarStage().sma("price", window=20))
+lagged = spec.add(smoothed, fiml.ScalarStage().lagged("price", lag_window=1))
+spec.output("model", lagged)
 ```
 
 Book features can be smoothed directly: select the ID from

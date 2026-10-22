@@ -114,7 +114,7 @@ def accepts_nan(estimator):
     return type(estimator) in (SimpleImputer, PowerTransformer, QuantileTransformer)
 
 
-def fit_stage(estimator, name, matrix, spec):
+def fit_stage(estimator, matrix, input_ids):
     from sklearn.feature_selection import VarianceThreshold
     from sklearn.impute import SimpleImputer
     from sklearn.preprocessing import (
@@ -131,9 +131,8 @@ def fit_stage(estimator, name, matrix, spec):
         indices = fitted.get_support(indices=True).tolist()
         if not indices:
             raise ValueError("VarianceThreshold produced zero output features")
-        spec.select_stage(indices)
+        return dict(type="select", outputs=[input_ids[i] for i in indices], input_indices=indices)
     elif type(fitted) is SimpleImputer:
-        input_ids = spec.feature_ids()
         statistics = np.asarray(fitted.statistics_, dtype=np.float64)
         retained = np.flatnonzero(~np.isnan(statistics))
         replacements = statistics[retained]
@@ -147,28 +146,49 @@ def fit_stage(estimator, name, matrix, spec):
             raise ValueError("SimpleImputer produced zero output features")
         if not np.isfinite(replacements).all():
             raise ValueError("SimpleImputer fitted non-finite replacement values")
-        spec.simple_impute_stage(
-            outputs, retained.tolist(), replacements.tolist(), indicators.tolist()
+        return dict(
+            type="simple_impute",
+            outputs=outputs,
+            retained_input_indices=retained.tolist(),
+            replacement_values=replacements.tolist(),
+            indicator_input_indices=indicators.tolist(),
         )
     elif type(fitted) is StandardScaler:
         mean = fitted.mean_ if fitted.with_mean else np.zeros(matrix.shape[1])
         scale = fitted.scale_ if fitted.with_std else np.ones(matrix.shape[1])
-        spec.scale_stage(mean.tolist(), scale.tolist())
+        return dict(type="standard_scale", outputs=input_ids, mean=mean.tolist(), scale=scale.tolist())
     elif type(fitted) is RobustScaler:
         center = fitted.center_ if fitted.with_centering else np.zeros(matrix.shape[1])
         scale = fitted.scale_ if fitted.with_scaling else np.ones(matrix.shape[1])
-        spec.scale_stage(center.tolist(), scale.tolist())
+        return dict(type="standard_scale", outputs=input_ids, mean=center.tolist(), scale=scale.tolist())
     elif type(fitted) is MinMaxScaler:
         clip = fitted.feature_range if fitted.clip else None
-        spec.min_max_scale_stage(fitted.scale_.tolist(), fitted.min_.tolist(), clip)
+        result = dict(
+            type="min_max_scale",
+            outputs=input_ids,
+            scale=fitted.scale_.tolist(),
+            min=fitted.min_.tolist(),
+        )
+        if clip is not None:
+            result["clip"] = clip
+        return result
     elif type(fitted) is MaxAbsScaler:
         zeros = np.zeros(matrix.shape[1])
         if fitted.clip:
-            spec.min_max_scale_stage(
-                np.reciprocal(fitted.scale_).tolist(), zeros.tolist(), (-1.0, 1.0)
+            return dict(
+                type="min_max_scale",
+                outputs=input_ids,
+                scale=np.reciprocal(fitted.scale_).tolist(),
+                min=zeros.tolist(),
+                clip=(-1.0, 1.0),
             )
         else:
-            spec.scale_stage(zeros.tolist(), fitted.scale_.tolist())
+            return dict(
+                type="standard_scale",
+                outputs=input_ids,
+                mean=zeros.tolist(),
+                scale=fitted.scale_.tolist(),
+            )
     elif type(fitted) is PowerTransformer:
         if fitted.standardize:
             if fitted.method == "box-cox":
@@ -187,11 +207,13 @@ def fit_stage(estimator, name, matrix, spec):
         else:
             mean = np.zeros(matrix.shape[1])
             scale = np.ones(matrix.shape[1])
-        spec.power_transform_stage(
-            fitted.method,
-            fitted.lambdas_.tolist(),
-            mean.tolist(),
-            scale.tolist(),
+        return dict(
+            type="power_transform",
+            outputs=input_ids,
+            method=fitted.method,
+            lambdas=fitted.lambdas_.tolist(),
+            mean=mean.tolist(),
+            scale=scale.tolist(),
         )
     elif type(fitted) is QuantileTransformer:
         bounds_threshold = 1e-7
@@ -204,20 +226,27 @@ def fit_stage(estimator, name, matrix, spec):
 
             probability = bounds_threshold - np.spacing(1)
             normal_clip = (norm.ppf(probability), norm.ppf(1 - probability))
-        spec.quantile_transform_stage(
-            fitted.output_distribution,
-            quantiles.tolist(),
-            fitted.references_.tolist(),
-            all_nan_input_indices.tolist(),
-            bounds_threshold,
-            normal_clip,
+        result = dict(
+            type="quantile_transform",
+            outputs=input_ids,
+            output_distribution=fitted.output_distribution,
+            quantiles=quantiles.tolist(),
+            references=fitted.references_.tolist(),
+            all_nan_input_indices=all_nan_input_indices.tolist(),
+            bounds_threshold=bounds_threshold,
         )
+        if normal_clip is not None:
+            result["normal_clip"] = normal_clip
+        return result
     else:
         scale = (
             np.maximum(np.sqrt(fitted.explained_variance_), np.finfo(np.float64).eps)
             if fitted.whiten else np.ones(fitted.n_components_)
         )
-        spec.pca_stage(
-            [f"{name}__pc{i}" for i in range(fitted.n_components_)],
-            fitted.mean_.tolist(), fitted.components_.tolist(), scale.tolist(),
+        return dict(
+            type="pca",
+            outputs=[f"pc{i}" for i in range(fitted.n_components_)],
+            mean=fitted.mean_.tolist(),
+            components=fitted.components_.tolist(),
+            output_scale=scale.tolist(),
         )

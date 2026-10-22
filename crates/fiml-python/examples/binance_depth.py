@@ -85,10 +85,12 @@ def build_pipeline() -> fiml.ModelInputPipeline:
         "mid_price", "spread", "spread_bps", "microprice",
         "imbalance_1", "imbalance_5", "imbalance_20", "best_bid_size",
     ]
-    spec = fiml.PipelineSpec(raw)
+    scalar = fiml.ScalarStage()
     for feature_id, name in zip(raw.feature_ids(), names, strict=True):
-        spec.identity(feature_id, output=name)
-    spec.lagged(raw.feature_ids()[4], lag_window=1, output="previous_imbalance_1")
+        scalar.identity(feature_id, output=name)
+    scalar.lagged(raw.feature_ids()[4], lag_window=1, output="previous_imbalance_1")
+    spec = fiml.PipelineSpec(raw)
+    spec.output("model", spec.add(spec.root(), scalar))
     # The serialized recipe can also be loaded by Rust.
     return fiml.ModelInputPipeline.from_json(spec.to_json())
 
@@ -103,10 +105,10 @@ def main() -> None:
 
     events = load_events(args.file)
     pipeline = build_pipeline()
-    features = pipeline.transform_order_book(events)
+    features = pipeline.transform_order_book(events)["model"]
     # One row per newer snapshot, ready for an ML model. The first lag is NaN.
     np.savetxt(sys.stdout, features, delimiter=",", fmt="%.10g",
-               header=",".join(pipeline.feature_names()), comments="")
+               header=",".join(pipeline.output("model").feature_names()), comments="")
 
 
 if __name__ == "__main__":

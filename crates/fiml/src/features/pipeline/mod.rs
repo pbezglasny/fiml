@@ -1,59 +1,138 @@
-//! Compiles raw extraction, scalar transformations, and fitted vector stages into model input.
-//!
-//! The spec types validate named layouts on the cold path. [`Pipeline`] keeps
-//! resolved indexes and preallocated transformer state, and writes one caller-owned
-//! model vector directly on the event-processing hot path.
+//! Executes a shared extractor and branching transformation graph in creation order.
+//! Each node owns its result and histories; named outputs borrow completed values.
 
 mod specs;
 mod stages;
 
-pub use specs::PipelineSpec;
+pub use specs::{NodeId, OutputSpec, PipelineNode, PipelineSpec};
+use stages::CompiledStage;
 pub use stages::FittedStage;
-use stages::StageRuntime;
 
-use super::transformers::{Evaluation, Transformer};
+use super::transformers::Evaluation;
 use crate::{
     Event, FeatureExtractor, FeatureId, FeatureVector, Result, SourceObservation, Symbol,
-    UpdateResult,
+    UpdateResult, VecFeatureVector,
 };
 
-/// Allocation-free event runtime for raw extraction and final model input.
-pub struct Pipeline<RawV, ModelV>
-where
-    RawV: FeatureVector,
-    ModelV: FeatureVector,
-{
-    feature_extractor: FeatureExtractor<RawV>,
-    operations: Box<[Transformer]>,
-    clocks: Box<[Option<i64>]>,
-    stages: Option<StageRuntime>,
-    model_vector: ModelV,
-    observations: Box<[bool]>,
-    output_ids: Box<[FeatureId]>,
+/// Stable runtime-local output reference, separate from a short borrow of values.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OutputId {
+    owner: u64,
+    slot: usize,
 }
 
-impl<RawV, ModelV> Pipeline<RawV, ModelV>
-where
-    RawV: FeatureVector,
-    ModelV: FeatureVector,
-{
-    /// Applies an accepted event to raw features and then refreshes model input.
-    /// Non-finite payloads are rejected before changing raw or final values,
-    /// timed state, or the timestamp watermark, even for unsubscribed symbols.
-    /// Finite zero and negative payloads are accepted.
-    #[must_use = "event errors must be handled before using updated model-input values"]
-    pub fn handle_event(&mut self, event: Event) -> Result<UpdateResult> {
-        let update_result = self.feature_extractor.handle_event(event)?;
-        self.refresh(true);
-        Ok(update_result)
+/// Borrowed current values and metadata for one registered output.
+pub struct PipelineOutput<'a> {
+    id: OutputId,
+    values: &'a [f64],
+    feature_ids: &'a [FeatureId],
+    observations: &'a [bool],
+}
+
+impl<'a> PipelineOutput<'a> {
+    /// Retain this identifier across updates and resets, then resolve it again.
+    pub fn id(&self) -> OutputId {
+        self.id
+    }
+    /// Active values; the borrow prevents concurrent runtime mutation.
+    pub fn values(&self) -> &'a [f64] {
+        self.values
+    }
+    /// Feature IDs in coordinate order.
+    pub fn feature_ids(&self) -> &'a [FeatureId] {
+        self.feature_ids
+    }
+    /// Processing observations, independent of numeric readiness.
+    /// Inspect after successful processing; errors can leave an earlier event's mask.
+    pub fn observations(&self) -> &'a [bool] {
+        self.observations
+    }
+}
+
+/// Compiled transformation with its persistent result, observation mask, and clocks.
+struct NodeRuntime {
+    parent: usize,
+    stage: CompiledStage,
+    values: VecFeatureVector,
+    ids: Box<[FeatureId]>,
+    observations: Box<[bool]>,
+    clocks: Box<[Option<i64>]>,
+}
+
+/// Allocation-free graph evaluation with owned buffers and shared node histories.
+pub struct Pipeline {
+    owner: u64,
+    spec: PipelineSpec,
+    feature_extractor: FeatureExtractor<VecFeatureVector>,
+    clocks: Box<[Option<i64>]>,
+    nodes: Vec<NodeRuntime>,
+}
+
+impl Pipeline {
+    fn new(spec: &PipelineSpec) -> Result<Self> {
+        spec.validate()?;
+        let raw = spec.raw_feature_extractor_spec();
+        let feature_extractor = raw.build(VecFeatureVector::new_of_length(
+            raw.feature_vector_capacity(),
+            raw.feature_vector_length(),
+        ))?;
+        let timed = spec.nodes().iter().any(|node| match &node.stage {
+            FittedStage::Scalar { transformations } => transformations
+                .iter()
+                .any(crate::TransformerDefinition::needs_clock),
+            _ => false,
+        });
+        let nodes = spec
+            .nodes()
+            .iter()
+            .map(|node| {
+                let ids = node.stage.outputs().into_owned().into_boxed_slice();
+                let mut values = VecFeatureVector::new(ids.len());
+                for index in 0..ids.len() {
+                    values.set_value_at(index, f64::NAN);
+                }
+                NodeRuntime {
+                    parent: node.parent,
+                    stage: CompiledStage::new(&node.stage, &spec.node_ids(node.parent), timed),
+                    values,
+                    observations: vec![false; ids.len()].into_boxed_slice(),
+                    clocks: vec![None; if timed { ids.len() } else { 0 }].into_boxed_slice(),
+                    ids,
+                }
+            })
+            .collect();
+        Ok(Self {
+            owner: specs::owner_id(),
+            spec: spec.clone(),
+            clocks: vec![
+                None;
+                if timed {
+                    raw.feature_vector_length()
+                } else {
+                    0
+                }
+            ]
+            .into_boxed_slice(),
+            feature_extractor,
+            nodes,
+        })
     }
 
-    /// Validates context IDs and values without changing runtime state.
+    /// Applies an accepted event once to each node.
+    /// Rejected events do not refresh transformed buffers; order-book errors may
+    /// still change extractor synchronization state and do not promise full rollback.
+    #[must_use = "event errors must be handled before reading outputs"]
+    pub fn handle_event(&mut self, event: Event) -> Result<UpdateResult> {
+        let result = self.feature_extractor.handle_event(event)?;
+        self.refresh(true);
+        Ok(result)
+    }
+
+    /// Validates context without changing runtime state.
     pub fn validate_context(&self, updates: &[(&str, Option<f64>)]) -> Result<()> {
         self.feature_extractor.validate_context(updates)
     }
-
-    /// Replaces context and refreshes stateless stages without advancing histories.
+    /// Refreshes stateless calculations without advancing market histories.
     pub fn update_context(&mut self, updates: &[(&str, Option<f64>)]) -> Result<()> {
         self.feature_extractor.update_context(updates)?;
         if !updates.is_empty() {
@@ -66,670 +145,124 @@ where
         for (index, clock) in self.clocks.iter_mut().enumerate() {
             *clock = self.feature_extractor.evaluation_timestamp(index);
         }
-        let evaluation = Evaluation {
-            timestamps: &self.clocks,
-            global_timestamp: self.feature_extractor.max_timestamp(),
-            advance,
-        };
-        let observed = self.feature_extractor.observations();
-        self.observations.fill(false);
-        let raw_values = self.feature_extractor.feature_vector().values();
-        if let Some(stages) = &mut self.stages {
-            stages.prepare_input();
-            for operation in &mut self.operations {
-                operation.apply(
-                    raw_values,
-                    observed,
-                    &mut stages.input,
-                    &mut stages.observations,
-                    evaluation,
-                );
-            }
-            stages.apply(&mut self.model_vector, &mut self.observations, evaluation);
-        } else {
-            for operation in &mut self.operations {
-                operation.apply(
-                    raw_values,
-                    observed,
-                    &mut self.model_vector,
-                    &mut self.observations,
-                    evaluation,
-                );
-            }
+        let raw_width = self.raw_feature_ids().len();
+        let raw_values = &self.feature_extractor.feature_vector().values()[..raw_width];
+        let raw_observed = &self.feature_extractor.observations()[..raw_width];
+        for index in 0..self.nodes.len() {
+            let (earlier, rest) = self.nodes.split_at_mut(index);
+            let node = &mut rest[0];
+            let (input, observed, clocks) = if node.parent == 0 {
+                (raw_values, raw_observed, self.clocks.as_ref())
+            } else {
+                let parent = &earlier[node.parent - 1];
+                (
+                    parent.values.values(),
+                    parent.observations.as_ref(),
+                    parent.clocks.as_ref(),
+                )
+            };
+            node.stage.apply(
+                input,
+                observed,
+                &mut node.values,
+                &mut node.observations,
+                Evaluation {
+                    timestamps: clocks,
+                    global_timestamp: self.feature_extractor.max_timestamp(),
+                    advance,
+                },
+                &mut node.clocks,
+            );
         }
     }
 
-    /// Returns visible book state for inspection and ingestion validation.
-    pub fn order_book_of_symbol(
-        &self,
-        symbol: crate::Symbol,
-    ) -> Option<&crate::order_book::OrderBook> {
+    /// Looks up a named output without allocating or evaluating the graph.
+    pub fn output(&self, name: &str) -> Option<PipelineOutput<'_>> {
+        let slot = self
+            .spec
+            .outputs()
+            .iter()
+            .position(|output| output.name == name)?;
+        self.output_at(slot)
+    }
+    /// Looks up an output by its registration position.
+    pub fn output_at(&self, slot: usize) -> Option<PipelineOutput<'_>> {
+        self.output_by_id(OutputId {
+            owner: self.owner,
+            slot,
+        })
+    }
+    /// Borrows current results using a retained identifier; rejects foreign IDs.
+    pub fn output_by_id(&self, id: OutputId) -> Option<PipelineOutput<'_>> {
+        if id.owner != self.owner {
+            return None;
+        }
+        let output = self.spec.outputs().get(id.slot)?;
+        let (values, feature_ids, observations) = if output.node == 0 {
+            (
+                &self.raw_values()[..self.raw_feature_ids().len()],
+                self.raw_feature_ids(),
+                self.raw_observations(),
+            )
+        } else {
+            let node = &self.nodes[output.node - 1];
+            (
+                node.values.values(),
+                node.ids.as_ref(),
+                node.observations.as_ref(),
+            )
+        };
+        Some(PipelineOutput {
+            id,
+            values,
+            feature_ids,
+            observations,
+        })
+    }
+    /// Enumerates names in registration order.
+    pub fn output_names(&self) -> impl ExactSizeIterator<Item = &str> {
+        self.spec
+            .outputs()
+            .iter()
+            .map(|output| output.name.as_str())
+    }
+    /// Clears event state, retaining numeric parameters and output identifiers.
+    pub fn reset(&mut self) -> Result<()> {
+        let mut replacement = self.spec.build()?;
+        replacement.owner = self.owner;
+        *self = replacement;
+        Ok(())
+    }
+    /// Returns configured order-book state for ingestion validation.
+    pub fn order_book_of_symbol(&self, symbol: Symbol) -> Option<&crate::order_book::OrderBook> {
         self.feature_extractor.order_book_of_symbol(symbol)
     }
-
-    /// Returns the raw extractor vector, including reserved cells.
+    /// Raw diagnostic values, including reserved cells.
     pub fn raw_values(&self) -> &[f64] {
         self.feature_extractor.feature_vector().values()
     }
-
-    /// Returns active raw IDs in raw-vector order, excluding reserved cells.
+    /// Active raw IDs, excluding reserved cells.
     pub fn raw_feature_ids(&self) -> &[FeatureId] {
         self.feature_extractor.feature_ids()
     }
-
-    /// Resolves a raw ID once for subsequent indexed value and source access.
+    /// Resolves a raw feature for indexed diagnostics.
     pub fn raw_feature_index(&self, id: &FeatureId) -> Option<usize> {
         self.feature_extractor.feature_index(id)
     }
-
-    /// Borrows every source dependency for an active raw index.
-    /// See [`FeatureExtractor::feature_sources`] for missing inputs and context semantics.
+    /// Source dependencies for an active raw feature.
     pub fn raw_feature_sources(&self, index: usize) -> Option<&[SourceObservation]> {
         self.feature_extractor.feature_sources(index)
     }
-
-    /// Returns processing observations aligned with [`Self::raw_feature_ids`].
-    /// Observations do not imply numeric changes, readiness, or source freshness.
-    /// Inspect after successful event processing and before the next mutation;
-    /// an error can leave masks from an earlier event. Context updates do not
-    /// represent market observations or advance histories.
+    /// Raw processing observations, independent of readiness.
     pub fn raw_observations(&self) -> &[bool] {
         &self.feature_extractor.observations()[..self.raw_feature_ids().len()]
     }
-
-    /// Returns processing observations aligned with [`Self::output_ids`].
-    /// The same lifetime and readiness caveats as [`Self::raw_observations`] apply.
-    /// Event-driven lags and clock-driven timed refreshes may be observed even when their input was not observed.
-    pub fn output_observations(&self) -> &[bool] {
-        &self.observations[..self.output_ids.len()]
-    }
-
-    /// Returns final model input, including reserved cells.
-    pub fn values(&self) -> &[f64] {
-        self.model_vector.values()
-    }
-
-    /// Returns active final IDs in model-vector order.
-    pub fn output_ids(&self) -> &[FeatureId] {
-        &self.output_ids
-    }
-
-    /// Returns the timestamp of the last accepted event; it may decrease across symbols.
+    /// Timestamp of the last accepted event, which may decrease across symbols.
     pub fn last_timestamp(&self) -> Option<i64> {
         self.feature_extractor.last_timestamp()
     }
-
-    /// Returns the last accepted timestamp for a symbol, across all event kinds.
+    /// Timestamp watermark for one symbol across event kinds.
     pub fn last_timestamp_for_symbol(&self, symbol: Symbol) -> Option<i64> {
         self.feature_extractor.last_timestamp_for_symbol(symbol)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::{
-        ArrayFeatureVector, EventField, FeatureDefinition, FeatureExtractorSpec, FeatureKey,
-        FeatureSource, FimlError, InvalidArgumentError, InvalidTransformationDefinitionError,
-        Symbol, TransformerDefinition, WarmupPolicy,
-    };
-
-    fn day_of_week(id: &str) -> FeatureDefinition {
-        FeatureDefinition::new(
-            FeatureKey::DayOfWeek {
-                symbol: Symbol::GLOBAL,
-                source: FeatureSource::AnyEvent,
-            },
-            FeatureId::new(id),
-        )
-    }
-
-    fn time_since_first_event(id: &str) -> FeatureDefinition {
-        FeatureDefinition::new(
-            FeatureKey::TimeSinceFirstEventOfDay {
-                symbol: Symbol::GLOBAL,
-                source: FeatureSource::AnyEvent,
-                utc_offset_millis: 0,
-            },
-            FeatureId::new(id),
-        )
-    }
-
-    fn price(id: &str) -> FeatureDefinition {
-        FeatureDefinition::new(
-            FeatureKey::Field {
-                symbol: Symbol::GLOBAL,
-                field: EventField::Price,
-            },
-            FeatureId::new(id),
-        )
-    }
-
-    #[test]
-    fn lagged_transformers_track_accepted_events_in_authored_output_order() {
-        let raw_spec = FeatureExtractorSpec::new([time_since_first_event("elapsed")]).unwrap();
-        let spec = PipelineSpec::with_capacity(
-            raw_spec,
-            [
-                TransformerDefinition::lagged(FeatureId::new("elapsed"), FeatureId::new("lag2"), 2),
-                TransformerDefinition::identity(FeatureId::new("elapsed"), FeatureId::new("now")),
-                TransformerDefinition::standard_scale(
-                    FeatureId::new("elapsed"),
-                    FeatureId::new("scaled"),
-                    0.0,
-                    10.0,
-                ),
-                TransformerDefinition::lagged(FeatureId::new("elapsed"), FeatureId::new("lag1"), 1),
-            ],
-            5,
-        )
-        .unwrap();
-        let mut pipeline = spec
-            .build(
-                ArrayFeatureVector::<1>::new(),
-                ArrayFeatureVector::<5>::new_of_length(4),
-            )
-            .unwrap();
-        assert_eq!(pipeline.operations.len(), 3);
-        assert_eq!(
-            pipeline
-                .operations
-                .iter()
-                .filter(|op| matches!(op, Transformer::Lagged(_)))
-                .count(),
-            1
-        );
-        assert!(pipeline.values().iter().all(|value| value.is_nan()));
-        assert_eq!(
-            pipeline.output_ids(),
-            &[
-                FeatureId::new("lag2"),
-                FeatureId::new("now"),
-                FeatureId::new("scaled"),
-                FeatureId::new("lag1"),
-            ]
-        );
-
-        let cases = [
-            (100, [f64::NAN, 0.0, 0.0, f64::NAN]),
-            (110, [f64::NAN, 10.0, 1.0, 0.0]),
-            (120, [0.0, 20.0, 2.0, 10.0]),
-            (130, [10.0, 30.0, 3.0, 20.0]),
-            (140, [20.0, 40.0, 4.0, 30.0]),
-        ];
-        for (timestamp, expected) in cases {
-            if timestamp > 100 {
-                let before = pipeline
-                    .values()
-                    .iter()
-                    .map(|value| value.to_bits())
-                    .collect::<Vec<_>>();
-                assert!(pipeline.handle_event(Event::time(99)).is_err());
-                assert!(
-                    pipeline
-                        .handle_event(Event::price(Symbol::GLOBAL, f64::NAN, timestamp))
-                        .is_err()
-                );
-                assert_eq!(pipeline.last_timestamp(), Some(timestamp - 10));
-                assert_eq!(
-                    pipeline
-                        .values()
-                        .iter()
-                        .map(|value| value.to_bits())
-                        .collect::<Vec<_>>(),
-                    before
-                );
-            }
-            pipeline.handle_event(Event::time(timestamp)).unwrap();
-            assert_eq!(pipeline.raw_values(), &[(timestamp - 100) as f64]);
-            for (actual, expected) in pipeline.values().iter().zip(expected) {
-                assert!((actual.is_nan() && expected.is_nan()) || *actual == expected);
-            }
-            assert!(pipeline.values()[4].is_nan());
-        }
-    }
-
-    #[test]
-    fn lagged_groups_keep_distinct_inputs_and_repeated_lags_separate() {
-        let raw_spec =
-            FeatureExtractorSpec::new([time_since_first_event("elapsed"), day_of_week("day")])
-                .unwrap();
-        let spec = PipelineSpec::new(
-            raw_spec,
-            [
-                TransformerDefinition::lagged(
-                    FeatureId::new("elapsed"),
-                    FeatureId::new("elapsed2"),
-                    2,
-                ),
-                TransformerDefinition::lagged(FeatureId::new("day"), FeatureId::new("day1"), 1),
-                TransformerDefinition::lagged(
-                    FeatureId::new("elapsed"),
-                    FeatureId::new("elapsed1"),
-                    1,
-                ),
-                TransformerDefinition::lagged(FeatureId::new("day"), FeatureId::new("day2"), 2),
-                TransformerDefinition::lagged(
-                    FeatureId::new("elapsed"),
-                    FeatureId::new("elapsed1_copy"),
-                    1,
-                ),
-            ],
-        )
-        .unwrap();
-        let mut pipeline = spec
-            .build(
-                ArrayFeatureVector::<2>::new(),
-                ArrayFeatureVector::<5>::new(),
-            )
-            .unwrap();
-        assert_eq!(pipeline.operations.len(), 2);
-        assert!(
-            pipeline
-                .operations
-                .iter()
-                .all(|op| matches!(op, Transformer::Lagged(_)))
-        );
-        let cases = [
-            (100, [f64::NAN; 5]),
-            (110, [f64::NAN, 4.0, 0.0, f64::NAN, 0.0]),
-            (120, [0.0, 4.0, 10.0, 4.0, 10.0]),
-            (130, [10.0, 4.0, 20.0, 4.0, 20.0]),
-        ];
-        for (timestamp, expected) in cases {
-            pipeline.handle_event(Event::time(timestamp)).unwrap();
-            for (actual, expected) in pipeline.values().iter().zip(expected) {
-                assert!((actual.is_nan() && expected.is_nan()) || *actual == expected);
-            }
-        }
-    }
-
-    #[test]
-    fn rejects_invalid_lags_before_compiling_a_transformer() {
-        for (lag_window, expected_reason) in [
-            (0, InvalidTransformationDefinitionError::LagWindowZero),
-            (
-                10_001,
-                InvalidTransformationDefinitionError::LagWindowTooLarge,
-            ),
-            (
-                usize::MAX,
-                InvalidTransformationDefinitionError::LagWindowTooLarge,
-            ),
-        ] {
-            let error = PipelineSpec::new(
-                FeatureExtractorSpec::new([day_of_week("day")]).unwrap(),
-                [TransformerDefinition::lagged(
-                    FeatureId::new("day"),
-                    FeatureId::new("lagged"),
-                    lag_window,
-                )],
-            )
-            .unwrap_err();
-            assert!(matches!(
-                error,
-                FimlError::InvalidTransformationDefinition { index: 0, reason }
-                    if reason == expected_reason
-            ));
-        }
-    }
-
-    #[test]
-    fn identity_and_standard_scaling_work() {
-        let raw_spec = FeatureExtractorSpec::new([day_of_week("day")]).unwrap();
-        let spec = PipelineSpec::new(
-            raw_spec,
-            [
-                TransformerDefinition::identity(FeatureId::new("day"), FeatureId::new("identity")),
-                TransformerDefinition::standard_scale(
-                    FeatureId::new("day"),
-                    FeatureId::new("scaled"),
-                    2.0,
-                    2.0,
-                ),
-            ],
-        )
-        .unwrap();
-        let mut pipeline = spec
-            .build(
-                ArrayFeatureVector::<1>::new(),
-                ArrayFeatureVector::<2>::new(),
-            )
-            .unwrap();
-
-        assert!(pipeline.values().iter().all(|value| value.is_nan()));
-        pipeline.handle_event(Event::time(0)).unwrap();
-
-        assert_eq!(pipeline.raw_values(), &[4.0]);
-        assert_eq!(pipeline.values(), &[4.0, 1.0]);
-    }
-
-    #[test]
-    fn authored_order_is_final_order_and_raw_and_final_ids_are_separate() {
-        let raw_spec =
-            FeatureExtractorSpec::new([time_since_first_event("elapsed"), day_of_week("day")])
-                .unwrap();
-        let spec = PipelineSpec::with_metadata(
-            raw_spec,
-            [
-                TransformerDefinition::identity(
-                    FeatureId::new("elapsed"),
-                    FeatureId::new("elapsed"),
-                ),
-                TransformerDefinition::identity(FeatureId::new("day"), FeatureId::new("model_day")),
-            ],
-            4,
-            Some("opaque".to_owned()),
-        )
-        .unwrap();
-
-        assert_eq!(spec.feature_vector_length(), 2);
-        assert_eq!(spec.feature_vector_capacity(), 4);
-        assert_eq!(spec.checksum(), Some("opaque"));
-        assert_eq!(spec.raw_feature_extractor_spec().feature_vector_length(), 2);
-        assert_eq!(spec.transformation_definitions().len(), 2);
-
-        let mut pipeline = spec
-            .build(
-                ArrayFeatureVector::<2>::new(),
-                ArrayFeatureVector::<4>::new_of_length(2),
-            )
-            .unwrap();
-        pipeline.handle_event(Event::time(0)).unwrap();
-
-        assert_eq!(pipeline.output_ids()[0], FeatureId::new("elapsed"));
-        assert_eq!(pipeline.output_ids()[1], FeatureId::new("model_day"));
-        assert_eq!(pipeline.values()[..2], [0.0, 4.0]);
-        assert!(pipeline.values()[2..].iter().all(|value| value.is_nan()));
-    }
-
-    #[test]
-    fn undeclared_raw_features_are_omitted_and_scaling_does_not_mutate_raw_values() {
-        let raw_spec =
-            FeatureExtractorSpec::new([day_of_week("day"), time_since_first_event("elapsed")])
-                .unwrap();
-        let spec = PipelineSpec::new(
-            raw_spec,
-            [TransformerDefinition::standard_scale(
-                FeatureId::new("day"),
-                FeatureId::new("day"),
-                2.0,
-                2.0,
-            )],
-        )
-        .unwrap();
-        let mut pipeline = spec
-            .build(
-                ArrayFeatureVector::<2>::new(),
-                ArrayFeatureVector::<1>::new(),
-            )
-            .unwrap();
-
-        pipeline.handle_event(Event::time(0)).unwrap();
-
-        assert_eq!(pipeline.raw_values(), &[4.0, 0.0]);
-        assert_eq!(pipeline.values(), &[1.0]);
-        assert_eq!(pipeline.output_ids(), &[FeatureId::new("day")]);
-    }
-
-    #[test]
-    fn warmup_nan_propagates_and_rejected_event_leaves_final_output_unchanged() {
-        let raw_spec = FeatureExtractorSpec::new([price("sma")]).unwrap();
-        let spec = PipelineSpec::with_stages(
-            raw_spec,
-            [TransformerDefinition::sma(
-                FeatureId::new("sma"),
-                FeatureId::new("sma"),
-                2,
-                WarmupPolicy::FullWindow,
-            )],
-            [FittedStage::Scalar {
-                transformations: vec![TransformerDefinition::standard_scale(
-                    FeatureId::new("sma"),
-                    FeatureId::new("scaled_sma"),
-                    10.0,
-                    5.0,
-                )],
-            }],
-            1,
-            None,
-        )
-        .unwrap();
-        let mut pipeline = spec
-            .build(
-                ArrayFeatureVector::<1>::new(),
-                ArrayFeatureVector::<1>::new(),
-            )
-            .unwrap();
-
-        pipeline
-            .handle_event(Event::price(Symbol::GLOBAL, 10.0, 1))
-            .unwrap();
-        assert_eq!(pipeline.raw_values(), &[10.0]);
-        assert!(pipeline.values()[0].is_nan());
-
-        pipeline
-            .handle_event(Event::price(Symbol::GLOBAL, 20.0, 2))
-            .unwrap();
-        assert_eq!(pipeline.raw_values(), &[20.0]);
-        assert_eq!(pipeline.values(), &[1.0]);
-        let error = match pipeline.handle_event(Event::price(Symbol::GLOBAL, 100.0, 0)) {
-            Err(error) => error,
-            Ok(_) => panic!("out-of-order event should fail"),
-        };
-
-        assert!(matches!(error, FimlError::TimestampOutOfOrder { .. }));
-        assert_eq!(pipeline.raw_values(), &[20.0]);
-        assert_eq!(pipeline.values(), &[1.0]);
-        assert_eq!(pipeline.last_timestamp(), Some(2));
-    }
-
-    #[test]
-    fn rejects_unknown_duplicate_and_reserved_ids_and_insufficient_capacity() {
-        let unknown = PipelineSpec::new(
-            FeatureExtractorSpec::new([day_of_week("day")]).unwrap(),
-            [TransformerDefinition::identity(
-                FeatureId::new("missing"),
-                FeatureId::new("output"),
-            )],
-        )
-        .unwrap_err();
-        assert!(matches!(
-            unknown,
-            FimlError::InvalidTransformationDefinition {
-                index: 0,
-                reason: InvalidTransformationDefinitionError::InputFeatureNotFound
-            }
-        ));
-
-        let duplicate = PipelineSpec::new(
-            FeatureExtractorSpec::new([day_of_week("day")]).unwrap(),
-            [
-                TransformerDefinition::identity(FeatureId::new("day"), FeatureId::new("output")),
-                TransformerDefinition::identity(FeatureId::new("day"), FeatureId::new("output")),
-            ],
-        )
-        .unwrap_err();
-        assert!(matches!(
-            duplicate,
-            FimlError::InvalidTransformationDefinition {
-                index: 1,
-                reason: InvalidTransformationDefinitionError::DuplicateOutputFeature
-            }
-        ));
-
-        let reserved = PipelineSpec::new(
-            FeatureExtractorSpec::new([day_of_week("day")]).unwrap(),
-            [TransformerDefinition::identity(
-                FeatureId::new("day"),
-                FeatureId::new("__reserved_0"),
-            )],
-        )
-        .unwrap_err();
-        assert!(matches!(
-            reserved,
-            FimlError::InvalidTransformationDefinition {
-                index: 0,
-                reason: InvalidTransformationDefinitionError::ReservedOutputFeature
-            }
-        ));
-
-        let capacity = PipelineSpec::with_capacity(
-            FeatureExtractorSpec::new([day_of_week("day")]).unwrap(),
-            [TransformerDefinition::identity(
-                FeatureId::new("day"),
-                FeatureId::new("output"),
-            )],
-            0,
-        )
-        .unwrap_err();
-        assert!(matches!(
-            capacity,
-            FimlError::InvalidArgument(InvalidArgumentError::FeatureVectorCapacityTooSmall {
-                capacity: 0,
-                active_length: 1
-            })
-        ));
-    }
-
-    #[test]
-    fn rejects_invalid_scaler_parameters() {
-        let cases = [
-            (
-                f64::NAN,
-                1.0,
-                InvalidTransformationDefinitionError::MeanNotFinite,
-            ),
-            (
-                0.0,
-                f64::INFINITY,
-                InvalidTransformationDefinitionError::ScaleNotFinite,
-            ),
-            (
-                0.0,
-                0.0,
-                InvalidTransformationDefinitionError::ScaleNotPositive,
-            ),
-            (
-                0.0,
-                -1.0,
-                InvalidTransformationDefinitionError::ScaleNotPositive,
-            ),
-            (
-                0.0,
-                f64::from_bits(1),
-                InvalidTransformationDefinitionError::InverseScaleNotFinite,
-            ),
-        ];
-
-        for (mean, scale, expected) in cases {
-            let error = PipelineSpec::new(
-                FeatureExtractorSpec::new([day_of_week("day")]).unwrap(),
-                [TransformerDefinition::standard_scale(
-                    FeatureId::new("day"),
-                    FeatureId::new("output"),
-                    mean,
-                    scale,
-                )],
-            )
-            .unwrap_err();
-            assert!(matches!(
-                error,
-                FimlError::InvalidTransformationDefinition { index: 0, reason }
-                    if reason == expected
-            ));
-        }
-    }
-
-    #[test]
-    fn rejects_raw_and_model_storage_mismatches() {
-        let make_spec = || {
-            PipelineSpec::with_capacity(
-                FeatureExtractorSpec::new([day_of_week("day")]).unwrap(),
-                [TransformerDefinition::identity(
-                    FeatureId::new("day"),
-                    FeatureId::new("output"),
-                )],
-                2,
-            )
-            .unwrap()
-        };
-
-        let capacity_error = match make_spec().build(
-            ArrayFeatureVector::<1>::new(),
-            ArrayFeatureVector::<1>::new(),
-        ) {
-            Err(error) => error,
-            Ok(_) => panic!("model capacity mismatch should fail"),
-        };
-        assert!(matches!(
-            capacity_error,
-            FimlError::ModelVectorCapacityMismatch {
-                expected: 2,
-                actual: 1
-            }
-        ));
-
-        let length_error = match make_spec().build(
-            ArrayFeatureVector::<1>::new(),
-            ArrayFeatureVector::<2>::new_of_length(0),
-        ) {
-            Err(error) => error,
-            Ok(_) => panic!("model length mismatch should fail"),
-        };
-        assert!(matches!(
-            length_error,
-            FimlError::ModelVectorLengthMismatch {
-                expected: 1,
-                actual: 0
-            }
-        ));
-
-        let raw_error = match make_spec().build(
-            ArrayFeatureVector::<2>::new_of_length(1),
-            ArrayFeatureVector::<2>::new_of_length(1),
-        ) {
-            Err(error) => error,
-            Ok(_) => panic!("raw capacity mismatch should fail"),
-        };
-        assert!(matches!(
-            raw_error,
-            FimlError::FeatureVectorCapacityMismatch {
-                expected: 1,
-                actual: 2
-            }
-        ));
-    }
-
-    #[test]
-    fn supports_empty_transformations_and_completely_empty_layouts() {
-        let spec = PipelineSpec::with_capacity(
-            FeatureExtractorSpec::new([day_of_week("day")]).unwrap(),
-            [],
-            2,
-        )
-        .unwrap();
-        let mut pipeline = spec
-            .build(
-                ArrayFeatureVector::<1>::new(),
-                ArrayFeatureVector::<2>::new_of_length(0),
-            )
-            .unwrap();
-        pipeline.handle_event(Event::time(0)).unwrap();
-        assert_eq!(pipeline.raw_values(), &[4.0]);
-        assert!(pipeline.values().iter().all(|value| value.is_nan()));
-        assert!(pipeline.output_ids().is_empty());
-
-        let empty_raw = FeatureExtractorSpec::new(Vec::<FeatureDefinition>::new()).unwrap();
-        let empty_spec = PipelineSpec::new(empty_raw, []).unwrap();
-        let mut empty_pipeline = empty_spec
-            .build(
-                ArrayFeatureVector::<0>::new(),
-                ArrayFeatureVector::<0>::new(),
-            )
-            .unwrap();
-        empty_pipeline.handle_event(Event::time(1)).unwrap();
-        assert!(empty_pipeline.raw_values().is_empty());
-        assert!(empty_pipeline.values().is_empty());
     }
 }

@@ -47,12 +47,14 @@ def _(fiml, trades):
         .cvd("BTCUSDT", [10], warmup=fiml.WarmupPolicy.FIRST_VALUE)
     )
     cvd_id = feature_extractor_spec.feature_ids()[0]
-    pipeline_spec = (fiml.PipelineSpec(feature_extractor_spec).identity(cvd_id)
+    scalar = (fiml.ScalarStage().identity(cvd_id)
         .ema("price", window=5, warmup=fiml.WarmupPolicy.FIRST_VALUE, output="ema:5")
         .sma("price", window=5, warmup=fiml.WarmupPolicy.FIRST_VALUE, output="sma:5"))
-    extractor = fiml.ModelInputPipeline(pipeline_spec, output_dtype="float64")
-    features = extractor.compute_features(trades, side="side")
-    cvd_name, ema_name, sma_name = extractor.feature_names()
+    pipeline_spec = fiml.PipelineSpec(feature_extractor_spec)
+    pipeline_spec.output("model", pipeline_spec.add(pipeline_spec.root(), scalar))
+    extractor = pipeline_spec.build(output_dtype="float64")
+    features = extractor.compute_features(trades, side="side")["model"]
+    cvd_name, ema_name, sma_name = extractor.output("model").feature_names()
 
     assert len(features) == len(trades)
     assert [name.split(":", 1)[0] for name in (cvd_name, ema_name, sma_name)] == [

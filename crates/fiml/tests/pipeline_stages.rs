@@ -1,6 +1,8 @@
+mod common;
+
 use fiml::{
-    ArrayFeatureVector, Event, FeatureDefinition, FeatureExtractorSpec, FeatureId, FeatureKey,
-    FeatureSource, FittedStage, PipelineSpec, Symbol, TransformerDefinition,
+    Event, FeatureDefinition, FeatureExtractorSpec, FeatureId, FeatureKey, FeatureSource,
+    FittedStage, PipelineSpec, Symbol, TransformerDefinition,
 };
 
 fn base() -> (FeatureExtractorSpec, Vec<TransformerDefinition>) {
@@ -46,7 +48,7 @@ fn stages() -> Vec<FittedStage> {
 #[test]
 fn min_max_stage_preserves_nans_and_clips_only_when_configured() {
     let (raw, definitions) = base();
-    let spec = PipelineSpec::with_stages(
+    let spec = common::linear_spec(
         raw,
         definitions,
         [
@@ -63,27 +65,21 @@ fn min_max_stage_preserves_nans_and_clips_only_when_configured() {
                 clip: Some((-2.0, 2.0)),
             },
         ],
-        2,
         None,
     )
     .unwrap();
-    let mut pipeline = spec
-        .build(
-            ArrayFeatureVector::<1>::new(),
-            ArrayFeatureVector::<2>::new(),
-        )
-        .unwrap();
+    let mut pipeline = spec.build().unwrap();
 
     pipeline.handle_event(Event::time(0)).unwrap();
-    assert_eq!(pipeline.values()[0], -1.0);
-    assert!(pipeline.values()[1].is_nan());
+    assert_eq!(pipeline.output("model").unwrap().values()[0], -1.0);
+    assert!(pipeline.output("model").unwrap().values()[1].is_nan());
     pipeline.handle_event(Event::time(2)).unwrap();
-    assert_eq!(pipeline.values(), &[2.0, 2.0]);
+    assert_eq!(pipeline.output("model").unwrap().values(), &[2.0, 2.0]);
 
     #[cfg(feature = "serde")]
     {
         let mut document = serde_json::to_value(&spec).unwrap();
-        assert_eq!(document["version"], "3.0");
+        assert_eq!(document["version"], "4.0");
         assert_eq!(
             serde_json::from_value::<PipelineSpec>(document.clone()).unwrap(),
             spec
@@ -93,7 +89,7 @@ fn min_max_stage_preserves_nans_and_clips_only_when_configured() {
             serde_json::from_value::<PipelineSpec>(document)
                 .unwrap_err()
                 .to_string()
-                .contains("unsupported model-input spec version")
+                .contains("unsupported pipeline spec version")
         );
     }
 }
@@ -101,35 +97,32 @@ fn min_max_stage_preserves_nans_and_clips_only_when_configured() {
 #[test]
 fn selection_copies_only_retained_columns_and_round_trips() {
     let (raw, definitions) = base();
-    let spec = PipelineSpec::with_stages(
+    let spec = common::linear_spec(
         raw,
         definitions,
         [FittedStage::Select {
             outputs: vec![FeatureId::new("now")],
             input_indices: vec![0],
         }],
-        2,
         None,
     )
     .unwrap();
-    let mut pipeline = spec
-        .build(
-            ArrayFeatureVector::<1>::new(),
-            ArrayFeatureVector::<2>::new_of_length(1),
-        )
-        .unwrap();
+    let mut pipeline = spec.build().unwrap();
 
     pipeline.handle_event(Event::time(0)).unwrap();
-    assert_eq!(pipeline.values()[0], 0.0);
-    assert!(pipeline.values()[1].is_nan());
-    assert_eq!(pipeline.output_ids(), &[FeatureId::new("now")]);
+    assert_eq!(pipeline.output("model").unwrap().values()[0], 0.0);
+    assert_eq!(pipeline.output("model").unwrap().values().len(), 1);
+    assert_eq!(
+        pipeline.output("model").unwrap().feature_ids(),
+        &[FeatureId::new("now")]
+    );
 
     #[cfg(feature = "serde")]
     {
         let mut document = serde_json::to_value(&spec).unwrap();
-        assert_eq!(document["version"], "3.0");
+        assert_eq!(document["version"], "4.0");
         assert_eq!(
-            document["model_input"]["stages"][0]["input_indices"],
+            document["nodes"][2]["stage"]["input_indices"],
             serde_json::json!([0])
         );
         assert_eq!(
@@ -141,7 +134,7 @@ fn selection_copies_only_retained_columns_and_round_trips() {
             serde_json::from_value::<PipelineSpec>(document)
                 .unwrap_err()
                 .to_string()
-                .contains("unsupported model-input spec version")
+                .contains("unsupported pipeline spec version")
         );
     }
 }
@@ -155,7 +148,7 @@ fn power_transform_stage_handles_limits_domains_and_overflow() {
         1.0,
         1.0,
     );
-    let spec = PipelineSpec::with_stages(
+    let spec = common::linear_spec(
         raw,
         definitions,
         [FittedStage::PowerTransform {
@@ -165,25 +158,19 @@ fn power_transform_stage_handles_limits_domains_and_overflow() {
             mean: vec![0.0, 0.0],
             scale: vec![1.0, 1.0],
         }],
-        2,
         None,
     )
     .unwrap();
-    let mut pipeline = spec
-        .build(
-            ArrayFeatureVector::<1>::new(),
-            ArrayFeatureVector::<2>::new(),
-        )
-        .unwrap();
+    let mut pipeline = spec.build().unwrap();
     pipeline.handle_event(Event::time(0)).unwrap();
-    assert!((pipeline.values()[0] + 2.0_f64.ln()).abs() < 1e-14);
-    assert!(pipeline.values()[1].is_nan());
+    assert!((pipeline.output("model").unwrap().values()[0] + 2.0_f64.ln()).abs() < 1e-14);
+    assert!(pipeline.output("model").unwrap().values()[1].is_nan());
     pipeline.handle_event(Event::time(2)).unwrap();
-    assert!((pipeline.values()[0] - 1.5).abs() < 1e-14);
-    assert_eq!(pipeline.values()[1], 0.0);
+    assert!((pipeline.output("model").unwrap().values()[0] - 1.5).abs() < 1e-14);
+    assert_eq!(pipeline.output("model").unwrap().values()[1], 0.0);
     pipeline.handle_event(Event::time(4)).unwrap();
-    assert!((pipeline.values()[0] - 7.5).abs() < 1e-14);
-    assert!((pipeline.values()[1] - 3.0_f64.ln()).abs() < 1e-14);
+    assert!((pipeline.output("model").unwrap().values()[0] - 7.5).abs() < 1e-14);
+    assert!((pipeline.output("model").unwrap().values()[1] - 3.0_f64.ln()).abs() < 1e-14);
 
     let (raw, mut definitions) = base();
     definitions[0] = TransformerDefinition::standard_scale(
@@ -192,7 +179,7 @@ fn power_transform_stage_handles_limits_domains_and_overflow() {
         1.0,
         1.0,
     );
-    let box_cox = PipelineSpec::with_stages(
+    let box_cox = common::linear_spec(
         raw,
         definitions,
         [FittedStage::PowerTransform {
@@ -202,24 +189,25 @@ fn power_transform_stage_handles_limits_domains_and_overflow() {
             mean: vec![0.0, 0.0],
             scale: vec![1.0, 1.0],
         }],
-        2,
         None,
     )
     .unwrap();
-    let mut pipeline = box_cox
-        .build(
-            ArrayFeatureVector::<1>::new(),
-            ArrayFeatureVector::<2>::new(),
-        )
-        .unwrap();
+    let mut pipeline = box_cox.build().unwrap();
     pipeline.handle_event(Event::time(0)).unwrap();
-    assert!(pipeline.values().iter().all(|value| value.is_nan()));
+    assert!(
+        pipeline
+            .output("model")
+            .unwrap()
+            .values()
+            .iter()
+            .all(|value| value.is_nan())
+    );
     pipeline.handle_event(Event::time(2)).unwrap();
-    assert_eq!(pipeline.values()[0], 0.0);
-    assert!(pipeline.values()[1].is_nan());
+    assert_eq!(pipeline.output("model").unwrap().values()[0], 0.0);
+    assert!(pipeline.output("model").unwrap().values()[1].is_nan());
     pipeline.handle_event(Event::time(4)).unwrap();
-    assert!((pipeline.values()[0] - 3.0_f64.ln()).abs() < 1e-14);
-    assert!((pipeline.values()[1] - 2.0_f64.ln()).abs() < 1e-14);
+    assert!((pipeline.output("model").unwrap().values()[0] - 3.0_f64.ln()).abs() < 1e-14);
+    assert!((pipeline.output("model").unwrap().values()[1] - 2.0_f64.ln()).abs() < 1e-14);
 
     let (raw, mut definitions) = base();
     definitions[0] = TransformerDefinition::standard_scale(
@@ -228,7 +216,7 @@ fn power_transform_stage_handles_limits_domains_and_overflow() {
         -f64::MAX,
         1.0,
     );
-    let overflow = PipelineSpec::with_stages(
+    let overflow = common::linear_spec(
         raw,
         definitions,
         [FittedStage::PowerTransform {
@@ -238,23 +226,17 @@ fn power_transform_stage_handles_limits_domains_and_overflow() {
             mean: vec![0.0, 0.0],
             scale: vec![1.0, 1.0],
         }],
-        2,
         None,
     )
     .unwrap();
-    let mut overflow = overflow
-        .build(
-            ArrayFeatureVector::<1>::new(),
-            ArrayFeatureVector::<2>::new(),
-        )
-        .unwrap();
+    let mut overflow = overflow.build().unwrap();
     overflow.handle_event(Event::time(0)).unwrap();
-    assert!(overflow.values()[0].is_infinite());
+    assert!(overflow.output("model").unwrap().values()[0].is_infinite());
 
     #[cfg(feature = "serde")]
     {
         let mut document = serde_json::to_value(&box_cox).unwrap();
-        assert_eq!(document["version"], "3.0");
+        assert_eq!(document["version"], "4.0");
         assert_eq!(
             serde_json::from_value::<PipelineSpec>(document.clone()).unwrap(),
             box_cox
@@ -264,7 +246,7 @@ fn power_transform_stage_handles_limits_domains_and_overflow() {
             serde_json::from_value::<PipelineSpec>(document)
                 .unwrap_err()
                 .to_string()
-                .contains("unsupported model-input spec version")
+                .contains("unsupported pipeline spec version")
         );
     }
 }
@@ -282,16 +264,11 @@ fn quantile_transform_stage_interpolates_ties_clips_normal_tails_and_round_trips
         bounds_threshold: 1e-7,
         normal_clip: None,
     };
-    let spec = PipelineSpec::with_stages(raw, definitions, [uniform], 1, None).unwrap();
-    let mut pipeline = spec
-        .build(
-            ArrayFeatureVector::<1>::new(),
-            ArrayFeatureVector::<1>::new(),
-        )
-        .unwrap();
+    let spec = common::linear_spec(raw, definitions, [uniform], None).unwrap();
+    let mut pipeline = spec.build().unwrap();
     for (timestamp, expected) in [(0, 0.0), (1, 0.5), (2, 5.0 / 6.0), (4, 1.0)] {
         pipeline.handle_event(Event::time(timestamp)).unwrap();
-        assert!((pipeline.values()[0] - expected).abs() < 1e-15);
+        assert!((pipeline.output("model").unwrap().values()[0] - expected).abs() < 1e-15);
     }
 
     let (raw, mut definitions) = base();
@@ -305,26 +282,21 @@ fn quantile_transform_stage_interpolates_ties_clips_normal_tails_and_round_trips
         bounds_threshold: 1e-7,
         normal_clip: Some((-5.199_337_582_605_575, 5.199_337_582_703_42)),
     };
-    let normal_spec = PipelineSpec::with_stages(raw, definitions, [normal], 1, None).unwrap();
-    let mut pipeline = normal_spec
-        .build(
-            ArrayFeatureVector::<1>::new(),
-            ArrayFeatureVector::<1>::new(),
-        )
-        .unwrap();
+    let normal_spec = common::linear_spec(raw, definitions, [normal], None).unwrap();
+    let mut pipeline = normal_spec.build().unwrap();
     for (timestamp, expected) in [
         (0, -5.199_337_582_605_575),
         (1, 0.0),
         (2, 5.199_337_582_703_42),
     ] {
         pipeline.handle_event(Event::time(timestamp)).unwrap();
-        assert!((pipeline.values()[0] - expected).abs() < 1e-14);
+        assert!((pipeline.output("model").unwrap().values()[0] - expected).abs() < 1e-14);
     }
 
     #[cfg(feature = "serde")]
     {
         let mut document = serde_json::to_value(&normal_spec).unwrap();
-        assert_eq!(document["version"], "3.0");
+        assert_eq!(document["version"], "4.0");
         assert_eq!(
             serde_json::from_value::<PipelineSpec>(document.clone()).unwrap(),
             normal_spec
@@ -334,7 +306,7 @@ fn quantile_transform_stage_interpolates_ties_clips_normal_tails_and_round_trips
             serde_json::from_value::<PipelineSpec>(document)
                 .unwrap_err()
                 .to_string()
-                .contains("unsupported model-input spec version")
+                .contains("unsupported pipeline spec version")
         );
     }
 }
@@ -342,7 +314,7 @@ fn quantile_transform_stage_interpolates_ties_clips_normal_tails_and_round_trips
 #[test]
 fn simple_imputer_replaces_only_nans_and_appends_fitted_indicators() {
     let (raw, definitions) = base();
-    let spec = PipelineSpec::with_stages(
+    let spec = common::linear_spec(
         raw,
         definitions,
         [FittedStage::SimpleImpute {
@@ -355,24 +327,21 @@ fn simple_imputer_replaces_only_nans_and_appends_fitted_indicators() {
             replacement_values: vec![10.0, 20.0],
             indicator_input_indices: vec![1],
         }],
-        3,
         None,
     )
     .unwrap();
-    let mut pipeline = spec
-        .build(
-            ArrayFeatureVector::<1>::new(),
-            ArrayFeatureVector::<3>::new(),
-        )
-        .unwrap();
+    let mut pipeline = spec.build().unwrap();
 
     pipeline.handle_event(Event::time(0)).unwrap();
-    assert_eq!(pipeline.values(), &[0.0, 20.0, 1.0]);
+    assert_eq!(
+        pipeline.output("model").unwrap().values(),
+        &[0.0, 20.0, 1.0]
+    );
     pipeline.handle_event(Event::time(2)).unwrap();
-    assert_eq!(pipeline.values(), &[2.0, 0.0, 0.0]);
+    assert_eq!(pipeline.output("model").unwrap().values(), &[2.0, 0.0, 0.0]);
 
     let (raw, definitions) = base();
-    let overflow = PipelineSpec::with_stages(
+    let overflow = common::linear_spec(
         raw,
         definitions,
         [
@@ -392,26 +361,20 @@ fn simple_imputer_replaces_only_nans_and_appends_fitted_indicators() {
                 indicator_input_indices: vec![0],
             },
         ],
-        2,
         None,
     )
     .unwrap();
-    let mut overflow = overflow
-        .build(
-            ArrayFeatureVector::<1>::new(),
-            ArrayFeatureVector::<2>::new(),
-        )
-        .unwrap();
+    let mut overflow = overflow.build().unwrap();
     overflow.handle_event(Event::time(0)).unwrap();
-    assert_eq!(overflow.values(), &[5.0, 1.0]);
+    assert_eq!(overflow.output("model").unwrap().values(), &[5.0, 1.0]);
     overflow.handle_event(Event::time(2)).unwrap();
-    assert!(overflow.values()[0].is_infinite());
-    assert_eq!(overflow.values()[1], 0.0);
+    assert!(overflow.output("model").unwrap().values()[0].is_infinite());
+    assert_eq!(overflow.output("model").unwrap().values()[1], 0.0);
 
     #[cfg(feature = "serde")]
     {
         let mut document = serde_json::to_value(&spec).unwrap();
-        assert_eq!(document["version"], "3.0");
+        assert_eq!(document["version"], "4.0");
         assert_eq!(
             serde_json::from_value::<PipelineSpec>(document.clone()).unwrap(),
             spec
@@ -421,7 +384,7 @@ fn simple_imputer_replaces_only_nans_and_appends_fitted_indicators() {
             serde_json::from_value::<PipelineSpec>(document)
                 .unwrap_err()
                 .to_string()
-                .contains("unsupported model-input spec version")
+                .contains("unsupported pipeline spec version")
         );
     }
 }
@@ -429,38 +392,45 @@ fn simple_imputer_replaces_only_nans_and_appends_fitted_indicators() {
 #[test]
 fn stages_chain_after_lags_preserve_layout_warmup_and_rejection() {
     let (raw, definitions) = base();
-    let spec = PipelineSpec::with_stages(raw, definitions, stages(), 2, None).unwrap();
-    assert_eq!(spec.feature_vector_length(), 1);
-    let mut pipeline = spec
-        .build(
-            ArrayFeatureVector::<1>::new(),
-            ArrayFeatureVector::<2>::new_of_length(1),
-        )
-        .unwrap();
+    let spec = common::linear_spec(raw, definitions, stages(), None).unwrap();
+    assert_eq!(
+        spec.build()
+            .unwrap()
+            .output("model")
+            .unwrap()
+            .values()
+            .len(),
+        1
+    );
+    let mut pipeline = spec.build().unwrap();
     pipeline.handle_event(Event::time(0)).unwrap();
-    assert!(pipeline.values().iter().all(|value| value.is_nan()));
+    assert!(
+        pipeline
+            .output("model")
+            .unwrap()
+            .values()
+            .iter()
+            .all(|value| value.is_nan())
+    );
     for timestamp in [2, 4, 6] {
         pipeline.handle_event(Event::time(timestamp)).unwrap();
         let x = (timestamp as f64 - 1.0) / 2.0;
         let lag = (timestamp as f64 - 4.0) / 4.0;
         let expected = (((x - 0.5) * 0.6 + (lag + 0.5) * 0.8) / 2.0 - 1.0) / 2.0;
-        assert!((pipeline.values()[0] - expected).abs() < 1e-14);
-        assert!(pipeline.values()[1].is_nan());
-        assert_eq!(pipeline.output_ids(), &[FeatureId::new("pc0")]);
-        let before = pipeline.values()[0];
+        assert!((pipeline.output("model").unwrap().values()[0] - expected).abs() < 1e-14);
+        assert_eq!(pipeline.output("model").unwrap().values().len(), 1);
+        assert_eq!(
+            pipeline.output("model").unwrap().feature_ids(),
+            &[FeatureId::new("pc0")]
+        );
+        let before = pipeline.output("model").unwrap().values()[0];
         assert!(pipeline.handle_event(Event::time(timestamp - 1)).is_err());
-        assert_eq!(pipeline.values()[0], before);
+        assert_eq!(pipeline.output("model").unwrap().values()[0], before);
     }
     // The final storage can be smaller than the two-column base and scratch.
     let (raw, definitions) = base();
-    let spec = PipelineSpec::with_stages(raw, definitions, stages(), 1, None).unwrap();
-    assert!(
-        spec.build(
-            ArrayFeatureVector::<1>::new(),
-            ArrayFeatureVector::<1>::new()
-        )
-        .is_ok()
-    );
+    let spec = common::linear_spec(raw, definitions, stages(), None).unwrap();
+    assert!(spec.build().is_ok());
 }
 
 #[test]
@@ -487,20 +457,11 @@ fn scalar_stages_chain_after_pca_and_share_lags_without_leaking_scratch() {
             TransformerDefinition::identity(FeatureId::new("lag1_copy"), FeatureId::new("copy")),
         ],
     });
-    let spec =
-        PipelineSpec::with_stages(raw.clone(), definitions.clone(), sequence, 4, None).unwrap();
-    let mut pipeline = spec
-        .build(
-            ArrayFeatureVector::<1>::new(),
-            ArrayFeatureVector::<4>::new_of_length(3),
-        )
-        .unwrap();
-    let mut prefix = PipelineSpec::with_stages(raw, definitions, stages(), 1, None)
+    let spec = common::linear_spec(raw.clone(), definitions.clone(), sequence, None).unwrap();
+    let mut pipeline = spec.build().unwrap();
+    let mut prefix = common::linear_spec(raw, definitions, stages(), None)
         .unwrap()
-        .build(
-            ArrayFeatureVector::<1>::new(),
-            ArrayFeatureVector::<1>::new(),
-        )
+        .build()
         .unwrap();
     let mut history = Vec::new();
     for timestamp in 0..8 {
@@ -513,16 +474,18 @@ fn scalar_stages_chain_after_pca_and_share_lags_without_leaking_scratch() {
                 .checked_sub(window)
                 .map_or(f64::NAN, |index| history[index])
         };
-        for (actual, expected) in
-            pipeline
-                .values()
-                .iter()
-                .zip([(lag(1) - 1.0) / 2.0, lag(2), lag(1), f64::NAN])
-        {
+        for (actual, expected) in pipeline.output("model").unwrap().values().iter().zip([
+            (lag(1) - 1.0) / 2.0,
+            lag(2),
+            lag(1),
+            f64::NAN,
+        ]) {
             assert!((actual.is_nan() && expected.is_nan()) || *actual == expected);
         }
-        history.push(prefix.values()[0]);
+        history.push(prefix.output("model").unwrap().values()[0]);
         let before = pipeline
+            .output("model")
+            .unwrap()
             .values()
             .iter()
             .map(|v| v.to_bits())
@@ -535,6 +498,8 @@ fn scalar_stages_chain_after_pca_and_share_lags_without_leaking_scratch() {
         assert_eq!(
             before,
             pipeline
+                .output("model")
+                .unwrap()
                 .values()
                 .iter()
                 .map(|v| v.to_bits())
@@ -542,7 +507,7 @@ fn scalar_stages_chain_after_pca_and_share_lags_without_leaking_scratch() {
         );
     }
     assert_eq!(
-        pipeline.output_ids(),
+        pipeline.output("model").unwrap().feature_ids(),
         &[
             FeatureId::new("scaled"),
             FeatureId::new("lag2"),
@@ -552,7 +517,7 @@ fn scalar_stages_chain_after_pca_and_share_lags_without_leaking_scratch() {
     #[cfg(feature = "serde")]
     {
         let document = serde_json::to_value(&spec).unwrap();
-        assert_eq!(document["version"], "3.0");
+        assert_eq!(document["version"], "4.0");
         assert_eq!(
             serde_json::from_value::<PipelineSpec>(document.clone()).unwrap(),
             spec
@@ -563,7 +528,7 @@ fn scalar_stages_chain_after_pca_and_share_lags_without_leaking_scratch() {
             serde_json::from_value::<PipelineSpec>(old_version)
                 .unwrap_err()
                 .to_string()
-                .contains("unsupported model-input spec version")
+                .contains("unsupported pipeline spec version")
         );
     }
 }
@@ -605,17 +570,16 @@ fn scalar_stages_reject_inputs_outside_the_preceding_layout() {
         ],
     ] {
         let (raw, base) = base();
-        let error = PipelineSpec::with_stages(
+        let error = common::linear_spec(
             raw,
             base,
             [FittedStage::Scalar {
                 transformations: definitions,
             }],
-            2,
             None,
         )
         .unwrap_err();
-        assert!(error.to_string().contains("stage 0"), "{error}");
+        assert!(error.to_string().contains("stage 2"), "{error}");
     }
 }
 
@@ -727,8 +691,8 @@ fn stage_numeric_and_layout_validation_is_shared_by_construction_and_json() {
     ];
     for stage in invalid {
         let (raw, definitions) = base();
-        let error = PipelineSpec::with_stages(raw, definitions, [stage], 2, None).unwrap_err();
-        assert!(error.to_string().contains("stage 0"), "{error}");
+        let error = common::linear_spec(raw, definitions, [stage], None).unwrap_err();
+        assert!(error.to_string().contains("stage 2"), "{error}");
     }
 }
 
@@ -736,36 +700,24 @@ fn stage_numeric_and_layout_validation_is_shared_by_construction_and_json() {
 #[test]
 fn json_rejects_legacy_and_strictly_validates_current_stages() {
     let (raw, definitions) = base();
-    let base = PipelineSpec::new(raw, definitions).unwrap();
+    let base = common::linear_spec(raw, definitions, [], None).unwrap();
     let mut legacy = serde_json::to_value(&base).unwrap();
     legacy["version"] = "1.0".into();
-    legacy["model_input"]
-        .as_object_mut()
-        .unwrap()
-        .remove("stages");
-    assert!(serde_json::from_value::<PipelineSpec>(legacy.clone()).is_err());
-    legacy["model_input"]["stages"] = serde_json::json!([]);
     assert!(serde_json::from_value::<PipelineSpec>(legacy).is_err());
 
     let (raw, definitions) = self::base();
-    let spec = PipelineSpec::with_stages(raw, definitions, stages(), 1, None).unwrap();
+    let spec = common::linear_spec(raw, definitions, stages(), None).unwrap();
     let value = serde_json::to_value(&spec).unwrap();
     assert_eq!(
         serde_json::from_value::<PipelineSpec>(value.clone()).unwrap(),
         spec
     );
     for (pointer, replacement) in [
-        ("/model_input/stages", serde_json::Value::Null),
-        ("/model_input/stages/1/type", serde_json::json!("unknown")),
-        (
-            "/model_input/stages/1/components",
-            serde_json::json!([[1.0]]),
-        ),
-        (
-            "/model_input/stages/1/output_scale",
-            serde_json::json!([null]),
-        ),
-        ("/model_input/length", serde_json::json!(2)),
+        ("/nodes", serde_json::Value::Null),
+        ("/nodes/3/stage/type", serde_json::json!("unknown")),
+        ("/nodes/3/stage/components", serde_json::json!([[1.0]])),
+        ("/nodes/3/stage/output_scale", serde_json::json!([null])),
+        ("/nodes/3/parent", serde_json::json!(3)),
     ] {
         let mut invalid = value.clone();
         *invalid.pointer_mut(pointer).unwrap() = replacement;
@@ -775,20 +727,16 @@ fn json_rejects_legacy_and_strictly_validates_current_stages() {
         );
     }
     let mut missing = value.clone();
-    missing["model_input"]
-        .as_object_mut()
-        .unwrap()
-        .remove("stages");
+    missing.as_object_mut().unwrap().remove("nodes");
     assert!(serde_json::from_value::<PipelineSpec>(missing).is_err());
     let mut extra = value;
-    extra["model_input"]["stages"][1]["extra"] = true.into();
+    extra["nodes"][3]["stage"]["extra"] = true.into();
     assert!(serde_json::from_value::<PipelineSpec>(extra).is_err());
 }
 
 #[cfg(feature = "serde")]
 #[test]
 fn standalone_rust_replays_python_fitted_sklearn_fixture() {
-    use fiml::VecFeatureVector;
     use serde::Deserialize;
 
     /// Literal sklearn training/export output shared with the Python parity test.
@@ -806,20 +754,8 @@ fn standalone_rust_replays_python_fitted_sklearn_fixture() {
         "../../../tests/fixtures/sklearn_pipeline.json"
     ))
     .unwrap();
-    let raw = fixture.pipeline.raw_feature_extractor_spec();
-    let mut pipeline = fixture
-        .pipeline
-        .build(
-            VecFeatureVector::new_of_length(
-                raw.feature_vector_capacity(),
-                raw.feature_vector_length(),
-            ),
-            VecFeatureVector::new_of_length(
-                fixture.pipeline.feature_vector_capacity(),
-                fixture.pipeline.feature_vector_length(),
-            ),
-        )
-        .unwrap();
+    let _raw = fixture.pipeline.raw_feature_extractor_spec();
+    let mut pipeline = fixture.pipeline.build().unwrap();
     assert_eq!(fixture.timestamp.len(), fixture.price.len());
     assert_eq!(fixture.price.len(), fixture.expected.len());
     let symbol = Symbol::new(&fixture.symbol).unwrap();
@@ -832,8 +768,17 @@ fn standalone_rust_replays_python_fitted_sklearn_fixture() {
         pipeline
             .handle_event(Event::trade(symbol, price, 1.0, timestamp, None))
             .unwrap();
-        assert_eq!(pipeline.values().len(), expected.len());
-        for (&actual, expected) in pipeline.values().iter().zip(expected) {
+        assert_eq!(
+            pipeline.output("model").unwrap().values().len(),
+            expected.len()
+        );
+        for (&actual, expected) in pipeline
+            .output("model")
+            .unwrap()
+            .values()
+            .iter()
+            .zip(expected)
+        {
             match expected {
                 Some(expected) => assert!(
                     (actual - expected).abs() <= 1e-12 + 1e-10 * expected.abs(),

@@ -37,7 +37,9 @@ pub use feature_extractor_builder::FeatureExtractorBuilder;
 pub use feature_id::FeatureId;
 pub use feature_key::FeatureKey;
 pub use feature_source::{EventField, FeatureSource, SourceKind, SourceObservation};
-pub use pipeline::{FittedStage, Pipeline, PipelineSpec};
+pub use pipeline::{
+    FittedStage, NodeId, OutputId, OutputSpec, Pipeline, PipelineNode, PipelineOutput, PipelineSpec,
+};
 pub use serde::FeatureExtractorSpec;
 pub use transformers::{TransformerDefinition, TransformerOperation};
 

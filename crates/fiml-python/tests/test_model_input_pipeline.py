@@ -1,330 +1,255 @@
+"""Public branching graph contract, ownership, training and lifecycle checks."""
 import json
-import sys
-
-import fiml
 import numpy as np
 import pandas as pd
 import pytest
+from sklearn.decomposition import PCA
+from sklearn.preprocessing import StandardScaler
+
+import fiml
 
 
 def raw_spec():
-    return fiml.FeatureExtractorSpec(checksum="raw-checksum").day_of_week()
+    return (fiml.FeatureExtractorSpec(capacity=4)
+            .field("BTC", source="trade_price", id="price")
+            .field("BTC", source="trade_volume", id="volume"))
 
 
-@pytest.mark.parametrize("method", ["fit", "fit_transform"])
-@pytest.mark.parametrize("keyword", ["bid", "ask"])
-@pytest.mark.parametrize("value", [None, np.array([100.0])])
-def test_fitting_rejects_removed_book_keywords(method, keyword, value):
-    raw = raw_spec()
-    pipeline = fiml.ModelInputPipeline(fiml.PipelineSpec(raw).identity(raw.feature_ids()[0]))
-    args = (np.array([fiml.KIND_TIME], dtype=np.uint8),
-            np.array([0], dtype=np.int64), np.array([0], dtype=np.int64))
-    pipeline.fit_transform(*args)
-    before_json, before_values = pipeline.to_json(), pipeline.values()
-    with pytest.raises(TypeError, match=f"unexpected keyword argument '{keyword}'"):
-        getattr(pipeline, method)(*args, **{keyword: value})
-    assert pipeline.to_json() == before_json
-    np.testing.assert_equal(pipeline.values(), before_values)
+def events(pipeline, size=16):
+    return dict(kind=np.full(size, fiml.KIND_TRADE, dtype=np.uint8),
+                symbol=np.full(size, pipeline.symbol("BTC"), dtype=np.int64),
+                timestamp=np.arange(size, dtype=np.int64),
+                price=np.arange(size, dtype=float) + 5 + np.sin(np.arange(size)),
+                volume=np.arange(size, dtype=float) ** 2 + 2)
 
 
-@pytest.mark.parametrize("restore", [False, True])
-def test_grouped_lags_preserve_json_layout_and_individual_warmup(restore):
-    raw = raw_spec()
-    raw_id = raw.feature_ids()[0]
-    spec = (
-        fiml.PipelineSpec(raw)
-        .lagged(raw_id, lag_window=2, output="lag2")
-        .identity(raw_id, output="now")
-        .lagged(raw_id, lag_window=1, output="lag1")
-        .lagged(raw_id, lag_window=1)
-    )
-    document = json.loads(spec.to_json())
-    assert document["model_input"] == {
-        "stages": [],
-        "capacity": 4,
-        "length": 4,
-        "transformations": [
-            {"type": "lagged", "input": raw_id, "output": "lag2", "lag_window": 2},
-            {"type": "identity", "input": raw_id, "output": "now"},
-            {"type": "lagged", "input": raw_id, "output": "lag1", "lag_window": 1},
-            {"type": "lagged", "input": raw_id, "output": raw_id, "lag_window": 1},
-        ],
-    }
-    if restore:
-        spec = fiml.PipelineSpec.from_json(json.dumps(document))
-    assert json.loads(spec.to_json()) == document
-    assert spec.feature_ids() == ["lag2", "now", "lag1", raw_id]
-    pipeline = fiml.ModelInputPipeline(spec)
-    symbol = pipeline.symbol("ignored-for-time-events")
-    expected = [
-        [np.nan, 4.0, np.nan, np.nan],
-        [np.nan, 5.0, 4.0, 4.0],
-        [4.0, 6.0, 5.0, 5.0],
-        [5.0, 0.0, 6.0, 6.0],
-        [6.0, 1.0, 0.0, 0.0],
-    ]
-    for day, values in enumerate(expected):
-        pipeline.update(fiml.KIND_TIME, symbol, day * 86_400_000)
-        np.testing.assert_equal(pipeline.values(), values)
+def graph(*, learned=False):
+    spec = fiml.PipelineSpec(raw_spec())
+    root = spec.root()
+    shared = spec.add(root, PCA(n_components=2)) if learned else spec.add(
+        root, fiml.ScalarStage().lagged("price", lag_window=1, output="price"))
+    selected = spec.add(shared, fiml.ScalarStage().identity("pc0" if learned else "price"))
+    spec.output("selected", selected)
+    spec.output("shared", shared)
+    spec.output("alias", shared)
+    spec.output("raw", root)
+    return spec
 
 
-def test_pipeline_spec_builds_ordered_transformations_and_round_trips():
-    raw = raw_spec()
-    raw_id = raw.feature_ids()[0]
-    spec = (
-        fiml.PipelineSpec(raw, checksum="model-checksum")
-        .standard_scale(raw_id, mean=2.0, scale=4.0, output="scaled_day")
-        .identity(raw_id)
-    )
-
-    assert spec.raw_feature_ids() == [raw_id]
-    assert spec.feature_ids() == ["scaled_day", raw_id]
-    assert spec.capacity == 2
-    assert spec.active_feature_count == 2
-    assert spec.checksum == "model-checksum"
-    assert fiml.PipelineSpec.from_json(spec.to_json()).to_json() == spec.to_json()
-
-
-def test_model_input_pipeline_exposes_raw_and_final_snapshots():
-    raw = raw_spec()
-    raw_id = raw.feature_ids()[0]
-    spec = fiml.PipelineSpec(raw, capacity=3).standard_scale(
-        raw_id, mean=2.0, scale=2.0, output="scaled_day"
-    )
-    pipeline = fiml.ModelInputPipeline(spec)
-    global_symbol = pipeline.symbol("ignored-for-time-events")
-
-    pipeline.update(fiml.KIND_TIME, global_symbol, 0)
-
-    assert pipeline.raw_feature_names() == [raw_id]
-    assert pipeline.feature_names() == [
-        "scaled_day",
-        "__reserved_1",
-        "__reserved_2",
-    ]
-    np.testing.assert_equal(pipeline.raw_values(), np.array([4.0]))
-    np.testing.assert_equal(pipeline.values(), np.array([1.0, np.nan, np.nan]))
+def test_all_outputs_update_once_and_batch_is_aligned():
+    pipeline = graph().build()
+    data = events(pipeline)
+    result = pipeline.transform(**data)
+    assert list(result) == ["selected", "shared", "alias", "raw"]
+    expected = np.r_[np.nan, data["price"][:-1]][:, None]
+    for name in ["selected", "shared", "alias"]:
+        np.testing.assert_equal(result[name], expected)
+        np.testing.assert_equal(pipeline.output(name).values(), expected[-1])
+    np.testing.assert_equal(result["raw"], np.column_stack((data["price"], data["volume"])))
+    assert not np.shares_memory(result["shared"], result["alias"])
+    assert pipeline.raw_values().shape == (4,)
+    assert not hasattr(pipeline, "values")
+    with pytest.raises(ValueError, match="unknown output"):
+        pipeline.output("missing")
 
 
-def test_pipeline_spec_capacity_cloning_metadata_and_atomic_failures():
-    raw = fiml.FeatureExtractorSpec(capacity=3, checksum="raw").day_of_week()
-    raw_id = raw.feature_ids()[0]
-    dynamic = fiml.PipelineSpec(raw, checksum="model").identity(raw_id)
-    raw.time_since_first_event_of_day()
-
-    assert dynamic.capacity == 1
-    assert dynamic.raw_feature_ids() == [raw_id]
-    assert dynamic.checksum == "model"
-    document = json.loads(dynamic.to_json())
-    assert document["checksum"] == "model"
-    assert document["feature_extractor"]["checksum"] == "raw"
-
-    before = dynamic.to_json()
-    with pytest.raises(ValueError, match="input feature ID does not exist"):
-        dynamic.identity("missing")
-    assert dynamic.to_json() == before
-
-    fixed = fiml.PipelineSpec(raw, capacity=1).identity(raw.feature_ids()[0])
-    with pytest.raises(ValueError, match="capacity 1 is smaller"):
-        fixed.identity(raw.feature_ids()[0], output="another")
-    assert fixed.feature_ids() == [raw.feature_ids()[0]]
-
-
-@pytest.mark.parametrize(
-    ("operation", "message"),
-    [
-        (lambda spec, raw_id: spec.identity(raw_id, output="__reserved_0"), "reserved"),
-        (
-            lambda spec, raw_id: spec.lagged(raw_id, lag_window=0),
-            "lag window must be positive",
-        ),
-        (
-            lambda spec, raw_id: spec.lagged(raw_id, lag_window=10_001),
-            "lag window exceeds",
-        ),
-        (
-            lambda spec, raw_id: spec.lagged(raw_id, lag_window=2 * sys.maxsize + 1),
-            "lag window exceeds",
-        ),
-        (
-            lambda spec, raw_id: spec.standard_scale(raw_id, mean=np.nan, scale=1.0),
-            "mean must be finite",
-        ),
-        (
-            lambda spec, raw_id: spec.standard_scale(raw_id, mean=0.0, scale=np.inf),
-            "scale must be finite",
-        ),
-        (
-            lambda spec, raw_id: spec.standard_scale(raw_id, mean=0.0, scale=0.0),
-            "scale must be positive",
-        ),
-        (
-            lambda spec, raw_id: spec.standard_scale(raw_id, mean=0.0, scale=5e-324),
-            "inverse scale must be finite",
-        ),
-    ],
-)
-def test_pipeline_spec_rejects_invalid_transformations_atomically(operation, message):
-    raw = raw_spec()
-    raw_id = raw.feature_ids()[0]
-    spec = fiml.PipelineSpec(raw)
-
-    with pytest.raises(ValueError, match=message):
-        operation(spec, raw_id)
-
-    assert spec.feature_ids() == []
-    assert spec.capacity == 0
-
-
-def test_pipeline_spec_rejects_duplicate_outputs_and_strict_json_errors():
-    raw = raw_spec()
-    raw_id = raw.feature_ids()[0]
-    spec = fiml.PipelineSpec(raw).identity(raw_id)
-
-    with pytest.raises(ValueError, match="duplicates an earlier output"):
-        spec.identity(raw_id)
-
-    document = json.loads(spec.to_json())
-    document["version"] = "2.6"
-    with pytest.raises(ValueError, match="unsupported model-input spec version"):
-        fiml.PipelineSpec.from_json(json.dumps(document))
-    with pytest.raises(ValueError):
-        fiml.PipelineSpec.from_json("not json")
-
-
-def trade_model_spec(*, raw_capacity=2, final_capacity=3):
-    raw = fiml.FeatureExtractorSpec(capacity=raw_capacity).field("BTCUSDT", source="trade_price")
-    raw_id = raw.feature_ids()[0]
-    return (fiml.PipelineSpec(raw, capacity=final_capacity).sma(raw_id, window=2)
-            .scalar_stage(fiml.ScalarStage().standard_scale(raw_id, mean=10.0, scale=2.0, output="scaled_price")))
-
-
-def trade_frame():
-    return pd.DataFrame(
-        {
-            "symbol": ["BTCUSDT", "BTCUSDT", "BTCUSDT"],
-            "ts": np.array([1, 2, 3], dtype=np.int64),
-            "price": [10.0, 12.0, 14.0],
-            "volume": [1.0, 1.0, 1.0],
-        },
-        index=[20, 10, 30],
-    )
-
-
-@pytest.mark.parametrize("dtype", [np.float32, np.float64])
-def test_pipeline_replay_paths_and_json_restoration_are_exact(dtype):
-    spec = trade_model_spec()
-    source = trade_frame()
-
-    iterative = fiml.ModelInputPipeline(spec, output_dtype=dtype)
-    handle = iterative.symbol("BTCUSDT")
-    iterative_rows = []
-    for timestamp, price in zip(source["ts"], source["price"], strict=True):
-        iterative.update(
-            fiml.KIND_TRADE,
-            handle,
-            int(timestamp),
-            price=float(price),
-            volume=1.0,
-        )
-        iterative_rows.append(iterative.values())
-
-    transformed = fiml.ModelInputPipeline(spec, output_dtype=dtype)
-    transformed_handle = transformed.symbol("BTCUSDT")
-    matrix = transformed.transform(
-        np.full(len(source), fiml.KIND_TRADE, dtype=np.uint8),
-        np.full(len(source), transformed_handle, dtype=np.int64),
-        source["ts"].to_numpy(),
-        price=source["price"].to_numpy(),
-        volume=source["volume"].to_numpy(),
-    )
-
-    framed = fiml.ModelInputPipeline(spec, output_dtype=dtype)
-    frame = framed.compute_features(source)
-    restored = fiml.ModelInputPipeline.from_json(spec.to_json(), output_dtype=dtype)
-    restored_frame = restored.compute_features(source)
-
-    expected = np.stack(iterative_rows)
-    np.testing.assert_equal(matrix, expected)
-    np.testing.assert_equal(frame[framed.feature_names()].to_numpy(), expected)
-    np.testing.assert_equal(
-        restored_frame[restored.feature_names()].to_numpy(), expected
-    )
-    assert matrix.dtype == dtype
-    assert framed.raw_values().dtype == dtype
-    assert framed.raw_feature_names()[1] == "__reserved_1"
-    assert np.isnan(framed.raw_values()[1])
-    assert frame.index.equals(source.index)
-    assert list(frame.columns) == ["symbol", "ts", *framed.feature_names()]
-    assert np.isnan(matrix[0, 0])
-    assert matrix[1, 0] == dtype(0.5)
-    assert np.isnan(matrix[:, 1:]).all()
-
-
-def test_pipeline_dtype_locks_only_after_an_accepted_event():
-    pipeline = fiml.ModelInputPipeline(trade_model_spec(), output_dtype="float64")
-    empty = np.array([], dtype=np.int64)
-    pipeline.transform(
-        np.array([], dtype=np.uint8),
-        empty,
-        empty,
-        price=np.array([], dtype=np.float64),
-        volume=np.array([], dtype=np.float64),
-    )
-    pipeline.output_dtype = np.float32
-    handle = pipeline.symbol("BTCUSDT")
-    pipeline.update(fiml.KIND_TRADE, handle, 1, price=10.0, volume=1.0)
-
+def test_single_output_empty_batch_and_dtype():
+    spec = fiml.PipelineSpec(raw_spec())
+    spec.output("raw", spec.root())
+    pipeline = spec.build(np.float32)
+    result = pipeline.transform(**events(pipeline, 0))
+    assert list(result) == ["raw"]
+    assert result["raw"].shape == (0, 2)
+    assert result["raw"].dtype == np.float32
+    pipeline.output_dtype = "float64"
+    pipeline.transform(**events(pipeline))
     with pytest.raises(ValueError, match="cannot be changed"):
-        pipeline.output_dtype = np.float64
+        pipeline.output_dtype = "float32"
 
 
-def test_invalid_pipeline_batch_leaves_raw_and_final_snapshots_unchanged():
-    pipeline = fiml.ModelInputPipeline(trade_model_spec())
-    handle = pipeline.symbol("BTCUSDT")
-    pipeline.update(fiml.KIND_TRADE, handle, 10, price=10.0, volume=1.0)
-    raw_before = pipeline.raw_values().copy()
-    final_before = pipeline.values().copy()
-
-    with pytest.raises(ValueError, match="row 1"):
-        pipeline.transform(
-            np.full(2, fiml.KIND_TRADE, dtype=np.uint8),
-            np.full(2, handle, dtype=np.int64),
-            np.array([11, 9], dtype=np.int64),
-            price=np.array([12.0, 14.0]),
-            volume=np.ones(2),
-        )
-
-    np.testing.assert_equal(pipeline.raw_values(), raw_before)
-    np.testing.assert_equal(pipeline.values(), final_before)
-
-    with pytest.raises(ValueError, match="previous timestamp 10"):
-        pipeline.update(fiml.KIND_TRADE, handle, 9, price=12.0, volume=1.0)
-    np.testing.assert_equal(pipeline.raw_values(), raw_before)
-    np.testing.assert_equal(pipeline.values(), final_before)
-
-
-def test_pipeline_dataframe_custom_mapping_empty_input_and_metadata_collision():
-    source = trade_frame().rename(
-        columns={"symbol": "ticker", "ts": "time", "price": "px", "volume": "qty"}
-    )
-    pipeline = fiml.ModelInputPipeline(trade_model_spec())
-    result = pipeline.compute_features(
-        source, symbol="ticker", time="time", price="px", volume="qty"
-    )
-    assert list(result.columns[:2]) == ["ticker", "time"]
-    assert result["ticker"].equals(source["ticker"])
-    assert result["time"].equals(source["time"])
-
-    empty = source.iloc[:0]
-    fresh = fiml.ModelInputPipeline(trade_model_spec())
-    empty_result = fresh.compute_features(
-        empty, symbol="ticker", time="time", price="px", volume="qty"
-    )
-    assert empty_result.shape == (0, 2 + fresh.n_features())
-    fresh.output_dtype = "float32"
-
+def test_builder_snapshots_inputs_builds_and_rejects_foreign_handles():
     raw = raw_spec()
-    collision = fiml.PipelineSpec(raw).identity(raw.feature_ids()[0], output="symbol")
-    with pytest.raises(ValueError, match="collides with a metadata column"):
-        fiml.ModelInputPipeline(collision).compute_features(trade_frame())
+    spec = fiml.PipelineSpec(raw)
+    scalar = fiml.ScalarStage().identity("price")
+    node = spec.add(spec.root(), scalar)
+    spec.output("price", node)
+    scalar.identity("volume")
+    raw.day_of_week()
+    first, second = spec.build(), spec.build()
+    spec.output("raw", spec.root())
+    assert first.output_names() == second.output_names() == ["price"]
+    first.transform(**events(first))
+    assert np.isnan(second.output("price").values()).all()
+    assert first.output("price").feature_names() == ["price"]
+    other = fiml.PipelineSpec(raw_spec())
+    with pytest.raises(ValueError, match="another pipeline builder"):
+        other.add(node, fiml.ScalarStage().identity("price"))
+    with pytest.raises(ValueError, match="another pipeline builder"):
+        other.output("foreign", node)
+    with pytest.raises(ValueError, match="duplicate"):
+        spec.output("price", spec.root())
+
+
+@pytest.mark.parametrize("name", ["", "   ", "__reserved_0"])
+def test_invalid_output_names(name):
+    spec = fiml.PipelineSpec(raw_spec())
+    with pytest.raises(ValueError, match="output name"):
+        spec.output(name, spec.root())
+
+
+def test_no_outputs_and_empty_root_are_rejected():
+    with pytest.raises(ValueError, match="at least one named output"):
+        fiml.PipelineSpec(raw_spec()).build()
+    spec = fiml.PipelineSpec(fiml.FeatureExtractorSpec())
+    spec.output("empty", spec.root())
+    with pytest.raises(ValueError, match="output 'empty'.*active feature"):
+        spec.build()
+
+
+def test_fit_shares_estimator_and_keeps_output_handles(monkeypatch):
+    calls = []
+    original = PCA.fit
+    def fit(self, matrix, *args, **kwargs):
+        calls.append(matrix.copy())
+        return original(self, matrix, *args, **kwargs)
+    monkeypatch.setattr(PCA, "fit", fit)
+    pipeline = graph(learned=True).build()
+    handle = pipeline.output("shared")
+    data = events(pipeline)
+    with pytest.raises(ValueError, match="not fitted"):
+        handle.values()
+    mask = np.arange(16) >= 3
+    result = pipeline.fit_transform(**data, fit_mask=mask)
+    assert len(calls) == 1
+    expected_input = np.column_stack((data["price"], data["volume"]))
+    np.testing.assert_equal(calls[0], expected_input[mask])
+    expected = original(PCA(n_components=2), expected_input[mask]).transform(expected_input)
+    np.testing.assert_allclose(result["shared"], expected, atol=1e-12)
+    np.testing.assert_equal(result["selected"], result["shared"][:, :1])
+    assert handle.feature_names() == ["pc0", "pc1"]
+    snapshot = handle.values()
+    pipeline.reset()
+    assert np.isnan(handle.values()).all()
+    np.testing.assert_equal(snapshot, result["shared"][-1])
+    pipeline.fit(**data, fit_mask=mask)
+    assert np.isnan(handle.values()).all()
+    pipeline.transform(**data)
+    before, values = pipeline.to_json(), handle.values()
+    bad = dict(data, price=np.full(16, np.inf))
+    with pytest.raises(ValueError):
+        pipeline.fit(**bad, fit_mask=mask)
+    assert pipeline.to_json() == before
+    np.testing.assert_equal(handle.values(), values)
+
+
+def test_independent_pca_nodes_reuse_local_names_and_snapshot_estimators(monkeypatch):
+    spec = fiml.PipelineSpec(raw_spec())
+    estimator = PCA(n_components=1)
+    for name in ["a", "b"]:
+        spec.output(name, spec.add(spec.root(), estimator))
+    estimator.n_components = 2
+    pipeline = spec.build()
+    calls = []
+    original = PCA.fit
+    def fit(self, matrix, *args, **kwargs):
+        calls.append(self)
+        return original(self, matrix, *args, **kwargs)
+    monkeypatch.setattr(PCA, "fit", fit)
+    pipeline.fit(**events(pipeline))
+    assert len(calls) == 2 and calls[0] is not calls[1]
+    assert pipeline.output("a").feature_names() == pipeline.output("b").feature_names() == ["pc0"]
+    assert not hasattr(estimator, "components_")
+
+
+def test_history_replays_excluded_rows_and_multiple_learning_passes():
+    spec = fiml.PipelineSpec(raw_spec())
+    lag = spec.add(spec.root(), fiml.ScalarStage().lagged("price", lag_window=2, output="lag"))
+    scaled = spec.add(lag, StandardScaler())
+    projected = spec.add(scaled, PCA(n_components=1))
+    spec.output("model", projected)
+    spec.output("lag", lag)
+    pipeline = spec.build()
+    data = events(pipeline)
+    mask = np.arange(16) % 2 == 0
+    mask[:4] = False
+    result = pipeline.fit_transform(**data, fit_mask=mask)
+    lagged = np.r_[np.nan, np.nan, data["price"][:-2]][:, None]
+    np.testing.assert_equal(result["lag"], lagged)
+    scaler = StandardScaler().fit(lagged[mask])
+    pca = PCA(n_components=1).fit(scaler.transform(lagged[mask]))
+    np.testing.assert_allclose(result["model"][2:], pca.transform(scaler.transform(lagged[2:])), atol=1e-12)
+
+
+def test_failed_refit_missing_component_preserves_layout_and_state():
+    spec = fiml.PipelineSpec(raw_spec())
+    pca = spec.add(spec.root(), PCA(n_components=0.95))
+    spec.output("first", pca)
+    spec.output("second", spec.add(pca, fiml.ScalarStage().identity("pc1")))
+    pipeline = spec.build()
+    data = events(pipeline)
+    data["price"] = np.tile([-1., -1., 1., 1.], 4)
+    data["volume"] = np.tile([-1., 1., -1., 1.], 4)
+    pipeline.fit_transform(**data)
+    output = pipeline.output("second")
+    saved, values = pipeline.to_json(), output.values()
+    data["volume"] = data["price"].copy()
+    with pytest.raises(ValueError, match="pc1|input feature ID"):
+        pipeline.fit(**data)
+    assert pipeline.to_json() == saved
+    np.testing.assert_equal(output.values(), values)
+
+
+def test_json_cold_roundtrip_order_and_dataframe_results():
+    pipeline = graph(learned=True).build()
+    data = events(pipeline)
+    result = pipeline.fit_transform(**data)
+    document = json.loads(pipeline.to_json())
+    assert document["version"] == "4.0"
+    assert document["nodes"][1]["stage"]["outputs"] == ["pc0", "pc1"]
+    assert [out["name"] for out in document["outputs"]] == list(result)
+    restored = fiml.ModelInputPipeline.from_json(pipeline.to_json())
+    assert restored.to_json() == pipeline.to_json()
+    assert np.isnan(restored.output("raw").values()).all()
+    restored.symbol("BTC")
+    for name, values in restored.transform(**data).items():
+        np.testing.assert_equal(values, result[name])
+    restored.reset()
+    frame = pd.DataFrame(dict(symbol=["BTC"]*16, ts=data["timestamp"],
+                              price=data["price"], volume=data["volume"]))
+    frames = restored.compute_features(frame)
+    assert list(frames) == list(result)
+    for name, values in result.items():
+        np.testing.assert_equal(frames[name].iloc[:, 2:].to_numpy(), values)
+
+
+def test_symbol_aliases_keep_handles_before_fit_and_after_reset():
+    pipeline = graph(learned=True).build()
+    assert pipeline.symbol("UNUSED") == pipeline.symbol("unused") == 0
+    assert pipeline.symbol("BTC") == pipeline.symbol("btc") == 1
+    data = events(pipeline)
+    pipeline.fit_transform(**data)
+    assert pipeline.symbol("BTC") == pipeline.symbol("btc") == 1
+    pipeline.reset()
+    pipeline.transform(**data)
+    assert pipeline.symbol("UNUSED") == 0
+
+
+def test_refit_updates_existing_output_metadata_without_affecting_other_builds():
+    spec = fiml.PipelineSpec(raw_spec())
+    projected = spec.add(spec.root(), PCA(n_components=0.95))
+    spec.output("model", projected)
+    first, second = spec.build(), spec.build()
+    handle = first.output("model")
+    data = events(first)
+    data["price"] = np.tile([-1., -1., 1., 1.], 4)
+    data["volume"] = np.tile([-1., 1., -1., 1.], 4)
+    first.fit_transform(**data)
+    snapshot = handle.values()
+    assert handle.feature_names() == ["pc0", "pc1"]
+    data["volume"] = data["price"].copy()
+    first.fit(**data)
+    assert handle.feature_names() == ["pc0"]
+    assert handle.values().shape == (1,) and np.isnan(handle.values()).all()
+    assert snapshot.shape == (2,) and np.isfinite(snapshot).all()
+    with pytest.raises(ValueError, match="not fitted"):
+        second.output("model").values()

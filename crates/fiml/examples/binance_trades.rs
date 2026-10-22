@@ -1,6 +1,6 @@
 use fiml::{
-    ArrayFeatureVector, Event, EventField, FeatureDefinition, FeatureExtractorSpec, FeatureId,
-    FeatureKey, PipelineSpec, Symbol, TransformerDefinition, WarmupPolicy,
+    Event, EventField, FeatureDefinition, FeatureExtractorSpec, FeatureId, FeatureKey,
+    PipelineSpec, Symbol, TransformerDefinition, WarmupPolicy,
 };
 use futures::StreamExt;
 use serde::Deserialize;
@@ -43,27 +43,33 @@ async fn main() -> anyhow::Result<()> {
         },
         FeatureId::new("price"),
     )])?;
-    let mut extractor = PipelineSpec::new(
-        raw,
-        [
-            TransformerDefinition::ema(
-                FeatureId::new("price"),
-                FeatureId::new("ema_12"),
-                12,
-                WarmupPolicy::FullWindow,
-            ),
-            TransformerDefinition::sma(
-                FeatureId::new("price"),
-                FeatureId::new("sma_12"),
-                12,
-                WarmupPolicy::FullWindow,
-            ),
-        ],
-    )?
-    .build(
-        ArrayFeatureVector::<1>::new(),
-        ArrayFeatureVector::<2>::new(),
-    )?;
+    let mut extractor = {
+        let mut spec = PipelineSpec::new(raw);
+        let node = spec.add(
+            spec.root(),
+            fiml::FittedStage::Scalar {
+                transformations: [
+                    TransformerDefinition::ema(
+                        FeatureId::new("price"),
+                        FeatureId::new("ema_12"),
+                        12,
+                        WarmupPolicy::FullWindow,
+                    ),
+                    TransformerDefinition::sma(
+                        FeatureId::new("price"),
+                        FeatureId::new("sma_12"),
+                        12,
+                        WarmupPolicy::FullWindow,
+                    ),
+                ]
+                .into_iter()
+                .collect(),
+            },
+        )?;
+        spec.output("model", node)?;
+        spec
+    }
+    .build()?;
 
     let url = format!("{BINANCE_STREAM_URL}/{stream_symbol}@trade");
     let (mut ws_stream, _) = connect_async(&url).await?;
@@ -81,7 +87,7 @@ async fn main() -> anyhow::Result<()> {
                         trade.trade_time,
                         None,
                     ))?;
-                    let values = extractor.values();
+                    let values = extractor.output("model").unwrap().values();
 
                     println!(
                         "{},{},{},{:.8},{:.8},{:.8},{:.8}",

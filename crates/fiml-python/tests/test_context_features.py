@@ -1,3 +1,4 @@
+from pipeline_fixtures import LinearSpec, SingleOutput
 import json
 from pathlib import Path
 
@@ -18,7 +19,7 @@ def raw_spec():
 
 
 def model_spec():
-    return (fiml.PipelineSpec(raw_spec())
+    return (LinearSpec(raw_spec())
             .identity("high").lagged("high", lag_window=1, output="lag")
             .sma("price", window=2, warmup=fiml.WarmupPolicy.FULL_WINDOW, output="sma")
             .ema("high", window=1, output="context_ema"))
@@ -34,7 +35,7 @@ def events(runtime):
 @pytest.mark.parametrize("model", [False, True])
 @pytest.mark.parametrize("dtype", ["float32", "float64"])
 def test_scheduled_replay_matches_manual_interleaving(model, dtype):
-    cls = fiml.ModelInputPipeline if model else fiml.FeatureExtractor
+    cls = SingleOutput if model else fiml.FeatureExtractor
     spec = model_spec() if model else raw_spec()
     manual, batch = cls(spec, dtype), cls(spec, dtype)
     data = events(batch)
@@ -65,7 +66,7 @@ def test_scheduled_replay_matches_manual_interleaving(model, dtype):
 
 @pytest.mark.parametrize("model", [False, True])
 def test_invalid_schedule_is_rejected_before_any_event_or_context_change(model):
-    cls = fiml.ModelInputPipeline if model else fiml.FeatureExtractor
+    cls = SingleOutput if model else fiml.FeatureExtractor
     runtime = cls(model_spec() if model else raw_spec())
     data = events(runtime)
     for schedule in [{-1: {}}, {4: {}}, {1.5: {}}, {True: {}}, {"0": {}},
@@ -96,24 +97,22 @@ def test_invalid_schedule_is_rejected_before_any_event_or_context_change(model):
 
 
 def test_context_update_locks_recipe_and_reset_clears_context():
-    pipeline = fiml.ModelInputPipeline(fiml.PipelineSpec(raw_spec()).identity("high"))
+    pipeline = SingleOutput(LinearSpec(raw_spec()).identity("high"))
     pipeline.update_context({"high": 5.})
-    with pytest.raises(ValueError, match="recipe"):
-        pipeline.add_transformation(StandardScaler(), name="scale")
+    assert not hasattr(pipeline.inner, "add_transformation")
     assert pipeline.values()[0] == 5.
     document = pipeline.to_json()
-    restored = fiml.ModelInputPipeline.from_json(document)
+    restored = SingleOutput.from_json(document)
     assert np.isnan(restored.values()).all()
     assert np.isnan(restored.raw_values()).all()
     pipeline.reset()
     assert np.isnan(pipeline.raw_values()).all()
-    with pytest.raises(ValueError, match="recipe"):
-        pipeline.add_transformation(StandardScaler(), name="scale")
+    assert not hasattr(pipeline.inner, "add_transformation")
 
 
 def test_fit_reapplies_schedule_at_each_stage_and_preserves_failed_refit_state():
-    spec = fiml.PipelineSpec(raw_spec()).identity("high")
-    pipeline = (fiml.ModelInputPipeline(spec)
+    spec = LinearSpec(raw_spec()).identity("high")
+    pipeline = (SingleOutput(spec)
                 .add_transformation(StandardScaler(), name="first")
                 .add_transformation(fiml.ScalarStage().lagged("high", lag_window=1, output="lag"), name="history")
                 .add_transformation(StandardScaler(), name="second"))
@@ -143,7 +142,7 @@ def test_book_replay_retains_context_and_prevalidates_schedule(model):
     spec = (fiml.FeatureExtractorSpec().configure_order_book("btc", update_policy="contiguous", buffer_size=8)
             .order_book_best_bid_price("btc").context("btc", "high", id="high"))
     names = spec.feature_ids()
-    runtime = (fiml.ModelInputPipeline(fiml.PipelineSpec(spec).identity("high")) if model
+    runtime = (SingleOutput(LinearSpec(spec).identity("high")) if model
                else fiml.FeatureExtractor(spec))
     book_events = [fiml.OrderBookEvent.snapshot("btc", 1, 1, [("100", "1")], []),
                    fiml.OrderBookEvent.delta("btc", 2, 2, [("bid", "101", "1")])]
@@ -193,7 +192,7 @@ def test_context_json_schema_names_and_canonical_order():
 
 def test_shared_rust_python_context_replay_fixture():
     fixture = json.loads((Path(__file__).parents[3] / "tests/fixtures/context_replay.json").read_text())
-    runtime = fiml.ModelInputPipeline.from_json(json.dumps(fixture["pipeline"]))
+    runtime = SingleOutput.from_json(json.dumps(fixture["pipeline"]))
     steps = fixture["steps"]
     handle = runtime.symbol("btc")
     actual = runtime.transform(

@@ -44,19 +44,21 @@ def _(fiml, np):
         .trade_count_timed("BTCUSDT", aggregation="1ms", window="60s")
         .field("BTCUSDT", source="trade_price", id="price")
         .day_of_week())
-    pipeline_spec = fiml.PipelineSpec(feature_extractor_spec)
+    scalar = fiml.ScalarStage()
     for feature_id in feature_extractor_spec.feature_ids():
         if feature_id != "price":
-            pipeline_spec.identity(feature_id)
-    pipeline_spec.sma("price", window=2, warmup=fiml.WarmupPolicy.FIRST_VALUE, output="sma:2")
-    pipeline_spec.ema("price", window=2, warmup=fiml.WarmupPolicy.FIRST_VALUE, output="ema:2")
-    extractor = fiml.ModelInputPipeline(pipeline_spec, output_dtype=np.float32)
+            scalar.identity(feature_id)
+    scalar.sma("price", window=2, warmup=fiml.WarmupPolicy.FIRST_VALUE, output="sma:2")
+    scalar.ema("price", window=2, warmup=fiml.WarmupPolicy.FIRST_VALUE, output="ema:2")
+    pipeline_spec = fiml.PipelineSpec(feature_extractor_spec)
+    pipeline_spec.output("model", pipeline_spec.add(pipeline_spec.root(), scalar))
+    extractor = pipeline_spec.build(output_dtype=np.float32)
     return (extractor,)
 
 
 @app.cell
 def _(extractor, trades):
-    features = extractor.compute_features(trades)
+    features = extractor.compute_features(trades)["model"]
     features
     return (features,)
 
@@ -66,10 +68,10 @@ def _(extractor, features, np, trades):
     assert features.index.equals(trades.index)
     assert features["symbol"].equals(trades["symbol"])
     assert features["ts"].equals(trades["ts"])
-    assert list(features.columns[2:]) == extractor.feature_names()
+    assert list(features.columns[2:]) == extractor.output("model").feature_names()
     assert all(dtype == np.float32 for dtype in features.dtypes.iloc[2:])
-    assert features.shape == (len(trades), extractor.n_features() + 2)
-    moving_average_names = [name for name in extractor.feature_names() if name.startswith(("sma:", "ema:"))]
+    assert features.shape == (len(trades), extractor.output("model").n_features() + 2)
+    moving_average_names = [name for name in extractor.output("model").feature_names() if name.startswith(("sma:", "ema:"))]
     assert not features[moving_average_names].isna().any().any()
     return
 

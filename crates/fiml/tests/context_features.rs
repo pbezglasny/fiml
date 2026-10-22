@@ -1,3 +1,5 @@
+mod common;
+
 use fiml::{
     ArrayFeatureVector, Event, EventField, FeatureDefinition, FeatureExtractor,
     FeatureExtractorSpec, FeatureId, FeatureKey, FeatureSource, FeatureVector, FittedStage,
@@ -183,49 +185,53 @@ fn context_refresh_preserves_averages_and_event_lags_through_reused_stage_buffer
                 });
             }
         }
-        let mut pipeline = PipelineSpec::with_stages(raw.clone(), defs.clone(), stages, 6, None)
+        let mut pipeline = common::linear_spec(raw.clone(), defs.clone(), stages, None)
             .unwrap()
-            .build(
-                ArrayFeatureVector::<2>::new(),
-                ArrayFeatureVector::<6>::new(),
-            )
+            .build()
             .unwrap();
         pipeline.update_context(&[("high", Some(100.))]).unwrap();
         same(
-            pipeline.values(),
+            pipeline.output("model").unwrap().values(),
             &[100., f64::NAN, f64::NAN, f64::NAN, f64::NAN, f64::NAN],
         );
         pipeline.handle_event(Event::price(symbol, 10., 1)).unwrap();
         pipeline.handle_event(Event::price(symbol, 20., 2)).unwrap();
-        let before = pipeline.values().to_vec();
+        let before = pipeline.output("model").unwrap().values().to_vec();
         assert_eq!(before[1], 100.);
         assert_eq!(before[2], 15.);
         for high in [200., 300.] {
             pipeline.update_context(&[("high", Some(high))]).unwrap();
-            same(&pipeline.values()[1..], &before[1..]);
-            assert_eq!(pipeline.values()[0], high);
+            same(
+                &pipeline.output("model").unwrap().values()[1..],
+                &before[1..],
+            );
+            assert_eq!(pipeline.output("model").unwrap().values()[0], high);
             assert_eq!(pipeline.last_timestamp(), Some(2));
         }
-        let unchanged = pipeline.values().to_vec();
+        let unchanged = pipeline.output("model").unwrap().values().to_vec();
         assert!(
             pipeline
                 .update_context(&[("high", Some(9.)), ("price", Some(9.))])
                 .is_err()
         );
-        same(pipeline.values(), &unchanged);
+        same(pipeline.output("model").unwrap().values(), &unchanged);
         pipeline.handle_event(Event::price(symbol, 30., 3)).unwrap();
-        assert_eq!(pipeline.values()[1], 100.);
-        assert_eq!(pipeline.values()[2], 25.);
+        assert_eq!(pipeline.output("model").unwrap().values()[1], 100.);
+        assert_eq!(pipeline.output("model").unwrap().values()[2], 25.);
         pipeline.handle_event(Event::price(symbol, 40., 4)).unwrap();
-        assert_eq!(pipeline.values()[1], 300.);
-        assert!(pipeline.values()[4..].iter().all(|v| v.is_nan()));
+        assert_eq!(pipeline.output("model").unwrap().values()[1], 300.);
+        assert!(
+            pipeline.output("model").unwrap().values()[4..]
+                .iter()
+                .all(|v| v.is_nan())
+        );
     }
 }
 
 #[test]
 fn context_refresh_runs_stateless_stages_and_clearing_without_events() {
     let raw = FeatureExtractorSpec::new([context(Symbol::GLOBAL, "high", "high")]).unwrap();
-    let mut pipeline = PipelineSpec::with_stages(
+    let mut pipeline = common::linear_spec(
         raw,
         [T::standard_scale(id("high"), id("x"), 10., 2.)],
         [
@@ -251,21 +257,17 @@ fn context_refresh_runs_stateless_stages_and_clearing_without_events() {
                 output_scale: vec![1.],
             },
         ],
-        1,
         None,
     )
     .unwrap()
-    .build(
-        ArrayFeatureVector::<1>::new(),
-        ArrayFeatureVector::<1>::new(),
-    )
+    .build()
     .unwrap();
     pipeline.update_context(&[]).unwrap();
-    assert!(pipeline.values()[0].is_nan());
+    assert!(pipeline.output("model").unwrap().values()[0].is_nan());
     pipeline.update_context(&[("high", Some(20.))]).unwrap();
-    assert_eq!(pipeline.values(), &[2.]);
+    assert_eq!(pipeline.output("model").unwrap().values(), &[2.]);
     pipeline.update_context(&[("high", None)]).unwrap();
-    assert_eq!(pipeline.values(), &[-3.]);
+    assert_eq!(pipeline.output("model").unwrap().values(), &[-3.]);
     assert_eq!(pipeline.last_timestamp(), None);
 }
 
@@ -299,9 +301,10 @@ fn context_json_is_canonical_and_rebuilds_cold() {
             .iter()
             .all(|v| v.is_nan())
     );
-    let pipeline = PipelineSpec::new(restored, [T::identity(id("high"), id("out"))]).unwrap();
+    let pipeline =
+        common::linear_spec(restored, [T::identity(id("high"), id("out"))], [], None).unwrap();
     let value = serde_json::to_value(&pipeline).unwrap();
-    assert_eq!(value["version"], "3.0");
+    assert_eq!(value["version"], "4.0");
     assert_eq!(
         serde_json::from_value::<PipelineSpec>(value).unwrap(),
         pipeline
@@ -315,12 +318,7 @@ fn shared_python_rust_context_replay_fixture() {
         serde_json::from_str(include_str!("../../../tests/fixtures/context_replay.json")).unwrap();
     let spec: PipelineSpec = serde_json::from_value(fixture["pipeline"].clone()).unwrap();
     assert_eq!(serde_json::to_value(&spec).unwrap(), fixture["pipeline"]);
-    let mut pipeline = spec
-        .build(
-            ArrayFeatureVector::<2>::new(),
-            ArrayFeatureVector::<4>::new(),
-        )
-        .unwrap();
+    let mut pipeline = spec.build().unwrap();
     for step in fixture["steps"].as_array().unwrap() {
         let updates: Vec<_> = step["context"]
             .as_object()
@@ -342,14 +340,14 @@ fn shared_python_rust_context_replay_fixture() {
             .iter()
             .map(|v| v.as_f64().unwrap_or(f64::NAN))
             .collect();
-        same(pipeline.values(), &expected);
+        same(pipeline.output("model").unwrap().values(), &expected);
     }
 }
 
 #[test]
 fn downstream_averages_of_event_lags_do_not_sample_context_refreshes() {
     let raw = FeatureExtractorSpec::new([context(Symbol::GLOBAL, "high", "high")]).unwrap();
-    let mut pipeline = PipelineSpec::with_stages(
+    let mut pipeline = common::linear_spec(
         raw,
         [T::lagged(id("high"), id("lag"), 1)],
         [
@@ -366,27 +364,23 @@ fn downstream_averages_of_event_lags_do_not_sample_context_refreshes() {
                 ],
             },
         ],
-        2,
         None,
     )
     .unwrap()
-    .build(
-        ArrayFeatureVector::<1>::new(),
-        ArrayFeatureVector::<2>::new(),
-    )
+    .build()
     .unwrap();
     pipeline.update_context(&[("high", Some(100.))]).unwrap();
     for timestamp in 0..3 {
         pipeline.handle_event(Event::time(timestamp)).unwrap();
     }
-    same(pipeline.values(), &[100., 100.]);
+    same(pipeline.output("model").unwrap().values(), &[100., 100.]);
     for high in [200., 300., 400.] {
         pipeline.update_context(&[("high", Some(high))]).unwrap();
-        same(pipeline.values(), &[100., 100.]);
+        same(pipeline.output("model").unwrap().values(), &[100., 100.]);
     }
     pipeline.handle_event(Event::time(3)).unwrap();
-    same(pipeline.values(), &[100., 100.]);
+    same(pipeline.output("model").unwrap().values(), &[100., 100.]);
     pipeline.handle_event(Event::time(4)).unwrap();
-    assert_eq!(pipeline.values()[0], 250.);
-    assert!((pipeline.values()[1] - 300.).abs() < 1e-12);
+    assert_eq!(pipeline.output("model").unwrap().values()[0], 250.);
+    assert!((pipeline.output("model").unwrap().values()[1] - 300.).abs() < 1e-12);
 }

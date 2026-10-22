@@ -1,12 +1,12 @@
 //! Exposes the runnable transformed-model pipeline to Python.
 
-use fiml::{PipelineSpec as CorePipelineSpec, VecFeatureVector};
+use fiml::PipelineSpec as CorePipelineSpec;
 use numpy::PyReadonlyArray1;
 use pyo3::types::PyDict;
 use pyo3::{exceptions::PyValueError, prelude::*};
 
 use crate::order_book::OrderBookEvent;
-use crate::pipeline_spec::{PipelineSpec, core_feature_ids, model_output_ids};
+use crate::pipeline_spec::{PipelineSpec, core_feature_ids};
 use crate::runtime::{CorePipeline, OutputDtype, RuntimeDriver, RuntimeLayout, values_to_pyarray};
 
 /// Stateful raw-feature extraction plus fitted model-input transformations.
@@ -18,26 +18,17 @@ pub struct ModelInputPipeline {
 impl ModelInputPipeline {
     fn from_spec(spec: &CorePipelineSpec, output_dtype: OutputDtype) -> PyResult<Self> {
         let raw_spec = spec.raw_feature_extractor_spec();
-        let raw_vector = VecFeatureVector::new_of_length(
-            raw_spec.feature_vector_capacity(),
-            raw_spec.feature_vector_length(),
-        );
-        let model_vector = VecFeatureVector::new_of_length(
-            spec.feature_vector_capacity(),
-            spec.feature_vector_length(),
-        );
-        let final_ids = model_output_ids(spec);
         let raw_ids = core_feature_ids(raw_spec);
         let inner = spec
-            .build(raw_vector, model_vector)
+            .build()
             .map_err(|error| PyValueError::new_err(error.to_string()))?;
         Ok(Self {
             driver: RuntimeDriver::new(
                 inner,
                 output_dtype,
                 RuntimeLayout {
-                    active_ids: final_ids,
-                    capacity: spec.feature_vector_capacity(),
+                    active_ids: Vec::new(),
+                    capacity: 0,
                     raw_active_ids: raw_ids,
                     raw_capacity: raw_spec.feature_vector_capacity(),
                     runtime_name: "ModelInputPipeline",
@@ -115,29 +106,46 @@ impl ModelInputPipeline {
         self.driver.symbol(name)
     }
 
-    /// Final model-input names, including reserved cells.
-    fn feature_names(&self) -> Vec<String> {
-        self.driver.feature_names.clone()
+    /// Registered names in authored order.
+    fn output_names(&self) -> Vec<String> {
+        self.driver
+            .inner
+            .output_names()
+            .map(str::to_owned)
+            .collect()
     }
 
-    /// Raw diagnostic names, including raw reserved cells.
+    /// Active feature names for one registered output.
+    fn feature_names(&self, name: &str) -> PyResult<Vec<String>> {
+        let output = self
+            .driver
+            .inner
+            .output(name)
+            .ok_or_else(|| PyValueError::new_err(format!("unknown output {name:?}")))?;
+        Ok(output
+            .feature_ids()
+            .iter()
+            .map(|id| id.as_str().to_owned())
+            .collect())
+    }
+
+    /// Raw diagnostic names including reserved cells.
     fn raw_feature_names(&self) -> Vec<String> {
         self.driver.raw_feature_names.clone()
     }
 
-    /// Complete final width, including reserved cells.
-    fn n_features(&self) -> usize {
-        self.driver.feature_names.len()
-    }
-
-    /// Active final output count, excluding reserved cells.
-    fn active_feature_count(&self) -> usize {
-        self.driver.active_feature_count
-    }
-
-    /// Current final transformed snapshot.
-    fn values(&self, py: Python<'_>) -> Py<PyAny> {
-        values_to_pyarray(py, self.driver.output_dtype, self.driver.inner.values())
+    /// Independent NumPy snapshot of one registered output.
+    fn values(&self, py: Python<'_>, name: &str) -> PyResult<Py<PyAny>> {
+        let output = self
+            .driver
+            .inner
+            .output(name)
+            .ok_or_else(|| PyValueError::new_err(format!("unknown output {name:?}")))?;
+        Ok(values_to_pyarray(
+            py,
+            self.driver.output_dtype,
+            output.values(),
+        ))
     }
 
     /// Current raw feature snapshot for diagnostics.

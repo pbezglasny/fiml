@@ -1,330 +1,343 @@
 {
   "pipeline": {
-    "version": "3.0",
-    "feature_extractor": {
-      "version": "2.0",
-      "capacity": 21,
-      "length": 20,
-      "required_events": [
-        {
-          "symbol": "btcusdt",
-          "event": "order_book_delta"
-        },
-        {
-          "symbol": "btcusdt",
-          "event": "order_book_snapshot"
-        },
-        {
-          "symbol": "ethusdt",
-          "event": "order_book_delta"
-        },
-        {
-          "symbol": "ethusdt",
-          "event": "order_book_snapshot"
-        }
-      ],
-      "features": [
-        {
-          "symbol": "btcusdt",
-          "indicators": [
+    "version": "4.0",
+    "nodes": [
+      {
+        "type": "extractor",
+        "spec": {
+          "version": "2.0",
+          "capacity": 21,
+          "length": 20,
+          "required_events": [
             {
-              "kind": "order_book_mid_price",
-              "source": {
-                "type": "order_book"
-              },
-              "outputs": [
-                {
-                  "id": "mid"
-                }
-              ]
+              "symbol": "btcusdt",
+              "event": "order_book_delta"
             },
             {
-              "kind": "order_book_spread",
-              "source": {
-                "type": "order_book"
-              },
-              "outputs": [
-                {
-                  "id": "spread"
-                }
-              ]
+              "symbol": "btcusdt",
+              "event": "order_book_snapshot"
             },
             {
-              "kind": "order_book_spread_bps",
-              "source": {
-                "type": "order_book"
-              },
-              "outputs": [
-                {
-                  "id": "spread_bps"
-                }
-              ]
+              "symbol": "ethusdt",
+              "event": "order_book_delta"
             },
             {
-              "kind": "order_book_weighted_mid_price",
-              "source": {
-                "type": "order_book"
-              },
-              "outputs": [
-                {
-                  "id": "weighted"
-                }
-              ]
-            },
+              "symbol": "ethusdt",
+              "event": "order_book_snapshot"
+            }
+          ],
+          "features": [
             {
-              "kind": "order_book_microprice",
-              "source": {
-                "type": "order_book"
-              },
-              "outputs": [
+              "symbol": "btcusdt",
+              "indicators": [
                 {
-                  "id": "micro"
-                }
-              ]
-            },
-            {
-              "kind": "order_book_imbalance",
-              "source": {
-                "type": "order_book"
-              },
-              "outputs": [
-                {
-                  "n_levels": 2,
-                  "id": "imbalance_2"
+                  "kind": "order_book_mid_price",
+                  "source": {
+                    "type": "order_book"
+                  },
+                  "outputs": [
+                    {
+                      "id": "mid"
+                    }
+                  ]
                 },
                 {
-                  "n_levels": 1,
-                  "id": "imbalance_1"
+                  "kind": "order_book_spread",
+                  "source": {
+                    "type": "order_book"
+                  },
+                  "outputs": [
+                    {
+                      "id": "spread"
+                    }
+                  ]
+                },
+                {
+                  "kind": "order_book_spread_bps",
+                  "source": {
+                    "type": "order_book"
+                  },
+                  "outputs": [
+                    {
+                      "id": "spread_bps"
+                    }
+                  ]
+                },
+                {
+                  "kind": "order_book_weighted_mid_price",
+                  "source": {
+                    "type": "order_book"
+                  },
+                  "outputs": [
+                    {
+                      "id": "weighted"
+                    }
+                  ]
+                },
+                {
+                  "kind": "order_book_microprice",
+                  "source": {
+                    "type": "order_book"
+                  },
+                  "outputs": [
+                    {
+                      "id": "micro"
+                    }
+                  ]
+                },
+                {
+                  "kind": "order_book_imbalance",
+                  "source": {
+                    "type": "order_book"
+                  },
+                  "outputs": [
+                    {
+                      "n_levels": 2,
+                      "id": "imbalance_2"
+                    },
+                    {
+                      "n_levels": 1,
+                      "id": "imbalance_1"
+                    }
+                  ]
+                },
+                {
+                  "kind": "order_book_best_bid_price",
+                  "source": {
+                    "type": "order_book"
+                  },
+                  "outputs": [
+                    {
+                      "id": "best_bid"
+                    }
+                  ]
+                },
+                {
+                  "kind": "order_book_best_bid_size",
+                  "source": {
+                    "type": "order_book"
+                  },
+                  "outputs": [
+                    {
+                      "id": "bid_size"
+                    }
+                  ]
+                },
+                {
+                  "kind": "order_book_best_ask_price",
+                  "source": {
+                    "type": "order_book"
+                  },
+                  "outputs": [
+                    {
+                      "id": "best_ask"
+                    }
+                  ]
+                },
+                {
+                  "kind": "order_book_best_ask_size",
+                  "source": {
+                    "type": "order_book"
+                  },
+                  "outputs": [
+                    {
+                      "id": "ask_size"
+                    }
+                  ]
+                },
+                {
+                  "kind": "order_book_level_size",
+                  "source": {
+                    "type": "order_book"
+                  },
+                  "options": {
+                    "side": "bid",
+                    "price": "97"
+                  },
+                  "outputs": [
+                    {
+                      "id": "level_size"
+                    }
+                  ]
+                },
+                {
+                  "kind": "order_book_nth_price",
+                  "source": {
+                    "type": "order_book"
+                  },
+                  "options": {
+                    "side": "bid",
+                    "n_levels": 2
+                  },
+                  "outputs": [
+                    {
+                      "id": "nth_price"
+                    }
+                  ]
+                },
+                {
+                  "kind": "order_book_nth_size",
+                  "source": {
+                    "type": "order_book"
+                  },
+                  "options": {
+                    "side": "bid",
+                    "n_levels": 2
+                  },
+                  "outputs": [
+                    {
+                      "id": "nth_size"
+                    }
+                  ]
+                },
+                {
+                  "kind": "order_book_depth_until_price",
+                  "source": {
+                    "type": "order_book"
+                  },
+                  "options": {
+                    "side": "bid",
+                    "price": "97"
+                  },
+                  "outputs": [
+                    {
+                      "id": "depth_price"
+                    }
+                  ]
+                },
+                {
+                  "kind": "order_book_depth_until_size_price_from",
+                  "source": {
+                    "type": "order_book"
+                  },
+                  "options": {
+                    "side": "bid",
+                    "size": "4"
+                  },
+                  "outputs": [
+                    {
+                      "id": "fill_from"
+                    }
+                  ]
+                },
+                {
+                  "kind": "order_book_depth_until_size_price_to",
+                  "source": {
+                    "type": "order_book"
+                  },
+                  "options": {
+                    "side": "bid",
+                    "size": "4"
+                  },
+                  "outputs": [
+                    {
+                      "id": "fill_to"
+                    }
+                  ]
+                },
+                {
+                  "kind": "order_book_depth_until_size_total_size",
+                  "source": {
+                    "type": "order_book"
+                  },
+                  "options": {
+                    "side": "bid",
+                    "size": "4"
+                  },
+                  "outputs": [
+                    {
+                      "id": "fill_size"
+                    }
+                  ]
+                },
+                {
+                  "kind": "order_book_volume_between_prices",
+                  "source": {
+                    "type": "order_book"
+                  },
+                  "options": {
+                    "side": "bid",
+                    "from_price": "97",
+                    "to_price": "103"
+                  },
+                  "outputs": [
+                    {
+                      "id": "range_volume"
+                    }
+                  ]
                 }
               ]
             },
             {
-              "kind": "order_book_best_bid_price",
-              "source": {
-                "type": "order_book"
-              },
-              "outputs": [
+              "symbol": "ethusdt",
+              "indicators": [
                 {
-                  "id": "best_bid"
-                }
-              ]
-            },
-            {
-              "kind": "order_book_best_bid_size",
-              "source": {
-                "type": "order_book"
-              },
-              "outputs": [
-                {
-                  "id": "bid_size"
-                }
-              ]
-            },
-            {
-              "kind": "order_book_best_ask_price",
-              "source": {
-                "type": "order_book"
-              },
-              "outputs": [
-                {
-                  "id": "best_ask"
-                }
-              ]
-            },
-            {
-              "kind": "order_book_best_ask_size",
-              "source": {
-                "type": "order_book"
-              },
-              "outputs": [
-                {
-                  "id": "ask_size"
-                }
-              ]
-            },
-            {
-              "kind": "order_book_level_size",
-              "source": {
-                "type": "order_book"
-              },
-              "options": {
-                "side": "bid",
-                "price": "97"
-              },
-              "outputs": [
-                {
-                  "id": "level_size"
-                }
-              ]
-            },
-            {
-              "kind": "order_book_nth_price",
-              "source": {
-                "type": "order_book"
-              },
-              "options": {
-                "side": "bid",
-                "n_levels": 2
-              },
-              "outputs": [
-                {
-                  "id": "nth_price"
-                }
-              ]
-            },
-            {
-              "kind": "order_book_nth_size",
-              "source": {
-                "type": "order_book"
-              },
-              "options": {
-                "side": "bid",
-                "n_levels": 2
-              },
-              "outputs": [
-                {
-                  "id": "nth_size"
-                }
-              ]
-            },
-            {
-              "kind": "order_book_depth_until_price",
-              "source": {
-                "type": "order_book"
-              },
-              "options": {
-                "side": "bid",
-                "price": "97"
-              },
-              "outputs": [
-                {
-                  "id": "depth_price"
-                }
-              ]
-            },
-            {
-              "kind": "order_book_depth_until_size_price_from",
-              "source": {
-                "type": "order_book"
-              },
-              "options": {
-                "side": "bid",
-                "size": "4"
-              },
-              "outputs": [
-                {
-                  "id": "fill_from"
-                }
-              ]
-            },
-            {
-              "kind": "order_book_depth_until_size_price_to",
-              "source": {
-                "type": "order_book"
-              },
-              "options": {
-                "side": "bid",
-                "size": "4"
-              },
-              "outputs": [
-                {
-                  "id": "fill_to"
-                }
-              ]
-            },
-            {
-              "kind": "order_book_depth_until_size_total_size",
-              "source": {
-                "type": "order_book"
-              },
-              "options": {
-                "side": "bid",
-                "size": "4"
-              },
-              "outputs": [
-                {
-                  "id": "fill_size"
-                }
-              ]
-            },
-            {
-              "kind": "order_book_volume_between_prices",
-              "source": {
-                "type": "order_book"
-              },
-              "options": {
-                "side": "bid",
-                "from_price": "97",
-                "to_price": "103"
-              },
-              "outputs": [
-                {
-                  "id": "range_volume"
+                  "kind": "order_book_mid_price",
+                  "source": {
+                    "type": "order_book"
+                  },
+                  "outputs": [
+                    {
+                      "id": "eth_mid"
+                    }
+                  ]
                 }
               ]
             }
-          ]
-        },
-        {
-          "symbol": "ethusdt",
-          "indicators": [
+          ],
+          "order_books": [
             {
-              "kind": "order_book_mid_price",
-              "source": {
-                "type": "order_book"
-              },
-              "outputs": [
-                {
-                  "id": "eth_mid"
-                }
-              ]
+              "symbol": "btcusdt",
+              "update_policy": "contiguous",
+              "buffer_size": 8
+            },
+            {
+              "symbol": "ethusdt",
+              "update_policy": "monotonic",
+              "buffer_size": 8
             }
           ]
         }
-      ],
-      "order_books": [
-        {
-          "symbol": "btcusdt",
-          "update_policy": "contiguous",
-          "buffer_size": 8
-        },
-        {
-          "symbol": "ethusdt",
-          "update_policy": "monotonic",
-          "buffer_size": 8
+      },
+      {
+        "type": "transform",
+        "parent": 0,
+        "stage": {
+          "type": "scalar",
+          "transformations": [
+            {
+              "type": "standard_scale",
+              "input": "mid",
+              "output": "scaled_mid",
+              "mean": 100.0,
+              "scale": 2.0
+            },
+            {
+              "type": "identity",
+              "input": "imbalance_2",
+              "output": "imbalance"
+            },
+            {
+              "type": "lagged",
+              "input": "bid_size",
+              "output": "lag_bid_size",
+              "lag_window": 1
+            },
+            {
+              "type": "identity",
+              "input": "eth_mid",
+              "output": "other_mid"
+            }
+          ]
         }
-      ]
-    },
-    "model_input": {
-      "stages": [],
-      "capacity": 5,
-      "length": 4,
-      "transformations": [
-        {
-          "type": "standard_scale",
-          "input": "mid",
-          "output": "scaled_mid",
-          "mean": 100.0,
-          "scale": 2.0
-        },
-        {
-          "type": "identity",
-          "input": "imbalance_2",
-          "output": "imbalance"
-        },
-        {
-          "type": "lagged",
-          "input": "bid_size",
-          "output": "lag_bid_size",
-          "lag_window": 1
-        },
-        {
-          "type": "identity",
-          "input": "eth_mid",
-          "output": "other_mid"
-        }
-      ]
-    }
+      }
+    ],
+    "outputs": [
+      {
+        "name": "model",
+        "node": 1
+      }
+    ]
   },
   "raw_names": [
     "mid",
@@ -353,8 +366,7 @@
     "scaled_mid",
     "imbalance",
     "lag_bid_size",
-    "other_mid",
-    "__reserved_4"
+    "other_mid"
   ],
   "steps": [
     {
@@ -396,7 +408,6 @@
         null
       ],
       "model": [
-        null,
         null,
         null,
         null,
@@ -458,7 +469,6 @@
         0.0,
         0.2,
         null,
-        null,
         null
       ]
     },
@@ -504,7 +514,6 @@
         0.0,
         0.2,
         6,
-        null,
         null
       ]
     },
@@ -555,8 +564,7 @@
         0.0,
         0.2,
         6,
-        200,
-        null
+        200
       ]
     },
     {
@@ -592,8 +600,7 @@
         0.0,
         0.2,
         6,
-        200,
-        null
+        200
       ]
     },
     {
@@ -638,8 +645,7 @@
         0.0,
         0.2,
         6,
-        200,
-        null
+        200
       ]
     },
     {
@@ -684,8 +690,7 @@
         0.0,
         0.2,
         6,
-        200,
-        null
+        200
       ]
     },
     {
@@ -743,8 +748,7 @@
         0.0,
         0,
         6,
-        200,
-        null
+        200
       ]
     },
     {
@@ -789,8 +793,7 @@
         null,
         1,
         2,
-        200,
-        null
+        200
       ]
     },
     {
@@ -835,8 +838,7 @@
         null,
         null,
         2,
-        200,
-        null
+        200
       ]
     },
     {
@@ -894,8 +896,7 @@
         null,
         null,
         2,
-        200,
-        null
+        200
       ]
     },
     {
@@ -933,8 +934,7 @@
         null,
         null,
         null,
-        200,
-        null
+        200
       ]
     },
     {
@@ -976,7 +976,6 @@
         null
       ],
       "model": [
-        null,
         null,
         null,
         null,

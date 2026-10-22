@@ -1,7 +1,7 @@
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use fiml::{
-    ArrayFeatureVector, Event, EventField, FeatureDefinition, FeatureExtractorSpec, FeatureId,
-    FeatureKey, PipelineSpec, Symbol, TransformerDefinition as T, WarmupPolicy,
+    Event, EventField, FeatureDefinition, FeatureExtractorSpec, FeatureId, FeatureKey,
+    PipelineSpec, Symbol, TransformerDefinition as T, WarmupPolicy,
 };
 use std::{hint::black_box, time::Duration};
 
@@ -49,14 +49,22 @@ fn rolling_statistics(c: &mut Criterion) {
                     T::rolling_range(id("p"), id("range"), window, warmup),
                 ]
             };
-            let length = definitions.len();
-            let mut pipeline = PipelineSpec::with_capacity(raw, definitions, 6)
-                .unwrap()
-                .build(
-                    ArrayFeatureVector::<1>::new(),
-                    ArrayFeatureVector::<6>::new_of_length(length),
-                )
-                .unwrap();
+            let _length = definitions.len();
+            let mut pipeline = {
+                let mut spec = PipelineSpec::new(raw);
+                let node = spec
+                    .add(
+                        spec.root(),
+                        fiml::FittedStage::Scalar {
+                            transformations: definitions.into_iter().collect(),
+                        },
+                    )
+                    .unwrap();
+                spec.output("model", node).unwrap();
+                spec
+            }
+            .build()
+            .unwrap();
             let mut time = 0_i64;
             for _ in 0..window {
                 pipeline
@@ -70,7 +78,7 @@ fn rolling_statistics(c: &mut Criterion) {
                         .handle_event(Event::price(Symbol::GLOBAL, (time % 17) as f64, time))
                         .unwrap();
                     time += 1;
-                    black_box(pipeline.values());
+                    black_box(pipeline.output("model").unwrap().values());
                 })
             });
         }

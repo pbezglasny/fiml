@@ -1,3 +1,4 @@
+from pipeline_fixtures import LinearSpec, SingleOutput
 import json
 
 import fiml
@@ -12,10 +13,10 @@ from test_pipeline_spec_schema import VALIDATOR
 @pytest.mark.parametrize("warmup", [fiml.WarmupPolicy.FULL_WINDOW, fiml.WarmupPolicy.FIRST_VALUE])
 def test_observation_sampling_streaming_chunks_reset_and_fit(method, warmup):
     raw = fiml.FeatureExtractorSpec().field("BTC", source="trade_price", id="price")
-    spec = fiml.PipelineSpec(raw).standard_scale("price", mean=10.0, scale=2.0)
+    spec = LinearSpec(raw).standard_scale("price", mean=10.0, scale=2.0)
     stage = getattr(fiml.ScalarStage(), method)("price", window=2, warmup=warmup)
     spec.scalar_stage(stage)
-    runtime = fiml.ModelInputPipeline(spec)
+    runtime = SingleOutput(spec)
     btc, eth = runtime.symbol("BTC"), runtime.symbol("ETH")
     data = dict(kind=np.array([2, 2, 2, 2, 2, 2, 2], dtype=np.uint8),
                 symbol=np.array([btc, eth, btc, eth, btc, btc, btc], dtype=np.int64),
@@ -38,16 +39,16 @@ def test_observation_sampling_streaming_chunks_reset_and_fit(method, warmup):
         rows.append(runtime.values())
     np.testing.assert_array_equal(rows, actual)
     document = json.loads(runtime.to_json())
-    assert document["version"] == "3.0" and document["feature_extractor"]["version"] == "2.0"
+    assert document["version"] == "4.0" and document["nodes"][0]["spec"]["version"] == "2.0"
     assert not list(VALIDATOR.iter_errors(document))
-    restored = fiml.ModelInputPipeline.from_json(json.dumps(document))
+    restored = SingleOutput.from_json(json.dumps(document))
     restored.symbol("BTC"); restored.symbol("ETH")
     assert np.isnan(restored.values()).all()
     np.testing.assert_array_equal(restored.transform(**data), actual)
     # Excluded rows still contribute to the moving average's history.
     mask = np.array([False, False, True, False, True, False, True])
-    fitting_base = fiml.PipelineSpec(raw).standard_scale("price", mean=10.0, scale=2.0)
-    fitted = (fiml.ModelInputPipeline(fitting_base).add_transformation(stage, name="average")
+    fitting_base = LinearSpec(raw).standard_scale("price", mean=10.0, scale=2.0)
+    fitted = (SingleOutput(fitting_base).add_transformation(stage, name="average")
               .add_transformation(StandardScaler(), name="scale"))
     fitted.symbol("BTC"); fitted.symbol("ETH")
     result = fitted.fit_transform(**data, fit_mask=mask)
@@ -67,11 +68,11 @@ def test_obsolete_extractors_have_migration_guidance(version):
 @pytest.mark.parametrize("method", ["sma", "ema"])
 def test_average_schema_validation_and_no_lag_cap(method):
     raw = fiml.FeatureExtractorSpec().field("BTC", id="price")
-    spec = getattr(fiml.PipelineSpec(raw), method)("price", window=10_001)
+    spec = getattr(LinearSpec(raw), method)("price", window=10_001)
     document = json.loads(spec.to_json())
     assert not list(VALIDATOR.iter_errors(document))
     for invalid in [0, -1, 1.5, None]:
-        document["model_input"]["transformations"][0]["window"] = invalid
+        document["nodes"][1]["stage"]["transformations"][0]["window"] = invalid
         assert list(VALIDATOR.iter_errors(document))
         with pytest.raises(ValueError):
-            fiml.PipelineSpec.from_json(json.dumps(document))
+            LinearSpec.from_json(json.dumps(document))

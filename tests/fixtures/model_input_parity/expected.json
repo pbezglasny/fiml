@@ -16,7 +16,7 @@
     ]
   },
   "model": {
-    "capacity": 5,
+    "capacity": 3,
     "length": 3,
     "active_ids": [
       "scaled_sma",
@@ -26,9 +26,7 @@
     "names": [
       "scaled_sma",
       "elapsed",
-      "day",
-      "__reserved_3",
-      "__reserved_4"
+      "day"
     ]
   },
   "snapshots": [
@@ -43,9 +41,7 @@
       "model_values": [
         null,
         0.0,
-        4.0,
-        null,
-        null
+        4.0
       ]
     },
     {
@@ -59,9 +55,7 @@
       "model_values": [
         1.0,
         1.0,
-        4.0,
-        null,
-        null
+        4.0
       ]
     },
     {
@@ -75,9 +69,7 @@
       "model_values": [
         1.0,
         2.0,
-        4.0,
-        null,
-        null
+        4.0
       ]
     }
   ]

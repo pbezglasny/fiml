@@ -1,3 +1,4 @@
+from pipeline_fixtures import LinearSpec, SingleOutput
 import json
 from pathlib import Path
 
@@ -16,9 +17,9 @@ FIXTURE = json.loads(
 def test_shared_artifact_schema_streaming_chunks_and_reset():
     document = FIXTURE["pipeline"]
     assert not list(VALIDATOR.iter_errors(document))
-    spec = fiml.PipelineSpec.from_json(json.dumps(document))
+    spec = LinearSpec.from_json(json.dumps(document))
     assert json.loads(spec.to_json()) == document
-    runtime = fiml.ModelInputPipeline(spec)
+    runtime = SingleOutput(spec)
     symbols = {s: runtime.symbol(s) for s in ["a", "b"]}
     kinds = {"trade": fiml.KIND_TRADE, "volume": fiml.KIND_VOLUME, "time": fiml.KIND_TIME}
     events = [step["event"] for step in FIXTURE["steps"]]
@@ -33,7 +34,7 @@ def test_shared_artifact_schema_streaming_chunks_and_reset():
     actual = runtime.transform(**data)
     np.testing.assert_array_equal(actual, expected)
     assert runtime.feature_names() == [
-        t["output"] for t in document["model_input"]["stages"][0]["transformations"]
+        t["output"] for t in document["nodes"][2]["stage"]["transformations"]
     ]
     runtime.reset()
     chunks = [runtime.transform(**{k: v[a:b] for k, v in data.items()})
@@ -49,53 +50,53 @@ def test_shared_artifact_schema_streaming_chunks_and_reset():
 @pytest.mark.parametrize("method", METHODS)
 def test_builders_roundtrip_defaults_and_epsilon_validation(method):
     raw = fiml.FeatureExtractorSpec().field("BTC", source="trade_price", id="p")
-    base = getattr(fiml.PipelineSpec(raw), method)("p", epsilon=0.5, output="state")
+    base = getattr(LinearSpec(raw), method)("p", epsilon=0.5, output="state")
     stage = getattr(fiml.ScalarStage(), method)("p", epsilon=0.5, output="state")
-    chained = fiml.PipelineSpec(raw).identity("p").scalar_stage(stage)
+    chained = LinearSpec(raw).identity("p").scalar_stage(stage)
     for spec in [base, chained]:
         document = json.loads(spec.to_json())
         assert not list(VALIDATOR.iter_errors(document))
-        assert json.loads(fiml.PipelineSpec.from_json(spec.to_json()).to_json()) == document
-        transformation = (document["model_input"]["transformations"] if spec is base else
-                          document["model_input"]["stages"][0]["transformations"])[0]
+        assert json.loads(LinearSpec.from_json(spec.to_json()).to_json()) == document
+        transformation = (document["nodes"][1]["stage"]["transformations"] if spec is base else
+                          document["nodes"][2]["stage"]["transformations"])[0]
         assert transformation == dict(type=method, input="p", output="state", epsilon=0.5)
         original = transformation.copy()
         for bad in [-1, None, "0", True]:
             transformation["epsilon"] = bad
             assert list(VALIDATOR.iter_errors(document))
             with pytest.raises(ValueError):
-                fiml.PipelineSpec.from_json(json.dumps(document))
+                LinearSpec.from_json(json.dumps(document))
         transformation.update(original)
         for field in ["input", "output", "epsilon"]:
             del transformation[field]
             assert list(VALIDATOR.iter_errors(document))
             with pytest.raises(ValueError):
-                fiml.PipelineSpec.from_json(json.dumps(document))
+                LinearSpec.from_json(json.dumps(document))
             transformation.update(original)
         transformation["extra"] = True
         assert list(VALIDATOR.iter_errors(document))
         with pytest.raises(ValueError, match="unknown field"):
-            fiml.PipelineSpec.from_json(json.dumps(document))
+            LinearSpec.from_json(json.dumps(document))
     for bad in [-1., np.nan, np.inf, -np.inf]:
         with pytest.raises(ValueError, match="epsilon"):
-            getattr(fiml.PipelineSpec(raw), method)("p", epsilon=bad)
+            getattr(LinearSpec(raw), method)("p", epsilon=bad)
         invalid = getattr(fiml.ScalarStage(), method)("p", epsilon=bad)
         with pytest.raises(ValueError, match="epsilon"):
-            fiml.PipelineSpec(raw).identity("p").scalar_stage(invalid)
+            LinearSpec(raw).identity("p").scalar_stage(invalid)
     for epsilon in [0., -0., np.finfo(float).max]:
-        getattr(fiml.PipelineSpec(raw), method)("p", epsilon=epsilon)
-    default = json.loads(getattr(fiml.PipelineSpec(raw), method)("p").to_json())
-    assert default["model_input"]["transformations"][0] == dict(
+        getattr(LinearSpec(raw), method)("p", epsilon=epsilon)
+    default = json.loads(getattr(LinearSpec(raw), method)("p").to_json())
+    assert default["nodes"][1]["stage"]["transformations"][0] == dict(
         type=method, input="p", output="p", epsilon=0.)
 
 
 @pytest.mark.parametrize("change", ["delta", "simple_return", "log_return"])
 def test_state_stages_fit_and_replay_after_change_signals(change):
     raw = fiml.FeatureExtractorSpec().field("BTC", source="trade_price", id="p")
-    spec = getattr(fiml.PipelineSpec(raw), change)("p", lag_window=1, output="signal")
+    spec = getattr(LinearSpec(raw), change)("p", lag_window=1, output="signal")
     stage = (fiml.ScalarStage().positive_streak("signal", output="streak")
              .time_since_positive("signal", output="age"))
-    runtime = fiml.ModelInputPipeline(spec).add_transformation(stage, name="state")
+    runtime = SingleOutput(spec).add_transformation(stage, name="state")
     data = dict(
         kind=np.full(6, fiml.KIND_TRADE, dtype=np.uint8),
         symbol=np.full(6, runtime.symbol("BTC"), dtype=np.int64),
@@ -105,7 +106,7 @@ def test_state_stages_fit_and_replay_after_change_signals(change):
     actual = runtime.fit_transform(**data, fit_mask=np.array([False, True, True, True, True, True]))
     np.testing.assert_array_equal(actual, [[np.nan, np.nan], [1., 0.], [2., 0.],
                                           [0., 20.], [0., 50.], [1., 0.]])
-    restored = fiml.ModelInputPipeline.from_json(runtime.to_json())
+    restored = SingleOutput.from_json(runtime.to_json())
     restored.symbol("BTC")
     np.testing.assert_array_equal(restored.transform(**data), actual)
 
@@ -115,11 +116,11 @@ def test_raw_order_book_imbalance_streaks_skip_missing_books():
            .configure_order_book("BTC", update_policy="contiguous", buffer_size=4)
            .order_book_imbalance("BTC", [1]))
     feature = raw.feature_ids()[0]
-    spec = (fiml.PipelineSpec(raw).positive_streak(feature, output="positive")
+    spec = (LinearSpec(raw).positive_streak(feature, output="positive")
             .negative_streak(feature, output="negative")
             .observations_since_positive(feature, output="count")
             .time_since_positive(feature, output="age"))
-    runtime = fiml.ModelInputPipeline(spec)
+    runtime = SingleOutput(spec)
     for i, (sizes, expected) in enumerate([
         (("3", "1"), [1., 0., 0., 0.]),
         (None, [np.nan] * 4),

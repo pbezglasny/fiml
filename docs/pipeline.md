@@ -2,14 +2,15 @@
 
 Status: in progress
 
-Last updated: 2026-10-15
+Last updated: 2026-10-22
 
 The pipeline runtime, model-input serialization, and Python interface are
 implemented, including Python-fitted sklearn `SimpleImputer`, `StandardScaler`,
 `RobustScaler`, `MinMaxScaler`, `MaxAbsScaler`, `PowerTransformer`,
 `VarianceThreshold`, and PCA
 stages with Rust online inference.
-Remaining interface-hardening items are listed below.
+The [multiple-output graph API](multiple_output.md) defines current authoring,
+result access, storage, fitting, and artifact contracts.
 
 ## Scalar definition migration (Rust)
 
@@ -35,9 +36,8 @@ if let TransformerOperation::Lagged { lag_window } = &definition.operation {
 
 Read IDs directly from the struct and match operation parameters through
 `definition.operation`. `TransformerOperation::Identity` has no fields.
-Pipeline construction still validates IDs and operation parameters. Python
-builders and version `3.0` JSON retain their existing format and behavior;
-saved artifacts need no migration.
+Pipeline construction still validates IDs and operation parameters. Scalar operation definitions retain their behavior. Pipeline version `4.0`
+uses a graph envelope; old artifacts must be recreated and re-exported.
 
 ## Rolling scalar statistics
 
@@ -83,7 +83,7 @@ IDs. Sample slots equal the largest window. Timed slots equal
 `max_window / aggregation + 2`, capped at 1,000,000 (about 104 MiB including the
 tree at that cap). Choose coarser aggregation to reduce memory for long windows.
 
-Version `3.0` JSON adds `rolling_std`, `rolling_min`, `rolling_max`,
+Version `4.0` JSON adds `rolling_std`, `rolling_min`, `rolling_max`,
 `rolling_range`, and their `_timed` forms. All require `input`, `output`, `window`,
 and `warmup_policy`; timed windows use duration strings and optional
 `aggregation` (default `"1ms"`, omitted when serialized at its default).
@@ -133,7 +133,7 @@ no heap allocations. On 64-bit targets, tree storage is
 Regression moments use an observed origin to preserve small changes in large
 values. Tree merges preserve chronological order through circular wraparound.
 
-Version `3.0` JSON uses the six names above as `type`, with required `input`,
+Version `4.0` JSON uses the six names above as `type`, with required `input`,
 `output`, `window`, and `warmup_policy` fields. Existing artifacts retain their
 behavior; older runtimes cannot read these new types.
 
@@ -141,9 +141,9 @@ behavior; older runtimes cannot read these new types.
 
 `FittedStage::rolling_path_signature(input, output_prefix, window, warmup_policy)`
 consumes one scalar from the preceding layout and replaces that layout with six
-coordinates. In Python use `PipelineSpec.rolling_path_signature_stage(input,
-window=..., warmup=..., output_prefix=...)` after the base transformations.
-The prefix defaults to the input ID in Python. No fitting or new dependencies
+coordinates. In Python pass a numeric stage dictionary to `spec.add(parent, stage)`
+with `type="rolling_path_signature"`, `input`, `outputs`, `window`, and
+`warmup_policy`. The six output IDs must be supplied in the order below. No fitting or new dependencies
 are needed. Later stages can select or scale the resulting coordinates.
 
 For the retained finite values `x[0..n]`, join points `(i/(n-1), x[i])` with
@@ -192,7 +192,7 @@ Construction reserves
 (about 18 MiB for 100,000 observations); each signature stage owns its history.
 There are no heap allocations during warmup, updates, or eviction.
 
-Version `3.0` JSON adds stage type `rolling_path_signature`, with required
+Version `4.0` JSON adds stage type `rolling_path_signature`, with required
 `input`, `outputs`, `window`, and `warmup_policy`. `outputs` contains exactly six
 unique, nonreserved IDs in the order above. Existing artifacts keep their
 behavior; older runtimes reject this new stage type. Runtime history is not
@@ -225,8 +225,7 @@ successive input values itself.
 | `time_since_negative` | Milliseconds since the last negative signal |
 | `time_since_nonzero` | Milliseconds since either sign last occurred |
 
-Rust constructors take `(input, output, epsilon)`. Python `PipelineSpec` and
-`ScalarStage` methods take `(input, *, epsilon=0.0, output=None)`. Epsilon must be
+Rust constructors take `(input, output, epsilon)`. Python `ScalarStage` methods take `(input, *, epsilon=0.0, output=None)`. Epsilon must be
 finite and nonnegative. Both boundaries of `[-epsilon, epsilon]` are neutral,
 including signed zero. Neutral observations reset both streaks and advance any
 already-started observation ages. A matching observation makes its streak one
@@ -263,115 +262,30 @@ while elapsed time still includes the missing interval. Context replacements
 do not advance these states; context-only inputs have no observations or clock.
 
 Each output uses constant-size state, no rolling history, and no per-update
-allocation. Version `3.0` JSON uses the operation names above as `type`, with
+allocation. Version `4.0` JSON uses the operation names above as `type`, with
 required `input`, `output`, and `epsilon` fields. Existing artifacts are
 unchanged; older runtimes cannot load the new operation types.
 
 ## Current interface
 
-The Rust runtime intentionally exposes a small interface:
+Use the [graph API](multiple_output.md) for all new pipelines. `PipelineSpec`
+owns an append-only graph rooted at an extractor. Add each scalar or fitted vector
+stage beneath an explicit parent, register one or more named outputs, and build
+an independent runtime. Shared nodes execute once per accepted event.
 
-```rust,ignore
-pipeline.handle_event(event)?;
-pipeline.raw_values();
-pipeline.values();
-pipeline.output_ids();
-pipeline.last_timestamp();
-pipeline.last_timestamp_for_symbol(symbol);
-```
+Rust reads `pipeline.output(name).unwrap().values()` or resolves a retained
+`OutputId` using `output_by_id`. Python uses `pipeline.output(name).values()` for
+an independent snapshot. Python batch methods return dictionaries containing all
+outputs; DataFrame replay returns a dictionary of frames. Root outputs and
+transformation edges expose only active coordinates. Raw diagnostic vectors may
+still include extractor reserved cells.
 
-`PipelineSpec` compiles one `FeatureExtractorSpec` and an authored sequence of
-scalar transformations into a base vector. Each scalar reads the raw feature
-vector. Optional fitted vector stages then consume the preceding active layout
-in sequence. `FittedStage::StandardScale` preserves its width and IDs;
-`MaxAbsScaler` reuses it without clipping and the MinMax stage with clipping.
-`FittedStage::SimpleImpute` stores retained inputs, finite replacements, and
-fitted missing-indicator inputs.
-`FittedStage::PowerTransform` applies Box-Cox or Yeo-Johnson and effective scaling.
-`FittedStage::Select` copies retained columns by prevalidated numeric index.
-`FittedStage::Pca` projects to named components and supports whitening.
-`FittedStage::Scalar` selects, renames, scales, averages, lags, computes changes, or measures rolling statistics of columns from the preceding
-layout. Definitions within a scalar stage are independent; dependent operations
-belong in successive stages. Intermediate widths may exceed final capacity.
-General transformation graphs are not supported.
+Graph JSON uses pipeline version `4.0` and nested extractor version `2.0`.
+See [the schema](pipeline-spec.schema.json) and
+[complete artifact example](multiple_output-arc.md#artifact-format-and-compatibility).
+The runtime owns node buffers and state; live histories are never serialized.
 
-Python `ModelInputPipeline.add_transformation`, `fit`, and `fit_transform`
-train supported sklearn objects and freeze numeric parameters.
-`fiml.ScalarStage()` builders can be inserted anywhere in that sequence. Training
-replays every event through each completed prefix, including rows excluded by
-`fit_mask`, so downstream lag history matches inference. `transform`
-continues to replay events through Rust. `reset()` clears event state while
-retaining parameters and symbol handles. See [the transformer design](pipeline_transformer.md)
-and [the runnable example](../crates/fiml-python/examples/sklearn_pipeline.py).
-
-Lagged definitions for the same input within each scalar stage (or the base
-layout) compile into one transformer with one
-history buffer sized to the largest lag. Each output keeps its authored position
-and becomes available after its own positive lag window. Duplicate lag windows
-with different output IDs are supported; rejected events do not advance history.
-
-`TransformerDefinition::delta`, `simple_return`, and `log_return` use exact
-finite-observation lags instead of accepted-event lags. A lag `k` in `1..=10_000`
-requires `k + 1` finite observed inputs. Equal-valued observations count;
-unobserved events retain the last output. An observed nonfinite input emits NaN
-without advancing history. Each output inherits its input's observation flag,
-including during warm-up and invalid arithmetic domains.
-
-Delta computes `current - previous`; simple return computes
-`current / previous - 1` (NaN for a zero denominator); log return computes
-`ln(current) - ln(previous)` (NaN unless both values are positive). Finite zero
-and negative values still enter history. Delta/simple-return arithmetic can
-overflow; subtracting logs avoids intermediate ratio overflow for log returns.
-One ring buffer sized to the maximum lag serves all change kinds and windows
-for one input in one stage, with no allocations during warm-up or updates.
-The additive JSON types `delta`, `simple_return`, and `log_return` have
-`input`, `output`, and `lag_window` fields and retain pipeline version `3.0`.
-See the [order-book spread example](../crates/fiml/examples/transformers.rs)
-and [Python builders](../crates/fiml-python/README.md#fitted-model-input-pipelines).
-
-Timestamps are nondecreasing per symbol across all event kinds. Symbols may
-interleave with older timestamps; transformations and lag histories still follow
-accepted-event arrival order. `last_timestamp()` reports the last accepted arrival,
-while `last_timestamp_for_symbol(Symbol)` reports that symbol's ordering watermark.
-Timed windows advance only on their symbol's events. Global calendar features
-follow the maximum accepted timestamp, and global Time ticks do not advance other
-symbols' windows. Python `update`, `transform`, and `compute_features` share these
-rules; batches validate timestamp ordering before replaying any rows.
-
-The canonical artifact has three ownership levels:
-
-```json
-{
-  "version": "3.0",
-  "checksum": "optional model metadata",
-  "feature_extractor": {
-    "version": "2.0",
-    "capacity": 2,
-    "length": 2,
-    "required_events": [],
-    "features": []
-  },
-  "model_input": {
-    "capacity": 2,
-    "length": 2,
-    "transformations": [],
-    "stages": []
-  }
-}
-```
-
-`feature_extractor` owns the raw-vector layout. `model_input` owns the final
-vector layout, scalar base transformations, and fitted vector stages. Writers
-emit pipeline `3.0` with extractor `2.0`; readers accept only these versions.
-[Sample-average migration](sample-average-migration.md) describes replacing extractor
-SMA/EMA with field extraction and scalar transformations.
-The envelope above illustrates ownership; populated feature/transform arrays
-must agree with the declared lengths. `required_events` is the canonical,
-deduplicated list of concrete symbol/event inputs consumed by the extractor.
-The strict source spelling for a
-feature that observes any event is `any_event`.
-
-## Open issues
+## Historical interface-hardening notes
 
 ### P3: Transformation validation diagnostics
 
@@ -408,47 +322,8 @@ Completion criteria:
 - Keep the example driven by the same canonical artifact used for parity
   verification.
 
-### P5: Python spec-builder cloning
-
-Status: open
-
-Priority: low
-
-Each Python transformation append clones the existing definitions, nested raw
-spec, and checksum, then revalidates the complete candidate. Repeated appends
-therefore perform quadratic cold-path work.
-
-Completion criteria:
-
-- Accumulate Python transformations without cloning the complete spec for each
-  append.
-- Perform full semantic validation when producing or compiling the final spec.
-- Preserve atomic failure behavior and the fluent Python interface.
-
-### P6: Internal Python runtime documentation
-
-Status: open
-
-Priority: low
-
-The internal `RuntimeDriver` and `RuntimeLayout` structs are undocumented,
-despite owning the shared feature-extractor/model-input replay behavior and
-layout metadata.
-
-Completion criteria:
-
-- Document why each struct exists and what invariant it owns.
-- Avoid expanding the public runtime interface.
-
-## Verification status
-
-Verification for fitted stages:
-
-- `just test` (Rust tests, Python tests, and the maintained notebook);
-- real sklearn training/export and independent Rust fixture replay;
-- exact fitted JSON reloads and zero-allocation stage execution;
-- `cargo fmt --all -- --check`;
-- `cargo clippy --workspace --all-targets --all-features -- -D warnings`.
+Builder configuration snapshots and independent builds are now part of the graph
+contract. See [multiple_output.md](multiple_output.md) for their current behavior.
 
 ## Deferred work
 
@@ -486,7 +361,7 @@ calendar features, order books, indicator histories, or lag history. Context
 slots never set observation flags, so SMA/EMA and change transformers do not sample context replacements.
 Event lags can sample held context values on subsequent accepted events.
 
-The additive JSON kind retains extractor version `2.0` and pipeline version `3.0`:
+The additive JSON kind retains extractor version `2.0` and pipeline version `4.0`:
 
 ```json
 {

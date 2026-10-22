@@ -1,8 +1,10 @@
+mod common;
+
 use std::time::Duration;
 
 use fiml::{
-    ArrayFeatureVector, Event, EventField, FeatureDefinition, FeatureExtractorSpec, FeatureId,
-    FeatureKey, FittedStage, PipelineSpec, Symbol, TransformerDefinition as T, WarmupPolicy,
+    Event, EventField, FeatureDefinition, FeatureExtractorSpec, FeatureId, FeatureKey, FittedStage,
+    PipelineSpec, Symbol, TransformerDefinition as T, WarmupPolicy,
 };
 
 fn id(name: &str) -> FeatureId {
@@ -45,12 +47,7 @@ fn shared_artifacts_replay_rolling_summaries() {
         let fixture: serde_json::Value = serde_json::from_str(text).unwrap();
         let spec: PipelineSpec = serde_json::from_value(fixture["pipeline"].clone()).unwrap();
         assert_eq!(serde_json::to_value(&spec).unwrap(), fixture["pipeline"]);
-        let mut pipeline = spec
-            .build(
-                ArrayFeatureVector::<2>::new(),
-                fiml::VecFeatureVector::new(spec.feature_vector_capacity()),
-            )
-            .unwrap();
+        let mut pipeline = spec.build().unwrap();
         for step in fixture["steps"].as_array().unwrap() {
             let event = &step["event"];
             let timestamp = event["timestamp"].as_i64().unwrap();
@@ -76,14 +73,14 @@ fn shared_artifacts_replay_rolling_summaries() {
                 .iter()
                 .map(|v| v.as_f64().unwrap_or(f64::NAN))
                 .collect();
-            equal(pipeline.values(), &expected);
+            equal(pipeline.output("model").unwrap().values(), &expected);
             let observed: Vec<_> = step["observed"]
                 .as_array()
                 .unwrap()
                 .iter()
                 .map(|v| v.as_bool().unwrap())
                 .collect();
-            assert_eq!(pipeline.output_observations(), observed);
+            assert_eq!(pipeline.output("model").unwrap().observations(), observed);
         }
     }
 }
@@ -91,7 +88,7 @@ fn shared_artifacts_replay_rolling_summaries() {
 #[test]
 fn missing_intermediate_values_preserve_finite_history_and_clock_refreshes_propagate() {
     let a = Symbol::new("rolling-missing").unwrap();
-    let mut pipeline = PipelineSpec::with_stages(
+    let mut pipeline = common::linear_spec(
         raw(a),
         [T::standard_scale(id("p"), id("x"), 0., 0.5)],
         [
@@ -105,14 +102,10 @@ fn missing_intermediate_values_preserve_finite_history_and_clock_refreshes_propa
                 transformations: vec![T::identity(id("s"), id("s")), T::identity(id("t"), id("t"))],
             },
         ],
-        2,
         None,
     )
     .unwrap()
-    .build(
-        ArrayFeatureVector::<1>::new(),
-        ArrayFeatureVector::<2>::new(),
-    )
+    .build()
     .unwrap();
     for (event, expected, observed) in [
         (Event::price(a, 2., 0), [0., 0.], [true, true]),
@@ -122,8 +115,8 @@ fn missing_intermediate_values_preserve_finite_history_and_clock_refreshes_propa
         (Event::volume(a, 1., 30), [2., f64::NAN], [false, true]),
     ] {
         pipeline.handle_event(event).unwrap();
-        equal(pipeline.values(), &expected);
-        assert_eq!(pipeline.output_observations(), &observed);
+        equal(pipeline.output("model").unwrap().values(), &expected);
+        assert_eq!(pipeline.output("model").unwrap().observations(), &observed);
     }
 }
 
@@ -155,7 +148,7 @@ fn timed_statistics_follow_composite_clocks_and_ignore_context_refreshes() {
         ),
     ])
     .unwrap();
-    let mut pipeline = PipelineSpec::with_stages(
+    let mut pipeline = common::linear_spec(
         raw,
         [T::identity(id("p"), id("p")), T::identity(id("q"), id("q"))],
         [
@@ -180,14 +173,10 @@ fn timed_statistics_follow_composite_clocks_and_ignore_context_refreshes() {
                 )],
             },
         ],
-        1,
         None,
     )
     .unwrap()
-    .build(
-        ArrayFeatureVector::<3>::new(),
-        ArrayFeatureVector::<1>::new(),
-    )
+    .build()
     .unwrap();
     for (event, expected) in [
         (Event::price(a, 2., 0), 0.),
@@ -197,11 +186,11 @@ fn timed_statistics_follow_composite_clocks_and_ignore_context_refreshes() {
         (Event::volume(b, 1., 600), f64::NAN),
     ] {
         pipeline.handle_event(event).unwrap();
-        equal(pipeline.values(), &[expected]);
+        equal(pipeline.output("model").unwrap().values(), &[expected]);
     }
     pipeline.update_context(&[("context", Some(42.))]).unwrap();
-    equal(pipeline.values(), &[f64::NAN]);
-    assert_eq!(pipeline.output_observations(), &[false]);
+    equal(pipeline.output("model").unwrap().values(), &[f64::NAN]);
+    assert_eq!(pipeline.output("model").unwrap().observations(), &[false]);
 }
 
 #[test]
@@ -220,15 +209,14 @@ fn invalid_windows_fail_in_base_and_scalar_stages() {
     ] {
         for window in [0, usize::MAX] {
             let def = constructor(id("p"), id("s"), window, WarmupPolicy::FullWindow);
-            assert!(PipelineSpec::new(raw(Symbol::GLOBAL), [def.clone()]).is_err());
+            assert!(common::linear_spec(raw(Symbol::GLOBAL), [def.clone()], [], None).is_err());
             assert!(
-                PipelineSpec::with_stages(
+                common::linear_spec(
                     raw(Symbol::GLOBAL),
                     [T::identity(id("p"), id("p"))],
                     [FittedStage::Scalar {
                         transformations: vec![def]
                     }],
-                    1,
                     None
                 )
                 .is_err()
@@ -257,15 +245,14 @@ fn invalid_windows_fail_in_base_and_scalar_stages() {
                 aggregation,
                 WarmupPolicy::FirstValue,
             );
-            assert!(PipelineSpec::new(raw(Symbol::GLOBAL), [def.clone()]).is_err());
+            assert!(common::linear_spec(raw(Symbol::GLOBAL), [def.clone()], [], None).is_err());
             assert!(
-                PipelineSpec::with_stages(
+                common::linear_spec(
                     raw(Symbol::GLOBAL),
                     [T::identity(id("p"), id("p"))],
                     [FittedStage::Scalar {
                         transformations: vec![def]
                     }],
-                    1,
                     None
                 )
                 .is_err()

@@ -1,8 +1,10 @@
+mod common;
+
 use std::time::Duration;
 
 use fiml::{
-    ArrayFeatureVector, Event, EventField, FeatureDefinition, FeatureExtractorSpec, FeatureId,
-    FeatureKey, FittedStage, PipelineSpec, Symbol, TransformerDefinition as T, WarmupPolicy,
+    Event, EventField, FeatureDefinition, FeatureExtractorSpec, FeatureId, FeatureKey, FittedStage,
+    PipelineSpec, Symbol, TransformerDefinition as T, WarmupPolicy,
 };
 
 fn id(name: &str) -> FeatureId {
@@ -43,12 +45,7 @@ fn shared_artifact_replays_irregular_intervals_mixed_symbols_and_event_kinds() {
         let fixture: serde_json::Value = serde_json::from_str(text).unwrap();
         let spec: PipelineSpec = serde_json::from_value(fixture["pipeline"].clone()).unwrap();
         assert_eq!(serde_json::to_value(&spec).unwrap(), fixture["pipeline"]);
-        let mut pipeline = spec
-            .build(
-                ArrayFeatureVector::<2>::new(),
-                ArrayFeatureVector::<9>::new(),
-            )
-            .unwrap();
+        let mut pipeline = spec.build().unwrap();
         for step in fixture["steps"].as_array().unwrap() {
             let event = &step["event"];
             let timestamp = event["timestamp"].as_i64().unwrap();
@@ -74,14 +71,14 @@ fn shared_artifact_replays_irregular_intervals_mixed_symbols_and_event_kinds() {
                 .iter()
                 .map(|v| v.as_f64().unwrap_or(f64::NAN))
                 .collect();
-            equal(pipeline.values(), &expected);
+            equal(pipeline.output("model").unwrap().values(), &expected);
             let observed: Vec<_> = step["observed"]
                 .as_array()
                 .unwrap()
                 .iter()
                 .map(|v| v.as_bool().unwrap())
                 .collect();
-            assert_eq!(pipeline.output_observations(), observed);
+            assert_eq!(pipeline.output("model").unwrap().observations(), observed);
         }
     }
 }
@@ -89,7 +86,7 @@ fn shared_artifact_replays_irregular_intervals_mixed_symbols_and_event_kinds() {
 #[test]
 fn timed_refreshes_feed_later_averages_and_timed_histories_without_sampling_raw_duplicates() {
     let a = Symbol::new("timed-chained").unwrap();
-    let mut pipeline = PipelineSpec::with_stages(
+    let mut pipeline = common::linear_spec(
         raw(a),
         [T::delta_timed(id("p"), id("d"), ms(100))],
         [
@@ -106,14 +103,10 @@ fn timed_refreshes_feed_later_averages_and_timed_histories_without_sampling_raw_
                 ],
             },
         ],
-        2,
         None,
     )
     .unwrap()
-    .build(
-        ArrayFeatureVector::<1>::new(),
-        ArrayFeatureVector::<2>::new(),
-    )
+    .build()
     .unwrap();
     for (event, expected) in [
         (Event::price(a, 2., 0), [f64::NAN, f64::NAN]),
@@ -123,8 +116,11 @@ fn timed_refreshes_feed_later_averages_and_timed_histories_without_sampling_raw_
         (Event::volume(a, 1., 200), [0., 2.]),
     ] {
         pipeline.handle_event(event).unwrap();
-        equal(pipeline.values(), &expected);
-        assert_eq!(pipeline.output_observations(), &[true, true]);
+        equal(pipeline.output("model").unwrap().values(), &expected);
+        assert_eq!(
+            pipeline.output("model").unwrap().observations(),
+            &[true, true]
+        );
     }
 }
 
@@ -156,7 +152,7 @@ fn clocks_follow_selection_imputation_pca_and_monotonic_composite_time() {
         ),
     ])
     .unwrap();
-    let mut pipeline = PipelineSpec::with_stages(
+    let mut pipeline = common::linear_spec(
         raw,
         [
             T::identity(id("context"), id("context")),
@@ -184,14 +180,10 @@ fn clocks_follow_selection_imputation_pca_and_monotonic_composite_time() {
                 transformations: vec![T::delta_timed(id("sum"), id("d"), ms(100))],
             },
         ],
-        1,
         None,
     )
     .unwrap()
-    .build(
-        ArrayFeatureVector::<3>::new(),
-        ArrayFeatureVector::<1>::new(),
-    )
+    .build()
     .unwrap();
     for (event, expected) in [
         (Event::price(a, 2., 0), f64::NAN),
@@ -201,23 +193,23 @@ fn clocks_follow_selection_imputation_pca_and_monotonic_composite_time() {
         (Event::volume(b, 1., 600), 0.),
     ] {
         pipeline.handle_event(event).unwrap();
-        equal(pipeline.values(), &[expected]);
+        equal(pipeline.output("model").unwrap().values(), &[expected]);
     }
     pipeline.update_context(&[("context", Some(42.))]).unwrap();
-    equal(pipeline.values(), &[0.]);
-    assert_eq!(pipeline.output_observations(), &[false]);
+    equal(pipeline.output("model").unwrap().values(), &[0.]);
+    assert_eq!(pipeline.output("model").unwrap().observations(), &[false]);
     for event in [Event::price(a, 99., 199), Event::price(a, f64::NAN, 201)] {
         assert!(pipeline.handle_event(event).is_err());
-        equal(pipeline.values(), &[0.]);
+        equal(pipeline.output("model").unwrap().values(), &[0.]);
     }
     pipeline.handle_event(Event::price(a, 8., 201)).unwrap();
-    equal(pipeline.values(), &[4.]);
+    equal(pipeline.output("model").unwrap().values(), &[4.]);
 }
 
 #[test]
 fn missing_scaled_inputs_recover_without_entering_history() {
     let a = Symbol::new("timed-missing").unwrap();
-    let mut pipeline = PipelineSpec::with_stages(
+    let mut pipeline = common::linear_spec(
         raw(a),
         [T::standard_scale(id("p"), id("x"), 0., 0.5)],
         [FittedStage::Scalar {
@@ -226,14 +218,10 @@ fn missing_scaled_inputs_recover_without_entering_history() {
                 T::delta_timed(id("x"), id("d"), ms(100)),
             ],
         }],
-        2,
         None,
     )
     .unwrap()
-    .build(
-        ArrayFeatureVector::<1>::new(),
-        ArrayFeatureVector::<2>::new(),
-    )
+    .build()
     .unwrap();
     for (event, expected) in [
         (Event::price(a, 2., 0), [f64::NAN; 2]),
@@ -242,7 +230,7 @@ fn missing_scaled_inputs_recover_without_entering_history() {
         (Event::price(a, 4., 300), [4., 4.]),
     ] {
         pipeline.handle_event(event).unwrap();
-        equal(pipeline.values(), &expected);
+        equal(pipeline.output("model").unwrap().values(), &expected);
     }
 }
 
@@ -256,15 +244,16 @@ fn validates_every_timed_kind_in_base_and_scalar_stages() {
     ] {
         for window in [Duration::ZERO, Duration::from_nanos(1), Duration::MAX] {
             let definition = constructor(id("p"), id("x"), window);
-            assert!(PipelineSpec::new(raw(Symbol::GLOBAL), [definition.clone()]).is_err());
             assert!(
-                PipelineSpec::with_stages(
+                common::linear_spec(raw(Symbol::GLOBAL), [definition.clone()], [], None).is_err()
+            );
+            assert!(
+                common::linear_spec(
                     raw(Symbol::GLOBAL),
                     [T::identity(id("p"), id("p"))],
                     [FittedStage::Scalar {
                         transformations: vec![definition]
                     }],
-                    1,
                     None
                 )
                 .is_err()
@@ -286,15 +275,14 @@ fn global_calendars_and_event_count_lags_use_the_maximum_event_clock() {
         id("time"),
     )])
     .unwrap();
-    let mut calendar = PipelineSpec::new(
+    let mut calendar = common::linear_spec(
         raw_calendar,
         [T::lagged_timed(id("time"), id("lag"), ms(100))],
+        [],
+        None,
     )
     .unwrap()
-    .build(
-        ArrayFeatureVector::<1>::new(),
-        ArrayFeatureVector::<1>::new(),
-    )
+    .build()
     .unwrap();
     for (symbol, timestamp, expected, observed) in [
         (a, 0, f64::NAN, true),
@@ -306,23 +294,22 @@ fn global_calendars_and_event_count_lags_use_the_maximum_event_clock() {
         calendar
             .handle_event(Event::volume(symbol, 1., timestamp))
             .unwrap();
-        equal(calendar.values(), &[expected]);
-        assert_eq!(calendar.output_observations(), &[observed]);
+        equal(calendar.output("model").unwrap().values(), &[expected]);
+        assert_eq!(
+            calendar.output("model").unwrap().observations(),
+            &[observed]
+        );
     }
-    let mut arrival = PipelineSpec::with_stages(
+    let mut arrival = common::linear_spec(
         raw(a),
         [T::lagged(id("p"), id("arrival"), 1)],
         [FittedStage::Scalar {
             transformations: vec![T::delta_timed(id("arrival"), id("d"), ms(1))],
         }],
-        1,
         None,
     )
     .unwrap()
-    .build(
-        ArrayFeatureVector::<1>::new(),
-        ArrayFeatureVector::<1>::new(),
-    )
+    .build()
     .unwrap();
     for (event, expected) in [
         (Event::price(a, 2., 100), f64::NAN),
@@ -333,7 +320,7 @@ fn global_calendars_and_event_count_lags_use_the_maximum_event_clock() {
         (Event::price(a, 8., 201), 0.),
     ] {
         arrival.handle_event(event).unwrap();
-        equal(arrival.values(), &[expected]);
+        equal(arrival.output("model").unwrap().values(), &[expected]);
     }
 }
 
@@ -348,19 +335,21 @@ fn context_only_inputs_never_gain_market_observations_or_a_clock() {
         id("context"),
     )])
     .unwrap();
-    let mut pipeline = PipelineSpec::new(raw, [T::lagged_timed(id("context"), id("lag"), ms(1))])
-        .unwrap()
-        .build(
-            ArrayFeatureVector::<1>::new(),
-            ArrayFeatureVector::<1>::new(),
-        )
-        .unwrap();
+    let mut pipeline = common::linear_spec(
+        raw,
+        [T::lagged_timed(id("context"), id("lag"), ms(1))],
+        [],
+        None,
+    )
+    .unwrap()
+    .build()
+    .unwrap();
     for timestamp in [0, 1, 1000] {
         pipeline.update_context(&[("context", Some(42.))]).unwrap();
         pipeline
             .handle_event(Event::price(a, 1., timestamp))
             .unwrap();
-        equal(pipeline.values(), &[f64::NAN]);
-        assert_eq!(pipeline.output_observations(), &[false]);
+        equal(pipeline.output("model").unwrap().values(), &[f64::NAN]);
+        assert_eq!(pipeline.output("model").unwrap().observations(), &[false]);
     }
 }

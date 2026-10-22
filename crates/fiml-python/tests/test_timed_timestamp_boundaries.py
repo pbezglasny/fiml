@@ -1,3 +1,4 @@
+from pipeline_fixtures import LinearSpec, SingleOutput
 import json
 from pathlib import Path
 
@@ -24,10 +25,10 @@ def build_runtime(fixture, warmup, pipeline):
     raw.vwap_timed("BTC", aggregation=aggregation, windows=[window], warmup=warmup)
     if not pipeline:
         return fiml.FeatureExtractor(raw)
-    model = fiml.PipelineSpec(raw)
+    model = LinearSpec(raw)
     for feature_id in raw.feature_ids():
         model.identity(feature_id)
-    return fiml.ModelInputPipeline(model)
+    return SingleOutput(model)
 
 
 @pytest.mark.parametrize("fixture", FIXTURES)

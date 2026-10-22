@@ -1,9 +1,11 @@
+mod common;
+
 use std::time::Duration;
 
 use fiml::{
     ArrayFeatureVector, Event, EventField, EventKind, FeatureDefinition, FeatureExtractorSpec,
-    FeatureId, FeatureKey, FeatureSource, FimlError, FittedStage, PipelineSpec, ReturnKind,
-    SourceKind, SourceObservation, Symbol, TradeSide, TransformerDefinition as T, VecFeatureVector,
+    FeatureId, FeatureKey, FeatureSource, FimlError, FittedStage, ReturnKind, SourceKind,
+    SourceObservation, Symbol, TradeSide, TransformerDefinition as T, VecFeatureVector,
     WarmupPolicy,
     order_book::{
         OrderBook, OrderBookConfig, OrderBookDelta, OrderBookLevel, OrderBookLevelUpdate,
@@ -67,7 +69,7 @@ fn raw_identity_sources_and_masks_follow_active_grouped_layouts() {
         6,
     )
     .unwrap();
-    let mut pipeline = PipelineSpec::with_stages(
+    let mut pipeline = common::linear_spec(
         raw,
         [
             T::lagged(id("price"), id("lag"), 1),
@@ -78,21 +80,20 @@ fn raw_identity_sources_and_masks_follow_active_grouped_layouts() {
             mean: vec![0.0; 2],
             scale: vec![1.0; 2],
         }],
-        3,
         None,
     )
     .unwrap()
-    .build(
-        ArrayFeatureVector::<6>::new_of_length(4),
-        ArrayFeatureVector::<3>::new_of_length(2),
-    )
+    .build()
     .unwrap();
 
     assert_eq!(
         pipeline.raw_feature_ids(),
         [id("price"), id("position"), id("return1"), id("return2")]
     );
-    assert_eq!(pipeline.output_ids(), [id("lag"), id("now")]);
+    assert_eq!(
+        pipeline.output("model").unwrap().feature_ids(),
+        [id("lag"), id("now")]
+    );
     for (index, name) in ["price", "position", "return1", "return2"]
         .iter()
         .enumerate()
@@ -113,15 +114,18 @@ fn raw_identity_sources_and_masks_follow_active_grouped_layouts() {
         }]
     );
     assert_eq!(pipeline.raw_observations(), [false; 4]);
-    assert_eq!(pipeline.output_observations(), [false; 2]);
+    assert_eq!(pipeline.output("model").unwrap().observations(), [false; 2]);
 
     pipeline
         .handle_event(Event::price(symbol, 10.0, 100))
         .unwrap();
     assert_eq!(pipeline.raw_observations(), [true, false, true, true]);
-    assert_eq!(pipeline.output_observations(), [true, true]);
+    assert_eq!(
+        pipeline.output("model").unwrap().observations(),
+        [true, true]
+    );
     assert!(pipeline.raw_values()[2].is_nan());
-    assert!(pipeline.values()[0].is_nan());
+    assert!(pipeline.output("model").unwrap().values()[0].is_nan());
     for index in [0, 2, 3] {
         assert_eq!(
             pipeline.raw_feature_sources(index).unwrap()[0].timestamp_millis,
@@ -131,13 +135,19 @@ fn raw_identity_sources_and_masks_follow_active_grouped_layouts() {
 
     pipeline.update_context(&[("position", Some(2.0))]).unwrap();
     assert_eq!(pipeline.raw_observations(), [false; 4]);
-    assert_eq!(pipeline.output_observations(), [false; 2]);
-    assert!(pipeline.values()[0].is_nan()); // Context did not advance lag history.
+    assert_eq!(pipeline.output("model").unwrap().observations(), [false; 2]);
+    assert!(pipeline.output("model").unwrap().values()[0].is_nan()); // Context did not advance lag history.
     assert_eq!(pipeline.raw_feature_sources(1), Some([].as_slice()));
     pipeline.handle_event(Event::time(200)).unwrap();
     assert_eq!(pipeline.raw_observations(), [false; 4]);
-    assert_eq!(pipeline.output_observations(), [true, false]);
-    assert_eq!(pipeline.values()[..2], [10.0, 10.0]);
+    assert_eq!(
+        pipeline.output("model").unwrap().observations(),
+        [true, false]
+    );
+    assert_eq!(
+        pipeline.output("model").unwrap().values()[..2],
+        [10.0, 10.0]
+    );
     assert_eq!(
         pipeline.raw_feature_sources(0).unwrap()[0].timestamp_millis,
         Some(100)
@@ -147,7 +157,7 @@ fn raw_identity_sources_and_masks_follow_active_grouped_layouts() {
             .iter()
             .all(|value| value.is_nan())
     );
-    assert!(pipeline.values()[2].is_nan());
+    assert_eq!(pipeline.output("model").unwrap().values().len(), 2);
 
     // An accepted, numerically unchanged observation refreshes its source.
     pipeline
@@ -224,12 +234,9 @@ fn timed_recalculation_does_not_refresh_market_inputs() {
     ];
     let price_ids = [FeatureId::from(&keys[0]), FeatureId::from(&keys[1])];
     let raw = FeatureExtractorSpec::new(keys.map(FeatureDefinition::with_default_id)).unwrap();
-    let mut pipeline = PipelineSpec::new(raw, [])
+    let mut pipeline = common::linear_spec(raw, [], [], None)
         .unwrap()
-        .build(
-            ArrayFeatureVector::<6>::new(),
-            ArrayFeatureVector::<0>::new(),
-        )
+        .build()
         .unwrap();
     pipeline
         .handle_event(Event::price(symbol, 100.0, 0))
@@ -397,19 +404,14 @@ fn book_outcomes_and_replay_times_work_with_or_without_subscribers() {
         .unwrap()
         .with_order_books([OrderBookConfig::new(symbol, UpdatePolicy::Contiguous, 8)])
         .unwrap();
-        let mut pipeline = PipelineSpec::new(raw, [])
-            .unwrap()
-            .build(VecFeatureVector::new(count), ArrayFeatureVector::<0>::new())
-            .unwrap();
-        let check = |pipeline: &fiml::Pipeline<VecFeatureVector, ArrayFeatureVector<0>>,
-                     state,
-                     timestamp| {
+        let mut pipeline = raw.build(VecFeatureVector::new(count)).unwrap();
+        let check = |pipeline: &fiml::FeatureExtractor<VecFeatureVector>, state, timestamp| {
             let book = pipeline.order_book_of_symbol(symbol).unwrap();
             assert_eq!(book.sync_state(), state);
             assert_eq!(book.source_timestamp(), timestamp);
             if subscribed {
                 assert_eq!(
-                    pipeline.raw_feature_sources(0).unwrap(),
+                    pipeline.feature_sources(0).unwrap(),
                     &[SourceObservation {
                         symbol,
                         kind: SourceKind::OrderBook,
@@ -430,7 +432,7 @@ fn book_outcomes_and_replay_times_work_with_or_without_subscribers() {
             .unwrap();
         assert_eq!(result.order_book_outcome, Some(Outcome::Applied));
         assert_eq!(result.features_updated, count);
-        assert_eq!(pipeline.raw_observations(), vec![true; count]);
+
         check(&pipeline, OrderBookSyncState::Live, Some(150));
         assert_eq!(pipeline.last_timestamp_for_symbol(symbol), Some(200));
         let result = pipeline
@@ -438,7 +440,7 @@ fn book_outcomes_and_replay_times_work_with_or_without_subscribers() {
             .unwrap();
         assert_eq!(result.order_book_outcome, Some(Outcome::IgnoredStale));
         assert_eq!(result.features_updated, 0);
-        assert_eq!(pipeline.raw_observations(), vec![false; count]);
+
         check(&pipeline, OrderBookSyncState::Live, Some(150));
 
         let result = pipeline
@@ -576,12 +578,9 @@ fn continuing_one_symbol_does_not_refresh_another_live_book() {
         [btc, eth].map(|symbol| OrderBookConfig::new(symbol, UpdatePolicy::Contiguous, 4)),
     )
     .unwrap();
-    let mut pipeline = PipelineSpec::new(raw, [])
+    let mut pipeline = common::linear_spec(raw, [], [], None)
         .unwrap()
-        .build(
-            ArrayFeatureVector::<2>::new(),
-            ArrayFeatureVector::<0>::new(),
-        )
+        .build()
         .unwrap();
     let eth_index = pipeline
         .raw_feature_index(&FeatureId::from(&FeatureKey::OrderBookBestBidPrice {

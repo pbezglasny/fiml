@@ -75,3 +75,7 @@ harness = false
 [[bench]]
 name = "path_signature"
 harness = false
+
+[[bench]]
+name = "multiple_outputs"
+harness = false

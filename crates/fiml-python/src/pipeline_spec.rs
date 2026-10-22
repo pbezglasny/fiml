@@ -77,6 +77,22 @@ pub struct ScalarStage {
 
 #[pymethods]
 impl ScalarStage {
+    /// Snapshot numeric definitions for graph insertion; parent validation is deferred.
+    fn _to_json(&self) -> PyResult<String> {
+        let stage = FittedStage::Scalar {
+            transformations: self.definitions.clone(),
+        };
+        if !self.definitions.is_empty() {
+            let inputs = self
+                .definitions
+                .iter()
+                .map(|definition| definition.input.clone())
+                .collect::<Vec<_>>();
+            stage.validate(&inputs).map_err(PyValueError::new_err)?;
+        }
+        serde_json::to_string(&stage).map_err(|error| PyValueError::new_err(error.to_string()))
+    }
+
     /// Consecutive observations greater than epsilon.
     #[pyo3(signature = (input, *, epsilon=0., output=None))]
     fn positive_streak<'py>(
@@ -725,963 +741,84 @@ pub(crate) fn core_feature_ids(spec: &CoreFeatureExtractorSpec) -> Vec<String> {
         .collect()
 }
 
-pub(crate) fn model_output_ids(spec: &CorePipelineSpec) -> Vec<String> {
-    spec.output_ids()
-        .iter()
-        .map(|id| id.as_str().to_owned())
-        .collect()
-}
-
-/// Validated raw-feature and fitted scalar-transformation specification.
-///
-/// The raw spec is cloned at construction so later Python builder mutations do
-/// not change the model artifact. Transformations remain in authored order.
+/// Numeric graph adapter used by Python authoring and fitted artifact loading.
 #[pyclass]
 #[derive(Clone)]
 pub struct PipelineSpec {
     pub(crate) core: CorePipelineSpec,
-    explicit_capacity: bool,
-}
-
-impl PipelineSpec {
-    fn add_transformation(&mut self, definition: TransformerDefinition) -> PyResult<()> {
-        if !self.core.stages().is_empty() {
-            return Err(PyValueError::new_err(
-                "cannot append base transformations after stages; use scalar_stage(ScalarStage(...))",
-            ));
-        }
-        let mut definitions = self.core.transformation_definitions().to_vec();
-        definitions.push(definition);
-        let capacity = if self.explicit_capacity {
-            self.core.feature_vector_capacity()
-        } else {
-            definitions.len()
-        };
-        let candidate = CorePipelineSpec::with_metadata(
-            self.core.raw_feature_extractor_spec().clone(),
-            definitions,
-            capacity,
-            self.core.checksum().map(str::to_owned),
-        )
-        .map_err(|error| PyValueError::new_err(error.to_string()))?;
-        self.core = candidate;
-        Ok(())
-    }
-
-    fn add_stage(&mut self, stage: FittedStage) -> PyResult<()> {
-        let capacity = if self.explicit_capacity {
-            self.core.feature_vector_capacity()
-        } else {
-            stage.outputs().len()
-        };
-        let stages = self.core.stages().iter().cloned().chain([stage]);
-        let candidate = CorePipelineSpec::with_stages(
-            self.core.raw_feature_extractor_spec().clone(),
-            self.core.transformation_definitions().to_vec(),
-            stages,
-            capacity,
-            self.core.checksum().map(str::to_owned),
-        )
-        .map_err(|error| PyValueError::new_err(error.to_string()))?;
-        self.core = candidate;
-        Ok(())
-    }
 }
 
 #[pymethods]
 impl PipelineSpec {
-    /// Consecutive observations greater than epsilon.
-    #[pyo3(signature = (input, *, epsilon=0., output=None))]
-    fn positive_streak<'py>(
-        mut slf: PyRefMut<'py, Self>,
-        input: &str,
-        epsilon: f64,
-        output: Option<&str>,
-    ) -> PyResult<PyRefMut<'py, Self>> {
-        slf.add_transformation(TransformerDefinition::positive_streak(
-            FeatureId::new(input),
-            FeatureId::new(output.unwrap_or(input)),
-            epsilon,
-        ))?;
-        Ok(slf)
+    #[new]
+    #[pyo3(signature = (extractor, *, checksum=None))]
+    fn new(extractor: PyRef<'_, FeatureExtractorSpec>, checksum: Option<String>) -> Self {
+        let mut core = CorePipelineSpec::new(extractor.core.clone());
+        core.set_checksum(checksum);
+        Self { core }
     }
 
-    /// Consecutive observations less than negative epsilon.
-    #[pyo3(signature = (input, *, epsilon=0., output=None))]
-    fn negative_streak<'py>(
-        mut slf: PyRefMut<'py, Self>,
-        input: &str,
-        epsilon: f64,
-        output: Option<&str>,
-    ) -> PyResult<PyRefMut<'py, Self>> {
-        slf.add_transformation(TransformerDefinition::negative_streak(
-            FeatureId::new(input),
-            FeatureId::new(output.unwrap_or(input)),
-            epsilon,
-        ))?;
-        Ok(slf)
-    }
-
-    /// Finite observations since the last value greater than epsilon.
-    #[pyo3(signature = (input, *, epsilon=0., output=None))]
-    fn observations_since_positive<'py>(
-        mut slf: PyRefMut<'py, Self>,
-        input: &str,
-        epsilon: f64,
-        output: Option<&str>,
-    ) -> PyResult<PyRefMut<'py, Self>> {
-        slf.add_transformation(TransformerDefinition::observations_since_positive(
-            FeatureId::new(input),
-            FeatureId::new(output.unwrap_or(input)),
-            epsilon,
-        ))?;
-        Ok(slf)
-    }
-
-    /// Finite observations since the last value less than negative epsilon.
-    #[pyo3(signature = (input, *, epsilon=0., output=None))]
-    fn observations_since_negative<'py>(
-        mut slf: PyRefMut<'py, Self>,
-        input: &str,
-        epsilon: f64,
-        output: Option<&str>,
-    ) -> PyResult<PyRefMut<'py, Self>> {
-        slf.add_transformation(TransformerDefinition::observations_since_negative(
-            FeatureId::new(input),
-            FeatureId::new(output.unwrap_or(input)),
-            epsilon,
-        ))?;
-        Ok(slf)
-    }
-
-    /// Finite observations since the last value outside the neutral interval.
-    #[pyo3(signature = (input, *, epsilon=0., output=None))]
-    fn observations_since_nonzero<'py>(
-        mut slf: PyRefMut<'py, Self>,
-        input: &str,
-        epsilon: f64,
-        output: Option<&str>,
-    ) -> PyResult<PyRefMut<'py, Self>> {
-        slf.add_transformation(TransformerDefinition::observations_since_nonzero(
-            FeatureId::new(input),
-            FeatureId::new(output.unwrap_or(input)),
-            epsilon,
-        ))?;
-        Ok(slf)
-    }
-
-    /// Elapsed milliseconds since the last value greater than epsilon.
-    #[pyo3(signature = (input, *, epsilon=0., output=None))]
-    fn time_since_positive<'py>(
-        mut slf: PyRefMut<'py, Self>,
-        input: &str,
-        epsilon: f64,
-        output: Option<&str>,
-    ) -> PyResult<PyRefMut<'py, Self>> {
-        slf.add_transformation(TransformerDefinition::time_since_positive(
-            FeatureId::new(input),
-            FeatureId::new(output.unwrap_or(input)),
-            epsilon,
-        ))?;
-        Ok(slf)
-    }
-
-    /// Elapsed milliseconds since the last value less than negative epsilon.
-    #[pyo3(signature = (input, *, epsilon=0., output=None))]
-    fn time_since_negative<'py>(
-        mut slf: PyRefMut<'py, Self>,
-        input: &str,
-        epsilon: f64,
-        output: Option<&str>,
-    ) -> PyResult<PyRefMut<'py, Self>> {
-        slf.add_transformation(TransformerDefinition::time_since_negative(
-            FeatureId::new(input),
-            FeatureId::new(output.unwrap_or(input)),
-            epsilon,
-        ))?;
-        Ok(slf)
-    }
-
-    /// Elapsed milliseconds since the last value outside the neutral interval.
-    #[pyo3(signature = (input, *, epsilon=0., output=None))]
-    fn time_since_nonzero<'py>(
-        mut slf: PyRefMut<'py, Self>,
-        input: &str,
-        epsilon: f64,
-        output: Option<&str>,
-    ) -> PyResult<PyRefMut<'py, Self>> {
-        slf.add_transformation(TransformerDefinition::time_since_nonzero(
-            FeatureId::new(input),
-            FeatureId::new(output.unwrap_or(input)),
-            epsilon,
-        ))?;
-        Ok(slf)
-    }
-    /// Least-squares slope against sample indices; NaN with fewer than two observations.
-    #[pyo3(signature = (input, *, window, warmup=PyWarmupPolicy::FullWindow, output=None))]
-    fn rolling_slope<'py>(
-        mut slf: PyRefMut<'py, Self>,
-        input: &str,
-        window: usize,
-        warmup: PyWarmupPolicy,
-        output: Option<&str>,
-    ) -> PyResult<PyRefMut<'py, Self>> {
-        slf.add_transformation(rolling_transformation(
-            input,
-            window,
-            warmup,
-            output,
-            TransformerDefinition::rolling_slope,
-        ))?;
-        Ok(slf)
-    }
-    /// Sum of absolute adjacent changes within the window.
-    #[pyo3(signature = (input, *, window, warmup=PyWarmupPolicy::FullWindow, output=None))]
-    fn rolling_path_length<'py>(
-        mut slf: PyRefMut<'py, Self>,
-        input: &str,
-        window: usize,
-        warmup: PyWarmupPolicy,
-        output: Option<&str>,
-    ) -> PyResult<PyRefMut<'py, Self>> {
-        slf.add_transformation(rolling_transformation(
-            input,
-            window,
-            warmup,
-            output,
-            TransformerDefinition::rolling_path_length,
-        ))?;
-        Ok(slf)
-    }
-    /// Sum of positive adjacent changes within the window.
-    #[pyo3(signature = (input, *, window, warmup=PyWarmupPolicy::FullWindow, output=None))]
-    fn rolling_positive_movement<'py>(
-        mut slf: PyRefMut<'py, Self>,
-        input: &str,
-        window: usize,
-        warmup: PyWarmupPolicy,
-        output: Option<&str>,
-    ) -> PyResult<PyRefMut<'py, Self>> {
-        slf.add_transformation(rolling_transformation(
-            input,
-            window,
-            warmup,
-            output,
-            TransformerDefinition::rolling_positive_movement,
-        ))?;
-        Ok(slf)
-    }
-    /// Magnitude of negative adjacent changes within the window.
-    #[pyo3(signature = (input, *, window, warmup=PyWarmupPolicy::FullWindow, output=None))]
-    fn rolling_negative_movement<'py>(
-        mut slf: PyRefMut<'py, Self>,
-        input: &str,
-        window: usize,
-        warmup: PyWarmupPolicy,
-        output: Option<&str>,
-    ) -> PyResult<PyRefMut<'py, Self>> {
-        slf.add_transformation(rolling_transformation(
-            input,
-            window,
-            warmup,
-            output,
-            TransformerDefinition::rolling_negative_movement,
-        ))?;
-        Ok(slf)
-    }
-    /// Number of reversals between nonzero deltas; zero deltas are ignored.
-    #[pyo3(signature = (input, *, window, warmup=PyWarmupPolicy::FullWindow, output=None))]
-    fn rolling_direction_change_count<'py>(
-        mut slf: PyRefMut<'py, Self>,
-        input: &str,
-        window: usize,
-        warmup: PyWarmupPolicy,
-        output: Option<&str>,
-    ) -> PyResult<PyRefMut<'py, Self>> {
-        slf.add_transformation(rolling_transformation(
-            input,
-            window,
-            warmup,
-            output,
-            TransformerDefinition::rolling_direction_change_count,
-        ))?;
-        Ok(slf)
-    }
-    /// Largest earlier-peak to later-trough decrease, in absolute input units.
-    #[pyo3(signature = (input, *, window, warmup=PyWarmupPolicy::FullWindow, output=None))]
-    fn rolling_max_drawdown<'py>(
-        mut slf: PyRefMut<'py, Self>,
-        input: &str,
-        window: usize,
-        warmup: PyWarmupPolicy,
-        output: Option<&str>,
-    ) -> PyResult<PyRefMut<'py, Self>> {
-        slf.add_transformation(rolling_transformation(
-            input,
-            window,
-            warmup,
-            output,
-            TransformerDefinition::rolling_max_drawdown,
-        ))?;
-        Ok(slf)
-    }
-    /// Rolling population standard deviation of finite observations, with shared history across windows.
-    #[pyo3(signature = (input, *, window, warmup=PyWarmupPolicy::FullWindow, output=None))]
-    fn rolling_std<'py>(
-        mut slf: PyRefMut<'py, Self>,
-        input: &str,
-        window: usize,
-        warmup: PyWarmupPolicy,
-        output: Option<&str>,
-    ) -> PyResult<PyRefMut<'py, Self>> {
-        slf.add_transformation(rolling_transformation(
-            input,
-            window,
-            warmup,
-            output,
-            TransformerDefinition::rolling_std,
-        ))?;
-        Ok(slf)
-    }
-    /// Rolling population standard deviation of finite observations, with shared history across windows.
-    /// Timed buckets retain every finite observation and expire together.
-    #[pyo3(signature = (input, *, window, aggregation="1ms", warmup=PyWarmupPolicy::FullWindow, output=None))]
-    fn rolling_std_timed<'py>(
-        mut slf: PyRefMut<'py, Self>,
-        input: &str,
-        window: &str,
-        aggregation: &str,
-        warmup: PyWarmupPolicy,
-        output: Option<&str>,
-    ) -> PyResult<PyRefMut<'py, Self>> {
-        slf.add_transformation(rolling_timed_transformation(
-            input,
-            window,
-            aggregation,
-            warmup,
-            output,
-            TransformerDefinition::rolling_std_timed_with_aggregation,
-        )?)?;
-        Ok(slf)
-    }
-    /// Rolling minimum of finite observations, with shared history across windows.
-    #[pyo3(signature = (input, *, window, warmup=PyWarmupPolicy::FullWindow, output=None))]
-    fn rolling_min<'py>(
-        mut slf: PyRefMut<'py, Self>,
-        input: &str,
-        window: usize,
-        warmup: PyWarmupPolicy,
-        output: Option<&str>,
-    ) -> PyResult<PyRefMut<'py, Self>> {
-        slf.add_transformation(rolling_transformation(
-            input,
-            window,
-            warmup,
-            output,
-            TransformerDefinition::rolling_min,
-        ))?;
-        Ok(slf)
-    }
-    /// Rolling minimum of finite observations, with shared history across windows.
-    /// Timed buckets retain every finite observation and expire together.
-    #[pyo3(signature = (input, *, window, aggregation="1ms", warmup=PyWarmupPolicy::FullWindow, output=None))]
-    fn rolling_min_timed<'py>(
-        mut slf: PyRefMut<'py, Self>,
-        input: &str,
-        window: &str,
-        aggregation: &str,
-        warmup: PyWarmupPolicy,
-        output: Option<&str>,
-    ) -> PyResult<PyRefMut<'py, Self>> {
-        slf.add_transformation(rolling_timed_transformation(
-            input,
-            window,
-            aggregation,
-            warmup,
-            output,
-            TransformerDefinition::rolling_min_timed_with_aggregation,
-        )?)?;
-        Ok(slf)
-    }
-    /// Rolling maximum of finite observations, with shared history across windows.
-    #[pyo3(signature = (input, *, window, warmup=PyWarmupPolicy::FullWindow, output=None))]
-    fn rolling_max<'py>(
-        mut slf: PyRefMut<'py, Self>,
-        input: &str,
-        window: usize,
-        warmup: PyWarmupPolicy,
-        output: Option<&str>,
-    ) -> PyResult<PyRefMut<'py, Self>> {
-        slf.add_transformation(rolling_transformation(
-            input,
-            window,
-            warmup,
-            output,
-            TransformerDefinition::rolling_max,
-        ))?;
-        Ok(slf)
-    }
-    /// Rolling maximum of finite observations, with shared history across windows.
-    /// Timed buckets retain every finite observation and expire together.
-    #[pyo3(signature = (input, *, window, aggregation="1ms", warmup=PyWarmupPolicy::FullWindow, output=None))]
-    fn rolling_max_timed<'py>(
-        mut slf: PyRefMut<'py, Self>,
-        input: &str,
-        window: &str,
-        aggregation: &str,
-        warmup: PyWarmupPolicy,
-        output: Option<&str>,
-    ) -> PyResult<PyRefMut<'py, Self>> {
-        slf.add_transformation(rolling_timed_transformation(
-            input,
-            window,
-            aggregation,
-            warmup,
-            output,
-            TransformerDefinition::rolling_max_timed_with_aggregation,
-        )?)?;
-        Ok(slf)
-    }
-    /// Rolling range (maximum minus minimum) of finite observations, with shared history across windows.
-    #[pyo3(signature = (input, *, window, warmup=PyWarmupPolicy::FullWindow, output=None))]
-    fn rolling_range<'py>(
-        mut slf: PyRefMut<'py, Self>,
-        input: &str,
-        window: usize,
-        warmup: PyWarmupPolicy,
-        output: Option<&str>,
-    ) -> PyResult<PyRefMut<'py, Self>> {
-        slf.add_transformation(rolling_transformation(
-            input,
-            window,
-            warmup,
-            output,
-            TransformerDefinition::rolling_range,
-        ))?;
-        Ok(slf)
-    }
-    /// Rolling range (maximum minus minimum) of finite observations, with shared history across windows.
-    /// Timed buckets retain every finite observation and expire together.
-    #[pyo3(signature = (input, *, window, aggregation="1ms", warmup=PyWarmupPolicy::FullWindow, output=None))]
-    fn rolling_range_timed<'py>(
-        mut slf: PyRefMut<'py, Self>,
-        input: &str,
-        window: &str,
-        aggregation: &str,
-        warmup: PyWarmupPolicy,
-        output: Option<&str>,
-    ) -> PyResult<PyRefMut<'py, Self>> {
-        slf.add_transformation(rolling_timed_transformation(
-            input,
-            window,
-            aggregation,
-            warmup,
-            output,
-            TransformerDefinition::rolling_range_timed_with_aggregation,
-        )?)?;
-        Ok(slf)
-    }
-
-    /// Apply an as-of operation on the input's source clock, exact at the default 1ms aggregation.
-    /// Positive whole-millisecond duration strings include "100ms", "500ms", and "1s".
-    /// Aggregation retains the last finite observation per bucket and reduces memory and precision.
-    /// Lag must be a positive multiple of aggregation; history is capped at 1,000,000 slots.
-    /// Clock advances refresh output; missing observations emit NaN without entering history.
-    #[pyo3(signature = (input, *, lag_window, aggregation="1ms", output=None))]
-    fn lagged_timed<'py>(
-        mut slf: PyRefMut<'py, Self>,
-        input: &str,
-        lag_window: &str,
-        aggregation: &str,
-        output: Option<&str>,
-    ) -> PyResult<PyRefMut<'py, Self>> {
-        slf.add_transformation(timed_transformation(
-            input,
-            lag_window,
-            aggregation,
-            output,
-            TransformerDefinition::lagged_timed_with_aggregation,
-        )?)?;
-        Ok(slf)
-    }
-
-    /// Apply an as-of operation on the input's source clock, exact at the default 1ms aggregation.
-    /// Positive whole-millisecond duration strings include "100ms", "500ms", and "1s".
-    /// Aggregation retains the last finite observation per bucket and reduces memory and precision.
-    /// Lag must be a positive multiple of aggregation; history is capped at 1,000,000 slots.
-    /// Clock advances refresh output; missing observations emit NaN without entering history.
-    #[pyo3(signature = (input, *, lag_window, aggregation="1ms", output=None))]
-    fn delta_timed<'py>(
-        mut slf: PyRefMut<'py, Self>,
-        input: &str,
-        lag_window: &str,
-        aggregation: &str,
-        output: Option<&str>,
-    ) -> PyResult<PyRefMut<'py, Self>> {
-        slf.add_transformation(timed_transformation(
-            input,
-            lag_window,
-            aggregation,
-            output,
-            TransformerDefinition::delta_timed_with_aggregation,
-        )?)?;
-        Ok(slf)
-    }
-
-    /// Apply an as-of operation on the input's source clock, exact at the default 1ms aggregation.
-    /// Positive whole-millisecond duration strings include "100ms", "500ms", and "1s".
-    /// Aggregation retains the last finite observation per bucket and reduces memory and precision.
-    /// Lag must be a positive multiple of aggregation; history is capped at 1,000,000 slots.
-    /// Clock advances refresh output; missing observations emit NaN without entering history.
-    #[pyo3(signature = (input, *, lag_window, aggregation="1ms", output=None))]
-    fn simple_return_timed<'py>(
-        mut slf: PyRefMut<'py, Self>,
-        input: &str,
-        lag_window: &str,
-        aggregation: &str,
-        output: Option<&str>,
-    ) -> PyResult<PyRefMut<'py, Self>> {
-        slf.add_transformation(timed_transformation(
-            input,
-            lag_window,
-            aggregation,
-            output,
-            TransformerDefinition::simple_return_timed_with_aggregation,
-        )?)?;
-        Ok(slf)
-    }
-
-    /// Apply an as-of operation on the input's source clock, exact at the default 1ms aggregation.
-    /// Positive whole-millisecond duration strings include "100ms", "500ms", and "1s".
-    /// Aggregation retains the last finite observation per bucket and reduces memory and precision.
-    /// Lag must be a positive multiple of aggregation; history is capped at 1,000,000 slots.
-    /// Clock advances refresh output; missing observations emit NaN without entering history.
-    #[pyo3(signature = (input, *, lag_window, aggregation="1ms", output=None))]
-    fn log_return_timed<'py>(
-        mut slf: PyRefMut<'py, Self>,
-        input: &str,
-        lag_window: &str,
-        aggregation: &str,
-        output: Option<&str>,
-    ) -> PyResult<PyRefMut<'py, Self>> {
-        slf.add_transformation(timed_transformation(
-            input,
-            lag_window,
-            aggregation,
-            output,
-            TransformerDefinition::log_return_timed_with_aggregation,
-        )?)?;
-        Ok(slf)
-    }
-
-    /// Compute an exact delta over finite input observations.
-    /// Lag must be in 1..=10_000; observed nonfinite inputs emit NaN without advancing history.
-    /// Unobserved events retain the last output. Exact lag k requires k + 1 finite observations.
-    #[pyo3(signature = (input, *, lag_window, output=None))]
-    fn delta<'py>(
-        mut slf: PyRefMut<'py, Self>,
-        input: &str,
-        lag_window: usize,
-        output: Option<&str>,
-    ) -> PyResult<PyRefMut<'py, Self>> {
-        slf.add_transformation(TransformerDefinition::delta(
-            FeatureId::new(input),
-            FeatureId::new(output.unwrap_or(input)),
-            lag_window,
-        ))?;
-        Ok(slf)
-    }
-
-    /// Compute an exact simple return over finite input observations.
-    /// Lag must be in 1..=10_000; observed nonfinite inputs emit NaN without advancing history.
-    /// Unobserved events retain the last output. Exact lag k requires k + 1 finite observations.
-    #[pyo3(signature = (input, *, lag_window, output=None))]
-    fn simple_return<'py>(
-        mut slf: PyRefMut<'py, Self>,
-        input: &str,
-        lag_window: usize,
-        output: Option<&str>,
-    ) -> PyResult<PyRefMut<'py, Self>> {
-        slf.add_transformation(TransformerDefinition::simple_return(
-            FeatureId::new(input),
-            FeatureId::new(output.unwrap_or(input)),
-            lag_window,
-        ))?;
-        Ok(slf)
-    }
-
-    /// Compute an exact log return over finite input observations.
-    /// Lag must be in 1..=10_000; observed nonfinite inputs emit NaN without advancing history.
-    /// Unobserved events retain the last output. Exact lag k requires k + 1 finite observations.
-    #[pyo3(signature = (input, *, lag_window, output=None))]
-    fn log_return<'py>(
-        mut slf: PyRefMut<'py, Self>,
-        input: &str,
-        lag_window: usize,
-        output: Option<&str>,
-    ) -> PyResult<PyRefMut<'py, Self>> {
-        slf.add_transformation(TransformerDefinition::log_return(
-            FeatureId::new(input),
-            FeatureId::new(output.unwrap_or(input)),
-            lag_window,
-        ))?;
-        Ok(slf)
-    }
-
-    /// Average finite source observations using the existing EMA calculator.
-    #[pyo3(signature = (input, *, window, warmup=PyWarmupPolicy::FullWindow, output=None))]
-    fn ema<'py>(
-        mut slf: PyRefMut<'py, Self>,
-        input: &str,
-        window: usize,
-        warmup: PyWarmupPolicy,
-        output: Option<&str>,
-    ) -> PyResult<PyRefMut<'py, Self>> {
-        let definition = TransformerDefinition::ema(
-            FeatureId::new(input),
-            FeatureId::new(output.unwrap_or(input)),
-            window,
-            warmup.into(),
-        );
-        slf.add_transformation(definition)?;
-        Ok(slf)
-    }
-
-    /// Average finite source observations using the existing SMA calculator.
-    #[pyo3(signature = (input, *, window, warmup=PyWarmupPolicy::FullWindow, output=None))]
-    fn sma<'py>(
-        mut slf: PyRefMut<'py, Self>,
-        input: &str,
-        window: usize,
-        warmup: PyWarmupPolicy,
-        output: Option<&str>,
-    ) -> PyResult<PyRefMut<'py, Self>> {
-        let definition = TransformerDefinition::sma(
-            FeatureId::new(input),
-            FeatureId::new(output.unwrap_or(input)),
-            window,
-            warmup.into(),
-        );
-        slf.add_transformation(definition)?;
-        Ok(slf)
-    }
-
-    /// Allow temporary training prefixes to exceed the configured final capacity.
-    fn _fit_candidate(&self) -> Self {
-        Self {
-            explicit_capacity: false,
-            ..self.clone()
-        }
-    }
-
-    /// Restore the authored final capacity after all intermediate stages have been fitted.
-    fn _finalize_fit(&mut self, base: PyRef<'_, Self>) -> PyResult<()> {
-        if base.explicit_capacity {
-            self.core = CorePipelineSpec::with_stages(
-                self.core.raw_feature_extractor_spec().clone(),
-                self.core.transformation_definitions().to_vec(),
-                self.core.stages().to_vec(),
-                base.core.feature_vector_capacity(),
-                self.core.checksum().map(str::to_owned),
-            )
-            .map_err(|error| PyValueError::new_err(error.to_string()))?;
-        }
-        self.explicit_capacity = base.explicit_capacity;
-        Ok(())
-    }
-
-    /// Append independent scalar outputs consuming the current active layout.
-    fn scalar_stage<'py>(
-        mut slf: PyRefMut<'py, Self>,
-        stage: PyRef<'_, ScalarStage>,
-    ) -> PyResult<PyRefMut<'py, Self>> {
-        slf.add_stage(FittedStage::Scalar {
-            transformations: stage.definitions.clone(),
-        })?;
-        Ok(slf)
-    }
-
-    /// Append an experimental level-2 signature of (normalized observation index, input).
-    /// Emits prefix__t, __x, __tt, __tx, __xt, __xx; prefix defaults to the input ID.
-    /// Finite observations enter history; observed nonfinite inputs emit NaNs without advancing.
-    /// Unobserved events and context refreshes retain outputs. Singleton paths emit zeros.
-    #[pyo3(signature = (input, *, window, warmup=PyWarmupPolicy::FullWindow, output_prefix=None))]
-    fn rolling_path_signature_stage<'py>(
-        mut slf: PyRefMut<'py, Self>,
-        input: &str,
-        window: usize,
-        warmup: PyWarmupPolicy,
-        output_prefix: Option<&str>,
-    ) -> PyResult<PyRefMut<'py, Self>> {
-        slf.add_stage(FittedStage::rolling_path_signature(
-            FeatureId::new(input),
-            output_prefix.unwrap_or(input),
-            window,
-            warmup.into(),
-        ))?;
-        Ok(slf)
-    }
-
-    /// Number of already fitted vector stages.
-    #[getter]
-    fn stage_count(&self) -> usize {
-        self.core.stages().len()
-    }
-
-    /// Independent snapshot retaining whether final capacity was explicitly authored.
     fn copy(&self) -> Self {
         self.clone()
     }
 
-    /// Append a fitted vector scaler, preserving the current active IDs.
-    fn scale_stage<'py>(
-        mut slf: PyRefMut<'py, Self>,
-        mean: Vec<f64>,
-        scale: Vec<f64>,
-    ) -> PyResult<PyRefMut<'py, Self>> {
-        let outputs = slf.core.output_ids();
-        slf.add_stage(FittedStage::StandardScale {
-            outputs,
-            mean,
-            scale,
-        })?;
-        Ok(slf)
+    fn _intern_symbol(&self, name: &str) -> PyResult<String> {
+        crate::intern_symbol(name).map(|symbol| symbol.resolve_as_string())
     }
 
-    /// Append fitted sklearn MinMaxScaler state, preserving the current active IDs.
-    #[pyo3(signature = (scale, min, clip=None))]
-    fn min_max_scale_stage<'py>(
-        mut slf: PyRefMut<'py, Self>,
-        scale: Vec<f64>,
-        min: Vec<f64>,
-        clip: Option<(f64, f64)>,
-    ) -> PyResult<PyRefMut<'py, Self>> {
-        let outputs = slf.core.output_ids();
-        slf.add_stage(FittedStage::MinMaxScale {
-            outputs,
-            scale,
-            min,
-            clip,
-        })?;
-        Ok(slf)
+    fn add(&mut self, parent: usize, stage: &str) -> PyResult<usize> {
+        let parent = self
+            .core
+            .node(parent)
+            .ok_or_else(|| PyValueError::new_err("parent must be an earlier node"))?;
+        let stage: FittedStage = serde_json::from_str(stage)
+            .map_err(|error| PyValueError::new_err(error.to_string()))?;
+        self.core
+            .add(parent, stage)
+            .map_err(|error| PyValueError::new_err(error.to_string()))?;
+        Ok(self.core.nodes().len())
     }
 
-    /// Append fitted sklearn PowerTransformer state, preserving the current active IDs.
-    fn power_transform_stage<'py>(
-        mut slf: PyRefMut<'py, Self>,
-        method: String,
-        lambdas: Vec<f64>,
-        mean: Vec<f64>,
-        scale: Vec<f64>,
-    ) -> PyResult<PyRefMut<'py, Self>> {
-        let outputs = slf.core.output_ids();
-        slf.add_stage(FittedStage::PowerTransform {
-            outputs,
-            method,
-            lambdas,
-            mean,
-            scale,
-        })?;
-        Ok(slf)
-    }
-
-    /// Append fitted sklearn QuantileTransformer state, preserving the current active IDs.
-    #[pyo3(signature = (output_distribution, quantiles, references, all_nan_input_indices, bounds_threshold, normal_clip=None))]
-    fn quantile_transform_stage<'py>(
-        mut slf: PyRefMut<'py, Self>,
-        output_distribution: String,
-        quantiles: Vec<Vec<f64>>,
-        references: Vec<f64>,
-        all_nan_input_indices: Vec<usize>,
-        bounds_threshold: f64,
-        normal_clip: Option<(f64, f64)>,
-    ) -> PyResult<PyRefMut<'py, Self>> {
-        let outputs = slf.core.output_ids();
-        slf.add_stage(FittedStage::QuantileTransform {
-            outputs,
-            output_distribution,
-            quantiles,
-            references,
-            all_nan_input_indices,
-            bounds_threshold,
-            normal_clip,
-        })?;
-        Ok(slf)
-    }
-
-    /// Append an ordered fitted column selection, preserving retained input IDs.
-    fn select_stage<'py>(
-        mut slf: PyRefMut<'py, Self>,
-        input_indices: Vec<usize>,
-    ) -> PyResult<PyRefMut<'py, Self>> {
-        let inputs = slf.core.output_ids();
-        let outputs = input_indices
-            .iter()
-            .map(|&index| {
-                inputs.get(index).cloned().ok_or_else(|| {
-                    PyValueError::new_err(format!(
-                        "selection index {index} is out of bounds for {} inputs",
-                        inputs.len()
-                    ))
-                })
-            })
-            .collect::<PyResult<_>>()?;
-        slf.add_stage(FittedStage::Select {
-            outputs,
-            input_indices,
-        })?;
-        Ok(slf)
-    }
-
-    /// Append fitted sklearn SimpleImputer state and its frozen output layout.
-    fn simple_impute_stage<'py>(
-        mut slf: PyRefMut<'py, Self>,
-        outputs: Vec<String>,
-        retained_input_indices: Vec<usize>,
-        replacement_values: Vec<f64>,
-        indicator_input_indices: Vec<usize>,
-    ) -> PyResult<PyRefMut<'py, Self>> {
-        slf.add_stage(FittedStage::SimpleImpute {
-            outputs: outputs.into_iter().map(FeatureId::new).collect(),
-            retained_input_indices,
-            replacement_values,
-            indicator_input_indices,
-        })?;
-        Ok(slf)
-    }
-
-    /// Append fitted PCA state; component rows follow output order.
-    fn pca_stage<'py>(
-        mut slf: PyRefMut<'py, Self>,
-        outputs: Vec<String>,
-        mean: Vec<f64>,
-        components: Vec<Vec<f64>>,
-        output_scale: Vec<f64>,
-    ) -> PyResult<PyRefMut<'py, Self>> {
-        slf.add_stage(FittedStage::Pca {
-            outputs: outputs.into_iter().map(FeatureId::new).collect(),
-            mean,
-            components,
-            output_scale,
-        })?;
-        Ok(slf)
-    }
-
-    #[new]
-    #[pyo3(signature = (raw_feature_extractor_spec, *, capacity=None, checksum=None))]
-    fn new(
-        raw_feature_extractor_spec: PyRef<'_, FeatureExtractorSpec>,
-        capacity: Option<usize>,
-        checksum: Option<String>,
-    ) -> PyResult<Self> {
-        let explicit_capacity = capacity.is_some();
-        let core = CorePipelineSpec::with_metadata(
-            raw_feature_extractor_spec.core.clone(),
-            [],
-            capacity.unwrap_or(0),
-            checksum,
-        )
-        .map_err(|error| PyValueError::new_err(error.to_string()))?;
-        Ok(Self {
-            core,
-            explicit_capacity,
-        })
-    }
-
-    /// Loads the strict versioned canonical model-input artifact.
-    #[staticmethod]
-    fn from_json(json: &str) -> PyResult<Self> {
-        let core =
-            serde_json::from_str(json).map_err(|error| PyValueError::new_err(error.to_string()))?;
-        Ok(Self {
-            core,
-            explicit_capacity: true,
-        })
-    }
-
-    /// Serializes this spec using the canonical Rust JSON adapter.
-    fn to_json(&self) -> PyResult<String> {
-        serde_json::to_string_pretty(&self.core)
+    fn output(&mut self, name: &str, node: usize) -> PyResult<()> {
+        let node = self
+            .core
+            .node(node)
+            .ok_or_else(|| PyValueError::new_err("output node index out of bounds"))?;
+        self.core
+            .output(name, node)
             .map_err(|error| PyValueError::new_err(error.to_string()))
     }
 
-    /// Append an unchanged scalar to the final model vector.
-    #[pyo3(signature = (input, *, output=None))]
-    fn identity<'py>(
-        mut slf: PyRefMut<'py, Self>,
-        input: &str,
-        output: Option<&str>,
-    ) -> PyResult<PyRefMut<'py, Self>> {
-        let output = output.unwrap_or(input);
-        slf.add_transformation(TransformerDefinition::identity(
-            FeatureId::new(input),
-            FeatureId::new(output),
-        ))?;
-        Ok(slf)
+    fn validate(&self) -> PyResult<()> {
+        self.core
+            .validate()
+            .map_err(|error| PyValueError::new_err(error.to_string()))
     }
 
-    /// Append a raw scalar from `lag_window` accepted events earlier.
-    /// The window must be in `1..=10_000`; output remains NaN until enough history exists.
-    #[pyo3(signature = (input, *, lag_window, output=None))]
-    fn lagged<'py>(
-        mut slf: PyRefMut<'py, Self>,
-        input: &str,
-        lag_window: usize,
-        output: Option<&str>,
-    ) -> PyResult<PyRefMut<'py, Self>> {
-        let output = output.unwrap_or(input);
-        slf.add_transformation(TransformerDefinition::lagged(
-            FeatureId::new(input),
-            FeatureId::new(output),
-            lag_window,
-        ))?;
-        Ok(slf)
+    fn feature_ids(&self, node: usize) -> PyResult<Vec<String>> {
+        let node = self
+            .core
+            .node(node)
+            .ok_or_else(|| PyValueError::new_err("node index out of bounds"))?;
+        Ok(self
+            .core
+            .feature_ids(node)
+            .map_err(|error| PyValueError::new_err(error.to_string()))?
+            .iter()
+            .map(|id| id.as_str().to_owned())
+            .collect())
     }
 
-    /// Append a fitted `(input - mean) / scale` scalar transformation.
-    #[pyo3(signature = (input, *, mean, scale, output=None))]
-    fn standard_scale<'py>(
-        mut slf: PyRefMut<'py, Self>,
-        input: &str,
-        mean: f64,
-        scale: f64,
-        output: Option<&str>,
-    ) -> PyResult<PyRefMut<'py, Self>> {
-        let output = output.unwrap_or(input);
-        slf.add_transformation(TransformerDefinition::standard_scale(
-            FeatureId::new(input),
-            FeatureId::new(output),
-            mean,
-            scale,
-        ))?;
-        Ok(slf)
+    #[staticmethod]
+    fn from_json(json: &str) -> PyResult<Self> {
+        Ok(Self {
+            core: serde_json::from_str(json)
+                .map_err(|error| PyValueError::new_err(error.to_string()))?,
+        })
     }
 
-    /// Active final IDs in authored transformation order.
-    fn feature_ids(&self) -> Vec<String> {
-        model_output_ids(&self.core)
-    }
-
-    /// Active raw IDs in canonical extraction order.
-    fn raw_feature_ids(&self) -> Vec<String> {
-        core_feature_ids(self.core.raw_feature_extractor_spec())
-    }
-
-    /// Complete configured final width, including trailing reserved cells.
-    #[getter]
-    fn capacity(&self) -> usize {
-        self.core.feature_vector_capacity()
-    }
-
-    /// Number of configured final outputs, excluding reserved cells.
-    #[getter]
-    fn active_feature_count(&self) -> usize {
-        self.core.feature_vector_length()
-    }
-
-    /// Opaque model checksum, independent of the raw-spec checksum.
-    #[getter]
-    fn checksum(&self) -> Option<&str> {
-        self.core.checksum()
+    fn to_json(&self) -> PyResult<String> {
+        serde_json::to_string_pretty(&self.core)
+            .map_err(|error| PyValueError::new_err(error.to_string()))
     }
 }
