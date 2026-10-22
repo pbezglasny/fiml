@@ -1,5 +1,12 @@
 # ADR 0008: Serialize the pipeline spec
 
+Update (2026-10-22): the current pipeline format is `4.0`, with indexed graph nodes
+and named outputs. The [graph contract](../multiple_output.md) supersedes the
+linear envelope and constructors below. Persisting configuration rather than
+live runtime state remains the serialization boundary. The following records
+the historical versions and their rationale.
+
+
 Status: accepted  
 Date: 2026-09-02
 

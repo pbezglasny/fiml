@@ -15,16 +15,22 @@ from sklearn.preprocessing import MaxAbsScaler, QuantileTransformer
 def train():
     """Return a fitted pipeline, replay events, and an independent sklearn oracle."""
     raw = fiml.FeatureExtractorSpec().field("BTCUSDT", source="trade_price", id="price")
-    spec = fiml.PipelineSpec(raw)
+    indicators = fiml.ScalarStage()
     for window in [1, 3, 5]:
-        spec.sma("price", window=window, output=f"sma{window}")
-    spec.lagged("price", lag_window=2, output="lag2")
-    pipeline = (fiml.ModelInputPipeline(spec)
-                .add_transformation(SimpleImputer(strategy="median", add_indicator=True), name="impute")
-                .add_transformation(MaxAbsScaler(clip=True), name="scale")
-                .add_transformation(VarianceThreshold(), name="variance")
-                .add_transformation(QuantileTransformer(n_quantiles=8), name="quantile")
-                .add_transformation(PCA(n_components=2, whiten=True, svd_solver="full"), name="pca"))
+        indicators.sma("price", window=window, output=f"sma{window}")
+    indicators.lagged("price", lag_window=2, output="lag2")
+    base_spec = fiml.PipelineSpec(raw)
+    base_spec.output("base", base_spec.add(base_spec.root(), indicators))
+    base = base_spec.build()
+    spec = fiml.PipelineSpec(raw)
+    node = spec.add(spec.root(), indicators)
+    for estimator in [SimpleImputer(strategy="median", add_indicator=True),
+                      MaxAbsScaler(clip=True), VarianceThreshold(),
+                      QuantileTransformer(n_quantiles=8),
+                      PCA(n_components=2, whiten=True, svd_solver="full")]:
+        node = spec.add(node, estimator)
+    spec.output("model", node)
+    pipeline = spec.build()
     data = dict(
         kind=np.full(12, fiml.KIND_TRADE, dtype=np.uint8),
         symbol=np.full(12, pipeline.symbol("BTCUSDT"), dtype=np.int64),
@@ -32,10 +38,9 @@ def train():
         price=np.array([10., 12., 11., 15., 13., 18., 16., 20., 17., 23., 19., 25.]),
         volume=np.ones(12),
     )
-    base = fiml.ModelInputPipeline(spec)
     base.symbol("BTCUSDT")
-    matrix = base.transform(**data)
-    actual = pipeline.fit_transform(**data)
+    matrix = base.transform(**data)["base"]
+    actual = pipeline.fit_transform(**data)["model"]
 
     # Independently check sklearn inference on the same indicator/lag snapshots.
     imputed = SimpleImputer(strategy="median", add_indicator=True).fit_transform(matrix)

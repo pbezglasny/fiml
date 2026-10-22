@@ -1,3 +1,4 @@
+from pipeline_fixtures import LinearSpec, SingleOutput
 import json
 from pathlib import Path
 
@@ -19,7 +20,7 @@ def expected_array(values):
 
 
 def test_python_pipeline_matches_shared_model_input_fixture():
-    pipeline = fiml.ModelInputPipeline.from_json(
+    pipeline = SingleOutput.from_json(
         (FIXTURE_ROOT / "pipeline_spec.json").read_text()
     )
     events = load_json("events.json")

@@ -19,14 +19,17 @@
 //! let raw = FeatureExtractorSpec::new([FeatureDefinition::new(
 //!     FeatureKey::Field { symbol: btc, field: EventField::Price }, FeatureId::new("price"),
 //! )])?;
-//! let mut pipeline = PipelineSpec::new(raw, [TransformerDefinition::sma(
+//! let mut spec = PipelineSpec::new(raw);
+//! let node = spec.add(spec.root(), fiml::FittedStage::Scalar { transformations: vec![TransformerDefinition::sma(
 //!     FeatureId::new("price"), FeatureId::new("sma3"), 3, WarmupPolicy::FullWindow,
-//! )])?.build(ArrayFeatureVector::<1>::new(), ArrayFeatureVector::<1>::new())?;
+//! )] })?;
+//! spec.output("model", node)?;
+//! let mut pipeline = spec.build()?;
 //! pipeline.handle_event(Event::price(btc, 10.0, 0))?;
-//! assert!(pipeline.values()[0].is_nan());
+//! assert!(pipeline.output("model").unwrap().values()[0].is_nan());
 //! pipeline.handle_event(Event::price(btc, 12.0, 1))?;
 //! pipeline.handle_event(Event::price(btc, 14.0, 2))?;
-//! assert_eq!(pipeline.values(), &[12.0]);
+//! assert_eq!(pipeline.output("model").unwrap().values(), &[12.0]);
 //! # Ok(())
 //! # }
 //! ```
@@ -51,9 +54,9 @@ pub use event::{
 };
 pub use features::{
     EventField, FeatureDefinition, FeatureExtractor, FeatureExtractorBuilder, FeatureExtractorSpec,
-    FeatureId, FeatureKey, FeatureSource, FittedStage, MAX_OUTPUTS_PER_INDICATOR, Pipeline,
-    PipelineSpec, SourceKind, SourceObservation, TransformerDefinition, TransformerOperation,
-    UpdateResult,
+    FeatureId, FeatureKey, FeatureSource, FittedStage, MAX_OUTPUTS_PER_INDICATOR, NodeId, OutputId,
+    OutputSpec, Pipeline, PipelineNode, PipelineOutput, PipelineSpec, SourceKind,
+    SourceObservation, TransformerDefinition, TransformerOperation, UpdateResult,
 };
 pub use indicators::{
     CumulativeVolumeDelta, ObvBucket, OnBalanceVolumeTimed, ReturnKind, VolumePriceTrend,
@@ -106,6 +109,11 @@ pub enum FimlError {
         index: usize,
         /// Underlying validation failure.
         reason: InvalidTransformationDefinitionError,
+    },
+    /// Invalid graph ownership, outputs, or topology.
+    InvalidPipeline {
+        /// Description of the graph contract violation.
+        reason: String,
     },
     /// Cold-path stage validation includes layout and numeric diagnostics.
     InvalidPipelineStage {
@@ -548,6 +556,7 @@ pub enum DefinitionDurationField {
 impl Display for FimlError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::InvalidPipeline { reason } => write!(f, "invalid pipeline: {reason}"),
             Self::InvalidContextUpdate { index, reason } => {
                 write!(f, "context update {index}: {reason}")
             }

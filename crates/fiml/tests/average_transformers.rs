@@ -1,9 +1,10 @@
+mod common;
+
 use fiml::HeapRingBuffer;
 use fiml::indicators::{ExponentialMovingAverage, SimpleMovingAverage};
 use fiml::{
-    ArrayFeatureVector, Event, EventField, FeatureDefinition, FeatureExtractorSpec, FeatureId,
-    FeatureKey, FittedStage, PipelineSpec, Symbol, TransformerDefinition as T, VecFeatureVector,
-    WarmupPolicy,
+    Event, EventField, FeatureDefinition, FeatureExtractorSpec, FeatureId, FeatureKey, FittedStage,
+    Symbol, TransformerDefinition as T, WarmupPolicy,
 };
 
 fn id(name: &str) -> FeatureId {
@@ -28,7 +29,7 @@ fn averages_match_calculators_and_sample_only_matching_finite_observations() {
     for warmup in [WarmupPolicy::FullWindow, WarmupPolicy::FirstValue] {
         let raw =
             FeatureExtractorSpec::new([field(symbol, "price", EventField::TradePrice)]).unwrap();
-        let mut pipeline = PipelineSpec::new(
+        let mut pipeline = common::linear_spec(
             raw,
             [
                 T::sma(id("price"), id("s3"), 3, warmup),
@@ -37,12 +38,11 @@ fn averages_match_calculators_and_sample_only_matching_finite_observations() {
                 T::ema(id("price"), id("e3"), 3, warmup),
                 T::sma(id("price"), id("s3-copy"), 3, warmup),
             ],
+            [],
+            None,
         )
         .unwrap()
-        .build(
-            ArrayFeatureVector::<1>::new(),
-            ArrayFeatureVector::<5>::new(),
-        )
+        .build()
         .unwrap();
         let mut sma = SimpleMovingAverage::<HeapRingBuffer<f64>, 2>::new_heap(3, warmup);
         let mut ema = ExponentialMovingAverage::<2>::new(warmup);
@@ -50,7 +50,14 @@ fn averages_match_calculators_and_sample_only_matching_finite_observations() {
             sma.add_window(window).unwrap();
             ema.add_window(window).unwrap();
         }
-        assert!(pipeline.values().iter().all(|v| v.is_nan()));
+        assert!(
+            pipeline
+                .output("model")
+                .unwrap()
+                .values()
+                .iter()
+                .all(|v| v.is_nan())
+        );
         for (timestamp, value) in [10., 10., 20., -2., 0., 50.].into_iter().enumerate() {
             let timestamp = timestamp as i64;
             pipeline
@@ -66,14 +73,14 @@ fn averages_match_calculators_and_sample_only_matching_finite_observations() {
                 sma.value_at(0),
             ]
             .map(|v| v.unwrap_or(f64::NAN));
-            equal(pipeline.values(), &expected);
+            equal(pipeline.output("model").unwrap().values(), &expected);
             for event in [
                 Event::trade(other, 99., 1., timestamp, None),
                 Event::volume(symbol, 99., timestamp),
                 Event::time(timestamp),
             ] {
                 pipeline.handle_event(event).unwrap();
-                equal(pipeline.values(), &expected);
+                equal(pipeline.output("model").unwrap().values(), &expected);
             }
             assert!(
                 pipeline
@@ -85,7 +92,7 @@ fn averages_match_calculators_and_sample_only_matching_finite_observations() {
                     .handle_event(Event::price(symbol, 1., timestamp - 1))
                     .is_err()
             );
-            equal(pipeline.values(), &expected);
+            equal(pipeline.output("model").unwrap().values(), &expected);
         }
     }
 }
@@ -100,31 +107,43 @@ fn fields_route_all_scalar_sources_and_start_missing() {
         field(symbol, "tv", EventField::TradeVolume),
     ])
     .unwrap();
-    let mut pipeline = PipelineSpec::new(
+    let mut pipeline = common::linear_spec(
         raw,
         ["p", "v", "tp", "tv"].map(|name| T::identity(id(name), id(name))),
+        [],
+        None,
     )
     .unwrap()
-    .build(
-        ArrayFeatureVector::<4>::new(),
-        ArrayFeatureVector::<4>::new(),
-    )
+    .build()
     .unwrap();
-    assert!(pipeline.values().iter().all(|v| v.is_nan()));
+    assert!(
+        pipeline
+            .output("model")
+            .unwrap()
+            .values()
+            .iter()
+            .all(|v| v.is_nan())
+    );
     pipeline.handle_event(Event::price(symbol, 7., 0)).unwrap();
-    equal(pipeline.values(), &[7., f64::NAN, f64::NAN, f64::NAN]);
+    equal(
+        pipeline.output("model").unwrap().values(),
+        &[7., f64::NAN, f64::NAN, f64::NAN],
+    );
     pipeline.handle_event(Event::volume(symbol, 8., 1)).unwrap();
     pipeline
         .handle_event(Event::trade(symbol, 9., 10., 2, None))
         .unwrap();
-    equal(pipeline.values(), &[7., 8., 9., 10.]);
+    equal(
+        pipeline.output("model").unwrap().values(),
+        &[7., 8., 9., 10.],
+    );
 }
 
 #[test]
 fn successive_stages_retain_visible_outputs_in_reused_scratch() {
     let symbol = Symbol::new("average-stages").unwrap();
     let raw = FeatureExtractorSpec::new([field(symbol, "p", EventField::Price)]).unwrap();
-    let mut pipeline = PipelineSpec::with_stages(
+    let mut pipeline = common::linear_spec(
         raw,
         [T::standard_scale(id("p"), id("x"), 10., 2.)],
         [
@@ -141,14 +160,10 @@ fn successive_stages_retain_visible_outputs_in_reused_scratch() {
                 ],
             },
         ],
-        2,
         None,
     )
     .unwrap()
-    .build(
-        ArrayFeatureVector::<1>::new(),
-        ArrayFeatureVector::<2>::new(),
-    )
+    .build()
     .unwrap();
     for (event, expected) in [
         (Event::price(symbol, 10., 0), [f64::NAN, f64::NAN]),
@@ -158,7 +173,7 @@ fn successive_stages_retain_visible_outputs_in_reused_scratch() {
         (Event::time(4), [7. / 3., 7. / 3.]),
     ] {
         pipeline.handle_event(event).unwrap();
-        equal(pipeline.values(), &expected);
+        equal(pipeline.output("model").unwrap().values(), &expected);
     }
 }
 
@@ -180,18 +195,17 @@ fn book_missing_outputs_preserve_history_and_ignore_buffered_updates() {
     .unwrap()
     .with_order_books([OrderBookConfig::new(symbol, UpdatePolicy::Contiguous, 4)])
     .unwrap();
-    let mut pipeline = PipelineSpec::new(
+    let mut pipeline = common::linear_spec(
         raw,
         [
             T::sma(id("book"), id("s"), 2, WarmupPolicy::FullWindow),
             T::ema(id("book"), id("e"), 2, WarmupPolicy::FirstValue),
         ],
+        [],
+        None,
     )
     .unwrap()
-    .build(
-        ArrayFeatureVector::<1>::new(),
-        ArrayFeatureVector::<2>::new(),
-    )
+    .build()
     .unwrap();
     let snapshot = |seq, ts, bid, ask| {
         Event::order_book_snapshot(
@@ -207,7 +221,7 @@ fn book_missing_outputs_preserve_history_and_ignore_buffered_updates() {
     pipeline
         .handle_event(snapshot(10, 0, dec!(3), dec!(1)))
         .unwrap();
-    equal(pipeline.values(), &[f64::NAN, 0.5]);
+    equal(pipeline.output("model").unwrap().values(), &[f64::NAN, 0.5]);
     assert!(
         pipeline
             .handle_event(Event::order_book_delta(
@@ -227,11 +241,11 @@ fn book_missing_outputs_preserve_history_and_ignore_buffered_updates() {
             OrderBookDelta::new(12, vec![]),
         ))
         .unwrap();
-    equal(pipeline.values(), &[f64::NAN, 0.5]);
+    equal(pipeline.output("model").unwrap().values(), &[f64::NAN, 0.5]);
     pipeline
         .handle_event(snapshot(11, 2, dec!(3), dec!(1)))
         .unwrap();
-    equal(pipeline.values(), &[0.25, 1. / 6.]);
+    equal(pipeline.output("model").unwrap().values(), &[0.25, 1. / 6.]);
     pipeline
         .handle_event(Event::order_book_snapshot(
             symbol,
@@ -239,13 +253,22 @@ fn book_missing_outputs_preserve_history_and_ignore_buffered_updates() {
             OrderBookSnapshot::new(13, vec![], vec![]),
         ))
         .unwrap();
-    equal(pipeline.values(), &[f64::NAN, f64::NAN]);
+    equal(
+        pipeline.output("model").unwrap().values(),
+        &[f64::NAN, f64::NAN],
+    );
     pipeline.handle_event(Event::time(4)).unwrap();
-    equal(pipeline.values(), &[f64::NAN, f64::NAN]);
+    equal(
+        pipeline.output("model").unwrap().values(),
+        &[f64::NAN, f64::NAN],
+    );
     pipeline
         .handle_event(snapshot(14, 5, dec!(3), dec!(1)))
         .unwrap();
-    equal(pipeline.values(), &[0.25, 7. / 18.]);
+    equal(
+        pipeline.output("model").unwrap().values(),
+        &[0.25, 7. / 18.],
+    );
 }
 
 #[test]
@@ -257,7 +280,7 @@ fn pca_selection_and_imputation_propagate_source_observations() {
         field(b, "b", EventField::Price),
     ])
     .unwrap();
-    let mut pipeline = PipelineSpec::with_stages(
+    let mut pipeline = common::linear_spec(
         raw,
         [T::identity(id("a"), id("a")), T::identity(id("b"), id("b"))],
         [
@@ -281,14 +304,10 @@ fn pca_selection_and_imputation_propagate_source_observations() {
                 transformations: vec![T::sma(id("sum"), id("avg"), 2, WarmupPolicy::FullWindow)],
             },
         ],
-        1,
         None,
     )
     .unwrap()
-    .build(
-        ArrayFeatureVector::<2>::new(),
-        ArrayFeatureVector::<1>::new(),
-    )
+    .build()
     .unwrap();
     for (event, expected) in [
         (Event::price(a, 10., 0), f64::NAN),
@@ -297,7 +316,7 @@ fn pca_selection_and_imputation_propagate_source_observations() {
         (Event::price(a, 10., 3), 30.),
     ] {
         pipeline.handle_event(event).unwrap();
-        equal(pipeline.values(), &[expected]);
+        equal(pipeline.output("model").unwrap().values(), &[expected]);
     }
 }
 
@@ -305,28 +324,33 @@ fn pca_selection_and_imputation_propagate_source_observations() {
 fn validates_average_windows_without_lag_cap_and_limits_compatible_groups() {
     let raw = FeatureExtractorSpec::new([field(Symbol::GLOBAL, "p", EventField::Price)]).unwrap();
     assert!(
-        PipelineSpec::new(
+        common::linear_spec(
             raw.clone(),
-            [T::sma(id("p"), id("s"), 0, WarmupPolicy::FullWindow)]
+            [T::sma(id("p"), id("s"), 0, WarmupPolicy::FullWindow)],
+            [],
+            None
         )
         .is_err()
     );
-    let spec = PipelineSpec::new(
+    let spec = common::linear_spec(
         raw.clone(),
         [T::sma(id("p"), id("s"), 10_001, WarmupPolicy::FullWindow)],
+        [],
+        None,
     )
     .unwrap();
-    spec.build(VecFeatureVector::new(1), VecFeatureVector::new(1))
-        .unwrap();
+    spec.build().unwrap();
     assert!(
-        PipelineSpec::new(
+        common::linear_spec(
             raw,
             (0..17).map(|i| T::ema(
                 id("p"),
                 id(&format!("e{i}")),
                 i + 1,
                 WarmupPolicy::FullWindow
-            ))
+            )),
+            [],
+            None
         )
         .is_err()
     );
@@ -336,7 +360,7 @@ fn validates_average_windows_without_lag_cap_and_limits_compatible_groups() {
 fn overflow_is_missing_and_lags_before_averages_sample_every_accepted_event() {
     let symbol = Symbol::new("average-overflow").unwrap();
     let raw = FeatureExtractorSpec::new([field(symbol, "p", EventField::Price)]).unwrap();
-    let mut pipeline = PipelineSpec::with_stages(
+    let mut pipeline = common::linear_spec(
         raw,
         [
             T::standard_scale(id("p"), id("scaled"), 0., 0.5),
@@ -348,14 +372,10 @@ fn overflow_is_missing_and_lags_before_averages_sample_every_accepted_event() {
                 T::sma(id("lag"), id("lag_avg"), 2, WarmupPolicy::FullWindow),
             ],
         }],
-        2,
         None,
     )
     .unwrap()
-    .build(
-        ArrayFeatureVector::<1>::new(),
-        ArrayFeatureVector::<2>::new(),
-    )
+    .build()
     .unwrap();
     for (event, expected) in [
         (Event::price(symbol, 1., 0), [f64::NAN, f64::NAN]),
@@ -366,7 +386,7 @@ fn overflow_is_missing_and_lags_before_averages_sample_every_accepted_event() {
         (Event::volume(symbol, 0., 5), [4., 5e307]),
     ] {
         pipeline.handle_event(event).unwrap();
-        equal(pipeline.values(), &expected);
+        equal(pipeline.output("model").unwrap().values(), &expected);
     }
 }
 
@@ -382,15 +402,14 @@ fn invoked_handlers_without_writes_do_not_sample() {
         id("cvd"),
     )])
     .unwrap();
-    let mut pipeline = PipelineSpec::new(
+    let mut pipeline = common::linear_spec(
         raw,
         [T::sma(id("cvd"), id("avg"), 2, WarmupPolicy::FullWindow)],
+        [],
+        None,
     )
     .unwrap()
-    .build(
-        ArrayFeatureVector::<1>::new(),
-        ArrayFeatureVector::<1>::new(),
-    )
+    .build()
     .unwrap();
     for (timestamp, side, volume, expected) in [
         (0, Some(fiml::TradeSide::AggressorBuy), 10., f64::NAN),
@@ -400,7 +419,7 @@ fn invoked_handlers_without_writes_do_not_sample() {
         pipeline
             .handle_event(Event::trade(symbol, 1., volume, timestamp, side))
             .unwrap();
-        equal(pipeline.values(), &[expected]);
+        equal(pipeline.output("model").unwrap().values(), &[expected]);
     }
 }
 
@@ -413,7 +432,7 @@ fn imputed_values_and_missing_indicators_inherit_only_their_source_flags() {
         field(b, "b", EventField::Price),
     ])
     .unwrap();
-    let mut pipeline = PipelineSpec::with_stages(
+    let mut pipeline = common::linear_spec(
         raw,
         [T::identity(id("a"), id("a")), T::identity(id("b"), id("b"))],
         [
@@ -434,14 +453,10 @@ fn imputed_values_and_missing_indicators_inherit_only_their_source_flags() {
                 ],
             },
         ],
-        2,
         None,
     )
     .unwrap()
-    .build(
-        ArrayFeatureVector::<2>::new(),
-        ArrayFeatureVector::<2>::new(),
-    )
+    .build()
     .unwrap();
     for (event, expected) in [
         (Event::price(a, 1., 0), [f64::NAN; 2]),
@@ -450,6 +465,6 @@ fn imputed_values_and_missing_indicators_inherit_only_their_source_flags() {
         (Event::price(b, 20., 3), [15., 0.]),
     ] {
         pipeline.handle_event(event).unwrap();
-        equal(pipeline.values(), &expected);
+        equal(pipeline.output("model").unwrap().values(), &expected);
     }
 }

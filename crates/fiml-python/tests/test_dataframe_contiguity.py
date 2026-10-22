@@ -1,10 +1,11 @@
+from pipeline_fixtures import LinearSpec, SingleOutput
 import fiml
 import numpy as np
 import pandas as pd
 import pytest
 
 
-@pytest.fixture(params=[fiml.FeatureExtractor, fiml.ModelInputPipeline])
+@pytest.fixture(params=[fiml.FeatureExtractor, SingleOutput])
 def runtime_factory(request):
     spec = (
         fiml.FeatureExtractorSpec()
@@ -12,8 +13,8 @@ def runtime_factory(request):
         .field("BTCUSDT", source="trade_volume")
         .cvd("BTCUSDT", [2])
     )
-    if request.param is fiml.ModelInputPipeline:
-        model = fiml.PipelineSpec(spec)
+    if request.param is SingleOutput:
+        model = LinearSpec(spec)
         for feature_id in spec.feature_ids():
             model.lagged(feature_id, lag_window=1)
         spec = model

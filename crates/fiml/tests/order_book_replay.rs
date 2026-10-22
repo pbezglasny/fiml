@@ -77,19 +77,21 @@ fn configured_raw_and_model_runtimes_match_shared_book_replay() {
     let mut raw = raw_spec
         .build(VecFeatureVector::new_of_length(21, 20))
         .unwrap();
-    let mut pipeline = spec
-        .build(
-            VecFeatureVector::new_of_length(21, 20),
-            VecFeatureVector::new_of_length(5, 4),
-        )
-        .unwrap();
+    let mut pipeline = spec.build().unwrap();
     assert!(
         raw.feature_vector()
             .values()
             .iter()
             .all(|value| value.is_nan())
     );
-    assert!(pipeline.values().iter().all(|value| value.is_nan()));
+    assert!(
+        pipeline
+            .output("model")
+            .unwrap()
+            .values()
+            .iter()
+            .all(|value| value.is_nan())
+    );
     assert_eq!(
         raw.feature_ids()
             .iter()
@@ -102,7 +104,9 @@ fn configured_raw_and_model_runtimes_match_shared_book_replay() {
     );
     assert_eq!(
         pipeline
-            .output_ids()
+            .output("model")
+            .unwrap()
+            .feature_ids()
             .iter()
             .map(|id| id.as_str())
             .collect::<Vec<_>>(),
@@ -132,7 +136,7 @@ fn configured_raw_and_model_runtimes_match_shared_book_replay() {
         }
         assert_values(raw.feature_vector().values(), &step["raw"]);
         assert_values(pipeline.raw_values(), &step["raw"]);
-        assert_values(pipeline.values(), &step["model"]);
+        assert_values(pipeline.output("model").unwrap().values(), &step["model"]);
     }
     // A spec contains configuration only: rebuilding starts with fresh state.
     let fresh = raw_spec
@@ -154,15 +158,13 @@ fn flow_fixture_preserves_observations_and_smoothing_through_resynchronization()
     for dense in [false, true] {
         let mut document = fixture["pipeline"].clone();
         if dense {
-            document["feature_extractor"]["order_books"][0]["dense"] = serde_json::json!({
+            document["nodes"][0]["spec"]["order_books"][0]["dense"] = serde_json::json!({
                 "tick_size": "1", "min_price": "90", "max_price": "110"
             });
         }
         let spec: PipelineSpec = serde_json::from_value(document.clone()).unwrap();
         assert_eq!(serde_json::to_value(&spec).unwrap(), document);
-        let mut pipeline = spec
-            .build(VecFeatureVector::new(5), VecFeatureVector::new(2))
-            .unwrap();
+        let mut pipeline = spec.build().unwrap();
         let symbol = Symbol::new("btc").unwrap();
         let mut flow_timestamp = None;
         for (index, step) in fixture["steps"].as_array().unwrap().iter().enumerate() {
@@ -187,7 +189,10 @@ fn flow_fixture_preserves_observations_and_smoothing_through_resynchronization()
                 );
                 let observed = step["flow_observed"].as_bool().unwrap();
                 assert_eq!(&pipeline.raw_observations()[1..], [observed; 4]);
-                assert_eq!(pipeline.output_observations(), [observed; 2]);
+                assert_eq!(
+                    pipeline.output("model").unwrap().observations(),
+                    [observed; 2]
+                );
                 if observed {
                     flow_timestamp = step["event"]["timestamp"].as_i64();
                 }
@@ -198,7 +203,7 @@ fn flow_fixture_preserves_observations_and_smoothing_through_resynchronization()
                 assert_eq!(source.timestamp_millis, flow_timestamp, "step {index}");
             }
             assert_values(pipeline.raw_values(), &step["raw"]);
-            assert_values(pipeline.values(), &step["model"]);
+            assert_values(pipeline.output("model").unwrap().values(), &step["model"]);
         }
     }
 }

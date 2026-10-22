@@ -23,8 +23,11 @@ T0 = 1_609_459_200_000
 def build_feature_extractor_spec() -> fiml.PipelineSpec:
     raw = fiml.FeatureExtractorSpec().field("BTCUSDT", id="price").day_of_week()
     day = raw.feature_ids()[0]
-    return (fiml.PipelineSpec(raw).sma("price", window=3, output="sma")
+    scalar = (fiml.ScalarStage().sma("price", window=3, output="sma")
             .ema("price", window=3, output="ema").identity(day))
+    spec = fiml.PipelineSpec(raw)
+    spec.output("model", spec.add(spec.root(), scalar))
+    return spec
 
 
 def main() -> None:
@@ -39,7 +42,7 @@ def main() -> None:
     timestamp = T0 + np.arange(n, dtype=np.int64) * 1_000
 
     # Batch path. Payload columns are keyword-only; KIND_PRICE reads `price`.
-    batch = extractor.transform(kind, symbol, timestamp, price=prices)
+    batch = extractor.transform(kind, symbol, timestamp, price=prices)["model"]
 
     # Streaming path: a fresh extractor stepped one event at a time.
     streaming_extractor = fiml.ModelInputPipeline(build_feature_extractor_spec())
@@ -49,9 +52,9 @@ def main() -> None:
         streaming_extractor.update(
             int(kind[i]), int(symbol[i]), int(timestamp[i]), price=float(prices[i])
         )
-        streaming[i] = streaming_extractor.values()
+        streaming[i] = streaming_extractor.output("model").values()
 
-    print("columns:", extractor.feature_names())
+    print("columns:", extractor.output("model").feature_names())
     print(batch)
 
     # Exact equality, not approximate: identical feature-vector spec + identical code

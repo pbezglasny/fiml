@@ -1,3 +1,4 @@
+from pipeline_fixtures import LinearSpec, SingleOutput
 from datetime import timedelta
 
 import numpy as np
@@ -111,10 +112,10 @@ def test_target_generation_is_separate_from_causal_model_inputs():
     source["symbol"] = "BTCUSDT"
     source["volume"] = 1.0
     raw = fiml.FeatureExtractorSpec().field("BTCUSDT", source="trade_price", id="price")
-    spec = fiml.PipelineSpec(raw).sma("price", window=2, output="sma2")
+    spec = LinearSpec(raw).sma("price", window=2, output="sma2")
 
     def features(frame):
-        return fiml.ModelInputPipeline(spec).compute_features(frame)
+        return SingleOutput(spec).compute_features(frame)
 
     before = features(source)
     target = fiml.future_value(source, timestamp_column="ts", value_column="price", horizon="500ms")

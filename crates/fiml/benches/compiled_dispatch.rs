@@ -125,7 +125,19 @@ fn pipeline_spec(symbols: &[Symbol], windows: &[usize]) -> PipelineSpec {
             window,
         ));
     }
-    PipelineSpec::new(raw, transformations).unwrap()
+    {
+        let mut spec = PipelineSpec::new(raw);
+        let node = spec
+            .add(
+                spec.root(),
+                fiml::FittedStage::Scalar {
+                    transformations: transformations.into_iter().collect(),
+                },
+            )
+            .unwrap();
+        spec.output("model", node).unwrap();
+        spec
+    }
 }
 
 fn assert_value(ids: &[FeatureId], values: &[f64], name: &str, expected: f64) {
@@ -182,14 +194,15 @@ fn compiled_dispatch(c: &mut Criterion) {
         let spec = pipeline_spec(symbols, windows);
         let raw_spec = spec.raw_feature_extractor_spec();
         let raw_count = raw_spec.feature_vector_length();
-        let model_count = spec.feature_vector_length();
+        let model_count = spec
+            .build()
+            .unwrap()
+            .output("model")
+            .unwrap()
+            .values()
+            .len();
         let mut extractor = raw_spec.build(VecFeatureVector::new(raw_count)).unwrap();
-        let mut pipeline = spec
-            .build(
-                VecFeatureVector::new(raw_count),
-                VecFeatureVector::new(model_count),
-            )
-            .unwrap();
+        let mut pipeline = spec.build().unwrap();
 
         let max_window = *windows.last().unwrap();
         let warmup_rounds = 2 * max_window + 1;
@@ -202,8 +215,8 @@ fn compiled_dispatch(c: &mut Criterion) {
 
         let raw_ids = extractor.feature_ids();
         let raw_values = extractor.feature_vector().values();
-        let output_ids = pipeline.output_ids();
-        let values = pipeline.values();
+        let output_ids = pipeline.output("model").unwrap().feature_ids();
+        let values = pipeline.output("model").unwrap().values();
         assert!(raw_values.iter().all(|value| value.is_finite()));
         assert!(values.iter().all(|value| value.is_finite()));
         assert_eq!(raw_values, pipeline.raw_values());
@@ -277,7 +290,7 @@ fn compiled_dispatch(c: &mut Criterion) {
             warmup_rounds,
             |event| {
                 black_box(pipeline.handle_event(event).unwrap());
-                black_box(pipeline.values());
+                black_box(pipeline.output("model").unwrap().values());
             },
         );
     }

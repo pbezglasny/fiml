@@ -14,7 +14,7 @@ spec.loader.exec_module(example)
 
 def test_saved_binance_depth_matches_decimal_calculations():
     pipeline = example.build_pipeline()
-    actual = pipeline.transform_order_book(example.load_events(example.SAMPLE))
+    actual = pipeline.transform_order_book(example.load_events(example.SAMPLE))["model"]
     expected = []
     last_id = -1
     previous_imbalance = np.nan
@@ -53,7 +53,7 @@ def test_partial_snapshots_replace_levels_and_skip_duplicates(tmp_path):
     sample.write_text("".join(json.dumps({
         "stream": example.STREAM, "received_at_ms": i, "data": depth,
     }) + "\n" for i, depth in enumerate(records)))
-    rows = example.build_pipeline().transform_order_book(example.load_events(sample))
+    rows = example.build_pipeline().transform_order_book(example.load_events(sample))["model"]
     assert rows.shape == (2, 9)
     np.testing.assert_equal(rows[:, [0, 1, 3, 4, 8]], [
         [101, 2, 101.5, 0.5, np.nan],

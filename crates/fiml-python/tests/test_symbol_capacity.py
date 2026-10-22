@@ -1,3 +1,4 @@
+from pipeline_fixtures import LinearSpec, SingleOutput
 import subprocess
 import sys
 
@@ -16,9 +17,9 @@ def test_symbol_capacity_is_recoverable():
 
 def check_capacity():
     raw = fiml.FeatureExtractorSpec().field("capacity-0")
-    model = fiml.PipelineSpec(raw).identity(raw.feature_ids()[0])
+    model = LinearSpec(raw).identity(raw.feature_ids()[0])
     extractor = fiml.FeatureExtractor(raw)
-    pipeline = fiml.ModelInputPipeline(model)
+    pipeline = SingleOutput(model)
     raw_json = raw.to_json()
     model_json = model.to_json()
     for runtime in [extractor, pipeline]:
@@ -60,8 +61,8 @@ def check_capacity():
     for cls, text in [
         (fiml.FeatureExtractorSpec, raw_json),
         (fiml.FeatureExtractor, raw_json),
-        (fiml.PipelineSpec, model_json),
-        (fiml.ModelInputPipeline, model_json),
+        (LinearSpec, model_json),
+        (SingleOutput, model_json),
     ]:
         with pytest.raises(ValueError, match=error):
             cls.from_json(text.replace("capacity-0", "overflow"))

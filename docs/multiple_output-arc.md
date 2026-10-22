@@ -1,18 +1,18 @@
-# Multiple pipeline outputs: graph architecture proposal
+# Multiple pipeline outputs: graph architecture
 
-Status: proposal with recorded decisions for
+Status: implemented contract with recorded decisions for
 [#187](https://github.com/pbezglasny/fiml/issues/187).
 This records the graph design discussed after the initial single-prefix draft.
 The central builder and ownership rules, result access, offline batch results,
 node-local PCA feature names, nonempty named outputs, indexed JSON format,
 per-node internal buffers, a shared fitting mask, replay-based fitting without a
 graph-wide training cache, and the absence of a backward-compatibility requirement
-are agreed below. Other recommendations remain provisional. Nothing here is
-implemented; interface examples are illustrative.
+are agreed below. The runtime, authoring API, and version 4.0 serializer implement
+this contract. Follow-up measurements may guide the deferred optimizations.
 
-The earlier [multiple-output draft](multiple_output.md) describes a reverted
-exploration with one shared prefix and one branching point. This proposal allows
-outputs to branch from any preceding transformation node.
+The [multiple-output API guide](multiple_output.md) now documents this graph
+contract, replacing the reverted single-prefix exploration. Outputs can branch
+from any preceding transformation node.
 
 ## Motivation
 
@@ -65,7 +65,7 @@ pipeline from the current configuration.
 Python training authoring:
 
 ```python
-# Proposed interface; not implemented. Stage variables are existing supported
+# Stage variables are supported
 # transformation recipes, and PCA is the sklearn estimator.
 spec = PipelineSpec(extractor_spec)
 raw = spec.root()
@@ -86,7 +86,7 @@ pipeline.fit(**training_events)
 Rust uses the same construction pattern with fitted numeric stage parameters:
 
 ```rust,ignore
-// Proposed interface; stage variables contain validated numeric definitions.
+// Stage variables contain validated numeric definitions.
 let mut spec = PipelineSpec::new(extractor_spec);
 let raw = spec.root();
 let projected = spec.add(raw, fitted_pca)?;
@@ -279,7 +279,7 @@ many outputs; no `all_outputs` flag is needed. Output selection happens on the
 returned dictionary. Shared nodes still run only once per event.
 
 ```python
-# Proposed runtime interface; not implemented.
+# Online reads and offline replay use the same graph runtime.
 model_a = pipeline.output("model_a")
 decision = pipeline.output("decision")
 
@@ -350,7 +350,7 @@ stage definitions. Nested extractor storage metadata retains its own format.
 
 The following example defines a shared PCA, a model-A selection, a model-B scaler,
 and a decision output exposing the extractor's original price and volume. Numeric
-parameters are illustrative; the graph format is not yet supported by the runtime.
+parameters are illustrative.
 
 ```json
 {
@@ -449,7 +449,7 @@ Export configuration and fitted numeric state only. Do not export live values,
 histories, clocks, buffers, training rows, or Python estimators. Loading starts
 cold. The JSON Schema should describe record shapes and local numeric constraints;
 reference bounds, parent ordering, and cross-node dimensions require runtime
-validation. Implement the schema and Rust serializer together in #188.
+validation. The schema and Rust serializer validate the same format.
 
 ## Deferred capabilities and implementation follow-up
 
@@ -459,10 +459,8 @@ optimization. Combining original features and PCA coordinates into one vector
 would require a future merge operation; the separate decision output shown above
 does not require it.
 
-The JSON representation is now selected; implementing its schema and serializer
-remains follow-up work. Concrete interface spellings in the examples can be
-refined without changing the agreed builder, ownership, result-access,
-PCA feature-naming, nonempty-output, artifact-ordering, storage, or fitting rules.
+The implementation follows the agreed builder, ownership, result-access, PCA
+feature-naming, nonempty-output, artifact-ordering, storage, and fitting rules.
 Reconcile [#188](https://github.com/pbezglasny/fiml/issues/188),
 [#189](https://github.com/pbezglasny/fiml/issues/189), and
 [#190](https://github.com/pbezglasny/fiml/issues/190) with those decisions. Their
@@ -479,5 +477,40 @@ zero-width output rejection during construction, loading, and fitting, including
 a failed refit with other nonempty outputs. Verify local PCA names, their reuse
 across separate nodes, missing-component validation, and name/order preservation
 through artifact round trips. Measure allocation behavior,
-throughput, and intermediate storage against separate pipelines. The historical
-checks in the earlier draft do not validate this graph proposal.
+throughput, and intermediate storage against separate pipelines. The current graph tests and benchmark validate this implementation separately
+from the historical single-prefix exploration.
+
+## Implementation verification and measurements
+
+The graph-specific tests cover shared history against independent pipelines,
+alias buffer identity, builder/runtime ownership, stable output handles,
+transactional refitting, changing learned widths, local PCA IDs, symbol-handle
+normalization, ordered dictionaries, zero-row batches, and strict 4.0 artifacts.
+Existing numeric, clock, context, and order-book fixtures now use the graph API.
+Allocation tests include branching and retained output-ID reads during warmup
+and steady event processing.
+
+Local measurements on 2026-10-22, AMD Ryzen 9 9900X, Rust 1.98.1:
+
+| Workload | Shared graph | Two independent pipelines |
+| --- | ---: | ---: |
+| 16 SMA coordinates, 8 PCA components, two lag branches | 117.98 ns/event | 213.33 ns/event |
+| Retained runtime heap for a 128-sample SMA and two lag branches | 13,038 bytes | 24,586 bytes |
+
+The timing benchmark uses release mode, ten samples, a one-second warmup, and a
+one-second measurement period. These are small local workloads, not universal
+latency guarantees. Heap measurements count live allocations after construction,
+including compiled parameters, saved numeric configuration, metadata, and histories;
+the source builder and allocator overhead are excluded. The timing and memory
+rows use different workloads.
+
+Reproduce with `cargo bench -p fiml --bench multiple_outputs -- --sample-size 10
+--warm-up-time 1 --measurement-time 1` and
+`cargo test -p fiml --all-features --test pipeline_allocations
+shared_graph_retains_less_heap -- --nocapture`.
+
+Validation passed: 346 Rust tests with all features on Rust 1.89.0, Python binding
+compilation on Rust 1.89.0, 895 Python tests, workspace/all-target Clippy with
+warnings denied, Rustdoc with warnings and missing docs denied, rustfmt, runnable
+Python examples, and HTML execution of `notebooks/test.py`. Python tests emit
+expected sklearn warnings for deliberately empty columns and degenerate PCA.

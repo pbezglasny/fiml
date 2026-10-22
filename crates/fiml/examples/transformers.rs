@@ -3,8 +3,8 @@
 
 use fiml::order_book::{OrderBookConfig, OrderBookLevel, OrderBookSnapshot, UpdatePolicy};
 use fiml::{
-    ArrayFeatureVector, Event, FeatureDefinition, FeatureExtractorSpec, FeatureId, FeatureKey,
-    FittedStage, PipelineSpec, Symbol, TransformerDefinition as T, WarmupPolicy,
+    Event, FeatureDefinition, FeatureExtractorSpec, FeatureId, FeatureKey, FittedStage,
+    PipelineSpec, Symbol, TransformerDefinition as T, WarmupPolicy,
 };
 use rust_decimal::Decimal;
 
@@ -24,89 +24,99 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     .with_order_books([OrderBookConfig::new(btc, UpdatePolicy::Contiguous, 8)])?;
 
     // Each stage reads the preceding layout; definition order sets model columns.
-    let spec = PipelineSpec::with_stages(
-        raw,
-        [
-            T::standard_scale(id("spread"), id("scaled_spread"), 0., 2.),
-            T::identity(id("imbalance"), id("imbalance")),
-        ],
-        [FittedStage::Scalar {
-            transformations: vec![
-                // All four outputs share one finite-observation history.
-                T::delta(id("scaled_spread"), id("delta1"), 1),
-                T::simple_return(id("scaled_spread"), id("return1"), 1),
-                T::log_return(id("scaled_spread"), id("log_return1"), 1),
-                T::delta(id("scaled_spread"), id("delta2"), 2),
-                T::rolling_std(
-                    id("scaled_spread"),
-                    id("spread_std2"),
-                    2,
-                    WarmupPolicy::FirstValue,
-                ),
-                T::rolling_std(
-                    id("scaled_spread"),
-                    id("spread_std4"),
-                    4,
-                    WarmupPolicy::FirstValue,
-                ),
-                T::rolling_range(
-                    id("imbalance"),
-                    id("imbalance_range2"),
-                    2,
-                    WarmupPolicy::FirstValue,
-                ),
-                T::rolling_range(
-                    id("imbalance"),
-                    id("imbalance_range4"),
-                    4,
-                    WarmupPolicy::FirstValue,
-                ),
-                T::rolling_slope(
-                    id("scaled_spread"),
-                    id("spread_slope4"),
-                    4,
-                    WarmupPolicy::FirstValue,
-                ),
-                T::rolling_path_length(
-                    id("scaled_spread"),
-                    id("spread_path_length4"),
-                    4,
-                    WarmupPolicy::FirstValue,
-                ),
-                T::rolling_positive_movement(
-                    id("scaled_spread"),
-                    id("spread_positive_movement4"),
-                    4,
-                    WarmupPolicy::FirstValue,
-                ),
-                T::rolling_negative_movement(
-                    id("scaled_spread"),
-                    id("spread_negative_movement4"),
-                    4,
-                    WarmupPolicy::FirstValue,
-                ),
-                T::rolling_direction_change_count(
-                    id("scaled_spread"),
-                    id("spread_direction_change_count4"),
-                    4,
-                    WarmupPolicy::FirstValue,
-                ),
-                T::rolling_max_drawdown(
-                    id("scaled_spread"),
-                    id("spread_max_drawdown4"),
-                    4,
-                    WarmupPolicy::FirstValue,
-                ),
-            ],
-        }],
-        14,
-        None,
-    )?;
-    let mut pipeline = spec.build(
-        ArrayFeatureVector::<2>::new(),
-        ArrayFeatureVector::<14>::new(),
-    )?;
-    println!("model columns: {:?}", pipeline.output_ids());
+    let spec = {
+        let mut spec = PipelineSpec::new(raw);
+        let mut node = spec.add(
+            spec.root(),
+            fiml::FittedStage::Scalar {
+                transformations: [
+                    T::standard_scale(id("spread"), id("scaled_spread"), 0., 2.),
+                    T::identity(id("imbalance"), id("imbalance")),
+                ]
+                .into_iter()
+                .collect(),
+            },
+        )?;
+        node = spec.add(
+            node,
+            FittedStage::Scalar {
+                transformations: vec![
+                    // All four outputs share one finite-observation history.
+                    T::delta(id("scaled_spread"), id("delta1"), 1),
+                    T::simple_return(id("scaled_spread"), id("return1"), 1),
+                    T::log_return(id("scaled_spread"), id("log_return1"), 1),
+                    T::delta(id("scaled_spread"), id("delta2"), 2),
+                    T::rolling_std(
+                        id("scaled_spread"),
+                        id("spread_std2"),
+                        2,
+                        WarmupPolicy::FirstValue,
+                    ),
+                    T::rolling_std(
+                        id("scaled_spread"),
+                        id("spread_std4"),
+                        4,
+                        WarmupPolicy::FirstValue,
+                    ),
+                    T::rolling_range(
+                        id("imbalance"),
+                        id("imbalance_range2"),
+                        2,
+                        WarmupPolicy::FirstValue,
+                    ),
+                    T::rolling_range(
+                        id("imbalance"),
+                        id("imbalance_range4"),
+                        4,
+                        WarmupPolicy::FirstValue,
+                    ),
+                    T::rolling_slope(
+                        id("scaled_spread"),
+                        id("spread_slope4"),
+                        4,
+                        WarmupPolicy::FirstValue,
+                    ),
+                    T::rolling_path_length(
+                        id("scaled_spread"),
+                        id("spread_path_length4"),
+                        4,
+                        WarmupPolicy::FirstValue,
+                    ),
+                    T::rolling_positive_movement(
+                        id("scaled_spread"),
+                        id("spread_positive_movement4"),
+                        4,
+                        WarmupPolicy::FirstValue,
+                    ),
+                    T::rolling_negative_movement(
+                        id("scaled_spread"),
+                        id("spread_negative_movement4"),
+                        4,
+                        WarmupPolicy::FirstValue,
+                    ),
+                    T::rolling_direction_change_count(
+                        id("scaled_spread"),
+                        id("spread_direction_change_count4"),
+                        4,
+                        WarmupPolicy::FirstValue,
+                    ),
+                    T::rolling_max_drawdown(
+                        id("scaled_spread"),
+                        id("spread_max_drawdown4"),
+                        4,
+                        WarmupPolicy::FirstValue,
+                    ),
+                ],
+            },
+        )?;
+        spec.output("model", node)?;
+        spec
+    };
+    let mut pipeline = spec.build()?;
+    println!(
+        "model columns: {:?}",
+        pipeline.output("model").unwrap().feature_ids()
+    );
     for (index, ask) in [102, 104, 108, 108].into_iter().enumerate() {
         pipeline.handle_event(Event::order_book_snapshot(
             btc,
@@ -123,11 +133,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!(
             "market={:?} model={:?}",
             pipeline.raw_values(),
-            pipeline.values()
+            pipeline.output("model").unwrap().values()
         );
         // Unrelated events do not add duplicate spread observations.
         pipeline.handle_event(Event::time(index as i64))?;
-        assert_eq!(pipeline.output_observations(), &[false; 14]);
+        assert_eq!(
+            pipeline.output("model").unwrap().observations(),
+            &[false; 14]
+        );
     }
     assert_eq!(pipeline.raw_values(), &[8., 0.6]);
     let expected = [
@@ -146,7 +159,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         0.,
         0.,
     ];
-    for (actual, expected) in pipeline.values().iter().zip(expected) {
+    for (actual, expected) in pipeline
+        .output("model")
+        .unwrap()
+        .values()
+        .iter()
+        .zip(expected)
+    {
         assert!((actual - expected).abs() < 1e-12);
     }
     Ok(())

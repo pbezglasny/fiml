@@ -15,12 +15,11 @@ use std::time::Duration;
 
 use fiml::{
     Event, EventField, FeatureDefinition, FeatureExtractorSpec, FeatureId, FeatureKey, Pipeline,
-    PipelineSpec, Symbol, TradeSide, TransformerDefinition, VecFeatureVector, WarmupPolicy,
+    PipelineSpec, Symbol, TradeSide, TransformerDefinition, WarmupPolicy,
 };
 
 const INPUT_HEADER: &str = "timestamp,symbol,price,quantity,aggressor_side";
 const FEATURE_SYMBOL: &str = "BTCUSDT";
-const FEATURE_COUNT: usize = 5;
 
 fn main() -> Result<(), Box<dyn Error>> {
     let input_path = std::env::args_os()
@@ -56,7 +55,7 @@ where
     let feature_symbol = Symbol::new(FEATURE_SYMBOL)?;
     let mut extractor = build_extractor(feature_symbol)?;
     write!(output, "{INPUT_HEADER}")?;
-    for id in extractor.output_ids() {
+    for id in extractor.output("model").unwrap().feature_ids() {
         write!(output, ",{}", id.as_str())?;
     }
     writeln!(output)?;
@@ -89,7 +88,7 @@ where
             trade.quantity,
             side_name(trade.side)
         )?;
-        for value in extractor.values() {
+        for value in extractor.output("model").unwrap().values() {
             write!(output, ",{value}")?;
         }
         writeln!(output)?;
@@ -98,9 +97,7 @@ where
     Ok(())
 }
 
-fn build_extractor(
-    symbol: Symbol,
-) -> Result<Pipeline<VecFeatureVector, VecFeatureVector>, fiml::FimlError> {
+fn build_extractor(symbol: Symbol) -> Result<Pipeline, fiml::FimlError> {
     let definitions = [
         FeatureKey::Field {
             symbol,
@@ -127,41 +124,47 @@ fn build_extractor(
         FeatureExtractorSpec::new(definitions.clone().map(FeatureDefinition::with_default_id))?;
     let price = FeatureId::from(&definitions[0]);
     let volume = FeatureId::from(&definitions[1]);
-    PipelineSpec::new(
-        raw,
-        [
-            TransformerDefinition::sma(
-                price.clone(),
-                FeatureId::new("sma_price"),
-                3,
-                WarmupPolicy::FullWindow,
-            ),
-            TransformerDefinition::ema(
-                price,
-                FeatureId::new("ema_price"),
-                3,
-                WarmupPolicy::FullWindow,
-            ),
-            TransformerDefinition::sma(
-                volume,
-                FeatureId::new("sma_volume"),
-                3,
-                WarmupPolicy::FullWindow,
-            ),
-            TransformerDefinition::identity(
-                FeatureId::from(&definitions[2]),
-                FeatureId::from(&definitions[2]),
-            ),
-            TransformerDefinition::identity(
-                FeatureId::from(&definitions[3]),
-                FeatureId::from(&definitions[3]),
-            ),
-        ],
-    )?
-    .build(
-        VecFeatureVector::new(4),
-        VecFeatureVector::new(FEATURE_COUNT),
-    )
+    {
+        let mut spec = PipelineSpec::new(raw);
+        let node = spec.add(
+            spec.root(),
+            fiml::FittedStage::Scalar {
+                transformations: [
+                    TransformerDefinition::sma(
+                        price.clone(),
+                        FeatureId::new("sma_price"),
+                        3,
+                        WarmupPolicy::FullWindow,
+                    ),
+                    TransformerDefinition::ema(
+                        price,
+                        FeatureId::new("ema_price"),
+                        3,
+                        WarmupPolicy::FullWindow,
+                    ),
+                    TransformerDefinition::sma(
+                        volume,
+                        FeatureId::new("sma_volume"),
+                        3,
+                        WarmupPolicy::FullWindow,
+                    ),
+                    TransformerDefinition::identity(
+                        FeatureId::from(&definitions[2]),
+                        FeatureId::from(&definitions[2]),
+                    ),
+                    TransformerDefinition::identity(
+                        FeatureId::from(&definitions[3]),
+                        FeatureId::from(&definitions[3]),
+                    ),
+                ]
+                .into_iter()
+                .collect(),
+            },
+        )?;
+        spec.output("model", node)?;
+        spec
+    }
+    .build()
 }
 
 struct Trade<'a> {

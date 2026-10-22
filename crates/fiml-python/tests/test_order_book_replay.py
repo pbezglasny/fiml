@@ -1,3 +1,4 @@
+from pipeline_fixtures import LinearSpec, SingleOutput
 import json
 from pathlib import Path
 
@@ -34,8 +35,8 @@ def runtime(model, buffer_size=8):
             .configure_order_book("BTCUSDT", update_policy="contiguous", buffer_size=buffer_size)
             .order_book_best_bid_size("BTCUSDT"))
     if model:
-        spec = fiml.PipelineSpec(spec).identity(spec.feature_ids()[0], output="bid_size")
-        return fiml.ModelInputPipeline(spec)
+        spec = LinearSpec(spec).identity(spec.feature_ids()[0], output="bid_size")
+        return SingleOutput(spec)
     return fiml.FeatureExtractor(spec)
 
 
@@ -43,13 +44,13 @@ def runtime(model, buffer_size=8):
 @pytest.mark.parametrize("dense", [False, True])
 @pytest.mark.parametrize("model", [False, True])
 def test_shared_book_fixture_matches_rust_exactly(model, dense, fixture):
-    document = fixture["pipeline"] if model else fixture["pipeline"]["feature_extractor"]
+    document = fixture["pipeline"] if model else fixture["pipeline"]["nodes"][0]["spec"]
     document = json.loads(json.dumps(document))
     if dense:
-        raw = document["feature_extractor"] if model else document
+        raw = document["nodes"][0]["spec"] if model else document
         for config in raw["order_books"]:
             config["dense"] = {"tick_size": "1", "min_price": "0", "max_price": "1000"}
-    cls = fiml.ModelInputPipeline if model else fiml.FeatureExtractor
+    cls = SingleOutput if model else fiml.FeatureExtractor
     instance = cls.from_json(json.dumps(document))
     assert instance.feature_names() == fixture["model_names" if model else "raw_names"]
     assert np.isnan(instance.values()).all()
@@ -78,7 +79,7 @@ def test_shared_book_fixture_matches_rust_exactly(model, dense, fixture):
 
 
 def test_all_book_builders_preserve_configuration_and_default_ids():
-    document = json.loads(json.dumps(FIXTURE["pipeline"]["feature_extractor"]))
+    document = json.loads(json.dumps(FIXTURE["pipeline"]["nodes"][0]["spec"]))
     spec = fiml.FeatureExtractorSpec(capacity=21)
     for config in reversed(document["order_books"]):
         spec.configure_order_book(config["symbol"].upper(), update_policy=config["update_policy"],
@@ -137,10 +138,10 @@ def test_book_batches_validate_timestamps_per_symbol(model):
         spec.configure_order_book(symbol, update_policy="contiguous", buffer_size=8)
         spec.order_book_best_bid_size(symbol)
     if model:
-        pipeline_spec = fiml.PipelineSpec(spec)
+        pipeline_spec = LinearSpec(spec)
         for feature_id in spec.feature_ids():
             pipeline_spec.identity(feature_id)
-        instance = fiml.ModelInputPipeline(pipeline_spec)
+        instance = SingleOutput(pipeline_spec)
     else:
         instance = fiml.FeatureExtractor(spec)
 
@@ -226,7 +227,7 @@ def test_missing_duplicate_and_global_configuration_fail_before_replay():
     with pytest.raises(ValueError, match="order book"):
         fiml.FeatureExtractor(spec)
     with pytest.raises(ValueError, match="order book"):
-        fiml.ModelInputPipeline(fiml.PipelineSpec(spec).identity(spec.feature_ids()[0], output="mid"))
+        SingleOutput(LinearSpec(spec).identity(spec.feature_ids()[0], output="mid"))
     spec.configure_order_book("btc", update_policy="contiguous", buffer_size=1)
     before = spec.to_json()
     for symbol, policy in [("BTC", "contiguous"), ("__global__", "monotonic"), ("eth", "invalid")]:
@@ -250,7 +251,7 @@ def test_dense_json_configuration_selects_storage_and_preserves_grid(model):
     validator.validate(document)
     restored = fiml.FeatureExtractorSpec.from_json(json.dumps(document))
     assert json.loads(restored.to_json())["order_books"][0]["dense"] == grid
-    instance = (fiml.ModelInputPipeline(fiml.PipelineSpec(restored).identity(restored.feature_ids()[0]))
+    instance = (SingleOutput(LinearSpec(restored).identity(restored.feature_ids()[0]))
                 if model else fiml.FeatureExtractor(restored))
     instance.update_order_book(fiml.OrderBookEvent.snapshot("btc", 0, 0, [("100", "2")], []))
     instance.update_order_book(fiml.OrderBookEvent.delta("btc", 1, 1, [("bid", "101", "3")]))
@@ -282,14 +283,14 @@ def test_flow_builders_roundtrip_and_feed_scalar_averages():
         "order_book_bid_removed_volume", "order_book_ask_added_volume",
         "order_book_ask_removed_volume",
     ]]
-    spec = (fiml.PipelineSpec(raw)
+    spec = (LinearSpec(raw)
             .sma(names[1], window=2, warmup=fiml.WarmupPolicy.FIRST_VALUE, output="bid_added_sma")
             .ema(names[4], window=3, warmup=fiml.WarmupPolicy.FIRST_VALUE, output="ask_removed_ema"))
     document = json.loads(spec.to_json())
     VALIDATOR.validate(document)
     VALIDATOR.validate(FLOW_FIXTURE["pipeline"])
-    assert json.loads(fiml.PipelineSpec.from_json(spec.to_json()).to_json()) == document
-    runtime = fiml.ModelInputPipeline(spec)
+    assert json.loads(LinearSpec.from_json(spec.to_json()).to_json()) == document
+    runtime = SingleOutput(spec)
     # The first buffered update and snapshot must not seed the sample averages.
     events = [book_event(step["event"]) for step in FLOW_FIXTURE["steps"][:7]]
     actual = runtime.transform_order_book(events)

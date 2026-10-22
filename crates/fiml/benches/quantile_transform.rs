@@ -3,15 +3,12 @@ use std::hint::black_box;
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use fiml::{
     Event, FeatureDefinition, FeatureExtractorSpec, FeatureId, FeatureKey, FeatureSource,
-    FittedStage, Pipeline, PipelineSpec, Symbol, TransformerDefinition, VecFeatureVector,
+    FittedStage, Pipeline, PipelineSpec, Symbol, TransformerDefinition,
 };
 
 const ROWS: usize = 10_000;
 
-fn pipeline(
-    dimensions: usize,
-    quantile_count: usize,
-) -> Pipeline<VecFeatureVector, VecFeatureVector> {
+fn pipeline(dimensions: usize, quantile_count: usize) -> Pipeline {
     let raw = FeatureExtractorSpec::new([FeatureDefinition::new(
         FeatureKey::DayOfWeek {
             symbol: Symbol::GLOBAL,
@@ -35,23 +32,34 @@ fn pipeline(
         .iter()
         .map(|reference| vec![reference * 6.0; dimensions])
         .collect();
-    PipelineSpec::with_stages(
-        raw,
-        transformations,
-        [FittedStage::QuantileTransform {
-            outputs,
-            output_distribution: "normal".into(),
-            quantiles,
-            references,
-            all_nan_input_indices: vec![],
-            bounds_threshold: 1e-7,
-            normal_clip: Some((-5.199_337_582_605_575, 5.199_337_582_703_42)),
-        }],
-        dimensions,
-        None,
-    )
-    .unwrap()
-    .build(VecFeatureVector::new(1), VecFeatureVector::new(dimensions))
+    {
+        let mut spec = PipelineSpec::new(raw);
+        let mut node = spec
+            .add(
+                spec.root(),
+                fiml::FittedStage::Scalar {
+                    transformations: transformations.into_iter().collect(),
+                },
+            )
+            .unwrap();
+        node = spec
+            .add(
+                node,
+                FittedStage::QuantileTransform {
+                    outputs,
+                    output_distribution: "normal".into(),
+                    quantiles,
+                    references,
+                    all_nan_input_indices: vec![],
+                    bounds_threshold: 1e-7,
+                    normal_clip: Some((-5.199_337_582_605_575, 5.199_337_582_703_42)),
+                },
+            )
+            .unwrap();
+        spec.output("model", node).unwrap();
+        spec
+    }
+    .build()
     .unwrap()
 }
 

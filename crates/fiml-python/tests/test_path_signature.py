@@ -1,3 +1,4 @@
+from pipeline_fixtures import LinearSpec, SingleOutput
 import json
 
 import fiml
@@ -22,7 +23,7 @@ def reference(values):
 
 def spec(window, warmup=fiml.WarmupPolicy.FULL_WINDOW, prefix=None):
     raw = fiml.FeatureExtractorSpec().field('BTC', source='trade_price', id='p')
-    return (fiml.PipelineSpec(raw).identity('p')
+    return (LinearSpec(raw).identity('p')
             .rolling_path_signature_stage('p', window=window, warmup=warmup,
                                           output_prefix=prefix))
 
@@ -42,7 +43,7 @@ def data(runtime, prices):
 @pytest.mark.parametrize('warmup', [fiml.WarmupPolicy.FIRST_VALUE, fiml.WarmupPolicy.FULL_WINDOW])
 def test_direct_integral_reference_and_serialized_replay(values, window, warmup):
     authored = spec(window, warmup, 'sig')
-    runtime = fiml.ModelInputPipeline(authored)
+    runtime = SingleOutput(authored)
     events = data(runtime, values)
     expected = np.array([
         reference(values[max(0, i + 1 - window):i + 1])
@@ -51,7 +52,7 @@ def test_direct_integral_reference_and_serialized_replay(values, window, warmup)
     ])
     actual = runtime.transform(**events)
     np.testing.assert_allclose(actual, expected, rtol=1e-12, atol=1e-12)
-    restored = fiml.ModelInputPipeline.from_json(runtime.to_json())
+    restored = SingleOutput.from_json(runtime.to_json())
     restored.symbol('BTC')
     np.testing.assert_allclose(restored.transform(**events), expected, rtol=1e-12, atol=1e-12)
     runtime.reset()
@@ -63,7 +64,7 @@ def test_direct_integral_reference_and_serialized_replay(values, window, warmup)
 def test_ordered_increments_with_same_endpoints_have_different_cross_terms():
     results = []
     for values in [[0., 1., 3.], [0., 2., 3.]]:
-        runtime = fiml.ModelInputPipeline(spec(3))
+        runtime = SingleOutput(spec(3))
         results.append(runtime.transform(**data(runtime, values))[-1])
     np.testing.assert_allclose(results[0], [1., 3., .5, 1.75, 1.25, 4.5])
     np.testing.assert_allclose(results[1], [1., 3., .5, 1.25, 1.75, 4.5])
@@ -72,27 +73,27 @@ def test_ordered_increments_with_same_endpoints_have_different_cross_terms():
 def test_builder_schema_validation_and_atomic_failure():
     authored = spec(3)
     document = json.loads(authored.to_json())
-    stage = document['model_input']['stages'][0]
+    stage = document['nodes'][2]['stage']
     assert stage == dict(type='rolling_path_signature', input='p', window=3,
                          warmup_policy='full_window', outputs=['p__' + c for c in COORDINATES])
-    assert document['model_input']['length'] == document['model_input']['capacity'] == 6
+    assert len(document['nodes'][-1]['stage']['outputs']) == 6
     assert not list(VALIDATOR.iter_errors(document))
-    assert json.loads(fiml.PipelineSpec.from_json(authored.to_json()).to_json()) == document
+    assert json.loads(LinearSpec.from_json(authored.to_json()).to_json()) == document
     for field in stage:
         invalid = json.loads(authored.to_json())
-        del invalid['model_input']['stages'][0][field]
+        del invalid['nodes'][2]['stage'][field]
         assert list(VALIDATOR.iter_errors(invalid))
         with pytest.raises(ValueError):
-            fiml.PipelineSpec.from_json(json.dumps(invalid))
+            LinearSpec.from_json(json.dumps(invalid))
     for update in [dict(window=0), dict(window=-1), dict(window=1.5), dict(window=None),
                    dict(warmup_policy='unknown'), dict(outputs=['a'] * 6),
                    dict(outputs=['a']), dict(outputs=['__reserved_0'] + list('bcdef')),
                    dict(extra=True)]:
         invalid = json.loads(authored.to_json())
-        invalid['model_input']['stages'][0].update(update)
+        invalid['nodes'][2]['stage'].update(update)
         assert list(VALIDATOR.iter_errors(invalid))
         with pytest.raises(ValueError):
-            fiml.PipelineSpec.from_json(json.dumps(invalid))
+            LinearSpec.from_json(json.dumps(invalid))
     for window in [0, 2**63]:
         with pytest.raises(ValueError):
             spec(window)
@@ -104,9 +105,9 @@ def test_builder_schema_validation_and_atomic_failure():
 
 def test_stage_composes_after_scaling_and_before_selection():
     raw = fiml.FeatureExtractorSpec().field('BTC', source='trade_price', id='p')
-    authored = (fiml.PipelineSpec(raw).identity('p').scale_stage([10.], [2.])
+    authored = (LinearSpec(raw).identity('p').scale_stage([10.], [2.])
                 .rolling_path_signature_stage('p', window=3, output_prefix='s')
                 .select_stage([3, 4]))
-    runtime = fiml.ModelInputPipeline(authored)
+    runtime = SingleOutput(authored)
     actual = runtime.transform(**data(runtime, [10., 12., 16.]))
     np.testing.assert_allclose(actual[-1], [1.75, 1.25])

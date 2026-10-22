@@ -1,3 +1,4 @@
+from pipeline_fixtures import LinearSpec, SingleOutput
 import json
 from pathlib import Path
 
@@ -19,9 +20,9 @@ METHODS = ["lagged_timed", "delta_timed", "simple_return_timed", "log_return_tim
 def test_shared_artifact_streaming_chunks_reset_and_schema(fixture):
     document = fixture["pipeline"]
     assert not list(VALIDATOR.iter_errors(document))
-    spec = fiml.PipelineSpec.from_json(json.dumps(document))
+    spec = LinearSpec.from_json(json.dumps(document))
     assert json.loads(spec.to_json()) == document
-    runtime = fiml.ModelInputPipeline(spec)
+    runtime = SingleOutput(spec)
     symbols = {s: runtime.symbol(s) for s in ["a", "b"]}
     kinds = {"trade": fiml.KIND_TRADE, "volume": fiml.KIND_VOLUME, "time": fiml.KIND_TIME}
     events = [step["event"] for step in fixture["steps"]]
@@ -52,15 +53,15 @@ def test_shared_artifact_streaming_chunks_reset_and_schema(fixture):
 def test_builders_validate_durations_and_round_trip_base_and_scalar_stages(method, output, aggregation):
     raw = fiml.FeatureExtractorSpec().field("BTC", source="trade_price", id="p")
     options = {} if aggregation is None else {"aggregation": aggregation}
-    base = getattr(fiml.PipelineSpec(raw), method)("p", lag_window="500ms", output=output, **options)
+    base = getattr(LinearSpec(raw), method)("p", lag_window="500ms", output=output, **options)
     stage = getattr(fiml.ScalarStage(), method)("p", lag_window="500ms", output=output, **options)
-    chained = fiml.PipelineSpec(raw).identity("p").scalar_stage(stage)
+    chained = LinearSpec(raw).identity("p").scalar_stage(stage)
     for spec in [base, chained]:
         document = json.loads(spec.to_json())
         assert not list(VALIDATOR.iter_errors(document))
-        assert json.loads(fiml.PipelineSpec.from_json(json.dumps(document)).to_json()) == document
-        group = (document["model_input"]["transformations"] if spec is base else
-                 document["model_input"]["stages"][0]["transformations"])
+        assert json.loads(LinearSpec.from_json(json.dumps(document)).to_json()) == document
+        group = (document["nodes"][1]["stage"]["transformations"] if spec is base else
+                 document["nodes"][2]["stage"]["transformations"])
         expected = {"type": method, "input": "p", "output": output or "p", "lag_window": "500ms"}
         if aggregation == "100ms":
             expected["aggregation"] = aggregation
@@ -70,38 +71,38 @@ def test_builders_validate_durations_and_round_trip_base_and_scalar_stages(metho
             group[0] = {**original, "lag_window": invalid}
             assert list(VALIDATOR.iter_errors(document))
             with pytest.raises(ValueError):
-                fiml.PipelineSpec.from_json(json.dumps(document))
+                LinearSpec.from_json(json.dumps(document))
         for invalid in ["9223372036854775807ms", "18446744073709551615h"]:
             group[0] = {**original, "lag_window": invalid}
             with pytest.raises(ValueError):
-                fiml.PipelineSpec.from_json(json.dumps(document))
+                LinearSpec.from_json(json.dumps(document))
         for field in ["input", "output", "lag_window"]:
             group[0] = original.copy()
             del group[0][field]
             assert list(VALIDATOR.iter_errors(document))
             with pytest.raises(ValueError):
-                fiml.PipelineSpec.from_json(json.dumps(document))
+                LinearSpec.from_json(json.dumps(document))
         group[0] = {**original, "extra": True}
         assert list(VALIDATOR.iter_errors(document))
         with pytest.raises(ValueError, match="unknown field"):
-            fiml.PipelineSpec.from_json(json.dumps(document))
+            LinearSpec.from_json(json.dumps(document))
     for invalid in ["0ms", "1us", "0.5ms", "9223372036854775807ms"]:
         with pytest.raises(ValueError):
-            getattr(fiml.PipelineSpec(raw), method)("p", lag_window=invalid)
+            getattr(LinearSpec(raw), method)("p", lag_window=invalid)
         with pytest.raises(ValueError):
-            fiml.PipelineSpec(raw).identity("p").scalar_stage(
+            LinearSpec(raw).identity("p").scalar_stage(
                 getattr(fiml.ScalarStage(), method)("p", lag_window=invalid))
     for window, interval in [("1ms", "1ms"), ("1s", "1s"), ("1m", "1s"), ("1h", "1m")]:
-        document = json.loads(getattr(fiml.PipelineSpec(raw), method)("p", lag_window=window, aggregation=interval).to_json())
-        assert document["model_input"]["transformations"][0]["lag_window"] == window
+        document = json.loads(getattr(LinearSpec(raw), method)("p", lag_window=window, aggregation=interval).to_json())
+        assert document["nodes"][1]["stage"]["transformations"][0]["lag_window"] == window
 
 
 @pytest.mark.parametrize("method", METHODS)
 def test_timed_scalar_stages_fit_after_sklearn_and_replay_identically(method):
     raw = fiml.FeatureExtractorSpec().field("BTC", source="trade_price", id="p")
-    base = fiml.PipelineSpec(raw).identity("p")
+    base = LinearSpec(raw).identity("p")
     stage = getattr(fiml.ScalarStage(), method)("p", lag_window="500ms", output="timed")
-    runtime = (fiml.ModelInputPipeline(base)
+    runtime = (SingleOutput(base)
                .add_transformation(StandardScaler(with_mean=False), name="scale")
                .add_transformation(stage, name="timed"))
     symbol = runtime.symbol("BTC")
@@ -128,7 +129,7 @@ def test_timed_scalar_stages_fit_after_sklearn_and_replay_identically(method):
             value = np.log(current) - np.log(previous) if current > 0 and previous > 0 else np.nan
         expected.append(value)
     np.testing.assert_allclose(actual[:, 0], expected, rtol=0, atol=1e-12, equal_nan=True)
-    restored = fiml.ModelInputPipeline.from_json(runtime.to_json())
+    restored = SingleOutput.from_json(runtime.to_json())
     restored.symbol("BTC")
     np.testing.assert_array_equal(restored.transform(**data), actual)
 
@@ -142,23 +143,23 @@ def test_aggregation_validation_and_large_window_limits(method):
         ("999999ms", "1ms"), ("1s", "18446744073709551615h"),
     ]:
         with pytest.raises(ValueError):
-            getattr(fiml.PipelineSpec(raw), method)("p", lag_window=window, aggregation=aggregation)
+            getattr(LinearSpec(raw), method)("p", lag_window=window, aggregation=aggregation)
         with pytest.raises(ValueError):
-            fiml.PipelineSpec(raw).identity("p").scalar_stage(
+            LinearSpec(raw).identity("p").scalar_stage(
                 getattr(fiml.ScalarStage(), method)("p", lag_window=window, aggregation=aggregation))
-        document = json.loads(getattr(fiml.PipelineSpec(raw), method)("p", lag_window="1s").to_json())
-        document["model_input"]["transformations"][0].update(lag_window=window, aggregation=aggregation)
+        document = json.loads(getattr(LinearSpec(raw), method)("p", lag_window="1s").to_json())
+        document["nodes"][1]["stage"]["transformations"][0].update(lag_window=window, aggregation=aggregation)
         with pytest.raises(ValueError):
-            fiml.PipelineSpec.from_json(json.dumps(document))
+            LinearSpec.from_json(json.dumps(document))
     for invalid in [None, 0, "", "-1s", "01s"]:
-        document["model_input"]["transformations"][0].update(lag_window="1s", aggregation=invalid)
+        document["nodes"][1]["stage"]["transformations"][0].update(lag_window="1s", aggregation=invalid)
         assert list(VALIDATOR.iter_errors(document))
         with pytest.raises(ValueError):
-            fiml.PipelineSpec.from_json(json.dumps(document))
+            LinearSpec.from_json(json.dumps(document))
     for window, aggregation in [("999998ms", "1ms"), ("24h", "1s"), ("24h", "1m")]:
-        spec = getattr(fiml.PipelineSpec(raw), method)("p", lag_window=window, aggregation=aggregation)
-        fiml.ModelInputPipeline(spec)
-        assert json.loads(fiml.PipelineSpec.from_json(spec.to_json()).to_json()) == json.loads(spec.to_json())
-    spec_a = getattr(fiml.PipelineSpec(raw), method)("p", lag_window="1s", aggregation="1s")
-    spec_b = getattr(fiml.PipelineSpec(raw), method)("p", lag_window="1000ms", aggregation="1000ms")
+        spec = getattr(LinearSpec(raw), method)("p", lag_window=window, aggregation=aggregation)
+        SingleOutput(spec)
+        assert json.loads(LinearSpec.from_json(spec.to_json()).to_json()) == json.loads(spec.to_json())
+    spec_a = getattr(LinearSpec(raw), method)("p", lag_window="1s", aggregation="1s")
+    spec_b = getattr(LinearSpec(raw), method)("p", lag_window="1000ms", aggregation="1000ms")
     assert spec_a.to_json() == spec_b.to_json()

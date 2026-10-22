@@ -51,8 +51,8 @@ Events → Feature extractor → Raw features → Transformations → Model inpu
   in Python, such as imputation values and PCA components.
 * **Pipeline** combines the extractor and transformations. `PipelineSpec`
   describes the configuration; Rust's `Pipeline` and Python's
-  `ModelInputPipeline` execute it and expose the final model-input vector.
-  Your model integration consumes that vector to make predictions.
+  `ModelInputPipeline` execute its shared graph and expose named output vectors.
+  Your model integrations consume those outputs to make predictions.
 
 Feature-extractor and pipeline specifications can be serialized as JSON and
 loaded in either language. A typical workflow is to define features and fit
@@ -194,10 +194,11 @@ import numpy as np
 from sklearn.preprocessing import StandardScaler
 
 raw = fiml.FeatureExtractorSpec().field("BTCUSDT", source="price", id="price")
-spec = fiml.PipelineSpec(raw).sma("price", window=3, output="sma3")
-pipeline = fiml.ModelInputPipeline(spec).add_transformation(
-    StandardScaler(), name="scale"
-)
+spec = fiml.PipelineSpec(raw)
+smoothed = spec.add(spec.root(), fiml.ScalarStage().sma("price", window=3, output="sma3"))
+scaled = spec.add(smoothed, StandardScaler())
+spec.output("model", scaled)
+pipeline = spec.build()
 
 prices = np.array([100.0, 102.0, 104.0, 106.0, 108.0])
 model_inputs = pipeline.fit_transform(
@@ -206,7 +207,7 @@ model_inputs = pipeline.fit_transform(
     timestamp=np.arange(len(prices), dtype=np.int64) * 1_000,
     price=prices,
     fit_mask=np.arange(len(prices)) >= 2,  # Exclude the two warm-up rows.
-)
+)["model"]
 
 assert np.isnan(model_inputs[:2]).all()
 np.testing.assert_allclose(model_inputs[-1, 0], np.sqrt(1.5))
@@ -225,26 +226,24 @@ Save this as `src/main.rs` in the Cargo application configured in Installation.
 Place `pipeline.json` in that application's root and run `cargo run` there.
 
 ```rust
-use fiml::{ArrayFeatureVector, Event, PipelineSpec, Symbol};
+use fiml::{Event, PipelineSpec, Symbol};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let json = std::fs::read_to_string("pipeline.json")?;
     let spec: PipelineSpec = serde_json::from_str(&json)?;
-    let mut pipeline = spec.build(
-        ArrayFeatureVector::<1>::new(), // One raw price value.
-        ArrayFeatureVector::<1>::new(), // One scaled model input.
-    )?;
+    let mut pipeline = spec.build()?;
+    let output = pipeline.output("model").unwrap().id();
     let btc = Symbol::new("BTCUSDT")?;
 
     // Rebuild indicator history; fitted scaler parameters came from JSON.
     for (index, price) in [100.0, 102.0, 104.0, 106.0, 108.0].into_iter().enumerate() {
         pipeline.handle_event(Event::price(btc, price, index as i64 * 1_000))?;
         if index < 2 {
-            assert!(pipeline.values()[0].is_nan());
+            assert!(pipeline.output_by_id(output).unwrap().values()[0].is_nan());
         }
     }
 
-    let model_input: &[f64] = pipeline.values();
+    let model_input: &[f64] = pipeline.output_by_id(output).unwrap().values();
     assert!((model_input[0] - 1.5_f64.sqrt()).abs() < 1e-12);
     println!("Final model input: {:.6}", model_input[0]);
     Ok(())
@@ -320,8 +319,9 @@ Behavior and limits
 * **Output layout and precision:** Use feature IDs to identify columns rather
   than assuming builder-call order. Rust feature vectors use `f64`; Python
   returns `float64` by default and optionally casts outputs to `float32`.
-  Reserved output cells remain `NaN` and are included in `values()`; active
-  output IDs describe the cells intended for model input.
+  Named pipeline outputs contain active coordinates only. Extractor diagnostics
+  may include reserved cells, which remain `NaN`. See the
+  [graph and output API](docs/multiple_output.md).
 * **Allocation:** Built-in indicator and transformation updates reuse
   preallocated storage. Construction, JSON handling, Python output arrays and
   DataFrames, and order-book storage may allocate. Borrowing Rust output slices

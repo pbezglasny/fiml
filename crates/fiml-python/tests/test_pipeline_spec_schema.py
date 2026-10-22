@@ -1,324 +1,79 @@
+"""Version 4.0 schema shapes and cross-node semantic validation."""
+import copy
 import json
 from pathlib import Path
 
-import pytest
 import fiml
-from jsonschema import Draft202012Validator
+import jsonschema
+import pytest
 from referencing import Registry, Resource
 
-
-DOCS = Path(__file__).parents[3] / "docs"
-MODEL_SCHEMA_PATH = DOCS / "pipeline-spec.schema.json"
-FEATURE_SCHEMA_PATH = DOCS / "feature-extractor-spec.schema.json"
-MODEL_SCHEMA = json.loads(MODEL_SCHEMA_PATH.read_text())
-FEATURE_SCHEMA = json.loads(FEATURE_SCHEMA_PATH.read_text())
-MODEL_SCHEMA_WITH_ID = {"$id": MODEL_SCHEMA_PATH.as_uri(), **MODEL_SCHEMA}
-REGISTRY = Registry().with_resource(
-    FEATURE_SCHEMA_PATH.as_uri(), Resource.from_contents(FEATURE_SCHEMA)
-)
-VALIDATOR = Draft202012Validator(
-    MODEL_SCHEMA_WITH_ID,
-    registry=REGISTRY,
-)
+DOCS = Path(__file__).resolve().parents[3] / "docs"
+SCHEMA = json.loads((DOCS / "pipeline-spec.schema.json").read_text())
+RAW_SCHEMA = json.loads((DOCS / "feature-extractor-spec.schema.json").read_text())
+VALIDATOR = jsonschema.Draft202012Validator(
+    SCHEMA, registry=Registry().with_resource(
+        "feature-extractor-spec.schema.json", Resource.from_contents(RAW_SCHEMA)))
 
 
-def canonical_example():
-    return json.loads((DOCS / "example_of_store_definition.json").read_text())
+def document():
+    raw = fiml.FeatureExtractorSpec().field("BTC", source="trade_price", id="price")
+    spec = fiml.PipelineSpec(raw, checksum="opaque")
+    lag = spec.add(spec.root(), fiml.ScalarStage().lagged("price", lag_window=1))
+    spec.output("lag", lag)
+    spec.output("raw", spec.root())
+    return json.loads(spec.to_json())
 
 
-def test_model_input_schema_is_valid_and_accepts_canonical_example():
-    Draft202012Validator.check_schema(MODEL_SCHEMA)
-    assert not list(VALIDATOR.iter_errors(canonical_example()))
-    spec = fiml.PipelineSpec.from_json(json.dumps(canonical_example()))
-    assert json.loads(spec.to_json()) == canonical_example()
+def test_documented_artifact_and_roundtrip():
+    for data in [document(), json.loads((DOCS / "example_of_store_definition.json").read_text())]:
+        VALIDATOR.validate(data)
+        assert json.loads(fiml.PipelineSpec.from_json(json.dumps(data)).to_json()) == data
 
 
-@pytest.mark.parametrize(
-    "transformation",
-    [
-        {"type": "identity", "input": "raw_price", "output": "price"},
-        {"type": "lagged", "input": "raw_price", "output": "price", "lag_window": 2},
-        {"type": "lagged", "input": "raw_price", "output": "price", "lag_window": 10_000},
-        {
-            "type": "standard_scale",
-            "input": "raw_price",
-            "output": "price",
-            "mean": 10.0,
-            "scale": 2.0,
-        },
-    ],
-)
-def test_model_input_schema_accepts_strict_transformation_variants(transformation):
-    document = canonical_example()
-    document["model_input"]["capacity"] = 1
-    document["model_input"]["length"] = 1
-    document["model_input"]["transformations"] = [transformation]
-    document["feature_extractor"]["features"][0]["indicators"][0]["outputs"][
-        0
-    ]["id"] = "raw_price"
-
-    assert not list(VALIDATOR.iter_errors(document))
+@pytest.mark.parametrize("field", ["version", "nodes", "outputs"])
+def test_required_fields(field):
+    data = document()
+    del data[field]
+    assert list(VALIDATOR.iter_errors(data))
+    with pytest.raises(ValueError, match="missing field"):
+        fiml.PipelineSpec.from_json(json.dumps(data))
 
 
-@pytest.mark.parametrize(
-    "transformation",
-    [
-        {"type": "identity", "input": "raw_price"},
-        {"type": "lagged", "input": "raw_price", "output": "price", "lag_window": 0},
-        {"type": "lagged", "input": "raw_price", "output": "price", "lag_window": 10_001},
-        {"type": "lagged", "input": "raw_price", "output": "price"},
-        {
-            "type": "standard_scale",
-            "input": "raw_price",
-            "output": "price",
-            "mean": 0.0,
-            "scale": 0.0,
-        },
-        {"type": "unknown", "input": "raw_price", "output": "price"},
-    ],
-)
-def test_model_input_schema_rejects_malformed_transformations(transformation):
-    document = canonical_example()
-    document["model_input"]["transformations"] = [transformation]
-
-    assert list(VALIDATOR.iter_errors(document))
-
-
-def test_schema_accepts_configured_book_replay_pipeline():
-    document = json.loads((DOCS.parent / "tests/fixtures/order_book_replay.json").read_text())["pipeline"]
-    assert not list(VALIDATOR.iter_errors(document))
-    spec = fiml.PipelineSpec.from_json(json.dumps(document))
-    assert json.loads(spec.to_json()) == document
-    assert fiml.ModelInputPipeline(spec).n_features() == 5
-
-
-def test_schema_accepts_fitted_stages_and_versioned_migration():
-    document = json.loads((DOCS.parent / "tests/fixtures/sklearn_pipeline.json").read_text())["pipeline"]
-    assert not list(VALIDATOR.iter_errors(document))
-    assert json.loads(fiml.PipelineSpec.from_json(json.dumps(document)).to_json()) == document
-    for version in ["1.0", "2.0", "2.1", "2.2", "2.3", "2.4", "2.5", "2.6"]:
-        document["version"] = version
-        assert list(VALIDATOR.iter_errors(document))
-        with pytest.raises(ValueError, match="unsupported model-input spec version"):
-            fiml.PipelineSpec.from_json(json.dumps(document))
-
-
-def test_scalar_stages_validate_and_round_trip_in_version_2_1():
-    spec = fiml.PipelineSpec.from_json(json.dumps(canonical_example()))
-    input_id = spec.feature_ids()[0]
-    spec.scalar_stage(fiml.ScalarStage().identity(input_id, output="selected"))
-    spec.scalar_stage(fiml.ScalarStage().lagged("selected", lag_window=2, output="lag"))
-    document = json.loads(spec.to_json())
-    assert document["version"] == "3.0"
-    assert not list(VALIDATOR.iter_errors(document))
-    assert json.loads(fiml.PipelineSpec.from_json(json.dumps(document)).to_json()) == document
-    document["version"] = "2.0"
-    assert list(VALIDATOR.iter_errors(document))
-    with pytest.raises(ValueError, match="unsupported model-input spec version"):
-        fiml.PipelineSpec.from_json(json.dumps(document))
-    document["version"] = "3.0"
-    document["model_input"]["stages"][0]["transformations"][0]["extra"] = True
-    assert list(VALIDATOR.iter_errors(document))
+@pytest.mark.parametrize("where", [(), ("nodes", 0), ("nodes", 1), ("outputs", 0), ("nodes", 1, "stage")])
+def test_unknown_fields(where):
+    data = document()
+    target = data
+    for key in where:
+        target = target[key]
+    target["unknown"] = True
+    assert list(VALIDATOR.iter_errors(data))
     with pytest.raises(ValueError, match="unknown field"):
-        fiml.PipelineSpec.from_json(json.dumps(document))
+        fiml.PipelineSpec.from_json(json.dumps(data))
 
 
-def test_scalar_stage_references_are_validated_atomically_against_previous_outputs():
-    spec = fiml.PipelineSpec.from_json(json.dumps(canonical_example()))
-    first = spec.feature_ids()[0]
-    spec.scalar_stage(fiml.ScalarStage().identity(first, output="selected"))
-    before = spec.to_json()
-    for invalid in [
-        fiml.ScalarStage(),
-        fiml.ScalarStage().identity(first),
-        fiml.ScalarStage().identity("selected", output="new").identity("new"),
-        fiml.ScalarStage().identity("selected").identity("selected"),
-        fiml.ScalarStage().lagged("selected", lag_window=0),
-        fiml.ScalarStage().standard_scale("selected", mean=0., scale=0.),
-    ]:
-        with pytest.raises(ValueError, match="stage 2"):
-            spec.scalar_stage(invalid)
-        assert spec.to_json() == before
-
-
-def test_min_max_stage_requires_version_2_2_and_valid_state():
-    document = canonical_example()
-    outputs = [item["output"] for item in document["model_input"]["transformations"]]
-    document["version"] = "3.0"
-    document["model_input"]["stages"] = [{
-        "type": "min_max_scale", "outputs": outputs,
-        "scale": [1.0] * len(outputs), "min": [0.0] * len(outputs),
-        "clip": [-2.0, 3.0],
-    }]
-    assert not list(VALIDATOR.iter_errors(document))
-    assert json.loads(fiml.PipelineSpec.from_json(json.dumps(document)).to_json()) == document
-
-    for version in ["2.0", "2.1"]:
-        invalid = json.loads(json.dumps(document))
-        invalid["version"] = version
-        assert list(VALIDATOR.iter_errors(invalid))
-        with pytest.raises(ValueError, match="unsupported model-input spec version"):
-            fiml.PipelineSpec.from_json(json.dumps(invalid))
-    for field, value in [("scale", [0.0] * len(outputs)),
-                         ("min", [0.0]), ("clip", [2.0, 1.0])]:
-        invalid = json.loads(json.dumps(document))
-        invalid["model_input"]["stages"][0][field] = value
-        with pytest.raises(ValueError, match="stage 0"):
-            fiml.PipelineSpec.from_json(json.dumps(invalid))
-    document["model_input"]["stages"][0]["clip"] = None
-    assert list(VALIDATOR.iter_errors(document))
+@pytest.mark.parametrize("parent", [-1, 1, 2, 999, 0.5, None, True])
+def test_invalid_parents(parent):
+    data = document()
+    data["nodes"][1]["parent"] = parent
     with pytest.raises(ValueError):
-        fiml.PipelineSpec.from_json(json.dumps(document))
+        fiml.PipelineSpec.from_json(json.dumps(data))
 
 
-def test_simple_imputer_stage_requires_version_2_3_and_valid_state():
-    document = canonical_example()
-    inputs = [item["output"] for item in document["model_input"]["transformations"]]
-    document["version"] = "3.0"
-    document["model_input"]["length"] = len(inputs) + 1
-    document["model_input"]["capacity"] = len(inputs) + 1
-    document["model_input"]["stages"] = [{
-        "type": "simple_impute",
-        "outputs": inputs + [f"missingindicator_{inputs[0]}"],
-        "retained_input_indices": list(range(len(inputs))),
-        "replacement_values": [0.0] * len(inputs),
-        "indicator_input_indices": [0],
-    }]
-    assert not list(VALIDATOR.iter_errors(document))
-    assert json.loads(fiml.PipelineSpec.from_json(json.dumps(document)).to_json()) == document
-
-    old = json.loads(json.dumps(document))
-    old["version"] = "2.2"
-    assert list(VALIDATOR.iter_errors(old))
-    with pytest.raises(ValueError, match="unsupported model-input spec version"):
-        fiml.PipelineSpec.from_json(json.dumps(old))
-
-    for field, value in [
-        ("replacement_values", [0.0]),
-        ("retained_input_indices", [1, 0] + list(range(2, len(inputs)))),
-        ("indicator_input_indices", [len(inputs)]),
-    ]:
-        invalid = json.loads(json.dumps(document))
-        invalid["model_input"]["stages"][0][field] = value
-        with pytest.raises(ValueError, match="stage 0"):
-            fiml.PipelineSpec.from_json(json.dumps(invalid))
-
-
-def test_power_transform_stage_requires_version_2_4_and_valid_state():
-    document = canonical_example()
-    outputs = [item["output"] for item in document["model_input"]["transformations"]]
-    document["version"] = "3.0"
-    document["model_input"]["stages"] = [{
-        "type": "power_transform",
-        "outputs": outputs,
-        "method": "yeo-johnson",
-        "lambdas": [1.0] * len(outputs),
-        "mean": [0.0] * len(outputs),
-        "scale": [1.0] * len(outputs),
-    }]
-    assert not list(VALIDATOR.iter_errors(document))
-    assert json.loads(fiml.PipelineSpec.from_json(json.dumps(document)).to_json()) == document
-
-    old = json.loads(json.dumps(document))
-    old["version"] = "2.3"
-    assert list(VALIDATOR.iter_errors(old))
-    with pytest.raises(ValueError, match="unsupported model-input spec version"):
-        fiml.PipelineSpec.from_json(json.dumps(old))
-
-    for field, value in [
-        ("method", "unknown"),
-        ("lambdas", [1.0]),
-        ("scale", [0.0] * len(outputs)),
-    ]:
-        invalid = json.loads(json.dumps(document))
-        invalid["model_input"]["stages"][0][field] = value
-        assert list(VALIDATOR.iter_errors(invalid)) or field == "lambdas"
-        with pytest.raises(ValueError, match="stage 0"):
-            fiml.PipelineSpec.from_json(json.dumps(invalid))
-
-
-def test_selection_stage_requires_version_2_5_and_valid_mapping():
-    document = canonical_example()
-    inputs = [item["output"] for item in document["model_input"]["transformations"]]
-    document["version"] = "3.0"
-    document["model_input"]["length"] = 2
-    document["model_input"]["stages"] = [{
-        "type": "select",
-        "outputs": [inputs[0], inputs[2]],
-        "input_indices": [0, 2],
-    }]
-    assert not list(VALIDATOR.iter_errors(document))
-    assert json.loads(fiml.PipelineSpec.from_json(json.dumps(document)).to_json()) == document
-
-    old = json.loads(json.dumps(document))
-    old["version"] = "2.4"
-    assert list(VALIDATOR.iter_errors(old))
-    with pytest.raises(ValueError, match="unsupported model-input spec version"):
-        fiml.PipelineSpec.from_json(json.dumps(old))
-
-    for outputs, indices in [
-        ([inputs[0], inputs[2]], [2, 0]),
-        ([inputs[0]], [0, 2]),
-        ([inputs[1], inputs[2]], [0, 2]),
-        ([inputs[0], inputs[2]], [0, len(inputs)]),
-        ([], []),
-    ]:
-        invalid = json.loads(json.dumps(document))
-        invalid["model_input"]["length"] = len(outputs)
-        invalid["model_input"]["stages"][0]["outputs"] = outputs
-        invalid["model_input"]["stages"][0]["input_indices"] = indices
-        if not outputs:
-            assert list(VALIDATOR.iter_errors(invalid))
-        with pytest.raises(ValueError, match="stage 0"):
-            fiml.PipelineSpec.from_json(json.dumps(invalid))
-
-
-def test_quantile_transform_stage_requires_version_2_6_and_valid_state():
-    document = canonical_example()
-    outputs = [item["output"] for item in document["model_input"]["transformations"]]
-    document["version"] = "3.0"
-    document["model_input"]["stages"] = [{
-        "type": "quantile_transform",
-        "outputs": outputs,
-        "output_distribution": "normal",
-        "quantiles": [[0.0] * len(outputs), [1.0] * len(outputs)],
-        "references": [0.0, 1.0],
-        "all_nan_input_indices": [],
-        "bounds_threshold": 1e-7,
-        "normal_clip": [-5.199337582605575, 5.19933758270342],
-    }]
-    assert not list(VALIDATOR.iter_errors(document))
-    assert json.loads(fiml.PipelineSpec.from_json(json.dumps(document)).to_json()) == document
-
-    old = json.loads(json.dumps(document))
-    old["version"] = "2.5"
-    assert list(VALIDATOR.iter_errors(old))
-    with pytest.raises(ValueError, match="unsupported model-input spec version"):
-        fiml.PipelineSpec.from_json(json.dumps(old))
-
-    for field, value in [
-        ("outputs", outputs[:-1]),
-        ("quantiles", [[1.0] * len(outputs), [0.0] * len(outputs)]),
-        ("quantiles", [[0.0], [1.0]]),
-        ("references", [0.5, 0.5]),
-        ("references", [-0.1, 1.0]),
-        ("references", [0.1, 1.0]),
-        ("references", [0.0, 0.9]),
-        ("all_nan_input_indices", [len(outputs)]),
-        ("all_nan_input_indices", [1, 0]),
-        ("bounds_threshold", -1.0),
-        ("normal_clip", [1.0, -1.0]),
-        ("output_distribution", "unknown"),
-    ]:
-        invalid = json.loads(json.dumps(document))
-        invalid["model_input"]["stages"][0][field] = value
-        if field == "outputs":
-            invalid["model_input"]["length"] = len(value)
-        with pytest.raises(ValueError, match="stage 0"):
-            fiml.PipelineSpec.from_json(json.dumps(invalid))
-
-    uniform = json.loads(json.dumps(document))
-    uniform["model_input"]["stages"][0]["output_distribution"] = "uniform"
-    del uniform["model_input"]["stages"][0]["normal_clip"]
-    assert not list(VALIDATOR.iter_errors(uniform))
-    assert json.loads(fiml.PipelineSpec.from_json(json.dumps(uniform)).to_json()) == uniform
+@pytest.mark.parametrize("mutation", [
+    lambda d: d.update(version="3.0"),
+    lambda d: d.update(nodes=[]),
+    lambda d: d.update(outputs=[]),
+    lambda d: d.update(checksum=None),
+    lambda d: d["outputs"].append(copy.deepcopy(d["outputs"][0])),
+    lambda d: d["outputs"][0].update(node=999),
+    lambda d: d["outputs"][0].update(name=" "),
+    lambda d: d["nodes"].append(copy.deepcopy(d["nodes"][0])),
+    lambda d: d["nodes"][1]["stage"]["transformations"][0].update(input="missing"),
+    lambda d: d["nodes"][1]["stage"]["transformations"][0].update(lag_window=0),
+])
+def test_semantic_rejection(mutation):
+    data = document()
+    mutation(data)
+    with pytest.raises(ValueError):
+        fiml.PipelineSpec.from_json(json.dumps(data))

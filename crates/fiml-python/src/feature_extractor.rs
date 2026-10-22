@@ -130,7 +130,7 @@ impl FeatureExtractor {
     /// Current feature values in output order. A window cell is NaN until its
     /// configured warm-up policy is satisfied and a current value exists.
     fn values(&self, py: Python<'_>) -> Py<PyAny> {
-        values_to_pyarray(py, self.driver.output_dtype, self.driver.inner.values())
+        values_to_pyarray(py, self.driver.output_dtype, self.driver.inner.values(0))
     }
 
     /// Apply a single event and update the feature vector. Useful for live

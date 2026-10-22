@@ -1,3 +1,4 @@
+from pipeline_fixtures import LinearSpec, SingleOutput
 from pathlib import Path
 
 import numpy as np
@@ -72,11 +73,11 @@ def test_dataframe_features_match_low_level_event_replay_exactly():
 def make_runtime(pipeline, symbols=("BTCUSDT", "ETHUSDT")):
     spec = build_feature_extractor_spec(symbols)
     if pipeline:
-        pipeline_spec = fiml.PipelineSpec(spec)
+        pipeline_spec = LinearSpec(spec)
         for feature_id in spec.feature_ids():
             pipeline_spec.identity(feature_id)
         pipeline_spec.lagged(spec.feature_ids()[0], lag_window=1, output="lag")
-        return fiml.ModelInputPipeline(pipeline_spec)
+        return SingleOutput(pipeline_spec)
     return fiml.FeatureExtractor(spec)
 
 

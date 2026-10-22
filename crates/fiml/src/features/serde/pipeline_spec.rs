@@ -5,7 +5,7 @@ use ::serde::{Deserialize, Deserializer, Serialize, Serializer};
 use super::{FeatureExtractorSpec, serialization::deserialize_present_option};
 use crate::{FeatureId, FittedStage, PipelineSpec, TransformerDefinition, TransformerOperation};
 
-const FORMAT_VERSION: &str = "3.0";
+const FORMAT_VERSION: &str = "4.0";
 
 /// Private versioned storage representation for a complete model-input layout.
 #[derive(Serialize, Deserialize)]
@@ -18,23 +18,23 @@ struct PipelineSpecWire {
         skip_serializing_if = "Option::is_none"
     )]
     checksum: Option<String>,
-    feature_extractor: FeatureExtractorSpec,
-    model_input: ModelInputWire,
+    nodes: Vec<NodeWire>,
+    outputs: Vec<OutputWire>,
 }
 
-/// Private storage representation for the final model-vector layout.
+#[derive(Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+enum NodeWire {
+    Extractor { spec: FeatureExtractorSpec },
+    Transform { parent: usize, stage: StageWire },
+}
+
+/// Ordered named reference into the artifact-local node array.
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct ModelInputWire {
-    capacity: usize,
-    length: usize,
-    transformations: Vec<TransformationWire>,
-    #[serde(
-        default,
-        deserialize_with = "deserialize_present_option",
-        skip_serializing_if = "Option::is_none"
-    )]
-    stages: Option<Vec<StageWire>>,
+struct OutputWire {
+    name: String,
+    node: usize,
 }
 
 /// Strict numeric storage for fitted stages, independent of compiled runtime state.
@@ -557,11 +557,24 @@ enum TransformationWire {
     },
 }
 
+impl Serialize for FittedStage {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        StageWire::from(self).serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for FittedStage {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        StageWire::deserialize(deserializer).map(Self::from)
+    }
+}
+
 impl Serialize for PipelineSpec {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
+        self.validate().map_err(::serde::ser::Error::custom)?;
         PipelineSpecWire::from(self).serialize(serializer)
     }
 }
@@ -581,17 +594,22 @@ impl From<&PipelineSpec> for PipelineSpecWire {
         Self {
             version: FORMAT_VERSION.to_owned(),
             checksum: spec.checksum().map(str::to_owned),
-            feature_extractor: spec.raw_feature_extractor_spec().clone(),
-            model_input: ModelInputWire {
-                capacity: spec.feature_vector_capacity(),
-                length: spec.feature_vector_length(),
-                stages: Some(spec.stages().iter().map(StageWire::from).collect()),
-                transformations: spec
-                    .transformation_definitions()
-                    .iter()
-                    .map(TransformationWire::from)
-                    .collect(),
-            },
+            nodes: std::iter::once(NodeWire::Extractor {
+                spec: spec.raw_feature_extractor_spec().clone(),
+            })
+            .chain(spec.nodes().iter().map(|node| NodeWire::Transform {
+                parent: node.parent,
+                stage: StageWire::from(&node.stage),
+            }))
+            .collect(),
+            outputs: spec
+                .outputs()
+                .iter()
+                .map(|output| OutputWire {
+                    name: output.name.clone(),
+                    node: output.node,
+                })
+                .collect(),
         }
     }
 }
@@ -873,49 +891,36 @@ impl TryFrom<PipelineSpecWire> for PipelineSpec {
     fn try_from(wire: PipelineSpecWire) -> Result<Self, Self::Error> {
         if wire.version != FORMAT_VERSION {
             return Err(format!(
-                "unsupported model-input spec version {:?}; expected {FORMAT_VERSION}; migrate sample averages to field extraction plus sma/ema transformations and re-export",
+                "unsupported pipeline spec version {:?}; expected {FORMAT_VERSION}",
                 wire.version
             ));
         }
-        let stages = wire
-            .model_input
-            .stages
-            .ok_or("missing field model_input.stages")?
-            .into_iter()
-            .map(FittedStage::from)
-            .collect::<Vec<_>>();
-        let length = stages
-            .last()
-            .map_or(wire.model_input.transformations.len(), |stage| {
-                stage.outputs().len()
-            });
-        if wire.model_input.length != length {
-            return Err(format!(
-                "model_input.length {} does not match transformation count or final stage width {}",
-                wire.model_input.length, length
-            ));
+        let mut nodes = wire.nodes.into_iter();
+        let Some(NodeWire::Extractor { spec: extractor }) = nodes.next() else {
+            return Err("node 0 must be the extractor".into());
+        };
+        let mut spec = PipelineSpec::new(extractor);
+        spec.set_checksum(wire.checksum);
+        for (offset, node) in nodes.enumerate() {
+            let index = offset + 1;
+            let NodeWire::Transform { parent, stage } = node else {
+                return Err(format!("node {index}: only node 0 may be an extractor"));
+            };
+            let parent = spec
+                .node(parent)
+                .ok_or_else(|| format!("node {index}: parent must refer to an earlier node"))?;
+            spec.add(parent, stage.into())
+                .map_err(|error| error.to_string())?;
         }
-        if wire.model_input.capacity < wire.model_input.length {
-            return Err(format!(
-                "model_input.capacity {} is smaller than model_input.length {}",
-                wire.model_input.capacity, wire.model_input.length
-            ));
+        for output in wire.outputs {
+            let node = spec
+                .node(output.node)
+                .ok_or_else(|| format!("output {:?}: node index out of bounds", output.name))?;
+            spec.output(output.name, node)
+                .map_err(|error| error.to_string())?;
         }
-
-        let transformations = wire
-            .model_input
-            .transformations
-            .into_iter()
-            .map(TransformerDefinition::from)
-            .collect::<Vec<_>>();
-        PipelineSpec::with_stages(
-            wire.feature_extractor,
-            transformations,
-            stages,
-            wire.model_input.capacity,
-            wire.checksum,
-        )
-        .map_err(|error| error.to_string())
+        spec.validate().map_err(|error| error.to_string())?;
+        Ok(spec)
     }
 }
 
@@ -1232,348 +1237,6 @@ impl From<TransformationWire> for TransformerDefinition {
                 mean,
                 scale,
             } => Self::standard_scale(FeatureId::new(input), FeatureId::new(output), mean, scale),
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use serde_json::{Value, json};
-
-    use crate::{FeatureDefinition, FeatureKey, FeatureSource, Symbol};
-
-    use super::*;
-
-    fn day_of_week(id: &str) -> FeatureDefinition {
-        FeatureDefinition::new(
-            FeatureKey::DayOfWeek {
-                symbol: Symbol::GLOBAL,
-                source: FeatureSource::AnyEvent,
-            },
-            FeatureId::new(id),
-        )
-    }
-
-    fn time_since_first_event(id: &str) -> FeatureDefinition {
-        FeatureDefinition::new(
-            FeatureKey::TimeSinceFirstEventOfDay {
-                symbol: Symbol::GLOBAL,
-                source: FeatureSource::AnyEvent,
-                utc_offset_millis: 0,
-            },
-            FeatureId::new(id),
-        )
-    }
-
-    fn valid_model_spec() -> Value {
-        json!({
-            "version": "3.0",
-            "feature_extractor": {
-                "version": "2.0",
-                "capacity": 1,
-                "length": 1,
-                "required_events": [{"symbol":"__global__", "event":"time"}],
-                "features": [{
-                    "symbol": "__global__",
-                    "indicators": [{
-                        "kind": "day_of_week",
-                        "source": {"type": "any_event"},
-                        "outputs": [{"id": "raw_day"}]
-                    }]
-                }]
-            },
-            "model_input": {
-                "stages": [],
-                "capacity": 1,
-                "length": 1,
-                "transformations": [{
-                    "type": "identity",
-                    "input": "raw_day",
-                    "output": "day"
-                }]
-            }
-        })
-    }
-
-    fn error(value: Value) -> String {
-        serde_json::from_value::<PipelineSpec>(value)
-            .unwrap_err()
-            .to_string()
-    }
-
-    #[test]
-    fn lagged_transformations_round_trip_and_validate_the_window() {
-        let mut document = valid_model_spec();
-        document["model_input"]["transformations"][0] = json!({
-            "type": "lagged", "input": "raw_day", "output": "day", "lag_window": 2,
-        });
-        let spec: PipelineSpec = serde_json::from_value(document.clone()).unwrap();
-        assert_eq!(
-            spec.transformation_definitions(),
-            &[TransformerDefinition::lagged(
-                FeatureId::new("raw_day"),
-                FeatureId::new("day"),
-                2
-            ),]
-        );
-        assert_eq!(serde_json::to_value(&spec).unwrap(), document);
-        document["model_input"]["transformations"][0]["lag_window"] = json!(10_000);
-        assert!(serde_json::from_value::<PipelineSpec>(document.clone()).is_ok());
-        for window in [10_001, usize::MAX] {
-            document["model_input"]["transformations"][0]["lag_window"] = json!(window);
-            assert!(error(document.clone()).contains("lag window exceeds"));
-        }
-        for window in [json!(0), json!(-1), json!(1.5), Value::Null] {
-            document["model_input"]["transformations"][0]["lag_window"] = window;
-            assert!(serde_json::from_value::<PipelineSpec>(document.clone()).is_err());
-        }
-        document["model_input"]["transformations"][0]
-            .as_object_mut()
-            .unwrap()
-            .remove("lag_window");
-        assert!(error(document).contains("lag_window"));
-    }
-
-    #[test]
-    fn round_trip_writes_canonical_contract_and_preserves_transformation_order() {
-        let raw_spec = FeatureExtractorSpec::with_metadata(
-            [
-                time_since_first_event("raw_elapsed"),
-                day_of_week("raw_day"),
-            ],
-            3,
-            Some("raw-checksum".to_owned()),
-        )
-        .unwrap();
-        let spec = PipelineSpec::with_metadata(
-            raw_spec,
-            [
-                TransformerDefinition::standard_scale(
-                    FeatureId::new("raw_elapsed"),
-                    FeatureId::new("scaled_elapsed"),
-                    4.0,
-                    2.0,
-                ),
-                TransformerDefinition::identity(FeatureId::new("raw_day"), FeatureId::new("day")),
-            ],
-            4,
-            Some("model-checksum".to_owned()),
-        )
-        .unwrap();
-
-        let value = serde_json::to_value(&spec).unwrap();
-        assert_eq!(
-            value,
-            json!({
-                "version": "3.0",
-                "checksum": "model-checksum",
-                "feature_extractor": {
-                    "version": "2.0",
-                    "capacity": 3,
-                    "length": 2,
-                    "required_events": [{"symbol":"__global__", "event":"time"}],
-                    "checksum": "raw-checksum",
-                    "features": [{
-                        "symbol": "__global__",
-                        "indicators": [
-                            {
-                                "kind": "day_of_week",
-                                "source": {"type": "any_event"},
-                                "outputs": [{"id": "raw_day"}]
-                            },
-                            {
-                                "kind": "time_since_first_event_of_day",
-                                "source": {"type": "any_event"},
-                                "options": {"utc_offset": "+00:00"},
-                                "outputs": [{"id": "raw_elapsed"}]
-                            }
-                        ]
-                    }]
-                },
-                "model_input": {
-                    "stages": [],
-                    "capacity": 4,
-                    "length": 2,
-                    "transformations": [
-                        {
-                            "type": "standard_scale",
-                            "input": "raw_elapsed",
-                            "output": "scaled_elapsed",
-                            "mean": 4.0,
-                            "scale": 2.0
-                        },
-                        {
-                            "type": "identity",
-                            "input": "raw_day",
-                            "output": "day"
-                        }
-                    ]
-                }
-            })
-        );
-
-        let restored: PipelineSpec = serde_json::from_value(value).unwrap();
-        assert_eq!(restored, spec);
-    }
-
-    #[test]
-    fn documented_example_is_accepted_and_already_canonical() {
-        let text = include_str!("../../../../../docs/example_of_store_definition.json");
-        let documented: Value = serde_json::from_str(text).unwrap();
-        let spec: PipelineSpec = serde_json::from_str(text).unwrap();
-
-        assert_eq!(serde_json::to_value(spec).unwrap(), documented);
-    }
-
-    #[test]
-    fn absent_checksums_are_omitted_and_explicit_null_is_rejected() {
-        let spec: PipelineSpec = serde_json::from_value(valid_model_spec()).unwrap();
-        let value = serde_json::to_value(spec).unwrap();
-
-        assert!(value.get("checksum").is_none());
-        assert!(value["feature_extractor"].get("checksum").is_none());
-
-        let mut value = valid_model_spec();
-        value["checksum"] = Value::Null;
-        assert!(error(value).contains("string"));
-
-        let mut value = valid_model_spec();
-        value["feature_extractor"]["checksum"] = Value::Null;
-        assert!(error(value).contains("string"));
-    }
-
-    #[test]
-    fn rejects_unsupported_versions_and_dimension_mismatches() {
-        let mut value = valid_model_spec();
-        value["version"] = json!("2.6");
-        assert!(error(value).contains("unsupported model-input spec version"));
-
-        let mut value = valid_model_spec();
-        value["feature_extractor"]["version"] = json!("1.1");
-        assert!(error(value).contains("unsupported feature-vector spec version"));
-
-        let mut value = valid_model_spec();
-        value["model_input"]["length"] = json!(2);
-        assert!(error(value).contains("does not match transformation count"));
-
-        let mut value = valid_model_spec();
-        value["model_input"]["capacity"] = json!(0);
-        assert!(error(value).contains("smaller than model_input.length"));
-    }
-
-    #[test]
-    fn rejects_unknown_and_missing_envelope_fields() {
-        let mut value = valid_model_spec();
-        value["unknown"] = json!(true);
-        assert!(error(value).contains("unknown field"));
-
-        let mut value = valid_model_spec();
-        let feature_extractor = value
-            .as_object_mut()
-            .unwrap()
-            .remove("feature_extractor")
-            .unwrap();
-        value["raw_feature_extractor_spec"] = feature_extractor;
-        assert!(error(value).contains("unknown field `raw_feature_extractor_spec`"));
-
-        for field in ["version", "feature_extractor", "model_input"] {
-            let mut value = valid_model_spec();
-            value.as_object_mut().unwrap().remove(field);
-            assert!(
-                error(value).contains("missing field"),
-                "missing {field} should be rejected"
-            );
-        }
-
-        let mut value = valid_model_spec();
-        value["model_input"]["unknown"] = json!(true);
-        assert!(error(value).contains("unknown field"));
-
-        for field in ["capacity", "length", "transformations"] {
-            let mut value = valid_model_spec();
-            value["model_input"].as_object_mut().unwrap().remove(field);
-            assert!(
-                error(value).contains("missing field"),
-                "missing model_input.{field} should be rejected"
-            );
-        }
-
-        let mut value = valid_model_spec();
-        let model_input = value
-            .as_object_mut()
-            .unwrap()
-            .remove("model_input")
-            .unwrap();
-        value["feature_vector_capacity"] = model_input["capacity"].clone();
-        value["feature_vector_length"] = model_input["length"].clone();
-        value["transformations"] = model_input["transformations"].clone();
-        assert!(error(value).contains("unknown field"));
-    }
-
-    #[test]
-    fn rejects_unknown_and_malformed_transformation_variants() {
-        let mut value = valid_model_spec();
-        value["model_input"]["transformations"][0]["type"] = json!("normalize");
-        assert!(error(value).contains("unknown variant"));
-
-        let mut value = valid_model_spec();
-        value["model_input"]["transformations"][0]["extra"] = json!(1);
-        assert!(error(value).contains("unknown field"));
-
-        let mut value = valid_model_spec();
-        value["model_input"]["transformations"][0] = json!({
-            "type": "standard_scale",
-            "input": "raw_day",
-            "output": "day",
-            "mean": 4.0
-        });
-        assert!(error(value).contains("missing field `scale`"));
-
-        let mut value = valid_model_spec();
-        value["model_input"]["transformations"] = Value::Null;
-        assert!(error(value).contains("sequence"));
-    }
-
-    #[test]
-    fn deserialization_reuses_model_input_semantic_validation() {
-        let mut value = valid_model_spec();
-        value["model_input"]["transformations"][0]["input"] = json!("missing");
-        assert!(error(value).contains("input feature ID does not exist"));
-
-        let mut value = valid_model_spec();
-        value["model_input"]["capacity"] = json!(2);
-        value["model_input"]["length"] = json!(2);
-        value["model_input"]["transformations"] = json!([
-            {"type":"identity", "input":"raw_day", "output":"day"},
-            {"type":"identity", "input":"raw_day", "output":"day"}
-        ]);
-        assert!(error(value).contains("output feature ID duplicates an earlier output"));
-
-        let mut value = valid_model_spec();
-        value["model_input"]["transformations"][0]["output"] = json!("__reserved_0");
-        assert!(error(value).contains("reserved namespace"));
-
-        for scale in [json!(0.0), json!(-1.0)] {
-            let mut value = valid_model_spec();
-            value["model_input"]["transformations"][0] = json!({
-                "type":"standard_scale", "input":"raw_day", "output":"day",
-                "mean":0.0, "scale":scale
-            });
-            assert!(error(value).contains("scale must be positive"));
-        }
-
-        let mut value = valid_model_spec();
-        value["model_input"]["transformations"][0] = json!({
-            "type":"standard_scale", "input":"raw_day", "output":"day",
-            "mean":0.0, "scale":5e-324
-        });
-        assert!(error(value).contains("inverse scale must be finite"));
-
-        for text in [
-            r#"{"version":"1.0","feature_extractor":{"version":"1.0","capacity":0,"length":0,"features":[]},"model_input":{"capacity":1,"length":1,"transformations":[{"type":"standard_scale","input":"raw_day","output":"day","mean":NaN,"scale":1.0}]}}"#,
-            r#"{"version":"1.0","feature_extractor":{"version":"1.0","capacity":0,"length":0,"features":[]},"model_input":{"capacity":1,"length":1,"transformations":[{"type":"standard_scale","input":"raw_day","output":"day","mean":0.0,"scale":1e400}]}}"#,
-        ] {
-            assert!(serde_json::from_str::<PipelineSpec>(text).is_err());
         }
     }
 }

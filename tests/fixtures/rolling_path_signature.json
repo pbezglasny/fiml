@@ -1,78 +1,88 @@
 {
   "pipeline": {
-    "version": "3.0",
-    "feature_extractor": {
-      "version": "2.0",
-      "capacity": 2,
-      "length": 2,
-      "required_events": [
-        {
-          "symbol": "a",
-          "event": "trade"
-        },
-        {
-          "symbol": "b",
-          "event": "trade"
-        }
-      ],
-      "features": [
-        {
-          "symbol": "a",
-          "indicators": [
+    "version": "4.0",
+    "nodes": [
+      {
+        "type": "extractor",
+        "spec": {
+          "version": "2.0",
+          "capacity": 2,
+          "length": 2,
+          "required_events": [
             {
-              "kind": "field",
-              "source": {
-                "type": "field",
-                "event": "trade",
-                "field": "price"
-              },
-              "outputs": [
+              "symbol": "a",
+              "event": "trade"
+            },
+            {
+              "symbol": "b",
+              "event": "trade"
+            }
+          ],
+          "features": [
+            {
+              "symbol": "a",
+              "indicators": [
                 {
-                  "id": "p"
+                  "kind": "field",
+                  "source": {
+                    "type": "field",
+                    "event": "trade",
+                    "field": "price"
+                  },
+                  "outputs": [
+                    {
+                      "id": "p"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "symbol": "b",
+              "indicators": [
+                {
+                  "kind": "field",
+                  "source": {
+                    "type": "field",
+                    "event": "trade",
+                    "field": "price"
+                  },
+                  "outputs": [
+                    {
+                      "id": "q"
+                    }
+                  ]
                 }
               ]
             }
           ]
-        },
-        {
-          "symbol": "b",
-          "indicators": [
+        }
+      },
+      {
+        "type": "transform",
+        "parent": 0,
+        "stage": {
+          "type": "scalar",
+          "transformations": [
             {
-              "kind": "field",
-              "source": {
-                "type": "field",
-                "event": "trade",
-                "field": "price"
-              },
-              "outputs": [
-                {
-                  "id": "q"
-                }
-              ]
+              "type": "identity",
+              "input": "q",
+              "output": "q"
+            },
+            {
+              "type": "standard_scale",
+              "input": "p",
+              "output": "x",
+              "mean": 0.0,
+              "scale": 0.5
             }
           ]
         }
-      ]
-    },
-    "model_input": {
-      "capacity": 6,
-      "length": 6,
-      "transformations": [
-        {
-          "type": "identity",
-          "input": "q",
-          "output": "q"
-        },
-        {
-          "type": "standard_scale",
-          "input": "p",
-          "output": "x",
-          "mean": 0.0,
-          "scale": 0.5
-        }
-      ],
-      "stages": [
-        {
+      },
+      {
+        "type": "transform",
+        "parent": 1,
+        "stage": {
           "type": "rolling_path_signature",
           "input": "x",
           "window": 3,
@@ -86,8 +96,14 @@
             "sig__xx"
           ]
         }
-      ]
-    }
+      }
+    ],
+    "outputs": [
+      {
+        "name": "model",
+        "node": 2
+      }
+    ]
   },
   "steps": [
     {

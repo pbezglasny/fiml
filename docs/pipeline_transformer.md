@@ -25,7 +25,7 @@ into `PipelineSpec`, and execute that spec through the same Rust runtime in both
 Python batch processing and online serving. Support `SimpleImputer`,
 `StandardScaler`, `RobustScaler`, `MinMaxScaler`, `MaxAbsScaler`,
 `PowerTransformer`, `QuantileTransformer`, `VarianceThreshold`, and `PCA`, including PCA whitening.
-Add an ordered list of vector stages after the existing scalar transformations.
+Attach vector and scalar stages to their explicit parent nodes.
 
 “Save parameters” must mean the fitted state needed for inference. Saving only
 constructor arguments such as `n_components=2` cannot reproduce a trained PCA.
@@ -37,135 +37,38 @@ object with `fit` and `transform` cannot run in Rust merely because its paramete
 are JSON serializable: Rust must implement its inference operation. Reject
 unsupported types when added, before replaying training data.
 
-## Starting point before issue #93
+## Python graph interface
 
-The relevant implementation is:
-
-| Component | Current responsibility | Required change |
-| --- | --- | --- |
-| [Rust PipelineSpec](../crates/fiml/src/features/pipeline/specs.rs) | Validates scalar definitions and raw/final vector layouts | Add fitted vector stages and derive final width from the last stage |
-| [Transformers](../crates/fiml/src/features/transformers/mod.rs) | Identity, fitted standard scaling, and shared lag histories; every input is raw | Preserve these operations as the base feature selection; add sequential vector execution |
-| [Rust Pipeline](../crates/fiml/src/features/pipeline/mod.rs) | Extracts raw values and writes transformed values after accepted events | Execute fitted stages using storage allocated at construction |
-| [Canonical JSON adapter](../crates/fiml/src/features/serde/pipeline_spec.rs) | Strict version `1.0`; transformation count equals final length | Introduce a versioned stage representation |
-| [Python pipeline](../crates/fiml-python/python/fiml/__init__.py) and [binding](../crates/fiml-python/src/model_input_pipeline.rs) | Wrap an already compiled spec; expose event replay and DataFrame replay | Own an unfitted recipe, fit it, retain the fitted spec, and rebuild the runtime |
-
-`ModelInputPipeline.transform(...)` already exists. It accepts event columns and
-returns one model-input row per event, advancing indicator and lag state. It is
-not sklearn's stateless `transform(X)` on a precomputed feature matrix. Add
-`fit` and `fit_transform` with the same event-column convention and preserve
-that existing `transform` contract.
-
-[ADR 0008](adr/0008-serialize-the-pipeline-spec.md) already establishes the right
-serialization boundary: persist the spec, not a live runtime. The current
-[pipeline design](pipeline.md) defers chaining; this proposal introduces the
-specific linear sequence needed for sklearn preprocessing.
-
-## Python interface
-
-Keep `PipelineSpec` as validated, deployable data. Unfitted sklearn objects belong
-to the Python pipeline, because their learned state and sometimes their dimensions
-do not exist yet. Extend the existing fluent construction style with
-`add_transformation(estimator, *, name) -> self`; a second builder class or
-`add_pca` convenience method is unnecessary initially.
-
-Usage:
+Author scalar and estimator nodes with `PipelineSpec.add(parent, stage)`, then
+register named outputs and call `build()`. Reusing a parent handle shares its
+fitting and runtime state. Each insertion snapshots the supplied configuration.
 
 ```python
-from pathlib import Path
-
-import numpy as np
-from sklearn.decomposition import PCA
-from sklearn.preprocessing import RobustScaler
-
 import fiml
+from sklearn.decomposition import PCA
+from sklearn.preprocessing import StandardScaler
 
-raw_spec = fiml.FeatureExtractorSpec().field("BTCUSDT", source="trade_price", id="price")
-base_spec = fiml.PipelineSpec(raw_spec)
-for window in [2, 5, 10]:
-    base_spec.sma("price", window=window, warmup=fiml.WarmupPolicy.FIRST_VALUE,
-                  output=f"sma{window}")
-
-pipeline = (
-    fiml.ModelInputPipeline(base_spec)
-    .add_transformation(RobustScaler(unit_variance=True), name="scale")
-    .add_transformation(PCA(n_components=2, whiten=True), name="pca")
-)
-events = dict(
-    kind=np.full(12, fiml.KIND_TRADE, dtype=np.uint8),
-    symbol=np.full(12, pipeline.symbol("BTCUSDT"), dtype=np.int64),
-    timestamp=np.arange(12, dtype=np.int64),
-    price=np.array([10., 12., 11., 15., 13., 18., 16., 20., 17., 23., 19., 25.]),
-    volume=np.ones(12),
-)
-
-pipeline.fit(**events)                 # learns parameters; leaves runtime cold
-X_train = pipeline.transform(**events) # Rust execution; advances runtime
-# model.fit(X_train, y_train)
-Path("pipeline.json").write_text(pipeline.to_json(), encoding="utf-8")
-
-restored = fiml.ModelInputPipeline.from_json(
-    Path("pipeline.json").read_text(encoding="utf-8")
-)
-# restored starts cold; register its symbols before supplying event arrays.
+raw = (fiml.FeatureExtractorSpec()
+       .field("BTCUSDT", source="trade_price", id="price")
+       .field("BTCUSDT", source="trade_volume", id="volume"))
+spec = fiml.PipelineSpec(raw)
+scaled = spec.add(spec.root(), StandardScaler())
+projected = spec.add(scaled, PCA(n_components=2))
+spec.output("model", projected)
+spec.output("decision", spec.root())
+pipeline = spec.build()
+# Register symbols, then supply the usual event columns.
+# pipeline.fit(**training_events, fit_mask=training_rows)
+# matrices = pipeline.transform(**following_events)
+# latest = pipeline.output("model").values()
 ```
 
-The base spec selects and orders stage inputs. It can contain identity, lagged,
-or manually fitted scalar transformations. Reserved cells never enter sklearn.
-Each added stage consumes the entire preceding active vector and replaces it.
-The first stage consumes the base outputs; later stages consume previous stage
-outputs. This supports scaler-to-PCA and `lags -> PCA` without branches,
-arbitrary references, or a general transformation graph.
-
-`fiml.ScalarStage()` groups can also appear anywhere in the sequence, authored
-with `identity`, `lagged`, and fixed-parameter `standard_scale`. Each definition
-reads the preceding layout; dependent definitions go into successive stages.
-A scalar stage replaces its input with its authored outputs, so use identity
-outputs for columns that must survive. Input resolution is deferred until the
-stage is reached during fitting, after PCA output dimensions are known. Rust
-represents these groups as `FittedStage::Scalar { transformations }`.
-
-Scaler stages preserve input IDs. PCA outputs receive deterministic IDs
-`<name>__pc0`, `<name>__pc1`, etc., after fitting resolves their count. Require
-unique stage names and unique, nonreserved IDs within every layout. Raw and
-successive layouts remain separate namespaces, so a scaler can preserve names.
-Final `feature_names()`, `n_features()`, and `active_feature_count()` describe the
-last stage, with the existing distinction between capacity and active length.
-
-### Method and state contract
-
-| Method | Behavior |
-| --- | --- |
-| `add_transformation(estimator, *, name)` | Check supported concrete type and options, snapshot an unfitted clone, append it, and invalidate the fitted result. Allow configuration before the first successful fit or event replay; create a new pipeline to change an established recipe. |
-| `fit(kind, symbol, timestamp, *, price=None, volume=None, side=None, fit_mask=None, context_updates=None)` | Replay from a fresh base runtime, fit cloned estimators sequentially, compile a candidate spec, and return `self`. On success install it with cold event state. |
-| `transform(...)` | Keep the current event-column signature. Apply frozen parameters through Rust and return all event rows. Never learn or reset implicitly. |
-| `fit_transform(..., fit_mask=None)` | Call `fit`, then replay the same events through `transform`. Return all rows, including warm-up rows. Fitting replays each completed prefix; the final replay returns all rows. |
-| `reset()` | Rebuild from the fitted spec, clearing indicators, lag histories, books, and timestamps while retaining fitted parameters and existing symbol-handle mappings. |
-| `to_spec()` / `to_json()` | Return a fitted spec snapshot / serialize it through the canonical Rust adapter. Reject an unfitted recipe. |
-| `from_json(...)` | Load an inference-ready pipeline without importing sklearn. No training recipe is reconstructed, so `fit` on this object raises a clear inference-only error. |
-
-A pipeline built directly from a fitted spec remains usable immediately. A
-pipeline with pending estimators must reject inference, final-layout inspection,
-and export until fitting succeeds; raw names and symbol registration remain
-available. Repeated `fit` on a Python-authored recipe always starts from its
-original unfitted templates, not from the previous fitted estimators.
-
-Fit on temporary state and publish only after all training, numeric validation,
-and Rust compilation succeed. A failed refit leaves the old fitted artifact,
-symbol mapping, and live runtime intact. Clone estimator templates so fitting
-does not mutate the user's objects; sklearn provides
-[`clone`](https://scikit-learn.org/stable/modules/generated/sklearn.base.clone.html)
-for this purpose. Preserve runtime-local symbol handles when creating the
-temporary replay driver or replacing the live one: currently those handles index
-`RuntimeDriver.symbols`, not a globally interchangeable integer namespace.
-
-Keep `compute_features(df)` and `transform_order_book(events)` as existing
-inference entry points into the fitted Rust runtime. The initial `fit` overload
-above covers columnar events, not order-book payloads or DataFrames. Those need
-explicit adapters if training on them is required; passing a DataFrame to
-`transform` must not silently change the meaning of the existing method.
-This also does not yet promise sklearn `Pipeline`/`GridSearchCV` compatibility:
-that requires a separate estimator contract, cloning support, and chronological
-fold handling.
+The [graph API](multiple_output.md) defines ownership, output handles, dictionaries
+of batch results, transactional fit, reset, and serialization. Topology is fixed
+in built pipelines. There is no `add_transformation` method on the runtime.
+Artifacts are inference-only and do not reconstruct estimator recipes. Training
+accepts columnar events and optional context schedules; order-book and DataFrame
+training adapters are not included. Inference supports both replay paths.
 
 ## Training rows, warm-up, and replay
 
@@ -174,7 +77,7 @@ Skipping events would change moving averages and accepted-event lag histories.
 Use the existing Rust event validation, per-symbol timestamp ordering, and arrival
 order; never sort or shuffle the replay to prepare sklearn input.
 
-Build a dense `float64` matrix from active base outputs. `fit_mask`, if supplied,
+Build a temporary dense `float64` matrix from the estimator parent's active outputs. `fit_mask`, if supplied,
 must be a one-dimensional boolean array with one entry per event. It selects
 which snapshots train every stage, without suppressing the corresponding events.
 With no mask, all snapshots are training rows. Require a nonempty selection and
@@ -186,7 +89,8 @@ Do not silently replace NaNs or independently drop different rows outside that s
 For each sklearn stage: clone, fit on selected rows, and export its numeric state.
 For each scalar stage: validate and append its definitions. Replay all original
 events from cold state through the completed Rust prefix to obtain the next
-matrix. Do not mask before replay: even excluded rows must advance downstream
+matrix. Shared estimators fit once per operation; no graph-wide training cache is
+retained. Do not mask before replay: even excluded rows must advance downstream
 lags. Check selected estimator inputs and final outputs are finite. A scalar
 selection may drop unused warm-up columns before the next estimator. This simple
 implementation repeats extraction per prefix, with training cost proportional to
@@ -370,150 +274,20 @@ stage fusion. Benchmark representative dimensions before adding those.
 
 ## JSON format and validation
 
-Pipeline format `3.0` requires nested extractor format `2.0`. Readers reject earlier
-versions with migration guidance; there is no automatic conversion. Scalar stages
-use `{"type": "scalar", "transformations": [...]}`, including `sma` and `ema`.
-Both average transformations carry `input`, `output`, `window`, and `warmup_policy`.
-See [sample-average migration](sample-average-migration.md) for observation semantics.
+Pipeline format `4.0` stores an ordered node array and a separate ordered output
+array; nested extractor format remains `2.0`. Stage payloads contain the numeric
+fields described above. PCA component IDs are local `pc0`, `pc1`, etc. Other
+operations retain their established naming rules within the node layout.
 
-`model_input` fragment, assuming raw IDs `raw_a` and `raw_b`:
+See the [complete graph example](multiple_output-arc.md#artifact-format-and-compatibility)
+and [JSON Schema](pipeline-spec.schema.json). Rust validates parent indexes,
+feature references, dimensions, positive output widths, and finite numeric
+parameters before exposing a runtime. Unknown fields and unsupported versions
+are rejected. No 3.0 compatibility reader is provided.
 
-```json
-{
-  "capacity": 1,
-  "length": 1,
-  "transformations": [
-    {"type": "identity", "input": "raw_a", "output": "a"},
-    {"type": "identity", "input": "raw_b", "output": "b"}
-  ],
-  "stages": [
-    {
-      "type": "standard_scale",
-      "outputs": ["a", "b"],
-      "mean": [10.0, 20.0],
-      "scale": [2.0, 4.0]
-    },
-    {
-      "type": "pca",
-      "outputs": ["pca__pc0"],
-      "mean": [0.0, 0.0],
-      "components": [[0.6, 0.8]],
-      "output_scale": [1.0]
-    }
-  ]
-}
-```
-
-Stage inputs are implicit: the complete preceding active layout, in order.
-Base scalar definitions resolve stable raw IDs; scalar stages resolve IDs against
-the preceding layout. Explicit fitted stage output IDs
-freeze the layout across export/import. The example has two base outputs and
-one final output; base scratch width must not be taken from final `capacity`.
-
-Require `stages` in `3.0`, permitting an empty list. Derive base
-width from scalar definitions, each stage width from its validated arrays and outputs, and final
-active length from the last stage (or base width if empty). Final `capacity`
-must cover that final length; it may be smaller than an intermediate width.
-For Python authoring, default final capacity to the fitted final width; any
-explicit capacity on the supplied base spec remains an explicit final capacity
-constraint and must be revalidated after fitting.
-
-Validate the whole artifact on construction: strict versions/fields/tags,
-existing scalar rules, nonempty stage input/output layouts, dimension agreement,
-rectangular matrices, unique nonreserved output IDs, and finite numeric state.
-Scaler outputs must preserve preceding IDs; PCA must have `1 <= k <= d`.
-Use checked dimension arithmetic before allocating scratch or flattening matrices.
-Report the stage index and relevant ID/dimension. Unknown stages must fail rather
-than be skipped. JSON numbers use full `f64` precision; NaN/Infinity are forbidden
-in fitted artifacts.
-
-For exact float restoration, Rust applications using serde_json must enable its
-`float_roundtrip` feature. The Python binding and maintained Rust fixtures do
-this; the default parser can round some fitted numbers by one ULP.
-
-Persist only inference state and existing metadata. Do not serialize Python
-objects, pickle/joblib data, training rows, estimator `__dict__`, solver choices,
-random generators, or live event state. Keep training configuration and package
-versions in the training experiment if refitting must be reproducible. Existing
-checksums remain opaque metadata, not integrity validation.
-
-## Rust and Python implementation boundaries
-
-Use a concrete stage enum with scaling, PCA, and scalar-group variants beside the
-base scalar definitions. Keep `PipelineSpec` as the semantic validator and canonical
-serde owner. Add a separate compiled-stage enum using flattened numeric arrays;
-there is no need for dynamic dispatch or a public transformer trait yet.
-
-For pipelines with stages, allocate a base vector and intermediate scratch at
-`build`. Reuse two work buffers sized for the required intermediate widths,
-alternating source and destination; the last stage writes into the caller-owned
-model vector. Ensure PCA never overwrites inputs that another component still
-needs. Keep the existing direct-write path for pipelines with no stages.
-Reserved final cells stay NaN, and processing a rejected event does not execute
-stages or advance lag histories; retain existing order-book error semantics.
-
-The steady-state event path uses numeric indexes and preallocated buffers, with
-no heap allocation, JSON work, Python calls, or string lookups. Configuration,
-fitting, and Python batch-output allocation are outside that guarantee.
-
-The Python layer should own the base spec, estimator templates, fitted spec, and
-a replaceable Rust runtime. Prefer composition for the public Python wrapper:
-the current PyO3 subclass eagerly embeds a runtime whose final width cannot be
-known before PCA fitting. Forward the existing runtime methods, dtype validation,
-and DataFrame helper; keep event validation/replay in the existing bindings.
-Retain symbol registration order across temporary runtimes, reset, and refit.
-Guard every inference entry point while unfitted, including `update`, `values`,
-DataFrame replay, and order-book replay.
-
-Add sklearn as an optional Python extra, for example `fiml[sklearn]`, and import
-it only for authoring/fitting. Extend the existing test dependencies/CI setup to
-install a declared, tested sklearn version range. Loading and serving an artifact
-must work with the current base NumPy dependency and no sklearn installation.
-Choose that range from passing parity tests, not an assumption that all sklearn
-releases have identical numerical behavior.
-
-## Implementation order and acceptance checks
-
-1. Add stage definitions, validation, compilation, final-layout derivation, and
-   Rust inference. Preserve scalar-only behavior and the existing allocation test.
-2. Add the `2.0` adapter and schema, explicit `1.0` reader support, and Python spec
-   bindings for fitted arrays. Update output-ID collection, which currently assumes
-   one final output per scalar definition.
-3. Add Python recipe ownership, exporter dispatch, `fit`, `fit_transform`, reset,
-   and export. Exercise one scaler-to-PCA workflow before expanding adapters.
-4. Add a maintained example and update the pipeline documentation/ADR to describe
-   stages, training state, and format migration.
-
-Use the existing tests and parity-fixture structure. Completion requires:
-
-- Fit real sklearn estimators in Python, export JSON, load it independently in
-  Rust, and compare event-by-event outputs against sklearn `fit` then `transform`
-  on the same base rows. Also compare the Python Rust-backed replay and reloaded
-  pipeline; a Rust-to-Rust comparison alone would miss exporter mistakes.
-- Cover scaling flags and constant columns; PCA dimension reduction, fitted
-  component count, whitening, rank-deficient data, and large feature offsets;
-  chained scaling/PCA; and PCA consuming lagged base outputs.
-- Specify tolerances for `float64` and final `float32` casts. Start ordinary
-  well-conditioned fixtures at `rtol=1e-10, atol=1e-12` for `float64`, then assess
-  ill-conditioned cases separately. BLAS reduction order prevents a general
-  bitwise-equality promise; do not silently loosen all tests to hide one failure.
-- Verify NaN warm-up and explicit fit masks, retained row alignment, cold state
-  after fit/load, chronological chunk continuation, reset, stable symbol handles,
-  failed-refit atomicity, unfitted errors, and unsupported estimator rejection.
-- Verify dimensions/IDs and malformed numeric JSON, `1.0` loading and `2.0`
-  round-trips, changed final capacity, reserved cells, and inference without sklearn.
-- Extend [pipeline_allocations.rs](../crates/fiml/tests/pipeline_allocations.rs) to
-  assert zero allocations through scaling/PCA warm-up and steady-state execution.
-
-Verification uses `cargo fmt --all`, the affected Rust/Python tests,
-`cargo clippy --workspace --all-targets --all-features -- -D warnings`, and the
-existing project checks. The runnable coverage lives in
-[test_sklearn_pipeline.py](../crates/fiml-python/tests/test_sklearn_pipeline.py),
-[pipeline_stages.rs](../crates/fiml/tests/pipeline_stages.rs), and the allocation
-test linked above. The [shared fitted fixture](../tests/fixtures/sklearn_pipeline.json)
-is generated from the maintained sklearn example and independently replayed by Rust.
-
-Defer other transformer exporters, `ColumnTransformer`, arbitrary sklearn
-pipelines, supervised transformers, `partial_fit`, Rust training, and runtime
-checkpoints until a concrete use case requires them. Each future exporter needs
-a defined inference operation and a Python/Rust parity test before it is accepted.
+Numeric inference is implemented by the existing Rust stages; Python only fits
+supported estimators and exports their state. Loading, graph evaluation, and
+numeric inference require no sklearn, BLAS, or matrix-library dependency in Rust.
+Enable serde_json's `float_roundtrip` feature when consuming fitted artifacts.
+Python/Rust fixture parity, independent sklearn oracles, transactional refits,
+branching histories, cold reload, and allocation tests cover the graph contract.

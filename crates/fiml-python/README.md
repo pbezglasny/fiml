@@ -194,9 +194,10 @@ trades = pd.DataFrame({
 raw = fiml.FeatureExtractorSpec().field(
     "BTCUSDT", source="trade_price", id="price",
 )
-spec = fiml.PipelineSpec(raw).sma("price", window=2, output="sma2")
-pipeline = fiml.ModelInputPipeline(spec)
-features = pipeline.compute_features(trades)
+spec = fiml.PipelineSpec(raw)
+spec.output("model", spec.add(spec.root(), fiml.ScalarStage().sma("price", window=2, output="sma2")))
+pipeline = spec.build()
+features = pipeline.compute_features(trades)["model"]
 future = fiml.future_value(
     trades, timestamp_column="ts", value_column="price", horizon="500ms",
 )
@@ -314,397 +315,105 @@ extractors and pipelines; dropping a runtime does not free interned names.
 
 ## Fitted model-input pipelines
 
-Keep raw indicator extraction separate from the fitted scalar transformations
-consumed by a model. `PipelineSpec` clones its raw `FeatureExtractorSpec`, keeps
-transformations in authored order, and serializes the canonical artifact read by
-the Rust `PipelineSpec`:
-
-```python
-raw_spec = fiml.FeatureExtractorSpec(checksum="raw-v1").field(
-    "BTCUSDT", source="trade_price", id="price"
-)
-model_spec = fiml.PipelineSpec(raw_spec, checksum="model-v1")
-
-# Transfer fitted arrays explicitly in the raw spec's canonical order.
-for feature_id, mean, scale in zip(
-    raw_spec.feature_ids(), scaler.mean_, scaler.scale_, strict=True
-):
-    model_spec.standard_scale(
-        feature_id, mean=float(mean), scale=float(scale)
-    )
-
-pipeline = fiml.ModelInputPipeline(model_spec, output_dtype="float64")
-```
-
-Sample averages belong to `PipelineSpec` and `ScalarStage`:
-
-```python
-raw = fiml.FeatureExtractorSpec().field("BTCUSDT", source="trade_price", id="price")
-spec = (fiml.PipelineSpec(raw)
-        .sma("price", window=20, output="sma20")
-        .ema("price", window=10, output="ema10"))
-```
-
-Both methods accept `warmup=fiml.WarmupPolicy.FULL_WINDOW` and `output=None`.
-The default output ID is the input ID. Use successive scalar stages to compose
-scaling, averages, and lags. See [the migration guide](../../docs/sample-average-migration.md).
-
-`identity(input, *, output=None)`, `lagged(input, *, lag_window, output=None)`, and
-`standard_scale(input, *, mean, scale, output=None)` append one final scalar and
-return the spec for fluent use. Omitting `output` reuses the input ID. Omitting
-model capacity tracks the transformation count; an explicit capacity stays
-fixed and creates trailing `__reserved_<index>` cells. `feature_ids()` and
-`raw_feature_ids()` exclude reserved cells. Raw and model checksums are
-independent opaque metadata.
-
-`lagged` reads the raw value from `lag_window` accepted events earlier. The
-window must be between 1 and 10,000 inclusive; outputs remain `NaN` until enough history exists.
-Multiple lags of the same input share one history buffer.
-
-`delta(input, *, lag_window, output=None)`, `simple_return(...)`, and
-`log_return(...)` are available on both `PipelineSpec` and `ScalarStage`.
-They compute `current - previous`, `current / previous - 1`, and
-`ln(current) - ln(previous)`, respectively. Their lag counts **finite observations
-of the input**, including repeated values. An exact lag of `k` requires `k + 1`
-observations; outputs are `NaN` until then. Windows must be in `1..=10_000`.
-All three kinds and their windows share one history per input within each stage.
-
-An observed NaN/infinity emits NaN without advancing history. Unobserved events
-retain the last output; context replacement does not count as an observation.
-Finite zero/negative values enter history, but a zero denominator makes simple
-return NaN and nonpositive operands make log return NaN. Arithmetic uses `f64`;
-extreme finite values can overflow delta or simple return. Log return subtracts
-logs to avoid overflowing the intermediate ratio. The output observation flag
-follows the input even when the result is warming up or undefined.
-
-For example, scale an extracted spread and then compute its changes:
+`PipelineSpec` owns a graph rooted at a snapshot of `FeatureExtractorSpec`.
+`add(parent, stage)` returns a builder-local handle; `output(name, node)` exposes
+that node without copying its state. Each `build()` creates an independent
+runtime. Reusing a node handle shares preprocessing between outputs. A stage has
+one parent; merges and automatic deduplication are not supported.
 
 ```python
 raw = (fiml.FeatureExtractorSpec()
-       .configure_order_book("BTCUSDT", update_policy="contiguous", buffer_size=8)
-       .order_book_spread("BTCUSDT"))
-spec = (fiml.PipelineSpec(raw)
-        .standard_scale(raw.feature_ids()[0], mean=0., scale=2., output="spread")
-        .scalar_stage(fiml.ScalarStage()
-                      .delta("spread", lag_window=1, output="spread_delta")
-                      .simple_return("spread", lag_window=2, output="spread_return")
-                      .log_return("spread", lag_window=2, output="spread_log_return")))
+       .field("BTCUSDT", source="trade_price", id="price")
+       .field("BTCUSDT", source="trade_volume", id="volume"))
+spec = fiml.PipelineSpec(raw)
+smoothed = spec.add(spec.root(), fiml.ScalarStage()
+                    .sma("price", window=3, output="sma3")
+                    .identity("volume"))
+spec.output("model", smoothed)
+spec.output("decision", spec.root())
+pipeline = spec.build(output_dtype="float64")
+model = pipeline.output("model")
 ```
 
-`rolling_std`, `rolling_min`, `rolling_max`, and `rolling_range` are available
-on both `PipelineSpec` and `ScalarStage`. They accept
-`(input, *, window, warmup=WarmupPolicy.FULL_WINDOW, output=None)` and count
-finite observations. Their `_timed` forms accept duration strings for `window`
-and an optional `aggregation="1ms"`. All finite values in each timed bucket
-contribute, preserving within-bucket spikes. Std uses population variance;
-use `sma` for mean. Compatible outputs share history across kinds and windows.
+Scalar operations are methods of `ScalarStage`, including identity, scaling,
+SMA/EMA, event lags, sample/timed changes, rolling statistics, trajectory
+statistics, streaks, and state ages. Operations within a scalar stage read the
+same parent layout. Add successive nodes to compose them. See the
+[operation reference](../../docs/pipeline.md) for windows, clocks, warmup,
+observation propagation, and numeric behavior.
 
-```python
-raw = (fiml.FeatureExtractorSpec()
-       .configure_order_book("BTCUSDT", update_policy="contiguous", buffer_size=8)
-       .order_book_spread("BTCUSDT")
-       .order_book_imbalance("BTCUSDT", [1]))
-spread, imbalance = raw.feature_ids()
-spec = (fiml.PipelineSpec(raw)
-        .rolling_std(spread, window=20, output="spread_std20")
-        .rolling_std(spread, window=100, output="spread_std100")
-        .rolling_range_timed(imbalance, window="1s", aggregation="10ms",
-                             output="imbalance_range1s")
-        .rolling_range_timed(imbalance, window="10s", aggregation="10ms",
-                             output="imbalance_range10s"))
-```
+`add` also accepts a dictionary using the fitted-stage JSON representation.
+This supports numeric PCA, selection, vector scaling, imputation, and experimental
+rolling path signatures without requiring estimator objects. Rust validates
+numeric parameters and layouts. For a path signature, supply
+`{"type": "rolling_path_signature", "input": "price", "window": 8,
+"warmup_policy": "full_window", "outputs": ["t", "x", "tt", "tx", "xt", "xx"]}`.
 
-Observed NaN/infinity emits NaN without adding history; unobserved inputs retain
-outputs. Timed windows also refresh on source-clock advances and expire whole
-epoch-aligned buckets. `FULL_WINDOW` waits for the sample count or elapsed time
-since the first finite observation; `FIRST_VALUE` exposes a nonempty window
-immediately. Empty windows emit NaN; one value has zero std/range. See
-[rolling statistics](../../docs/pipeline.md#rolling-scalar-statistics) for precise
-expiry, overflow, clock, and memory semantics.
+The runtime exposes `symbol`, `update`, `update_context`, and `update_order_book`.
+Online updates refresh the whole graph. Read independent NumPy snapshots with
+`model.values()` and current metadata with `model.feature_names()`,
+`model.n_features()`, or `model.active_feature_count()`. Output handles remain
+valid after reset and refitting. There is no pipeline-level `values()`.
 
-Trajectory methods `rolling_slope`, `rolling_path_length`,
-`rolling_positive_movement`, `rolling_negative_movement`,
-`rolling_direction_change_count`, and `rolling_max_drawdown` accept the same
-observation-count arguments on both `PipelineSpec` and `ScalarStage`:
-
-```python
-raw = fiml.FeatureExtractorSpec().field("BTCUSDT", source="trade_price", id="price")
-spec = (fiml.PipelineSpec(raw)
-        .standard_scale("price", mean=0., scale=2., output="scaled")
-        .scalar_stage(fiml.ScalarStage()
-                      .rolling_slope("scaled", window=20, output="trend")
-                      .rolling_path_length("scaled", window=20, output="movement")
-                      .rolling_max_drawdown("scaled", window=20, output="drawdown")))
-```
-
-Slope uses sample indices and requires two finite observations even with
-`FIRST_VALUE`; the other measurements return zero for a singleton. Direction
-changes ignore zero deltas (`+, 0, -` counts once). Drawdown is an absolute
-peak-to-later-trough decrease, not a percentage. Nonfinite observations emit
-NaN without entering history; the next finite observation reconnects to retained
-history. Outputs for one input share a preallocated tree across windows and
-warmup policies, with logarithmic updates and queries. Timed trajectory methods
-are not provided. See [trajectory definitions and memory costs](../../docs/pipeline.md#rolling-trajectory-shape).
-
-An experimental rolling level-2 path-signature stage expands one scalar into
-six coordinates:
-
-```python
-raw = fiml.FeatureExtractorSpec().field("BTCUSDT", source="trade_price", id="price")
-spec = (fiml.PipelineSpec(raw).identity("price")
-        .rolling_path_signature_stage("price", window=20, output_prefix="sig",
-                                      warmup=fiml.WarmupPolicy.FULL_WINDOW))
-```
-
-Output IDs are `sig__t`, `sig__x`, `sig__tt`, `sig__tx`, `sig__xt`, `sig__xx`
-in that order; `output_prefix` defaults to the input ID. Time is the retained
-observation index normalized to `[0, 1]`, independent of event timestamps.
-`window` counts finite observations. Missing observed values emit NaNs without
-entering history; unrelated events and context refreshes retain outputs.
-`FIRST_VALUE` exposes partial windows, including six zeros for a singleton.
-The stage replaces the preceding layout and supports JSON replay without fitting.
-See [coordinate definitions, normalization, limits, and memory costs](../../docs/pipeline.md#experimental-rolling-path-signatures).
-
-Streak and state-age methods are available on both `PipelineSpec` and
-`ScalarStage`, with `epsilon=0.0` and `output=None` defaults:
-
-```python
-raw = fiml.FeatureExtractorSpec().field("BTCUSDT", source="trade_price", id="price")
-spec = (fiml.PipelineSpec(raw)
-        .delta("price", lag_window=1, output="change")
-        .scalar_stage(fiml.ScalarStage()
-                      .positive_streak("change", epsilon=0.01, output="up_streak")
-                      .negative_streak("change", epsilon=0.01, output="down_streak")
-                      .observations_since_nonzero("change", epsilon=0.01, output="flat_count")
-                      .time_since_negative("change", epsilon=0.01, output="since_down_ms")))
-```
-
-The complete set also includes `observations_since_positive`,
-`observations_since_negative`, `time_since_positive`, and `time_since_nonzero`.
-Epsilon must be finite and nonnegative; both boundaries are neutral. Neutral
-values reset streaks, and since-values are NaN until their first matching signal,
-then zero on each match. NaN/infinity preserves state but emits NaN until finite
-input resumes. Count outputs ignore unrelated events; time outputs follow the
-source clock in milliseconds. Counts saturate at `2^53`. No warmup or window
-parameter is needed. See [state semantics](../../docs/pipeline.md#streak-and-state-age-transformations)
-for clocks, missing inputs, and numeric limits.
-
-`lagged_timed`, `delta_timed`, `simple_return_timed`, and `log_return_timed` are
-available on both `PipelineSpec` and `ScalarStage`. Use positive whole-millisecond
-duration strings such as `lag_window="100ms"`, `"500ms"`, or `"1s"`:
-
-```python
-raw = fiml.FeatureExtractorSpec().field("BTCUSDT", source="trade_price", id="price")
-spec = (fiml.PipelineSpec(raw)
-        .standard_scale("price", mean=0., scale=2., output="scaled")
-        .scalar_stage(fiml.ScalarStage()
-                      .lagged_timed("scaled", lag_window="100ms", output="lag100")
-                      .delta_timed("scaled", lag_window="500ms", output="delta500")
-                      .simple_return_timed("scaled", lag_window="1s", output="return1s")
-                      .log_return_timed("scaled", lag_window="1s", output="log1s")))
-```
-
-At source clock `t`, the as-of value is the newest retained finite input observation
-with timestamp `<= t - lag_window`, including exact boundaries. No interpolation
-is performed; missing history produces NaN. The default `aggregation="1ms"`
-retains the last finite observation at each millisecond and preserves exact
-millisecond as-of behavior. Existing JSON artifacts default to `"1ms"` when
-`aggregation` is omitted; writers omit that default too.
-
-For long windows, choose a coarser aggregation explicitly:
-
-```python
-spec = fiml.PipelineSpec(raw).delta_timed(
-    "price", lag_window="24h", aggregation="1s", output="daily_change"
-)
-```
-
-Buckets align to Unix epoch multiples of the aggregation interval, including
-negative timestamps. Each bucket keeps its last finite observation with its
-**actual timestamp**, so a lookup never selects a sample after its cutoff.
-Intermediate observations are discarded: a coarse lookup can return an older
-bucket's value or NaN where the exact 1 ms lookup has a value. Aggregation controls
-history only; the current operand remains the latest observed input value.
-`"1s"` and `"1000ms"` mean the same duration, regardless of spelling.
-
-Lag and aggregation must be positive whole-millisecond durations, and lag must
-be a multiple of aggregation. All four operations share history within a stage
-when input and aggregation match. A history reserves `max_lag / aggregation + 2`
-timestamp/value slots, including room for a boundary bucket and predecessor.
-The limit is **1,000,000 slots (about 16 MB) per shared history**; excessive
-configurations raise a configuration error before allocation. Multiple inputs or
-aggregation intervals have separate histories, so their memory costs add up.
-A 24-hour lag with 1-second aggregation reserves about **1.38 MB**, or **23 KB**
-with 1-minute aggregation. At the default 1 ms aggregation, lags longer than
-999,998 ms are rejected; increase aggregation or shorten the lag.
-
-A single-symbol input's clock advances on every accepted event for that symbol.
-Other symbols and global Time events do not advance it. Global calendar inputs
-and event-count lag outputs use the maximum accepted timestamp. Column-wise
-stages preserve clocks; PCA uses the maximum of its input clocks. An observation
-arriving behind a mixed-symbol clock is recorded at that composite time.
-Context-only inputs have no clock or observations and remain unavailable.
-
-Only finite observations of the input enter history. An observed NaN/infinity
-emits NaN until the next finite observation without discarding earlier history.
-Clock-only refreshes use the latest observed current value, add no duplicate
-input samples, and mark the timed output observed for later stateful stages.
-Equal-clock events with no input observation retain output and are not observed.
-Context replacement never advances timed histories. Delta/return arithmetic and
-numeric edge cases follow the sample-based contract above. Existing event-count
-and sample-count transformers retain their existing behavior.
-
-`ModelInputPipeline` mirrors the extractor's stateful `symbol`, `update`,
-`transform`, and `compute_features` event-replay APIs. `values()` and
-`feature_names()` describe final model input; `raw_values()` and
-`raw_feature_names()` expose only the current diagnostic raw snapshot. A
-pipeline DataFrame contains copied symbol/time metadata followed by final model
-columns only. Final and raw calculations stay in `float64`, while returned
-arrays use `output_dtype`, which locks after the first accepted event.
-
-See `examples/model_input_pipeline.py` for a focused runnable example. Indicator
-state is cumulative; call `pipeline.reset()` before replaying an independent
-stream. Reset retains fitted parameters and registered symbol handles.
+`transform`, `fit_transform`, and `transform_order_book` return dictionaries from
+output names to matrices, including for a single output. `compute_features`
+returns a dictionary of DataFrames with symbol/time metadata. All outputs use the
+same event rows. Output order is registration order; feature order is local to
+the producing node. Named outputs contain active features only and must be
+nonempty. `raw_values()` and `raw_feature_names()` remain diagnostic accessors.
 
 ### Fitting sklearn stages
 
-Install `fiml[sklearn]` (currently scikit-learn `>=1.9,<1.10`) for training.
-Append `SimpleImputer`, `StandardScaler`, `RobustScaler`, `MinMaxScaler`,
-`MaxAbsScaler`, `PowerTransformer`, `QuantileTransformer`, `VarianceThreshold`, `PCA`, or
-`fiml.ScalarStage` instances before fitting or replaying:
+Install `fiml[sklearn]` (scikit-learn `>=1.9,<1.10`) for training. Supported exact
+estimator types are `SimpleImputer`, `StandardScaler`, `RobustScaler`,
+`MinMaxScaler`, `MaxAbsScaler`, `PowerTransformer`, `QuantileTransformer`,
+`VarianceThreshold`, and `PCA`. Subclasses and `copy=False` are unsupported.
+Insertion clones an unfitted recipe, so later caller mutations do not change it.
 
 ```python
 from sklearn.decomposition import PCA
-from sklearn.feature_selection import VarianceThreshold
-from sklearn.impute import SimpleImputer
-from sklearn.preprocessing import PowerTransformer, QuantileTransformer, RobustScaler
+from sklearn.preprocessing import StandardScaler
 
-base_spec = fiml.PipelineSpec(raw_spec)
-for feature_id in raw_spec.feature_ids():
-    base_spec.identity(feature_id)
-
-pipeline = (fiml.ModelInputPipeline(base_spec)
-            .add_transformation(SimpleImputer(add_indicator=True), name="impute")
-            .add_transformation(VarianceThreshold(), name="variance")
-            .add_transformation(RobustScaler(unit_variance=True), name="scale")
-            .add_transformation(PowerTransformer(), name="power")
-            .add_transformation(QuantileTransformer(n_quantiles=256), name="quantile")
-            .add_transformation(PCA(n_components=2, whiten=True), name="pca"))
-pipeline.fit(kind, symbol, timestamp, price=prices, volume=volumes, fit_mask=ready)
-X_train = pipeline.transform(kind, symbol, timestamp, price=prices, volume=volumes)
-artifact = pipeline.to_json()
+spec = fiml.PipelineSpec(raw)
+scaled = spec.add(spec.root(), StandardScaler())
+projected = spec.add(scaled, PCA(n_components=2))
+spec.output("model", projected)
+spec.output("decision", spec.root())
+pipeline = spec.build()
+# Register symbols before preparing event arrays.
+# pipeline.fit(**training_events, fit_mask=training_rows)
+# matrices = pipeline.transform(**following_events)
+# X = matrices["model"]
 ```
 
-Scalar stages select, rename, scale, or lag values from the preceding stage:
+PCA component names are local `pc0`, `pc1`, etc. Scalar nodes following PCA may
+reference these names before fitting; missing components fail fit validation.
+Different PCA nodes may use the same component names.
 
-```python
-pipeline = (fiml.ModelInputPipeline(base_spec)
-            .add_transformation(StandardScaler(), name="scale")
-            .add_transformation(PCA(n_components=2), name="pca")
-            .add_transformation(fiml.ScalarStage()
-                                .identity("pca__pc0", output="current")
-                                .lagged("pca__pc0", lag_window=2, output="lag2"),
-                                name="lags")
-            .add_transformation(StandardScaler(), name="final_scale"))
-```
+Use one boolean `fit_mask` for the entire graph. It selects fitting snapshots;
+all events still replay to preserve histories. Shared estimators fit once per
+operation. Successive estimators may require repeated cold event replays; there
+is no graph-wide training cache. Fitting uses float64 regardless of output dtype.
+Selected inputs must be finite, except that SimpleImputer, PowerTransformer, and
+QuantileTransformer accept NaNs. Final selected output rows must be finite.
 
-All definitions within a `ScalarStage` read the same preceding layout. To scale
-`lag2` with fixed parameters, append another stage such as
-`fiml.ScalarStage().standard_scale("lag2", mean=0., scale=2., output="scaled_lag")`.
-Only explicitly declared outputs survive a scalar stage; use `identity` to carry
-columns forward. Input IDs and parameters are validated when the stage is added
-to a spec or reached during fitting. The pipeline snapshots the builder when added.
-For inference with already known parameters, use `spec.scalar_stage(stage)`;
-this also works without sklearn.
+Successful fitting installs a cold runtime. Failed fitting preserves the old
+artifact and live state. `reset()` clears histories, contexts, and books while
+retaining learned parameters and symbol handles. Batch replay advances the live
+runtime rather than resetting it implicitly. Unfitted recipes reject inference
+and export. A JSON-loaded pipeline is inference-only and imports no sklearn.
 
-Register the event symbols with this pipeline before constructing the `symbol`
-array. `fit` takes the same event columns as `transform` and returns `self`.
-`fit_mask` is an optional boolean vector selecting training snapshots, for example
-after indicator and downstream lag warm-up; every event is still replayed to preserve history.
-Even excluded middle rows enter lag history. Selected inputs to each sklearn estimator
-and selected final outputs must be finite, except that `SimpleImputer` and
-`PowerTransformer` and `QuantileTransformer` accept NaNs and still reject infinities. A later imputer is
-required if selected final outputs retain NaNs. An earlier scalar selection can drop
-unneeded warm-up columns. Fitting replays each completed prefix through Rust,
-so its cost grows with the number of stages. Fit only the chronological training
-partition. Reserved cells are excluded from fitting and stay NaN in output.
+JSON version `4.0` stores ordered graph nodes and named outputs, with nested
+extractor version `2.0`. Recreate and re-export older artifacts. Runtime state,
+training data, and estimator objects are never serialized. Rust consumers should
+enable serde_json's `float_roundtrip` feature to preserve fitted f64 values.
 
-Each stage consumes the preceding complete active vector; the base spec can
-include lagged features. Scaling preserves names; PCA generates `pca__pc0`, etc.
-VarianceThreshold preserves the IDs and order of retained inputs.
-Capacity defaults to the fitted final width, while an explicitly authored
-capacity applies to the final vector; intermediate training layouts may be wider. PCA emits all NaNs until every stage input is finite.
-`fit_transform` fits and replays, returning every event row; keep labels aligned
-and select usable rows when training the predictor.
-
-Successful `fit` leaves cold event state. Failed refits preserve the previous
-artifact and runtime. `transform` never fits or resets. Use `to_spec()` for an
-independent fitted spec snapshot. `from_json` restores an inference-only pipeline
-without sklearn; it starts cold and requires the historical warm-up prefix.
-DataFrame and order-book replay still work for inference; fitting currently
-accepts the columnar event API only. Arbitrary estimators/subclasses, `copy=False`,
-`RobustScaler(with_scaling=True, unit_variance=True)` with equal quantiles or
-quantiles at 0 or 100, and sklearn `GridSearchCV` integration are unsupported.
-Those quantile ranges produce a non-finite or zero fitted scale that cannot enter
-the pipeline's finite numeric state.
-
-`MinMaxScaler` supports every valid `feature_range` and both `clip` settings.
-Without clipping, future values outside the fitted data range can exceed the
-configured feature range, matching sklearn.
-
-`MaxAbsScaler` preserves zero and sign, and supports both `clip` settings.
-Without clipping, future magnitudes can exceed `1`; fitting is not robust to
-outliers.
-
-`SimpleImputer` supports dense numeric input with `missing_values=np.nan`,
-`copy=True`, the `mean`, `median`, `most_frequent`, and `constant` strategies,
-and both `keep_empty_features` and `add_indicator` settings. Empty columns follow
-sklearn's fitted retained layout. Indicator columns use sklearn's
-`missingindicator_<input>` names and only cover columns missing during fitting;
-NaNs first seen during inference are still replaced but do not add new indicators.
-Filling indicator warm-up is an explicit modeling choice, not evidence that a
-feature is ready. Use `fit_mask` to exclude those rows when that distinction matters.
-
-`PowerTransformer` supports exact sklearn estimators with `copy=True`, both
-`yeo-johnson` and `box-cox`, and `standardize=True/False`. FIML preserves NaNs.
-Box-Cox rejects nonpositive fitting values; during frozen inference, a nonpositive
-value produces NaN only in that output column instead of rejecting the event.
-
-`QuantileTransformer` supports exact sklearn estimators with `copy=True`, dense
-input, and `uniform` or `normal` output. Python owns fitting options such as
-`n_quantiles`, `subsample`, and `random_state`; artifacts store only the effective
-quantile/reference tables and boundary constants. Inference preserves IDs and
-NaNs, averages both sides of repeated quantiles like sklearn, and saturates values
-outside the fitted range. Normal output uses a full-precision AS 241 inverse-normal
-approximation and sklearn's exported finite tail clipping. The nonlinear mapping
-changes linear correlations. All-NaN fitted columns are stored as explicit indices
-and keep producing NaN, allowing a following imputer to fill them without putting
-non-finite numbers in the JSON artifact.
-
-`VarianceThreshold` supports the exact sklearn estimator with any finite,
-nonnegative `threshold`; it has no `copy` option. Fitting requires finite selected
-training inputs. Rust stores only sklearn's ordered retained-column indices, not
-variances or training statistics. Inference preserves NaNs in retained columns
-and ignores discarded columns. Positive thresholds depend on input scale;
-VarianceThreshold is neither correlation-based nor supervised feature selection.
-
-JSON writers and readers use pipeline version `3.0` and nested extractor version `2.0`.
-Earlier artifacts are rejected; see the
-[0.2.0 migration guide](https://github.com/pbezglasny/fiml/blob/v0.2.0/docs/sample-average-migration.md)
-before rebuilding and re-exporting configurations. Scalar stages serialize as
-`{"type": "scalar", "transformations": [...]}` within the required `model_input.stages` array.
-They use the same transformation fields as the base layout.
-Rust consumers should enable `serde_json`'s `float_roundtrip` feature to preserve
-every fitted `f64` on load, as the Python bindings do. No sklearn or matrix-library
-dependency is needed in Rust.
-
-Run [examples/sklearn_pipeline.py](examples/sklearn_pipeline.py) for a complete
-training/export example that checks Rust output against sklearn. See
-[the implementation design](../../docs/pipeline_transformer.md) for the wire
-contract and numerical limits. Whitening nearly zero-variance components can
-amplify sklearn/Rust rounding differences substantially; retain fewer components
-or disable whitening when needed. Train the predictor on FIML's returned matrix
-so deployed inference uses the same arithmetic.
+See [the graph contract](../../docs/multiple_output.md),
+[the numeric fitting reference](../../docs/pipeline_transformer.md), and
+[examples/sklearn_pipeline.py](examples/sklearn_pipeline.py). The example compares
+Rust inference with an independent sklearn oracle. Whitening nearly zero-variance
+components can amplify rounding differences; train downstream predictors on the
+matrix returned by FIML to use the same arithmetic at inference.
 
 ## Low-level event API
 
@@ -870,10 +579,12 @@ raw = (fiml.FeatureExtractorSpec()
        .order_book_bid_added_volume("BTCUSDT")
        .order_book_ask_removed_volume("BTCUSDT"))
 bid_added, ask_removed = raw.feature_ids()
-spec = (fiml.PipelineSpec(raw)
+scalar = (fiml.ScalarStage()
         .sma(bid_added, window=2, output="bid_add_mean")
         .ema(ask_removed, window=2, output="ask_remove_ema"))
-pipeline = fiml.ModelInputPipeline(spec)
+spec = fiml.PipelineSpec(raw)
+spec.output("model", spec.add(spec.root(), scalar))
+pipeline = spec.build()
 rows = pipeline.transform_order_book([
     fiml.OrderBookEvent.snapshot("BTCUSDT", 0, 10,
         [("100", "2")], [("101", "5")]),
@@ -882,7 +593,7 @@ rows = pipeline.transform_order_book([
     fiml.OrderBookEvent.delta("BTCUSDT", 2, 12,
         [("bid", "99", "1"), ("ask", "101", "2")]),
 ])
-# rows: [[nan, nan], [nan, nan], [2.0, 1.6666666666666665]]
+# rows["model"]: [[nan, nan], [nan, nan], [2.0, 1.6666666666666665]]
 ```
 
 Both averages default to full-window warmup; `warmup=fiml.WarmupPolicy.FIRST_VALUE`

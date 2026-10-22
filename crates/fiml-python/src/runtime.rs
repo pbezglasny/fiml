@@ -98,7 +98,7 @@ impl OutputBuffer {
 }
 
 pub(crate) type CoreFeatureExtractor = RustFeatureExtractor<VecFeatureVector>;
-pub(crate) type CorePipeline = RustPipeline<VecFeatureVector, VecFeatureVector>;
+pub(crate) type CorePipeline = RustPipeline;
 
 pub(crate) fn build_core(
     feature_extractor_spec: &FeatureExtractorSpec,
@@ -131,7 +131,13 @@ pub(crate) trait EventRuntime {
     fn handle_event(&mut self, event: Event) -> fiml::Result<()>;
     fn last_timestamp(&self) -> Option<i64>;
     fn last_timestamp_for_symbol(&self, symbol: Symbol) -> Option<i64>;
-    fn values(&self) -> &[f64];
+    fn output_count(&self) -> usize {
+        1
+    }
+    fn output_name(&self, _index: usize) -> Option<&str> {
+        None
+    }
+    fn values(&self, index: usize) -> &[f64];
 }
 
 impl EventRuntime for CoreFeatureExtractor {
@@ -156,7 +162,7 @@ impl EventRuntime for CoreFeatureExtractor {
         RustFeatureExtractor::last_timestamp_for_symbol(self, symbol)
     }
 
-    fn values(&self) -> &[f64] {
+    fn values(&self, _index: usize) -> &[f64] {
         self.feature_vector().values()
     }
 }
@@ -183,8 +189,14 @@ impl EventRuntime for CorePipeline {
         RustPipeline::last_timestamp_for_symbol(self, symbol)
     }
 
-    fn values(&self) -> &[f64] {
-        RustPipeline::values(self)
+    fn output_count(&self) -> usize {
+        self.output_names().len()
+    }
+    fn output_name(&self, index: usize) -> Option<&str> {
+        self.output_names().nth(index)
+    }
+    fn values(&self, index: usize) -> &[f64] {
+        self.output_at(index).expect("registered output").values()
     }
 }
 
@@ -476,8 +488,13 @@ where
             *previous_timestamp = Some(event.timestamp());
         }
 
-        let n_features = self.feature_names.len();
-        let mut output = OutputBuffer::new(self.output_dtype, n_rows * n_features);
+        let widths = (0..self.inner.output_count())
+            .map(|index| self.inner.values(index).len())
+            .collect::<Vec<_>>();
+        let mut outputs = widths
+            .iter()
+            .map(|width| OutputBuffer::new(self.output_dtype, n_rows * width))
+            .collect::<Vec<_>>();
         for (row, event) in events.into_iter().enumerate() {
             if let Some(updates) = schedule.get(&row) {
                 self.inner
@@ -493,9 +510,21 @@ where
             self.inner
                 .handle_event(event)
                 .map_err(|error| PyValueError::new_err(format!("row {row}: {error}")))?;
-            output.write_row(row, n_features, self.inner.values());
+            for (index, (output, &width)) in outputs.iter_mut().zip(&widths).enumerate() {
+                output.write_row(row, width, self.inner.values(index));
+            }
         }
-        output.into_pyarray(py, n_rows, n_features)
+        if self.inner.output_name(0).is_none() {
+            return outputs.remove(0).into_pyarray(py, n_rows, widths[0]);
+        }
+        let result = PyDict::new(py);
+        for (index, (output, width)) in outputs.into_iter().zip(widths).enumerate() {
+            result.set_item(
+                self.inner.output_name(index).expect("named graph output"),
+                output.into_pyarray(py, n_rows, width)?,
+            )?;
+        }
+        Ok(result.into_any().unbind())
     }
 }
 

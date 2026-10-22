@@ -1,60 +1,70 @@
 {
   "pipeline": {
-    "version": "3.0",
-    "feature_extractor": {
-      "version": "2.0",
-      "capacity": 3,
-      "length": 1,
-      "required_events": [
-        {
-          "symbol": "btcusdt",
-          "event": "trade"
-        }
-      ],
-      "features": [
-        {
-          "symbol": "btcusdt",
-          "indicators": [
+    "version": "4.0",
+    "nodes": [
+      {
+        "type": "extractor",
+        "spec": {
+          "version": "2.0",
+          "capacity": 3,
+          "length": 1,
+          "required_events": [
             {
-              "kind": "field",
-              "source": {
-                "type": "field",
-                "event": "trade",
-                "field": "price"
-              }
+              "symbol": "btcusdt",
+              "event": "trade"
+            }
+          ],
+          "features": [
+            {
+              "symbol": "btcusdt",
+              "indicators": [
+                {
+                  "kind": "field",
+                  "source": {
+                    "type": "field",
+                    "event": "trade",
+                    "field": "price"
+                  }
+                }
+              ]
             }
           ]
         }
-      ]
-    },
-    "model_input": {
-      "capacity": 2,
-      "length": 2,
-      "transformations": [
-        {
-          "type": "sma",
-          "input": "field:symbol=7:btcusdt:source=field.trade_price",
-          "output": "sma:symbol=7:btcusdt:source=field.trade_price:window=1:warmup=full_window",
-          "window": 1,
-          "warmup_policy": "full_window"
-        },
-        {
-          "type": "sma",
-          "input": "field:symbol=7:btcusdt:source=field.trade_price",
-          "output": "sma:symbol=7:btcusdt:source=field.trade_price:window=3:warmup=full_window",
-          "window": 3,
-          "warmup_policy": "full_window"
-        },
-        {
-          "type": "sma",
-          "input": "field:symbol=7:btcusdt:source=field.trade_price",
-          "output": "sma:symbol=7:btcusdt:source=field.trade_price:window=5:warmup=full_window",
-          "window": 5,
-          "warmup_policy": "full_window"
+      },
+      {
+        "type": "transform",
+        "parent": 0,
+        "stage": {
+          "type": "scalar",
+          "transformations": [
+            {
+              "type": "sma",
+              "input": "field:symbol=7:btcusdt:source=field.trade_price",
+              "output": "sma:symbol=7:btcusdt:source=field.trade_price:window=1:warmup=full_window",
+              "window": 1,
+              "warmup_policy": "full_window"
+            },
+            {
+              "type": "sma",
+              "input": "field:symbol=7:btcusdt:source=field.trade_price",
+              "output": "sma:symbol=7:btcusdt:source=field.trade_price:window=3:warmup=full_window",
+              "window": 3,
+              "warmup_policy": "full_window"
+            },
+            {
+              "type": "sma",
+              "input": "field:symbol=7:btcusdt:source=field.trade_price",
+              "output": "sma:symbol=7:btcusdt:source=field.trade_price:window=5:warmup=full_window",
+              "window": 5,
+              "warmup_policy": "full_window"
+            }
+          ]
         }
-      ],
-      "stages": [
-        {
+      },
+      {
+        "type": "transform",
+        "parent": 1,
+        "stage": {
           "type": "scalar",
           "transformations": [
             {
@@ -79,8 +89,12 @@
               "lag_window": 2
             }
           ]
-        },
-        {
+        }
+      },
+      {
+        "type": "transform",
+        "parent": 2,
+        "stage": {
           "type": "simple_impute",
           "outputs": [
             "sma:symbol=7:btcusdt:source=field.trade_price:window=1:warmup=full_window",
@@ -108,8 +122,12 @@
             2,
             3
           ]
-        },
-        {
+        }
+      },
+      {
+        "type": "transform",
+        "parent": 3,
+        "stage": {
           "type": "min_max_scale",
           "outputs": [
             "sma:symbol=7:btcusdt:source=field.trade_price:window=1:warmup=full_window",
@@ -142,8 +160,12 @@
             -1.0,
             1.0
           ]
-        },
-        {
+        }
+      },
+      {
+        "type": "transform",
+        "parent": 4,
+        "stage": {
           "type": "select",
           "outputs": [
             "sma:symbol=7:btcusdt:source=field.trade_price:window=1:warmup=full_window",
@@ -163,8 +185,12 @@
             5,
             6
           ]
-        },
-        {
+        }
+      },
+      {
+        "type": "transform",
+        "parent": 5,
+        "stage": {
           "type": "quantile_transform",
           "outputs": [
             "sma:symbol=7:btcusdt:source=field.trade_price:window=1:warmup=full_window",
@@ -262,12 +288,16 @@
           ],
           "all_nan_input_indices": [],
           "bounds_threshold": 1e-07
-        },
-        {
+        }
+      },
+      {
+        "type": "transform",
+        "parent": 6,
+        "stage": {
           "type": "pca",
           "outputs": [
-            "pca__pc0",
-            "pca__pc1"
+            "pc0",
+            "pc1"
           ],
           "mean": [
             0.4984651786122374,
@@ -303,8 +333,14 @@
             0.5370385104654894
           ]
         }
-      ]
-    }
+      }
+    ],
+    "outputs": [
+      {
+        "name": "model",
+        "node": 7
+      }
+    ]
   },
   "symbol": "BTCUSDT",
   "timestamp": [

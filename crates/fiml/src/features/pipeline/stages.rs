@@ -6,7 +6,7 @@ use crate::features::transformers::path_signature::{self, PathSignature};
 use crate::features::transformers::{
     self, Evaluation, Transformer, clock_inputs, inherit_clocks, validate_standard_scale,
 };
-use crate::{FeatureId, FeatureVector, TransformerDefinition, VecFeatureVector, WarmupPolicy};
+use crate::{FeatureId, FeatureVector, TransformerDefinition, WarmupPolicy};
 
 /// Deployable scalar definitions or learned numeric state consuming the preceding active vector.
 /// Training stays outside Rust; these definitions freeze inference and output order.
@@ -154,7 +154,8 @@ impl FittedStage {
         }
     }
 
-    pub(super) fn validate(&self, inputs: &[FeatureId]) -> Result<(), String> {
+    /// Validates numeric parameters and feature references against a parent layout.
+    pub fn validate(&self, inputs: &[FeatureId]) -> Result<(), String> {
         let outputs = self.outputs();
         if inputs.is_empty() || outputs.is_empty() {
             return Err("input and output layouts must be nonempty".into());
@@ -463,7 +464,7 @@ fn dot(left: &[f64], right: &[f64]) -> f64 {
 }
 
 /// Contiguous fitted state compiled once for numeric-only event processing.
-enum CompiledStage {
+pub(super) enum CompiledStage {
     RollingPathSignature(PathSignature),
     Scalar {
         operations: Box<[Transformer]>,
@@ -510,7 +511,7 @@ enum CompiledStage {
 }
 
 impl CompiledStage {
-    fn new(stage: &FittedStage, inputs: &[FeatureId], timed: bool) -> Self {
+    pub(super) fn new(stage: &FittedStage, inputs: &[FeatureId], timed: bool) -> Self {
         match stage {
             FittedStage::RollingPathSignature {
                 input,
@@ -603,7 +604,7 @@ impl CompiledStage {
         }
     }
 
-    fn apply<V: FeatureVector>(
+    pub(super) fn apply<V: FeatureVector>(
         &mut self,
         input: &[f64],
         observed: &[bool],
@@ -986,112 +987,4 @@ fn polynomial(argument: f64, coefficients: &[f64; 8]) -> f64 {
         .fold(coefficients[0], |value, coefficient| {
             value * argument + coefficient
         })
-}
-
-/// Scratch and compiled stages owned by a pipeline only when vector stages exist.
-pub(super) struct StageRuntime {
-    pub(super) input: VecFeatureVector,
-    pub(super) observations: Box<[bool]>,
-    scratch_observations: Box<[bool]>,
-    base_width: usize,
-    scratch: VecFeatureVector,
-    stages: Box<[CompiledStage]>,
-    base_clock_sources: Box<[Option<usize>]>,
-    clocks: Box<[Option<i64>]>,
-    scratch_clocks: Box<[Option<i64>]>,
-}
-
-impl StageRuntime {
-    pub(super) fn new(
-        base: &[TransformerDefinition],
-        stages: &[FittedStage],
-        raw_ids: &[FeatureId],
-        timed: bool,
-    ) -> Option<Self> {
-        if stages.is_empty() {
-            return None;
-        }
-        let base_width = base.len();
-        let mut width = base_width;
-        let mut inputs: Cow<'_, [FeatureId]> = base
-            .iter()
-            .map(|definition| definition.output.clone())
-            .collect::<Vec<_>>()
-            .into();
-        let stages = stages
-            .iter()
-            .map(|stage| {
-                let compiled = CompiledStage::new(stage, &inputs, timed);
-                inputs = stage.outputs();
-                width = width.max(inputs.len());
-                compiled
-            })
-            .collect::<Box<[_]>>();
-        Some(Self {
-            base_width,
-            base_clock_sources: if timed {
-                clock_inputs(base, raw_ids)
-            } else {
-                Box::new([])
-            },
-            clocks: vec![None; if timed { width } else { 0 }].into_boxed_slice(),
-            scratch_clocks: vec![None; if timed && stages.len() > 1 { width } else { 0 }]
-                .into_boxed_slice(),
-            observations: vec![false; width].into_boxed_slice(),
-            scratch_observations: vec![false; width].into_boxed_slice(),
-            input: VecFeatureVector::new(width),
-            scratch: VecFeatureVector::new(if stages.len() > 1 { width } else { 0 }),
-            stages,
-        })
-    }
-
-    pub(super) fn prepare_input(&mut self) {
-        self.observations.fill(false);
-        // Lags leave unavailable outputs untouched. Reused intermediate storage
-        // must not leak the preceding event's transformed values into warm-up.
-        for index in 0..self.base_width {
-            self.input.set_value_at(index, f64::NAN);
-        }
-    }
-
-    pub(super) fn apply<V: FeatureVector>(
-        &mut self,
-        output: &mut V,
-        output_observed: &mut [bool],
-        evaluation: Evaluation<'_>,
-    ) {
-        self.clocks.fill(None);
-        inherit_clocks(&self.base_clock_sources, evaluation, &mut self.clocks);
-        let (last, preceding) = self
-            .stages
-            .split_last_mut()
-            .expect("nonempty stage sequence");
-        for stage in preceding {
-            stage.apply(
-                self.input.values(),
-                &self.observations,
-                &mut self.scratch,
-                &mut self.scratch_observations,
-                Evaluation {
-                    timestamps: &self.clocks,
-                    ..evaluation
-                },
-                &mut self.scratch_clocks,
-            );
-            std::mem::swap(&mut self.clocks, &mut self.scratch_clocks);
-            std::mem::swap(&mut self.observations, &mut self.scratch_observations);
-            std::mem::swap(&mut self.input, &mut self.scratch);
-        }
-        last.apply(
-            self.input.values(),
-            &self.observations,
-            output,
-            output_observed,
-            Evaluation {
-                timestamps: &self.clocks,
-                ..evaluation
-            },
-            &mut [],
-        );
-    }
 }

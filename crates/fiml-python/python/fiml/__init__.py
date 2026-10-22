@@ -4,6 +4,9 @@ Features are computed by the exact Rust runtime used for live serving, so batch
 and live outputs match given the same canonical spec and event stream.
 """
 
+from dataclasses import dataclass
+import json as _json
+
 import numpy as np
 
 from ._fiml import (
@@ -14,7 +17,7 @@ from ._fiml import (
     KIND_TIME,
     KIND_TRADE,
     KIND_VOLUME,
-    PipelineSpec,
+    PipelineSpec as _PipelineSpec,
     ScalarStage,
     SIDE_AGGRESSOR_BUY,
     SIDE_AGGRESSOR_SELL,
@@ -30,6 +33,8 @@ __all__ = [
     "FeatureExtractorSpec",
     "OrderBookEvent",
     "ModelInputPipeline",
+    "PipelineOutput",
+    "NodeId",
     "PipelineSpec",
     "ScalarStage",
     "WarmupPolicy",
@@ -117,7 +122,14 @@ def _compute_features(
         if name not in df.columns:
             raise ValueError(f"input has no column {name!r}")
 
-    feature_names = runtime.feature_names()
+    names_by_output = (
+        {name: runtime.output(name).feature_names() for name in runtime.output_names()}
+        if isinstance(runtime, ModelInputPipeline) else None
+    )
+    feature_names = (
+        list(dict.fromkeys(name for names in names_by_output.values() for name in names))
+        if names_by_output is not None else runtime.feature_names()
+    )
     if len(feature_names) != len(set(feature_names)):
         raise ValueError("feature names must be unique")
     collisions = set(feature_names).intersection((symbol, time))
@@ -212,10 +224,15 @@ def _compute_features(
                 ) from None
         raise
 
-    result = pd.DataFrame(matrix, index=df.index, columns=feature_names, copy=False)
-    result.insert(0, time, df[time].array)
-    result.insert(0, symbol, df[symbol].array)
-    return result
+    def frame(values, names):
+        result = pd.DataFrame(values, index=df.index, columns=names, copy=False)
+        result.insert(0, time, df[time].array)
+        result.insert(0, symbol, df[symbol].array)
+        return result
+
+    if names_by_output is not None:
+        return {name: frame(values, names_by_output[name]) for name, values in matrix.items()}
+    return frame(matrix, feature_names)
 
 
 class FeatureExtractor(_FeatureExtractor):
@@ -261,28 +278,174 @@ class FeatureExtractor(_FeatureExtractor):
         )
 
 
-class ModelInputPipeline:
-    """Fit supported sklearn stages in Python and replay frozen parameters in Rust.
+@dataclass(frozen=True, slots=True)
+class NodeId:
+    """Opaque handle belonging to one graph builder; retains no runtime state."""
 
-    ``fit`` starts from cold event state and leaves the fitted runtime cold.
-    ``transform`` advances event state; use ``reset`` before replaying a stream.
+    _owner: object
+    _index: int
+
+
+def _stage_snapshot(stage):
+    if type(stage) is ScalarStage:
+        return stage._to_json()
+    if isinstance(stage, dict):
+        return _json.dumps(stage, allow_nan=False)
+    from ._sklearn import clone_transformer
+
+    return clone_transformer(stage)
+
+
+class PipelineSpec:
+    """Append-only graph builder. Stage inputs resolve against their direct parent.
+
+    Stages may be ScalarStage recipes, supported sklearn estimators, or numeric
+    dictionaries using the fitted-stage JSON format. Insertion snapshots inputs.
+    """
+
+    def __init__(self, extractor, *, checksum=None):
+        self._base = _PipelineSpec(extractor, checksum=checksum)
+        self._owner = object()
+        self._nodes = []
+        self._outputs = []
+        self._layouts = [self._base.feature_ids(0)]
+        self._loaded = False
+
+    def root(self):
+        """Return this builder's extractor root."""
+        return NodeId(self._owner, 0)
+
+    def _index(self, node):
+        if (type(node) is not NodeId or node._owner is not self._owner
+                or not 0 <= node._index <= len(self._nodes)):
+            raise ValueError("node belongs to another pipeline builder")
+        return node._index
+
+    def _numeric_path(self, parent):
+        path = []
+        while parent:
+            previous, stage = self._nodes[parent - 1]
+            path.append(stage)
+            parent = previous
+        candidate = self._base.copy()
+        current = 0
+        for stage in reversed(path):
+            current = candidate.add(current, stage)
+        return candidate, current
+
+    def add(self, parent, stage):
+        """Snapshot a transformation and append it below an existing parent."""
+        parent = self._index(parent)
+        stage = _stage_snapshot(stage)
+        layout = None
+        if isinstance(stage, str) and self._layouts[parent] is not None:
+            candidate, current = self._numeric_path(parent)
+            current = candidate.add(current, stage)
+            layout = candidate.feature_ids(current)
+        self._nodes.append((parent, stage))
+        self._layouts.append(layout)
+        return NodeId(self._owner, len(self._nodes))
+
+    def output(self, name, node):
+        """Register a unique name without copying or renaming node features."""
+        index = self._index(node)
+        if not isinstance(name, str) or not name.strip() or name.startswith("__reserved_"):
+            raise ValueError("output name must be nonblank and outside the reserved namespace")
+        if any(previous == name for previous, _ in self._outputs):
+            raise ValueError(f"duplicate output name {name!r}")
+        self._outputs.append((name, index))
+
+    def build(self, output_dtype="float64"):
+        """Create an independent snapshot; learned recipes require fit()."""
+        return ModelInputPipeline(self, output_dtype)
+
+    @classmethod
+    def from_json(cls, json):
+        """Load strict version 4.0 numeric state into a fresh builder."""
+        numeric = _PipelineSpec.from_json(json)
+        document = _json.loads(numeric.to_json())
+        result = cls(FeatureExtractorSpec.from_json(_json.dumps(document["nodes"][0]["spec"])),
+                     checksum=document.get("checksum"))
+        for node in document["nodes"][1:]:
+            result.add(NodeId(result._owner, node["parent"]), node["stage"])
+        for output in document["outputs"]:
+            result.output(output["name"], NodeId(result._owner, output["node"]))
+        result._loaded = True
+        return result
+
+    def to_json(self):
+        """Export numeric configurations; unfitted recipes must be fitted first."""
+        return self.build().to_json()
+
+
+class PipelineOutput:
+    """Reads a named result from the pipeline's current runtime, including after refit."""
+
+    def __init__(self, pipeline, name):
+        self._pipeline = pipeline
+        self._name = name
+
+    @property
+    def name(self):
+        return self._name
+
+    def values(self):
+        """Return an independent NumPy snapshot of active coordinates."""
+        return self._pipeline._runtime.values(self.name)
+
+    def feature_names(self):
+        """Return current coordinate names; refitting may change the layout."""
+        return self._pipeline._runtime.feature_names(self.name)
+
+    def n_features(self):
+        return len(self.feature_names())
+
+    def active_feature_count(self):
+        return self.n_features()
+
+
+class ModelInputPipeline:
+    """Own a fixed graph, fit shared nodes once, and replay events through Rust.
+
+    transform advances event state and returns all named matrices. Successful
+    fitting and reset install cold state. Failed fits preserve the live runtime.
     """
 
     def __init__(self, pipeline_spec, output_dtype="float64"):
-        self._base_spec = pipeline_spec.copy()
-        self._spec = pipeline_spec.copy()
-        self._inner = _ModelInputPipeline(self._spec, _normalize_output_dtype(output_dtype))
+        if not isinstance(pipeline_spec, PipelineSpec):
+            raise TypeError("pipeline_spec must be a PipelineSpec")
+        if not pipeline_spec._outputs:
+            raise ValueError("pipeline requires at least one named output")
+        for name, node in pipeline_spec._outputs:
+            if pipeline_spec._layouts[node] == []:
+                raise ValueError(f"output {name!r} must contain at least one active feature")
+        self._base_spec = pipeline_spec._base.copy()
+        self._templates = [
+            (parent, stage if isinstance(stage, str) else _stage_snapshot(stage))
+            for parent, stage in pipeline_spec._nodes
+        ]
+        self._outputs = list(pipeline_spec._outputs)
         self._symbols = []
-        self._templates = []
-        self._recipe_locked = False
-        self._inference_only = bool(pipeline_spec.stage_count)
+        self._dtype = _normalize_output_dtype(output_dtype)
+        self._inference_only = pipeline_spec._loaded
+        self._spec = None
+        self._inner = None
+        if all(isinstance(stage, str) for _, stage in self._templates):
+            candidate = self._base_spec.copy()
+            for parent, stage in self._templates:
+                candidate.add(parent, stage)
+            self._register_outputs(candidate)
+            self._inner = self._new_runtime(candidate)
+            self._spec = candidate
+
+    def _register_outputs(self, candidate):
+        for name, node in self._outputs:
+            candidate.output(name, node)
+        candidate.validate()
 
     @classmethod
     def from_json(cls, json, output_dtype="float64"):
-        """Construct directly from a versioned PipelineSpec artifact."""
-        pipeline = cls(PipelineSpec.from_json(json), output_dtype=output_dtype)
-        pipeline._inference_only = True
-        return pipeline
+        return cls(PipelineSpec.from_json(json), output_dtype)
 
     @property
     def _runtime(self):
@@ -291,145 +454,115 @@ class ModelInputPipeline:
         return self._inner
 
     def _new_runtime(self, spec, output_dtype=None):
-        runtime = _ModelInputPipeline(spec, output_dtype or self.output_dtype)
+        runtime = _ModelInputPipeline(spec, output_dtype or self._dtype)
         for name in self._symbols:
             runtime.symbol(name)
         return runtime
 
-    def add_transformation(self, estimator, *, name):
-        """Append a supported sklearn transformer or ScalarStage."""
-        if self._inference_only or self._recipe_locked or self._inner._has_events:
-            raise ValueError("cannot change an established recipe; create a new pipeline")
-        if not isinstance(name, str) or not name or name.startswith("__reserved_"):
-            raise ValueError("stage name must be a nonempty, nonreserved string")
-        if any(previous == name for previous, _ in self._templates):
-            raise ValueError(f"duplicate stage name {name!r}")
-        if type(estimator) is ScalarStage:
-            template = estimator.copy()
-        else:
-            from ._sklearn import clone_transformer
-
-            template = clone_transformer(estimator)
-        self._templates.append((name, template))
-        self._spec = None
-        return self
-
-    def fit(
-        self, kind, symbol, timestamp, *, price=None, volume=None, side=None,
-        fit_mask=None, context_updates=None,
-    ):
-        """Fit on selected event snapshots; replay all events to preserve history.
-
-        fit_mask is a boolean vector selecting training rows (e.g. excluding
-        warm-up). SimpleImputer and PowerTransformer inputs may contain NaNs;
-        infinities are always rejected. Failed refits preserve live state.
-        context_updates maps event-row indices to partial context replacements;
-        the same schedule is applied before events in every cold fitting replay.
-        """
+    def fit(self, kind, symbol, timestamp, *, price=None, volume=None, side=None,
+            fit_mask=None, context_updates=None):
+        """Use one shared fitting mask while replaying excluded rows for history."""
         if self._inference_only:
             raise ValueError("this pipeline is inference-only; create a Python training recipe")
-        candidate = self._base_spec._fit_candidate()
-
-        def replay_candidate():
-            replay = self._new_runtime(candidate, "float64")
-            return replay.transform(
-                kind, symbol, timestamp, price=price, volume=volume, side=side,
-                context_updates=context_updates,
-            )[:, :candidate.active_feature_count]
-
-        matrix = replay_candidate()
         if fit_mask is None:
-            fit_mask = np.ones(len(matrix), dtype=bool)
+            fit_mask = np.ones(len(kind), dtype=bool)
         else:
             fit_mask = np.asarray(fit_mask)
-            if fit_mask.dtype != np.bool_ or fit_mask.shape != (len(matrix),):
+            if fit_mask.dtype != np.bool_ or fit_mask.shape != (len(kind),):
                 raise ValueError("fit_mask must be a boolean vector with one entry per event")
         rows = np.flatnonzero(fit_mask)
-        if not rows.size or not matrix.shape[1]:
+        if not rows.size:
             raise ValueError("fit requires nonempty training rows and active features")
+        events = dict(kind=kind, symbol=symbol, timestamp=timestamp, price=price,
+                      volume=volume, side=side, context_updates=context_updates)
+        candidate = self._base_spec.copy()
 
-        def validate_matrix(*, allow_nan=False):
+        def validate_matrix(matrix, ids, allow_nan=False):
             selected = matrix[fit_mask]
             invalid = np.argwhere(np.isinf(selected) if allow_nan else ~np.isfinite(selected))
             if invalid.size:
                 row, column = invalid[0]
-                requirement = (
-                    "must not be infinite for SimpleImputer fitting"
-                    if allow_nan
-                    else "must be finite for fitting; exclude warm-up with fit_mask"
-                )
-                raise ValueError(
-                    f"row {rows[row]}: feature {candidate.feature_ids()[column]!r} "
-                    f"{requirement}"
-                )
+                requirement = ("must not be infinite for fitting" if allow_nan else
+                               "must be finite for fitting; exclude warm-up with fit_mask")
+                raise ValueError(f"row {rows[row]}: feature {ids[column]!r} {requirement}")
+            return np.ascontiguousarray(selected)
 
-        for name, template in self._templates:
-            if type(template) is ScalarStage:
-                candidate.scalar_stage(template)
-            else:
-                from ._sklearn import accepts_nan, fit_stage
+        for index, (parent, template) in enumerate(self._templates, 1):
+            try:
+                if isinstance(template, str):
+                    stage = template
+                else:
+                    from ._sklearn import accepts_nan, fit_stage
 
-                validate_matrix(allow_nan=accepts_nan(template))
-                fit_stage(template, name, np.ascontiguousarray(matrix[fit_mask]), candidate)
-            # ponytail: O(stages * events) prefix replays; stream stages if fitting cost matters.
-            # Replay excluded rows too: downstream lags count accepted events, not training rows.
-            matrix = replay_candidate()
-        validate_matrix()
-        candidate._finalize_fit(self._base_spec)
+                    replay_spec = candidate.copy()
+                    replay_spec.output("fit_input", parent)
+                    matrix = self._new_runtime(replay_spec, "float64").transform(**events)["fit_input"]
+                    ids = candidate.feature_ids(parent)
+                    selected = validate_matrix(matrix, ids, accepts_nan(template))
+                    stage = _json.dumps(fit_stage(template, selected, ids), allow_nan=False)
+                    del matrix, selected, replay_spec
+                candidate.add(parent, stage)
+                for name, node in self._outputs:
+                    if node == index and not candidate.feature_ids(node):
+                        raise ValueError(f"output {name!r} must contain at least one active feature")
+            except (ValueError, TypeError) as error:
+                names = [name for name, node in self._outputs if node == index]
+                raise ValueError(f"node {index}, outputs {names}: {error}") from error
+        self._register_outputs(candidate)
+        matrices = self._new_runtime(candidate, "float64").transform(**events)
+        for name, node in self._outputs:
+            validate_matrix(matrices[name], candidate.feature_ids(node))
         runtime = self._new_runtime(candidate)
-        self._spec = candidate
-        self._inner = runtime
-        self._recipe_locked = True
+        self._spec, self._inner = candidate, runtime
         return self
 
     def fit_transform(self, *args, fit_mask=None, **kwargs):
-        """Fit from cold state, then return one Rust-computed row per event."""
         self.fit(*args, fit_mask=fit_mask, **kwargs)
         return self.transform(*args, **kwargs)
 
     def reset(self):
-        """Clear event and context state, retaining fitted parameters and symbol handles."""
-        self._recipe_locked |= self._runtime._has_events
+        self._runtime
         self._inner = self._new_runtime(self._spec)
         return self
 
     def to_spec(self):
-        """Return an independent fitted spec snapshot."""
-        self._runtime
-        return self._spec.copy()
+        return PipelineSpec.from_json(self.to_json())
 
     def to_json(self):
-        """Serialize fitted numeric state using Rust's canonical adapter."""
-        return self.to_spec().to_json()
+        self._runtime
+        return self._spec.to_json()
 
     @property
     def output_dtype(self):
-        return self._inner.output_dtype
+        return self._dtype
 
     @output_dtype.setter
     def output_dtype(self, value):
-        self._inner.output_dtype = _normalize_output_dtype(value)
+        value = _normalize_output_dtype(value)
+        if self._inner is not None:
+            self._inner.output_dtype = value
+        self._dtype = value
 
     def symbol(self, name):
-        handle = self._inner.symbol(name)
+        name = self._base_spec._intern_symbol(name)
+        if self._inner is not None:
+            handle = self._inner.symbol(name)
+        else:
+            handle = self._symbols.index(name) if name in self._symbols else len(self._symbols)
         if handle == len(self._symbols):
             self._symbols.append(name)
         return handle
 
-    def feature_names(self):
-        return self._runtime.feature_names()
+    def output_names(self):
+        return [name for name, _ in self._outputs]
+
+    def output(self, name):
+        if name not in self.output_names():
+            raise ValueError(f"unknown output {name!r}")
+        return PipelineOutput(self, name)
 
     def raw_feature_names(self):
-        return self._inner.raw_feature_names()
-
-    def n_features(self):
-        return self._runtime.n_features()
-
-    def active_feature_count(self):
-        return self._runtime.active_feature_count()
-
-    def values(self):
-        return self._runtime.values()
+        return self._runtime.raw_feature_names()
 
     def raw_values(self):
         return self._runtime.raw_values()
@@ -438,7 +571,6 @@ class ModelInputPipeline:
         return self._runtime.update(*args, **kwargs)
 
     def update_context(self, updates):
-        """Replace held context values without advancing event history."""
         return self._runtime.update_context(updates)
 
     def update_order_book(self, event):
@@ -447,34 +579,13 @@ class ModelInputPipeline:
     def transform_order_book(self, events, *, context_updates=None):
         return self._runtime.transform_order_book(events, context_updates=context_updates)
 
-    def transform(
-        self, kind, symbol, timestamp, *, price=None, volume=None, side=None,
-        context_updates=None,
-    ):
-        """Replay event columns, applying context_updates just before indexed rows."""
-        return self._runtime.transform(
-            kind, symbol, timestamp, price=price, volume=volume, side=side,
-            context_updates=context_updates,
-        )
+    def transform(self, kind, symbol, timestamp, *, price=None, volume=None,
+                  side=None, context_updates=None):
+        return self._runtime.transform(kind, symbol, timestamp, price=price,
+                                       volume=volume, side=side, context_updates=context_updates)
 
-    def compute_features(
-        self,
-        df,
-        *,
-        symbol="symbol",
-        time="ts",
-        price="price",
-        volume="volume",
-        side=None,
-    ):
-        """Compute one final model-input snapshot after every trade row."""
+    def compute_features(self, df, *, symbol="symbol", time="ts", price="price",
+                         volume="volume", side=None):
         self._runtime
-        return _compute_features(
-            self,
-            df,
-            symbol=symbol,
-            time=time,
-            price=price,
-            volume=volume,
-            side=side,
-        )
+        return _compute_features(self, df, symbol=symbol, time=time, price=price,
+                                 volume=volume, side=side)

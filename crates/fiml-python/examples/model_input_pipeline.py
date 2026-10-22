@@ -24,19 +24,21 @@ scaler = SimpleNamespace(
     mean_=np.array([3.0, 10.0]),
     scale_=np.array([2.0, 2.0]),
 )
-model_spec = fiml.PipelineSpec(raw_spec, checksum="model-input-v1")
+indicators = fiml.ScalarStage()
 for feature_id in raw_spec.feature_ids():
     if feature_id == "price":
-        model_spec.sma(feature_id, window=2, warmup=fiml.WarmupPolicy.FIRST_VALUE)
+        indicators.sma(feature_id, window=2, warmup=fiml.WarmupPolicy.FIRST_VALUE)
     else:
-        model_spec.identity(feature_id)
+        indicators.identity(feature_id)
 scaling = fiml.ScalarStage()
 for feature_id, mean, scale in zip(
     raw_spec.feature_ids(), scaler.mean_, scaler.scale_, strict=True
 ):
     scaling.standard_scale(feature_id, mean=float(mean), scale=float(scale))
 
-model_spec.scalar_stage(scaling)
+model_spec = fiml.PipelineSpec(raw_spec, checksum="model-input-v1")
+node = model_spec.add(model_spec.root(), indicators)
+model_spec.output("model", model_spec.add(node, scaling))
 pipeline = fiml.ModelInputPipeline.from_json(model_spec.to_json())
 btc = pipeline.symbol("BTCUSDT")
 features = pipeline.transform(
@@ -47,6 +49,6 @@ features = pipeline.transform(
     volume=np.ones(2),
 )
 
-assert pipeline.feature_names() == raw_spec.feature_ids()
-np.testing.assert_equal(features[-1], np.array([0.5, 1.0]))
+assert pipeline.output("model").feature_names() == raw_spec.feature_ids()
+np.testing.assert_equal(features["model"][-1], np.array([0.5, 1.0]))
 print("OK: fitted model-input artifact replays through the Rust pipeline")

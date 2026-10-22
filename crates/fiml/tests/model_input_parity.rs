@@ -101,10 +101,10 @@ fn rust_pipeline_matches_shared_model_input_fixture() {
         .iter()
         .map(|definition| definition.id.as_str().to_owned())
         .collect::<Vec<_>>();
-    let raw_vector = VecFeatureVector::new_of_length(expected.raw.capacity, expected.raw.length);
-    let model_vector =
+    let _raw_vector = VecFeatureVector::new_of_length(expected.raw.capacity, expected.raw.length);
+    let _model_vector =
         VecFeatureVector::new_of_length(expected.model.capacity, expected.model.length);
-    let mut pipeline = spec.build(raw_vector, model_vector).unwrap();
+    let mut pipeline = spec.build().unwrap();
 
     for (event, snapshot) in events.into_iter().zip(&expected.snapshots) {
         pipeline.handle_event(event.into_event()).unwrap();
@@ -112,7 +112,9 @@ fn rust_pipeline_matches_shared_model_input_fixture() {
         assert_eq!(raw_active_ids, expected.raw.active_ids);
         assert_eq!(
             pipeline
-                .output_ids()
+                .output("model")
+                .unwrap()
+                .feature_ids()
                 .iter()
                 .map(|id| id.as_str())
                 .collect::<Vec<_>>(),
@@ -126,10 +128,19 @@ fn rust_pipeline_matches_shared_model_input_fixture() {
         assert_eq!(expected.raw.names.len(), expected.raw.capacity);
         assert_eq!(expected.model.names.len(), expected.model.capacity);
         assert_eq!(raw_active_ids.len(), expected.raw.length);
-        assert_eq!(pipeline.output_ids().len(), expected.model.length);
+        assert_eq!(
+            pipeline.output("model").unwrap().feature_ids().len(),
+            expected.model.length
+        );
         assert_eq!(pipeline.raw_values().len(), expected.raw.capacity);
-        assert_eq!(pipeline.values().len(), expected.model.capacity);
+        assert_eq!(
+            pipeline.output("model").unwrap().values().len(),
+            expected.model.capacity
+        );
         assert_values(pipeline.raw_values(), &snapshot.raw_values);
-        assert_values(pipeline.values(), &snapshot.model_values);
+        assert_values(
+            pipeline.output("model").unwrap().values(),
+            &snapshot.model_values,
+        );
     }
 }

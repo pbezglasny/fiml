@@ -1,3 +1,4 @@
+from pipeline_fixtures import LinearSpec, SingleOutput
 import fiml
 import numpy as np
 import pytest
@@ -16,15 +17,15 @@ def build_runtime(pipeline):
     ).time_since_first_event_of_day()
     if not pipeline:
         return fiml.FeatureExtractor(raw)
-    model = fiml.PipelineSpec(raw, capacity=7)
+    model = LinearSpec(raw)
     for feature_id in raw.feature_ids():
         model.standard_scale(feature_id, mean=10.0, scale=2.0)
-    return fiml.ModelInputPipeline(model)
+    return SingleOutput(model)
 
 
 def snapshots(runtime):
     result = [runtime.values()]
-    if isinstance(runtime, fiml.ModelInputPipeline):
+    if isinstance(runtime, SingleOutput):
         result.append(runtime.raw_values())
     return result
 

@@ -11,10 +11,13 @@ raw = (fiml.FeatureExtractorSpec()
        .order_book_imbalance("BTCUSDT", [2, 1])
        .order_book_best_bid_size("BTCUSDT"))
 mid, imbalance_two, _, bid_size = raw.feature_ids()
-spec = (fiml.PipelineSpec(raw)
+scalar = (fiml.ScalarStage()
         .standard_scale(mid, mean=100.0, scale=2.0, output="scaled_mid")
         .identity(imbalance_two, output="imbalance")
         .lagged(bid_size, lag_window=1, output="previous_bid_size"))
+
+spec = fiml.PipelineSpec(raw)
+spec.output("model", spec.add(spec.root(), scalar))
 
 # This same JSON can be loaded as fiml::PipelineSpec in Rust.
 with tempfile.TemporaryDirectory() as directory:
@@ -27,6 +30,6 @@ rows = pipeline.transform_order_book([
         [("98", "2"), ("97", "6")], [("102", "2"), ("103", "6")]),
     fiml.OrderBookEvent.delta("BTCUSDT", 2, 2, [("bid", "98", "6")]),
 ])
-np.testing.assert_equal(rows, [[0, 0, np.nan], [0, 0.2, 2]])
-print(pipeline.feature_names())
+np.testing.assert_equal(rows["model"], [[0, 0, np.nan], [0, 0.2, 2]])
+print(pipeline.output("model").feature_names())
 print(rows)
