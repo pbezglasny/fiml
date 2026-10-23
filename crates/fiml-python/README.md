@@ -362,18 +362,27 @@ same event rows. Output order is registration order; feature order is local to
 the producing node. Named outputs contain active features only and must be
 nonempty. `raw_values()` and `raw_feature_names()` remain diagnostic accessors.
 
-Run [examples/multiple_outputs.py](examples/multiple_outputs.py) to export one
-JSON artifact, load it, and replay a shared SMA into model A, model B, and raw
-decision vectors:
+Run [examples/multiple_outputs.py](examples/multiple_outputs.py) to fit independent
+scaler/PCA branches, export one JSON artifact, and load it for one replay producing
+model A, model B, and scalar decision vectors:
 
 ```bash
-uv run --with ./crates/fiml-python python crates/fiml-python/examples/multiple_outputs.py /tmp/model-inputs.json
+uv run --with './crates/fiml-python[sklearn]' python crates/fiml-python/examples/multiple_outputs.py /tmp/model-inputs.json
 ```
 
-The example uses authored numeric scaler parameters and needs no sklearn or
-market data download. It checks every output row, including each branch's warmup
-NaNs, then reads the final named snapshots. The exported version 4.0 artifact can
-also be loaded by Rust's `PipelineSpec`.
+The example shares full-window SMAs, a lag, and a fitted median imputer. Model A
+uses StandardScaler and two whitened PCA components; model B fits MinMaxScaler and
+one PCA component independently. The decision output selects raw price and volume.
+One fitting mask excludes middle observations and a final holdout; all event rows
+still advance SMA/lag history. The imputer handles warmup NaNs, and each named
+result is checked against independent NumPy/sklearn calculations with `rtol=1e-10`
+and `atol=1e-12`. It uses synthetic data and needs no market data download.
+
+Only training needs sklearn. The exported version 4.0 artifact contains numeric
+parameters and can be loaded by Rust's `PipelineSpec`. The checked-in
+[fitted fixture](../../tests/fixtures/sklearn_multiple_outputs.json) stores this
+artifact alongside its events, fitting mask, output layouts and reference rows;
+Python and standalone Rust tests compare every output, including after reset.
 
 ### Fitting sklearn stages
 
@@ -423,10 +432,11 @@ enable serde_json's `float_roundtrip` feature to preserve fitted f64 values.
 
 See [the graph contract](../../docs/multiple_output.md),
 [the numeric fitting reference](../../docs/pipeline_transformer.md), and
-[examples/sklearn_pipeline.py](examples/sklearn_pipeline.py). The example compares
-Rust inference with an independent sklearn oracle. Whitening nearly zero-variance
-components can amplify rounding differences; train downstream predictors on the
-matrix returned by FIML to use the same arithmetic at inference.
+[examples/sklearn_pipeline.py](examples/sklearn_pipeline.py) for a linear
+imputation/selection/scaling/PCA chain, or the branching training example above.
+Both compare Rust inference with independent sklearn oracles. Whitening nearly
+zero-variance components can amplify rounding differences; train downstream
+predictors on the matrix returned by FIML to use the same arithmetic at inference.
 
 ## Low-level event API
 

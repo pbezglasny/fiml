@@ -111,6 +111,14 @@ preserve lag and rolling histories. Fitting uses repeated cold event replays as
 needed, without a graph-wide cache of training matrices. A shared node executes
 once per event within each replay, not necessarily once over the entire fit.
 
+The runnable [training example](../crates/fiml-python/examples/multiple_outputs.py)
+fits a shared median imputer over SMA/lag snapshots, then independent
+StandardScaler/PCA and MinMaxScaler/PCA branches, alongside a scalar decision
+output. It applies one mask, checks every row against independent NumPy/sklearn
+references, and exports a numeric artifact for replay without sklearn. The shared
+[fitted fixture](../tests/fixtures/sklearn_multiple_outputs.json) verifies those
+outputs in both Python and standalone Rust with `rtol=1e-10`, `atol=1e-12`.
+
 A failed fit preserves the previous fitted artifact and live runtime. A successful
 fit installs cold state. Loading an artifact also starts cold. `transform`
 advances the live runtime; call `reset()` before replaying an independent stream.
