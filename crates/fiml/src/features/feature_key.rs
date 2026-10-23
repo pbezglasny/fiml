@@ -214,6 +214,11 @@ pub enum FeatureKey {
         warmup_policy: WarmupPolicy,
     },
     /// Simple or logarithmic return from the current value to a lagged sample.
+    ///
+    /// Requires exactly `lag + 1` matching symbol/source samples; no warm-up
+    /// policy applies. Missing history or an undefined return produces `NaN`.
+    /// Simple returns allow finite negative prices but require a nonzero lagged
+    /// price. Log returns require both prices to be positive.
     Return {
         /// Market symbol whose events or order book supply this output.
         symbol: Symbol,

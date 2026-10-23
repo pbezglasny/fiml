@@ -296,7 +296,13 @@ impl FeatureExtractorSpec {
         Ok(slf)
     }
 
-    /// Simple percentage returns over ordered sample lags.
+    /// Simple fractional returns over ordered sample lags (not multiplied by 100).
+    ///
+    /// Each lag k requires exactly k+1 matching symbol/source observations.
+    /// No warm-up option applies: missing history or a lagged price of either
+    /// signed zero produces NaN. Finite negative prices use ordinary arithmetic;
+    /// a zero current price with a nonzero lagged price gives -1. These samples
+    /// still advance history. Other symbols, sources, and time ticks do not.
     #[pyo3(signature = (symbol, lags, *, source="price"))]
     fn simple_returns<'py>(
         mut slf: PyRefMut<'py, Self>,
@@ -309,6 +315,11 @@ impl FeatureExtractorSpec {
     }
 
     /// Logarithmic returns over ordered sample lags.
+    ///
+    /// Each lag k requires exactly k+1 matching symbol/source observations,
+    /// without a warm-up option. Missing history or a nonpositive current or
+    /// lagged price produces NaN. Other symbols, sources, and time ticks do not
+    /// advance history.
     #[pyo3(signature = (symbol, lags, *, source="price"))]
     fn log_returns<'py>(
         mut slf: PyRefMut<'py, Self>,

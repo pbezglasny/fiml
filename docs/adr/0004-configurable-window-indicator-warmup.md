@@ -28,7 +28,8 @@ feature output withholds it.
 
 ## Decision
 
-Every window indicator has one `WarmupPolicy`:
+Window indicators with partial-value semantics have one `WarmupPolicy`.
+Exact sample-lag returns are the exception described below.
 
 ```rust
 pub enum WarmupPolicy {
@@ -65,9 +66,38 @@ Standalone indicators expose `is_ready_at(index)` for one output and
 Feature-vector cells are `f64`, initialized to NaN, and remain NaN while
 `value_at` returns `None`. Decimal cannot represent this missing-value contract.
 
+### Refinement: exact sample-lag returns (issue #102)
+
+A positive lag `k` compares the current price with the price exactly `k`
+matching samples earlier. Each output becomes ready after `k+1` samples;
+shorter lags can become ready before longer ones. No lag is shortened during
+warm-up, and no future sample is used. Neither `FirstValue` nor `FullWindow`
+applies: standalone returns, feature keys, Python builders, and JSON accept no
+warm-up policy. JSON containing a return `warmup_policy` is rejected.
+
+History advances only for the configured symbol and scalar source. Standalone
+price and trade-price inputs have separate histories; other symbols, volume
+events, and time ticks leave those histories and outputs unchanged. Compatible
+lags share one preallocated ring buffer retaining `max(lags)+1` values.
+
+Simple returns express fractional change, `current / previous - 1`, calculated
+as `(current - previous) / previous` in `f64`. Missing history or a denominator
+of either `+0.0` or `-0.0` produces `None` in standalone Rust and NaN in feature
+vectors. Finite negative prices use ordinary arithmetic, and a zero current
+price with a nonzero denominator produces `-1`. Zero and negative samples still
+advance history. Readiness remains true after sufficient history exists even
+if the current denominator is zero; values recover when it becomes nonzero.
+Existing logarithmic returns use the same readiness rule but require both
+prices to be positive.
+
+The return contract preserves existing API signatures, canonical feature IDs,
+and extractor spec version `2.0`. Shared Rust/Python literal replay snapshots
+cover the contract in `tests/fixtures/sample_returns.json`.
+
 ## Configuration and parity
 
-`WarmupPolicy` is stored in every window `IndicatorSpec` and serialized as
+For indicators supporting partial values, `WarmupPolicy` is stored in every
+window `IndicatorSpec` and serialized as
 `"first_value"` or `"full_window"`. It is not part of indicator identity or
 canonical feature names.
 

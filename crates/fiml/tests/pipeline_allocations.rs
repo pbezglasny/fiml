@@ -293,6 +293,7 @@ fn allocation_counter_detects_heap_allocation() {
 #[test]
 fn returns_and_rolling_volatility_updates_do_not_allocate() {
     let symbol = Symbol::new("volatility-allocations").unwrap();
+    let other = Symbol::new("returns-unrelated").unwrap();
     let mut extractor = FeatureExtractorSpec::new([
         FeatureDefinition::with_default_id(FeatureKey::Volatility {
             symbol,
@@ -319,23 +320,48 @@ fn returns_and_rolling_volatility_updates_do_not_allocate() {
             kind: ReturnKind::Log,
             lag: 4,
         }),
+        FeatureDefinition::with_default_id(FeatureKey::Return {
+            symbol,
+            source: fiml::EventField::Price,
+            kind: ReturnKind::Simple,
+            lag: 1,
+        }),
+        FeatureDefinition::with_default_id(FeatureKey::Return {
+            symbol,
+            source: fiml::EventField::TradePrice,
+            kind: ReturnKind::Simple,
+            lag: 4,
+        }),
+        FeatureDefinition::with_default_id(FeatureKey::Return {
+            symbol,
+            source: fiml::EventField::TradePrice,
+            kind: ReturnKind::Simple,
+            lag: 1,
+        }),
     ])
     .unwrap()
-    .build(ArrayFeatureVector::<4>::new())
+    .build(ArrayFeatureVector::<7>::new())
     .unwrap();
 
-    assert_eq!(
-        count_allocations(|| {
-            for timestamp in 0..128 {
-                black_box(
-                    extractor
-                        .handle_event(Event::price(symbol, 100.0 + timestamp as f64, timestamp))
-                        .unwrap(),
-                );
-            }
-        }),
-        0
-    );
+    for timestamps in [0..5, 5..128] {
+        assert_eq!(
+            count_allocations(|| {
+                for timestamp in timestamps {
+                    let price = 100.0 + timestamp as f64;
+                    for event in [
+                        Event::price(symbol, price, timestamp),
+                        Event::trade(symbol, price * 2., 1., timestamp, None),
+                        Event::price(other, 1., timestamp),
+                        Event::volume(symbol, 1., timestamp),
+                        Event::time(timestamp),
+                    ] {
+                        black_box(extractor.handle_event(event).unwrap());
+                    }
+                }
+            }),
+            0
+        );
+    }
     assert!(
         extractor
             .feature_vector()

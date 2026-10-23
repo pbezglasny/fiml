@@ -1,0 +1,81 @@
+{
+  "spec": {
+    "version": "2.0",
+    "capacity": 5,
+    "length": 5,
+    "required_events": [
+      {"symbol": "btc", "event": "price"},
+      {"symbol": "btc", "event": "trade"},
+      {"symbol": "eth", "event": "price"}
+    ],
+    "features": [
+      {
+        "symbol": "btc",
+        "indicators": [
+          {
+            "kind": "simple_return",
+            "source": {"type": "field", "event": "price", "field": "value"},
+            "outputs": [{"lag": 3}, {"lag": 1}]
+          },
+          {
+            "kind": "simple_return",
+            "source": {"type": "field", "event": "trade", "field": "price"},
+            "outputs": [{"lag": 3}, {"lag": 1}]
+          }
+        ]
+      },
+      {
+        "symbol": "eth",
+        "indicators": [
+          {
+            "kind": "simple_return",
+            "source": {"type": "field", "event": "price", "field": "value"},
+            "outputs": [{"lag": 1}]
+          }
+        ]
+      }
+    ]
+  },
+  "feature_ids": [
+    "simple_return:symbol=3:btc:source=field.price:lag=3",
+    "simple_return:symbol=3:btc:source=field.price:lag=1",
+    "simple_return:symbol=3:btc:source=field.trade_price:lag=3",
+    "simple_return:symbol=3:btc:source=field.trade_price:lag=1",
+    "simple_return:symbol=3:eth:source=field.price:lag=1"
+  ],
+  "steps": [
+    {"event": {"kind": "price", "symbol": "btc", "timestamp": 0, "price": 8}, "expected": [null, null, null, null, null]},
+    {"event": {"kind": "trade", "symbol": "btc", "timestamp": 1, "price": 16, "volume": 1}, "expected": [null, null, null, null, null]},
+    {"event": {"kind": "price", "symbol": "eth", "timestamp": 2, "price": 100}, "expected": [null, null, null, null, null]},
+    {"event": {"kind": "volume", "symbol": "btc", "timestamp": 3, "volume": 99}, "expected": [null, null, null, null, null]},
+    {"event": {"kind": "time", "timestamp": 4}, "expected": [null, null, null, null, null]},
+    {"event": {"kind": "price", "symbol": "btc", "timestamp": 5, "price": 8}, "expected": [null, 0, null, null, null]},
+    {"event": {"kind": "trade", "symbol": "btc", "timestamp": 6, "price": 16, "volume": 1}, "expected": [null, 0, null, 0, null]},
+    {"event": {"kind": "price", "symbol": "eth", "timestamp": 7, "price": 50}, "expected": [null, 0, null, 0, -0.5]},
+    {"event": {"kind": "price", "symbol": "other", "timestamp": 8, "price": 999}, "expected": [null, 0, null, 0, -0.5]},
+    {"event": {"kind": "price", "symbol": "btc", "timestamp": 9, "price": 16}, "expected": [null, 1, null, 0, -0.5]},
+    {"event": {"kind": "trade", "symbol": "btc", "timestamp": 10, "price": 8, "volume": 1}, "expected": [null, 1, null, -0.5, -0.5]},
+    {"event": {"kind": "price", "symbol": "btc", "timestamp": 11, "price": 8}, "expected": [0, -0.5, null, -0.5, -0.5]},
+    {"event": {"kind": "volume", "symbol": "btc", "timestamp": 12, "volume": 99}, "expected": [0, -0.5, null, -0.5, -0.5]},
+    {"event": {"kind": "time", "timestamp": 13}, "expected": [0, -0.5, null, -0.5, -0.5]},
+    {"event": {"kind": "trade", "symbol": "btc", "timestamp": 14, "price": 4, "volume": 1}, "expected": [0, -0.5, -0.75, -0.5, -0.5]},
+    {"event": {"kind": "trade", "symbol": "eth", "timestamp": 15, "price": 100, "volume": 1}, "expected": [0, -0.5, -0.75, -0.5, -0.5]},
+    {"event": {"kind": "price", "symbol": "eth", "timestamp": 16, "price": 50}, "expected": [0, -0.5, -0.75, -0.5, 0]},
+    {"event": {"kind": "price", "symbol": "btc", "timestamp": 17, "price": 4}, "expected": [-0.5, -0.5, -0.75, -0.5, 0]},
+    {"event": {"kind": "trade", "symbol": "btc", "timestamp": 18, "price": 8, "volume": 1}, "expected": [-0.5, -0.5, -0.5, 1, 0]},
+    {"event": {"kind": "price", "symbol": "btc", "timestamp": 19, "price": 0}, "expected": [-1, -1, -0.5, 1, 0]},
+    {"event": {"kind": "trade", "symbol": "btc", "timestamp": 20, "price": 16, "volume": 1}, "expected": [-1, -1, 1, 1, 0]},
+    {"event": {"kind": "price", "symbol": "btc", "timestamp": 21, "price": 2}, "expected": [-0.75, null, 1, 1, 0]},
+    {"event": {"kind": "volume", "symbol": "btc", "timestamp": 22, "volume": 99}, "expected": [-0.75, null, 1, 1, 0]},
+    {"event": {"kind": "trade", "symbol": "btc", "timestamp": 23, "price": 32, "volume": 1}, "expected": [-0.75, null, 7, 1, 0]},
+    {"event": {"kind": "price", "symbol": "btc", "timestamp": 24, "price": -2}, "expected": [-1.5, -2, 7, 1, 0]},
+    {"event": {"kind": "trade", "symbol": "btc", "timestamp": 25, "price": 16, "volume": 1}, "expected": [-1.5, -2, 1, -0.5, 0]},
+    {"event": {"kind": "price", "symbol": "btc", "timestamp": 26, "price": -4}, "expected": [null, 1, 1, -0.5, 0]},
+    {"event": {"kind": "time", "timestamp": 27}, "expected": [null, 1, 1, -0.5, 0]},
+    {"event": {"kind": "trade", "symbol": "btc", "timestamp": 28, "price": 8, "volume": 1}, "expected": [null, 1, -0.5, -0.5, 0]},
+    {"event": {"kind": "price", "symbol": "btc", "timestamp": 29, "price": 2}, "expected": [0, -1.5, -0.5, -0.5, 0]},
+    {"event": {"kind": "price", "symbol": "btc", "timestamp": 30, "price": 4}, "expected": [-3, 1, -0.5, -0.5, 0]},
+    {"event": {"kind": "price", "symbol": "btc", "timestamp": 31, "price": 8}, "expected": [-3, 1, -0.5, -0.5, 0]},
+    {"event": {"kind": "price", "symbol": "eth", "timestamp": 32, "price": 100}, "expected": [-3, 1, -0.5, -0.5, 1]}
+  ]
+}

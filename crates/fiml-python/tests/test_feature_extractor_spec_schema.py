@@ -304,8 +304,18 @@ def test_schema_accepts_returns_and_core_round_trips_them(kind):
     restored = fiml.FeatureExtractorSpec.from_json(json.dumps(document))
     assert json.loads(restored.to_json()) == document
 
+    for warmup in ["first_value", "full_window"]:
+        invalid = deepcopy(document)
+        only_indicator(invalid)["warmup_policy"] = warmup
+        assert list(VALIDATOR.iter_errors(invalid))
+        with pytest.raises(ValueError, match="warmup_policy"):
+            fiml.FeatureExtractorSpec.from_json(json.dumps(invalid))
+
     for invalid in [
         {"lag": 0},
+        {"lag": -1},
+        {"lag": 1.5},
+        {},
         {"window": 1},
         {"lag": 1, "window": 1},
     ]:
