@@ -293,6 +293,18 @@ keyword-only `warmup` enum; its default is `fiml.WarmupPolicy.FULL_WINDOW`.
 `vpt` consumes trade price and volume, starts at zero, and emits its cumulative
 value from the first trade.
 
+`volatility("BTCUSDT", [3, 10], source="trade_price")` reports the population
+standard deviation of one-step simple returns `(current - previous) / previous`,
+without annualization. Each window retains its latest valid returns and divides
+variance by their count, so a single return has zero volatility. The default
+`FULL_WINDOW` needs that many valid returns (at least one more price than the
+window size). `FIRST_VALUE` becomes ready at the first price but emits NaN until
+the first valid return. Either signed-zero previous price skips the return and
+advances the baseline, preserving history, readiness, and any existing output.
+Finite negative prices use ordinary arithmetic; a zero current price with a
+nonzero previous price contributes `-1`. Price and trade-price histories are
+separate; unrelated symbols, event kinds, and time ticks leave outputs unchanged.
+
 Fixed UTC offsets accept `"UTC"`, `"UTC+3"`, `"-05:30"`, or signed hours with
 optional minutes, within `-14:00` through `+14:00`. Hour/minute components must
 contain only ASCII digits. Empty strings and embedded signs are rejected.

@@ -94,6 +94,33 @@ The return contract preserves existing API signatures, canonical feature IDs,
 and extractor spec version `2.0`. Shared Rust/Python literal replay snapshots
 cover the contract in `tests/fixtures/sample_returns.json`.
 
+### Refinement: sample-window return volatility (issue #103)
+
+`RollingVolatility` and the `volatility` feature calculate population standard
+deviation of one-step simple returns, `(current - previous) / previous`, without
+annualization. A window of `N` retains the latest `N` valid returns, not `N`
+prices. Variance divides by the observed return count, not count minus one;
+one return has zero standard deviation.
+
+The first matching price establishes the baseline. A denominator of either
+signed zero skips that return but advances the price baseline. Skipped returns
+do not occupy window slots, evict observations, reset readiness, or change an
+existing output. Finite negative prices use ordinary arithmetic; a zero current
+price with a nonzero denominator contributes `-1`.
+
+`FullWindow` requires `N` valid returns (at least `N+1` prices, possibly more
+when returns are skipped). `FirstValue` becomes ready at the first price, but
+has no value until the first valid return. Readiness is monotonic and independent
+for each window. Unavailable values are `None` in standalone Rust and NaN in
+feature vectors.
+
+Only matching symbol/source observations advance history. Price and trade-price
+histories are independent; unrelated symbols, event kinds, and time ticks leave
+outputs unchanged. Compatible windows share one preallocated return buffer.
+The existing APIs, canonical IDs, and extractor spec version `2.0` remain intact.
+Shared snapshots in `tests/fixtures/sample_volatility.json` verify Rust/Python
+values, warm-up, missing returns, and rolling eviction.
+
 ## Configuration and parity
 
 For indicators supporting partial values, `WarmupPolicy` is stored in every

@@ -229,13 +229,14 @@ pub enum FeatureKey {
         /// Positive sample distance to the earlier value.
         lag: usize,
     },
-    /// Population volatility of simple returns over a sample window.
+    /// Nonannualized population standard deviation of one-step simple returns.
     Volatility {
         /// Market symbol whose events or order book supply this output.
         symbol: Symbol,
         /// Scalar event field supplying the observations.
         source: crate::EventField,
-        /// Positive number of simple returns; requires one additional price sample.
+        /// Positive number of valid returns; needs at least one additional price.
+        /// Zero-denominator returns are skipped without evicting observations.
         window: usize,
         /// Controls when output becomes available while history fills.
         warmup_policy: WarmupPolicy,

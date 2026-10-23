@@ -332,6 +332,14 @@ impl FeatureExtractorSpec {
     }
 
     /// Grouped population volatility of simple returns over sample windows.
+    ///
+    /// Uses one-step (current - previous) / previous returns, without annualization.
+    /// Each window counts valid returns and divides variance by their count.
+    /// FULL_WINDOW requires that many returns; FIRST_VALUE becomes ready at the
+    /// first price but emits NaN until a valid return exists. One return yields zero.
+    /// Either signed-zero previous price skips the return and advances the baseline,
+    /// preserving history and output. Finite negative prices use ordinary arithmetic.
+    /// Only matching symbol/source observations advance history.
     #[pyo3(signature = (
         symbol,
         windows,
