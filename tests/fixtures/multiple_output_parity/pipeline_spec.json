@@ -1,0 +1,78 @@
+{
+  "version": "4.0",
+  "nodes": [
+    {
+      "type": "extractor",
+      "spec": {
+        "version": "2.0",
+        "capacity": 4,
+        "length": 2,
+        "required_events": [
+          {"symbol": "a", "event": "trade"},
+          {"symbol": "b", "event": "trade"}
+        ],
+        "features": [
+          {
+            "symbol": "a",
+            "indicators": [
+              {
+                "kind": "field",
+                "source": {"type": "field", "event": "trade", "field": "price"},
+                "outputs": [{"id": "p"}]
+              }
+            ]
+          },
+          {
+            "symbol": "b",
+            "indicators": [
+              {
+                "kind": "field",
+                "source": {"type": "field", "event": "trade", "field": "price"},
+                "outputs": [{"id": "q"}]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "type": "transform",
+      "parent": 0,
+      "stage": {
+        "type": "scalar",
+        "transformations": [
+          {"type": "sma", "input": "p", "output": "mean", "window": 2, "warmup_policy": "full_window"},
+          {"type": "identity", "input": "q", "output": "q"}
+        ]
+      }
+    },
+    {
+      "type": "transform",
+      "parent": 1,
+      "stage": {
+        "type": "scalar",
+        "transformations": [
+          {"type": "standard_scale", "input": "mean", "output": "mean", "mean": 10.0, "scale": 2.0},
+          {"type": "identity", "input": "q", "output": "q"}
+        ]
+      }
+    },
+    {
+      "type": "transform",
+      "parent": 1,
+      "stage": {
+        "type": "scalar",
+        "transformations": [
+          {"type": "lagged_timed", "input": "mean", "output": "mean", "lag_window": "100ms"}
+        ]
+      }
+    }
+  ],
+  "outputs": [
+    {"name": "model_b", "node": 3},
+    {"name": "decision", "node": 0},
+    {"name": "shared", "node": 1},
+    {"name": "model_a", "node": 2},
+    {"name": "shared_alias", "node": 1}
+  ]
+}
