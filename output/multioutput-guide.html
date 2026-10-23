@@ -1,0 +1,456 @@
+<div id="fiml-multioutput-guide">
+  <style>
+    #fiml-multioutput-guide { color: var(--foreground); overflow-wrap: anywhere; }
+    #fiml-multioutput-guide strong { font-weight: 500; }
+    #fiml-multioutput-guide .deck-header { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 16px; }
+    #fiml-multioutput-guide .chapter-picker { flex: 1 1 260px; min-width: 0; }
+    #fiml-multioutput-guide .chapter-picker label { display: block; margin-bottom: 4px; }
+    #fiml-multioutput-guide .deck-footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-top: 20px; }
+    #fiml-multioutput-guide .scene { min-width: 0; }
+    #fiml-multioutput-guide .scene h2 { margin: 12px 0; }
+    #fiml-multioutput-guide .scene h3 { margin: 12px 0 8px; }
+    #fiml-multioutput-guide .controls-line { margin: 12px 0; }
+    #fiml-multioutput-guide .status-line { margin: 12px 0; }
+    #fiml-multioutput-guide .graph { width: 100%; min-width: 0; }
+    #fiml-multioutput-guide .graph svg, #fiml-multioutput-guide .measure svg { display: block; width: 100%; overflow: visible; }
+    #fiml-multioutput-guide .graph text { fill: var(--foreground); }
+    #fiml-multioutput-guide .graph .node-title { font-weight: 500; }
+    #fiml-multioutput-guide .graph .node-detail { fill: var(--muted-foreground); }
+    #fiml-multioutput-guide .graph .edge { stroke: var(--border); stroke-width: 1.5; fill: none; }
+    #fiml-multioutput-guide .graph .node-box { fill: var(--muted); }
+    #fiml-multioutput-guide .graph .active-box { fill: color-mix(in srgb, var(--viz-series-1) 18%, var(--background)); }
+    #fiml-multioutput-guide .graph .not-built { opacity: .35; }
+    #fiml-multioutput-guide pre { white-space: pre-wrap; overflow-wrap: anywhere; margin: 12px 0; }
+    #fiml-multioutput-guide .two-parts { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 285px), 1fr)); gap: 24px; }
+    #fiml-multioutput-guide .fit-steps { margin: 10px 0; padding-left: 24px; }
+    #fiml-multioutput-guide .fit-steps li { padding: 7px 0 7px 4px; }
+    #fiml-multioutput-guide .fit-steps .current { font-weight: 500; }
+    #fiml-multioutput-guide .fit-steps .pending { color: var(--muted-foreground); }
+    #fiml-multioutput-guide .runtime-label { margin: 12px 0 6px; }
+    #fiml-multioutput-guide .measure { min-width: 0; }
+    #fiml-multioutput-guide .measure text { fill: var(--foreground); }
+    #fiml-multioutput-guide .sources { margin-top: 16px; }
+    #fiml-multioutput-guide .sources a { overflow-wrap: anywhere; }
+  </style>
+
+  <div class="deck-header">
+    <div class="chapter-picker">
+      <label class="form-label text-small" for="mo-chapter">FIML · Multiple outputs · PR #193</label>
+      <select class="form-select" id="mo-chapter" aria-label="Presentation chapter">
+        <option value="0">1. From separate pipelines to one graph</option>
+        <option value="1">2. Build the graph explicitly</option>
+        <option value="2">3. Follow an event</option>
+        <option value="3">4. Read outputs: Python and Rust</option>
+        <option value="4">5. Fit without losing a working runtime</option>
+        <option value="5">6. Inspect the JSON 4.0 artifact</option>
+        <option value="6">7. Validation and migration</option>
+        <option value="7">8. Tests and measured performance</option>
+      </select>
+    </div>
+    <span class="tabular-nums text-small" id="mo-page" aria-live="polite">1 / 8</span>
+  </div>
+  <div id="mo-scene" class="scene" role="region" aria-label="Current presentation chapter"></div>
+  <div class="deck-footer">
+    <button type="button" class="btn" id="mo-prev">Previous</button>
+    <span class="text-small text-muted" id="mo-footer">Architecture</span>
+    <button type="button" class="btn btn-primary" id="mo-next">Next chapter</button>
+  </div>
+
+  <script>
+  (() => {
+    const root = document.getElementById('fiml-multioutput-guide');
+    const scene = root.querySelector('#mo-scene');
+    const chapter = root.querySelector('#mo-chapter');
+    const prices = [10, 14, 18, 22];
+    const smooth = [10, 12, 16, 20];
+    // Recorded from the actual Python binding backed by the Rust graph runtime.
+    const results = {model_a: [0, 1, 3, 5], model_b: [null, 10, 12, 16], decision: prices};
+    const artifact = {
+      version: '4.0',
+      nodes: [
+        {type: 'extractor', spec: {version: '2.0', capacity: 1, length: 1,
+          required_events: [{symbol: 'btc', event: 'trade'}],
+          features: [{symbol: 'btc', indicators: [{kind: 'field',
+            source: {type: 'field', event: 'trade', field: 'price'}, outputs: [{id: 'price'}]}]}]}},
+        {type: 'transform', parent: 0, stage: {type: 'scalar', transformations: [
+          {type: 'sma', input: 'price', output: 'smooth', window: 2, warmup_policy: 'first_value'}]}},
+        {type: 'transform', parent: 1, stage: {type: 'scalar', transformations: [
+          {type: 'standard_scale', input: 'smooth', output: 'scaled', mean: 10, scale: 2}]}},
+        {type: 'transform', parent: 1, stage: {type: 'scalar', transformations: [
+          {type: 'lagged', input: 'smooth', output: 'previous', lag_window: 1}]}}
+      ],
+      outputs: [{name: 'model_a', node: 2}, {name: 'model_b', node: 3}, {name: 'decision', node: 0}]
+    };
+    const headings = [
+      'One stream. Shared history. Three outputs.',
+      'A builder owns the graph; outputs name its nodes.',
+      'An event computes. A read only observes.',
+      'The pipeline processes; PipelineOutput exposes values.',
+      'Fit a candidate, then install it atomically.',
+      'One artifact preserves topology and numeric parameters.',
+      'The new contract is explicit—and intentionally breaking.',
+      'Less duplicated work, backed by regression checks.'
+    ];
+    const footers = ['Architecture', 'Authoring API', 'Runtime execution', 'Output ownership',
+      'Training lifecycle', 'Artifact format', 'Contract and migration', 'Implementation evidence'];
+    const defaults = {slide: 0, topology: 'after', build: 0, event: 0, reads: 0,
+      access: 'batch', fit: 0, outcome: 'success', json: '2', rule: 'alias'};
+    let state = {...defaults};
+    const esc = value => String(value).replace(/[&<>"']/g, c =>
+      ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
+    const val = value => value === null ? 'NaN' : String(value);
+    const code = value => '<pre><code>' + esc(value) + '</code></pre>';
+    const button = (id, text, action, value, selected = false, disabled = false) =>
+      '<button type="button" class="btn" id="' + id + '" data-action="' + action +
+      '" data-value="' + value + '"' + (['topology', 'event', 'access'].includes(action) ? ' aria-pressed="' + selected + '"' : '') +
+      (disabled ? ' disabled' : '') + '>' + text + '</button>';
+    const graph = () => '<div class="graph" id="mo-graph"></div>';
+    const status = text => '<div class="status-line" aria-live="polite">' + text + '</div>';
+
+    function restore(saved) {
+      const value = saved && saved.privateContent;
+      if (!value || value.version !== 1) return;
+      for (const key of ['slide', 'build', 'event', 'reads', 'fit']) {
+        const max = {slide: 7, build: 5, event: 3, reads: 100000, fit: 5}[key];
+        if (Number.isInteger(value[key])) state[key] = Math.max(0, Math.min(max, value[key]));
+      }
+      for (const [key, choices] of Object.entries({
+        topology: ['before', 'after'], access: ['live', 'batch', 'rust'],
+        outcome: ['success', 'failure'], json: ['0', '1', '2', '3', 'outputs'],
+        rule: ['alias', 'foreign', 'duplicate', 'empty', 'nooutputs', 'oldjson', 'merge']
+      })) if (choices.includes(value[key])) state[key] = value[key];
+      if (state.outcome === 'failure') state.fit = Math.min(3, state.fit);
+    }
+    function save() {
+      if (!window.openai || typeof window.openai.setWidgetState !== 'function') return;
+      Promise.resolve(window.openai.setWidgetState({
+        modelContent: {chapter: headings[state.slide], topology: state.topology,
+          eventPrice: prices[state.event], outputAccess: state.access,
+          fitOutcome: state.outcome, fitStep: state.fit, validationExample: state.rule},
+        privateContent: {version: 1, ...state}
+      })).catch(() => {});
+    }
+
+    const buildSteps = [
+      ['Create the extractor root',
+        'spec = fiml.PipelineSpec(extractor_spec)\nraw = spec.root()'],
+      ['Add one shared SMA',
+        'shared = spec.add(raw,\n    fiml.ScalarStage().sma(\n        "price", window=2,\n        warmup=fiml.WarmupPolicy.FIRST_VALUE,\n        output="smooth"))'],
+      ['Add model A’s scaling',
+        'a = spec.add(shared,\n    fiml.ScalarStage().standard_scale(\n        "smooth", mean=10., scale=2.,\n        output="scaled"))'],
+      ['Branch from the same shared node',
+        'b = spec.add(shared,\n    fiml.ScalarStage().lagged(\n        "smooth", lag_window=1,\n        output="previous"))'],
+      ['Name the results; no new calculation',
+        'spec.output("model_a", a)\nspec.output("model_b", b)\nspec.output("decision", raw)'],
+      ['Build an independent runtime snapshot',
+        'pipeline = spec.build()\n# Later builder additions do not change this pipeline.']
+    ];
+    function authoring() {
+      const step = buildSteps[state.build];
+      return '<div class="viz-controls controls-line">' +
+        button('mo-build-prev', 'Earlier step', 'build', -1, false, state.build === 0) +
+        '<span class="tabular-nums">Step ' + (state.build + 1) + ' / 6</span>' +
+        button('mo-build-next', 'Next step', 'build', 1, false, state.build === 5) +
+        '</div>' + graph() + status(step[0]) + code(step[1]) +
+        '<div class="text-small text-muted">One parent per node · append-only builder · sharing requires the same NodeId</div>';
+    }
+    function topology() {
+      const after = state.topology === 'after';
+      return '<div class="viz-controls controls-line">' +
+        button('mo-before', 'Before: separate pipelines', 'topology', 'before', !after) +
+        button('mo-after', 'After: shared graph', 'topology', 'after', after) + '</div>' +
+        graph() + status(after
+          ? '<strong>4 node evaluations / event.</strong> Extractor and SMA each run once.'
+          : '<strong>7 node evaluations / event.</strong> Extraction runs three times; SMA runs twice.') +
+        '<div class="text-small text-muted">Illustrative graph · model_a = scale(SMA) · model_b = lag(SMA) · decision = raw price</div>';
+    }
+    function replay() {
+      const i = state.event;
+      return '<div class="viz-controls controls-line" aria-label="Event position">' +
+        prices.map((price, index) => button('mo-event-' + index, 'Price ' + price, 'event', index, i === index)).join('') +
+        '</div>' + graph() +
+        '<table class="table table-sm"><thead><tr><th>For this event</th><th class="text-end">Executions</th></tr></thead><tbody>' +
+        '<tr><td>Extractor + SMA + scale + lag</td><td class="text-end tabular-nums">4</td></tr>' +
+        '<tr><td>Shared SMA</td><td class="text-end tabular-nums">1</td></tr>' +
+        '<tr><td>Additional executions caused by output reads</td><td class="text-end tabular-nums">0</td></tr></tbody></table>' +
+        '<div class="viz-controls controls-line">' +
+        button('mo-read', 'Read model_a again', 'read', 1) +
+        '<span class="tabular-nums" aria-live="polite">[' + results.model_a[i] +
+        '] · reads: ' + state.reads + '</span></div>' +
+        '<div class="text-small text-muted">SMA window 2, FIRST_VALUE · scale: mean 10, scale 2 · lag window 1 · values verified against the Rust-backed Python runtime</div>';
+    }
+    function access() {
+      let content;
+      if (state.access === 'batch') {
+        content = code('batch = pipeline.transform(**events)\nX_a = batch["model_a"]\nX_b = batch["model_b"]\nraw = batch["decision"]') +
+          '<table class="table table-sm"><thead><tr><th>Event price</th><th>model_a</th><th>model_b</th><th>decision</th></tr></thead><tbody>' +
+          prices.map((price, i) => '<tr><td>' + price + '</td><td>' + results.model_a[i] +
+            '</td><td>' + val(results.model_b[i]) + '</td><td>' + results.decision[i] + '</td></tr>').join('') +
+          '</tbody></table>' + status('One replay → three aligned matrices, each shaped (4, 1).') +
+          '<div class="text-small text-muted">Always a dictionary—even with one output. compute_features returns named DataFrames; transform_order_book returns named matrices.</div>';
+      } else if (state.access === 'live') {
+        content = code('# After the first event: price = 10\nout = pipeline.output("model_a")\nsnapshot = out.values()       # array([0.])\n\n# next_event contains the event with price = 14\npipeline.update(**next_event)\nout.values()                  # array([1.])\nsnapshot                      # array([0.])') +
+          '<table class="table table-sm"><thead><tr><th>Object</th><th>Behavior</th></tr></thead><tbody>' +
+          '<tr><td><code>out</code></td><td>Bound to the pipeline; reads current state</td></tr>' +
+          '<tr><td><code>snapshot</code></td><td>Independent NumPy array; stays unchanged</td></tr>' +
+          '<tr><td>After reset / refit</td><td>The output handle remains valid</td></tr></tbody></table>' +
+          status('Online update refreshes every node without building batch matrices.');
+      } else {
+        content = code('let id = pipeline.output("model_a").unwrap().id();\n\npipeline.handle_event(event)?;\nlet out = pipeline.output_by_id(id).unwrap();\nlet values = out.values(); // borrowed &[f64]\n\n// Finish using values before mutating pipeline again.') +
+          '<table class="table table-sm"><thead><tr><th>Reference</th><th>Lifetime / storage</th></tr></thead><tbody>' +
+          '<tr><td><code>OutputId</code></td><td>Reusable across updates and reset; runtime-local</td></tr>' +
+          '<tr><td><code>PipelineOutput</code></td><td>Short borrow of values, IDs, and observations</td></tr>' +
+          '<tr><td>Two output names → one node</td><td>Same borrowed buffer; no duplicate final vector</td></tr></tbody></table>' +
+          status('0 allocations during graph evaluation and borrowed Rust reads.') +
+          '<div class="text-small text-muted">Construction allocates node buffers and histories. Order-book storage mutations may allocate separately.</div>';
+      }
+      return '<div class="viz-controls controls-line">' +
+        [['live', 'Python · live'], ['batch', 'Python · batch'], ['rust', 'Rust · borrowed']]
+          .map(([key, label]) => button('mo-access-' + key, label, 'access', key, state.access === key)).join('') +
+        '</div>' + content;
+    }
+    const fitLabels = ['Replay inputs; fit shared PCA', 'Fit scaler A', 'Fit scaler B', 'Validate every output', 'Install the cold runtime'];
+    function fitting() {
+      const failed = state.outcome === 'failure' && state.fit === 3;
+      const installed = state.fit === 5;
+      const live = installed ? 'New fitted parameters; cold event state' : 'Previous fitted parameters and live state';
+      const candidate = failed ? 'Rejected at scaler B' : installed ? 'Installed' :
+        state.fit === 0 ? 'Not started' : fitLabels[state.fit - 1] + ' — complete';
+      return '<div class="viz-controls controls-line"><label class="form-label" for="mo-outcome">Candidate outcome' +
+        '<select class="form-select" id="mo-outcome"><option value="success"' +
+        (state.outcome === 'success' ? ' selected' : '') + '>Successful fit</option><option value="failure"' +
+        (state.outcome === 'failure' ? ' selected' : '') + '>Failure in branch B</option></select></label></div>' +
+        '<div class="text-small text-muted">Training example: extractor → shared PCA → independent scalers A and B</div>' +
+        '<div class="two-parts"><div><h3>Candidate graph</h3><ol class="fit-steps">' +
+        fitLabels.map((label, i) => '<li class="' + (i + 1 === state.fit ? 'current' :
+          i + 1 > state.fit ? 'pending' : '') + '">' + esc(label) + ' ' +
+          (failed && i === 2 ? '— failed' : i < state.fit ? '✓' : '') + '</li>').join('') +
+        '</ol></div><div><h3>Active runtime</h3><div class="runtime-label">' + live + '</div>' +
+        '<hr><div class="text-small text-muted">Candidate status</div><div class="runtime-label" aria-live="polite">' +
+        candidate + '</div></div></div>' +
+        '<div class="viz-controls controls-line">' +
+        button('mo-fit-prev', 'Earlier step', 'fit', -1, false, state.fit === 0) +
+        button('mo-fit-next', 'Next fitting step', 'fit', 1, false, installed || failed) +
+        '</div>' +
+        status(failed ? 'Failed fit → previous artifact, values, histories, and output handles remain usable.' :
+          installed ? 'Successful fit → new parameters, empty histories. Replay before consuming live values.' :
+          'The active runtime is replaced only after all candidate outputs pass validation.') +
+        '<h3>One fit_mask for the whole graph</h3>' +
+        '<table class="table table-sm"><thead><tr><th>Example rows</th><th>Replay history</th><th>Use for fitting</th></tr></thead><tbody>' +
+        '<tr><td>1–2 · mask = false</td><td>Yes</td><td>No</td></tr>' +
+        '<tr><td>3–4 · mask = true</td><td>Yes</td><td>Yes</td></tr></tbody></table>' +
+        '<div class="text-small text-muted">Each shared estimator is fitted once. Multiple cold replays may supply fitting inputs; no graph-wide training-matrix cache.</div>';
+    }
+    function jsonView() {
+      const selected = state.json === 'outputs' ? artifact.outputs : artifact.nodes[Number(state.json)];
+      return '<div class="viz-controls controls-line"><span class="viz-badge">Pipeline 4.0</span>' +
+        '<label class="form-label" for="mo-json">Inspect artifact record<select class="form-select" id="mo-json">' +
+        [['0', 'nodes[0] · extractor'], ['1', 'nodes[1] · shared SMA'], ['2', 'nodes[2] · scale'],
+          ['3', 'nodes[3] · lag'], ['outputs', 'outputs · registered order']].map(([value, label]) =>
+          '<option value="' + value + '"' + (state.json === value ? ' selected' : '') + '>' + label + '</option>').join('') +
+        '</select></label></div>' + graph() +
+        '<h3>' + (state.json === 'outputs' ? 'outputs' : 'nodes[' + state.json + ']') + '</h3>' +
+        code(JSON.stringify(selected, null, 2)) +
+        status(state.json === 'outputs' ? 'Names point to existing node indexes; output order is preserved.' :
+          state.json === '0' ? 'The extractor is node 0; its nested specification remains version 2.0.' :
+          'parent < node index: dependencies precede consumers; no forward references or cycles.') +
+        '<div class="text-small text-muted">Stored: topology + fitted numeric state. Excluded: histories, live values, clocks, training rows, estimators. Loading starts cold.</div>';
+    }
+    const rules = {
+      alias: ['Two names for one node', 'Allowed', 'spec.output("model_a", a)\nspec.output("alias", a)',
+        'Two names expose the same node. Neither registration adds computation.'],
+      foreign: ['Node from another builder', 'Rejected', 'other = fiml.PipelineSpec(extractor_spec)\nother.add(shared, stage)',
+        'A NodeId belongs to the builder that created it.'],
+      duplicate: ['Duplicate output name', 'Rejected', 'spec.output("model", a)\nspec.output("model", b)',
+        'Registered names are unique and cannot be rebound.'],
+      empty: ['Output with zero active features', 'Rejected', 'spec.output("empty", zero_width_node)\npipeline = spec.build()',
+        'Every named output needs at least one active feature. Learned widths are checked during fit.'],
+      nooutputs: ['Graph with no named outputs', 'Rejected', 'spec = fiml.PipelineSpec(extractor_spec)\npipeline = spec.build()',
+        'A runnable graph must have at least one named output.'],
+      oldjson: ['Load a JSON 3.0 artifact', 'Rejected', '{"version": "3.0", "...": "..."}',
+        'Recreate the configuration with the graph builder and export 4.0; no automatic migration.'],
+      merge: ['Merge two parent vectors', 'Unsupported', 'merged = spec.add([a, b], stage)',
+        'Each node consumes exactly one parent. Multi-parent merges are outside this contract.']
+    };
+    function validation() {
+      const item = rules[state.rule];
+      return '<label class="form-label" for="mo-rule">Explore a contract rule<select class="form-select" id="mo-rule">' +
+        Object.entries(rules).map(([key, value]) => '<option value="' + key + '"' +
+          (key === state.rule ? ' selected' : '') + '>' + value[0] + '</option>').join('') +
+        '</select></label>' + code(item[2]) +
+        status('<strong>' + item[1] + '.</strong> ' + item[3]) +
+        '<h3>Caller migration</h3><table class="table table-sm"><thead><tr><th>Previous interface</th><th>New contract</th></tr></thead><tbody>' +
+        '<tr><td><code>pipeline.values()</code></td><td><code>pipeline.output(name).values()</code></td></tr>' +
+        '<tr><td>One batch matrix</td><td><code>batch[name]</code>, even with one output</td></tr>' +
+        '<tr><td>Add transformations to a live pipeline</td><td>Author a PipelineSpec; build a fixed graph</td></tr>' +
+        '<tr><td>Pipeline JSON 3.0</td><td>Recreate and export JSON 4.0</td></tr></tbody></table>' +
+        '<div class="text-small text-muted">Also validated: nonblank names outside __reserved_, dimensions, finite parameters, and direct-parent feature IDs. PCA names are local: pc0, pc1, …</div>';
+    }
+    function evidence() {
+      return '<div class="two-parts"><div class="measure" id="mo-time"><h3>16 SMA → 8 PCA → two lag branches</h3></div>' +
+        '<div class="measure" id="mo-memory"><h3>128-sample SMA → two lag branches</h3></div></div>' +
+        status('≈1.8× faster in the timing workload; less retained heap in the separate memory workload.') +
+        '<div class="text-small text-muted">AMD Ryzen 9 9900X · Rust 1.98.1 · local measurements, 2026-10-22<br>' +
+        'Timing: release, 10 samples, 1 s warmup, 1 s measurement. Heap excludes source builder and allocator overhead.</div>' +
+        '<h3>Completed implementation checks</h3><table class="table table-sm"><tbody>' +
+        '<tr><td>Rust 1.89 · all features</td><td class="text-end tabular-nums">346 tests passed</td></tr>' +
+        '<tr><td>Python</td><td class="text-end tabular-nums">895 tests passed</td></tr>' +
+        '<tr><td>Clippy · Rustdoc · rustfmt</td><td class="text-end">Passed</td></tr>' +
+        '<tr><td>Python examples · notebook execution</td><td class="text-end">Passed</td></tr>' +
+        '<tr><td>Graph evaluation + borrowed Rust reads</td><td class="text-end">0 allocations</td></tr></tbody></table>' +
+        '<div class="sources viz-row text-small"><a href="https://github.com/pbezglasny/fiml/pull/193" target="_blank" rel="noopener noreferrer">PR #193</a>' +
+        '<a href="https://github.com/pbezglasny/fiml/blob/b011f4e19bbdc4a14bb03f90e4ac345ec1695e14/docs/multiple_output-arc.md" target="_blank" rel="noopener noreferrer">Architecture and reproduction commands</a></div>';
+    }
+    const scenes = [topology, authoring, replay, access, fitting, jsonView, validation, evidence];
+    function render() {
+      chapter.value = String(state.slide);
+      root.querySelector('#mo-page').textContent = (state.slide + 1) + ' / 8';
+      root.querySelector('#mo-prev').disabled = state.slide === 0;
+      root.querySelector('#mo-next').disabled = state.slide === 7;
+      root.querySelector('#mo-footer').textContent = footers[state.slide];
+      scene.innerHTML = '<h2>' + headings[state.slide] + '</h2>' + scenes[state.slide]();
+      draw();
+    }
+    function node(x, y, width, title, detail, value, highlighted, absent) {
+      const h = value === undefined ? 62 : 82;
+      return '<g' + (absent ? ' class="not-built"' : '') + '>' +
+        '<rect class="' + (highlighted ? 'active-box' : 'node-box') + '" x="' + (x-width/2) +
+        '" y="' + (y-h/2) + '" width="' + width + '" height="' + h + '" rx="7"/>' +
+        '<text class="node-title" text-anchor="middle" x="' + x + '" y="' + (y-8) + '">' + esc(title) + '</text>' +
+        '<text class="node-detail" text-anchor="middle" x="' + x + '" y="' + (y+13) + '">' + esc(detail) + '</text>' +
+        (value === undefined ? '' : '<text text-anchor="middle" class="tabular-nums" x="' + x + '" y="' + (y+33) + '">' + esc(value) + '</text>') +
+        '</g>';
+    }
+    function edge(x1, y1, x2, y2) {
+      const middle = (y1+y2)/2;
+      return '<path class="edge" d="M ' + x1 + ' ' + y1 + ' C ' + x1 + ' ' + middle +
+        ', ' + x2 + ' ' + middle + ', ' + x2 + ' ' + y2 + '"/>';
+    }
+    function drawGraph(container) {
+      const w = Math.max(280, Math.round(container.getBoundingClientRect().width));
+      let inner = '';
+      let height = 315;
+      const old = state.slide === 0 && state.topology === 'before';
+      if (old) {
+        const margin = 8;
+        const gap = Math.max(14, w * .035);
+        const width = (w-margin*2-gap*2)/3;
+        const xs = [margin+width/2, w/2, w-margin-width/2];
+        const rows = [
+          {y: 55, output: 'model_a · 3 evaluations', labels: ['Extract', 'SMA', 'Scale']},
+          {y: 160, output: 'model_b · 3 evaluations', labels: ['Extract', 'SMA', 'Lag']},
+          {y: 265, output: 'decision · 1 evaluation', labels: ['Extract']}
+        ];
+        for (const row of rows) {
+          inner += '<text x="8" y="' + (row.y-38) + '">' + row.output + '</text>';
+          row.labels.forEach((label, i) => {
+            if (i) inner += '<path class="edge" d="M ' + (xs[i-1]+width/2) + ' ' + row.y +
+              ' L ' + (xs[i]-width/2) + ' ' + row.y + '"/>';
+            inner += node(xs[i], row.y, width, label, 'own state', undefined, false, false);
+          });
+        }
+      } else {
+        const cx = w/2, lx = w/4, rx = w*3/4;
+        const width = Math.min(220, w/2-16);
+        const rootWidth = Math.min(250, w-32);
+        const tracing = state.slide === 2;
+        const ys = tracing ? [50, 154, 265] : [42, 140, 242];
+        height = tracing ? 320 : 285;
+        const radius = tracing ? 41 : 31;
+        inner += edge(cx, ys[0]+radius, cx, ys[1]-radius);
+        inner += edge(cx, ys[1]+radius, lx, ys[2]-radius);
+        inner += edge(cx, ys[1]+radius, rx, ys[2]-radius);
+        let highlight = -1, present = 3;
+        if (state.slide === 1) { highlight = state.build < 4 ? state.build : -1; present = Math.min(3, state.build); }
+        if (state.slide === 5) highlight = state.json === 'outputs' ? -1 : Number(state.json);
+        const names = state.slide !== 1 || state.build >= 4;
+        const event = state.event;
+        inner += node(cx, ys[0], rootWidth, '0 · Extractor', names ? 'price → decision' : 'price', tracing ? prices[event] : undefined, highlight === 0, false);
+        inner += node(cx, ys[1], rootWidth, '1 · Shared SMA', 'smooth · window 2', tracing ? smooth[event] : undefined, highlight === 1 || state.slide === 0, present < 1);
+        inner += node(lx, ys[2], width, '2 · Scale', names ? 'model_a' : 'scaled', tracing ? results.model_a[event] : undefined, highlight === 2, present < 2);
+        inner += node(rx, ys[2], width, '3 · Lag', names ? 'model_b' : 'previous', tracing ? val(results.model_b[event]) : undefined, highlight === 3, present < 3);
+      }
+      container.innerHTML = '<svg viewBox="0 0 ' + w + ' ' + height + '" height="' + height +
+        '" role="img" aria-label="' + (old ? 'Three independent pipelines repeat extraction and shared SMA work.' :
+          'One extractor feeds a shared SMA and the decision output. The SMA feeds scale and lag branches for model A and model B.') +
+        '"><title>' + (old ? 'Before: separate pipelines' : 'After: one shared graph') + '</title>' + inner + '</svg>';
+    }
+    function drawMeasure(container, values, unit, label) {
+      const existing = container.querySelector('svg');
+      if (existing) existing.remove();
+      const w = Math.max(280, Math.round(container.getBoundingClientRect().width));
+      const left = 100, right = 16, top = 28, bottom = 127;
+      const plotWidth = w-left-right;
+      const ceiling = Math.max(...values)*1.12;
+      const x = value => left + value/ceiling*plotWidth;
+      let content = '<title>' + esc(label) + '</title><desc>Shared graph: ' +
+        values[0] + ' ' + unit + '. Two separate pipelines: ' + values[1] + ' ' + unit + '.</desc>' +
+        '<rect data-chart-frame x="' + left + '" y="' + top + '" width="' + plotWidth +
+        '" height="' + (bottom-top) + '" fill="none" stroke="var(--border)"/>';
+      values.forEach((value, i) => {
+        const y = 57+i*47;
+        content += '<text x="0" y="' + (y+4) + '">' + (i === 0 ? 'Shared' : 'Separate') + '</text>' +
+          '<rect x="' + left + '" y="' + (y-7) + '" width="' + (x(value)-left) +
+          '" height="16" fill="' + (i === 0 ? 'var(--viz-series-1)' : 'var(--muted-foreground)') + '"/>' +
+          '<text x="' + (w-right-4) + '" y="' + (y-13) + '" text-anchor="end" class="tabular-nums">' +
+          value.toLocaleString('en-US', {maximumFractionDigits: 2}) + '</text>';
+      });
+      [0, .5, 1].forEach(fraction => {
+        const value = ceiling*fraction;
+        content += '<text x="' + x(value) + '" y="145" text-anchor="' +
+          (fraction === 0 ? 'start' : fraction === 1 ? 'end' : 'middle') + '">' +
+          Math.round(value).toLocaleString('en-US') + '</text>';
+      });
+      content += '<text class="axis-title" data-axis="x" x="' + (left+plotWidth/2) +
+        '" y="172" text-anchor="middle">' + esc(unit === 'bytes' ? 'Retained heap (bytes)' : 'Time (ns/event)') + '</text>' +
+        '<text class="axis-title" data-axis="y" x="0" y="18">Runtime</text>';
+      container.insertAdjacentHTML('beforeend', '<svg viewBox="0 0 ' + w +
+        ' 186" height="186" role="img" aria-label="' + esc(label) + '">' + content + '</svg>');
+    }
+    function draw() {
+      const target = root.querySelector('#mo-graph');
+      if (target) drawGraph(target);
+      const time = root.querySelector('#mo-time'), memory = root.querySelector('#mo-memory');
+      if (time) drawMeasure(time, [117.98, 213.33], 'ns/event', 'Event processing time; lower is better');
+      if (memory) drawMeasure(memory, [13038, 24586], 'bytes', 'Retained runtime heap; lower is better');
+    }
+    function change(action, value) {
+      if (action === 'topology' || action === 'access') state[action] = value;
+      if (action === 'build') state.build = Math.max(0, Math.min(5, state.build+Number(value)));
+      if (action === 'event') { state.event = Number(value); state.reads = 0; }
+      if (action === 'read') state.reads++;
+      if (action === 'fit') state.fit = Math.max(0, Math.min(state.outcome === 'failure' ? 3 : 5, state.fit+Number(value)));
+    }
+    root.addEventListener('click', event => {
+      const target = event.target.closest('button');
+      if (!target || !root.contains(target) || target.disabled) return;
+      if (target.id === 'mo-prev') state.slide = Math.max(0, state.slide-1);
+      else if (target.id === 'mo-next') state.slide = Math.min(7, state.slide+1);
+      else if (target.dataset.action) change(target.dataset.action, target.dataset.value);
+      else return;
+      const focusId = target.id;
+      render(); save();
+      const replacement = root.querySelector('#' + focusId);
+      if (replacement && !replacement.disabled) replacement.focus({preventScroll: true});
+    });
+    root.addEventListener('change', event => {
+      const id = event.target.id, value = event.target.value;
+      if (id === 'mo-chapter') state.slide = Number(value);
+      else if (id === 'mo-outcome') { state.outcome = value; state.fit = 0; }
+      else if (id === 'mo-json') state.json = value;
+      else if (id === 'mo-rule') state.rule = value;
+      else return;
+      render(); save();
+      const replacement = root.querySelector('#' + id);
+      if (replacement) replacement.focus({preventScroll: true});
+    });
+    window.addEventListener('openai:set_globals', event => {
+      const saved = event.detail && event.detail.globals && event.detail.globals.widgetState;
+      if (saved) { restore(saved); render(); }
+    });
+    restore(window.openai && window.openai.widgetState);
+    render();
+    new ResizeObserver(draw).observe(scene);
+  })();
+  </script>
+</div>

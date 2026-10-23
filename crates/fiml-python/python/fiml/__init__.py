@@ -296,6 +296,12 @@ def _stage_snapshot(stage):
     return clone_transformer(stage)
 
 
+def _register_outputs(candidate, outputs):
+    for name, node in outputs:
+        candidate.output(name, node)
+    candidate.validate()
+
+
 class PipelineSpec:
     """Append-only graph builder. Stage inputs resolve against their direct parent.
 
@@ -374,8 +380,17 @@ class PipelineSpec:
         return result
 
     def to_json(self):
-        """Export numeric configurations; unfitted recipes must be fitted first."""
-        return self.build().to_json()
+        """Export numeric configurations without allocating runtime histories."""
+        return self._numeric_spec().to_json()
+
+    def _numeric_spec(self):
+        candidate = self._base.copy()
+        for parent, stage in self._nodes:
+            if not isinstance(stage, str):
+                raise ValueError("pipeline is not fitted; call fit before inference or export")
+            candidate.add(parent, stage)
+        _register_outputs(candidate, self._outputs)
+        return candidate
 
 
 class PipelineOutput:
@@ -431,17 +446,9 @@ class ModelInputPipeline:
         self._spec = None
         self._inner = None
         if all(isinstance(stage, str) for _, stage in self._templates):
-            candidate = self._base_spec.copy()
-            for parent, stage in self._templates:
-                candidate.add(parent, stage)
-            self._register_outputs(candidate)
+            candidate = pipeline_spec._numeric_spec()
             self._inner = self._new_runtime(candidate)
             self._spec = candidate
-
-    def _register_outputs(self, candidate):
-        for name, node in self._outputs:
-            candidate.output(name, node)
-        candidate.validate()
 
     @classmethod
     def from_json(cls, json, output_dtype="float64"):
@@ -508,7 +515,7 @@ class ModelInputPipeline:
             except (ValueError, TypeError) as error:
                 names = [name for name, node in self._outputs if node == index]
                 raise ValueError(f"node {index}, outputs {names}: {error}") from error
-        self._register_outputs(candidate)
+        _register_outputs(candidate, self._outputs)
         matrices = self._new_runtime(candidate, "float64").transform(**events)
         for name, node in self._outputs:
             validate_matrix(matrices[name], candidate.feature_ids(node))
