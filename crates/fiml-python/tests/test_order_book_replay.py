@@ -298,3 +298,125 @@ def test_flow_builders_roundtrip_and_feed_scalar_averages():
     runtime.reset()
     chunks = [runtime.transform_order_book(events[:2]), runtime.transform_order_book(events[2:])]
     np.testing.assert_equal(np.concatenate(chunks), actual)
+
+
+@pytest.mark.parametrize("fixture", [FIXTURE, FLOW_FIXTURE])
+@pytest.mark.parametrize("dense", [False, True])
+def test_branching_book_graph_matches_shared_oracles(fixture, dense):
+    document = json.loads(json.dumps(fixture["pipeline"]))
+    if dense:
+        for config in document["nodes"][0]["spec"]["order_books"]:
+            config["dense"] = {"tick_size": "1", "min_price": "0", "max_price": "1000"}
+    document["nodes"].extend([
+        {"type": "transform", "parent": 1, "stage": {"type": "scalar", "transformations": [
+            {"type": "standard_scale", "input": fixture["model_names"][0],
+             "output": "scaled", "mean": 1., "scale": 2.},
+        ]}},
+        {"type": "transform", "parent": 1, "stage": {"type": "scalar", "transformations": [
+            {"type": "identity", "input": fixture["model_names"][-1], "output": "selected"},
+        ]}},
+    ])
+    document["outputs"] = [
+        {"name": "model_a", "node": 2}, {"name": "decision", "node": 0},
+        {"name": "shared", "node": 1}, {"name": "model_b", "node": 3},
+        {"name": "alias", "node": 1},
+    ]
+    instance = fiml.ModelInputPipeline.from_json(json.dumps(document))
+    assert instance.output_names() == [output["name"] for output in document["outputs"]]
+    for step in fixture["steps"]:
+        event = step["event"]
+
+        def apply():
+            if event["kind"] in ("snapshot", "delta"):
+                instance.update_order_book(book_event(event))
+            elif event["kind"] == "time":
+                instance.update(fiml.KIND_TIME, 0, event["timestamp"])
+            else:
+                instance.update(fiml.KIND_PRICE, instance.symbol(event["symbol"]),
+                                event["timestamp"], price=event["price"])
+
+        if step["error"]:
+            with pytest.raises(ValueError, match=step.get("python_error", step["error"])):
+                apply()
+        else:
+            apply()
+        raw, model = np.array(step["raw"], dtype=float), np.array(step["model"], dtype=float)
+        expected = {"model_a": (model[:1] - 1.) / 2., "model_b": model[-1:],
+                    "shared": model, "alias": model,
+                    "decision": raw[:document["nodes"][0]["spec"]["length"]]}
+        np.testing.assert_equal(instance.raw_values(), raw)
+        for name in instance.output_names():
+            np.testing.assert_equal(instance.output(name).values(), expected[name])
+
+
+@pytest.mark.parametrize("dtype", ["float32", "float64"])
+def test_branching_book_batch_context_prevalidation_and_error_prefix(dtype):
+    raw = (fiml.FeatureExtractorSpec()
+           .configure_order_book("btcusdt", update_policy="contiguous", buffer_size=8)
+           .order_book_best_bid_size("btcusdt").context("btcusdt", "high", id="high"))
+    size_id = next(name for name in raw.feature_ids() if name != "high")
+    spec = fiml.PipelineSpec(raw)
+    shared = spec.add(spec.root(), fiml.ScalarStage().identity(size_id, output="size")
+                      .identity("high"))
+    spec.output("model_a", spec.add(shared, fiml.ScalarStage()
+                                    .sma("size", window=2, warmup=fiml.WarmupPolicy.FULL_WINDOW)))
+    spec.output("model_b", spec.add(shared, fiml.ScalarStage().lagged("size", lag_window=1)))
+    spec.output("decision", spec.root())
+    spec.output("shared", shared)
+    batch, manual = spec.build(dtype), spec.build(dtype)
+
+    for invalid, schedule in [
+        ([snapshot(), delta(2, 2, "4", "missing")], {0: {"high": 100.}}),
+        ([snapshot(), delta(0, 2, "4")], {0: {"high": 100.}}),
+        ([snapshot(), delta(2, 2, "4")], {0: {"high": 100.}, 1: {"missing": 1.}}),
+    ]:
+        with pytest.raises(ValueError, match="row 1"):
+            batch.transform_order_book(invalid, context_updates=schedule)
+        assert np.isnan(batch.raw_values()).all()
+        for name in batch.output_names():
+            assert np.isnan(batch.output(name).values()).all()
+        batch.output_dtype = dtype
+
+    initial = [delta(0, 2, "4"), snapshot(1, 1), delta(2, 2, "99"), delta(3, 3, "6")]
+    schedule = {0: {"high": 100.}, 2: {"high": 200.}}
+    actual = batch.transform_order_book(initial, context_updates=schedule)
+    assert list(actual) == batch.output_names()
+    for row, event in enumerate(initial):
+        if row in schedule:
+            manual.update_context(schedule[row])
+        manual.update_order_book(event)
+        for name, matrix in actual.items():
+            assert matrix.dtype == np.dtype(dtype)
+            np.testing.assert_equal(matrix[row], manual.output(name).values())
+    np.testing.assert_equal(actual["model_a"], [[np.nan], [np.nan], [np.nan], [5.]])
+    np.testing.assert_equal(actual["model_b"], [[np.nan], [np.nan], [4.], [4.]])
+    np.testing.assert_equal(actual["shared"], [[np.nan, 100.], [4., 100.], [4., 200.], [6., 200.]])
+
+    failing = [delta(4, 4, "8"), delta(5, 6, "12"), delta(6, 7, "14")]
+    with pytest.raises(ValueError, match="row 1.*expected update ID 5, received 6"):
+        batch.transform_order_book(failing, context_updates={0: {"high": 300.}, 2: {"high": 999.}})
+    manual.update_context({"high": 300.})
+    manual.update_order_book(failing[0])
+    with pytest.raises(ValueError, match="expected update ID 5, received 6"):
+        manual.update_order_book(failing[1])
+    for name in batch.output_names():
+        np.testing.assert_equal(batch.output(name).values(), manual.output(name).values())
+    np.testing.assert_equal(batch.output("model_a").values(), [7.])
+    np.testing.assert_equal(batch.output("model_b").values(), [6.])
+    np.testing.assert_equal(batch.output("shared").values(), [8., 300.])
+
+    # Resynchronization must replay the rejected delta, but not the skipped row.
+    recovery = [snapshot(5, 5), failing[2]]
+    recovered = batch.transform_order_book(recovery)
+    for row, event in enumerate(recovery):
+        manual.update_order_book(event)
+        for name in recovered:
+            np.testing.assert_equal(recovered[name][row], manual.output(name).values())
+    np.testing.assert_equal(recovered["shared"], [[12., 300.], [14., 300.]])
+    np.testing.assert_equal(recovered["model_a"], [[10.], [13.]])
+    np.testing.assert_equal(recovered["model_b"], [[8.], [12.]])
+    empty = batch.transform_order_book([])
+    assert list(empty) == batch.output_names()
+    for name, matrix in empty.items():
+        assert matrix.shape == (0, batch.output(name).n_features())
+        assert matrix.dtype == np.dtype(dtype)

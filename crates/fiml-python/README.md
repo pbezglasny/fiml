@@ -362,6 +362,19 @@ same event rows. Output order is registration order; feature order is local to
 the producing node. Named outputs contain active features only and must be
 nonempty. `raw_values()` and `raw_feature_names()` remain diagnostic accessors.
 
+Run [examples/multiple_outputs.py](examples/multiple_outputs.py) to export one
+JSON artifact, load it, and replay a shared SMA into model A, model B, and raw
+decision vectors:
+
+```bash
+uv run --with ./crates/fiml-python python crates/fiml-python/examples/multiple_outputs.py /tmp/model-inputs.json
+```
+
+The example uses authored numeric scaler parameters and needs no sklearn or
+market data download. It checks every output row, including each branch's warmup
+NaNs, then reads the final named snapshots. The exported version 4.0 artifact can
+also be loaded by Rust's `PipelineSpec`.
+
 ### Fitting sklearn stages
 
 Install `fiml[sklearn]` (scikit-learn `>=1.9,<1.10`) for training. Supported exact

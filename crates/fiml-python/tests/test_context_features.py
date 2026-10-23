@@ -4,6 +4,7 @@ from pathlib import Path
 
 import fiml
 import numpy as np
+import pandas as pd
 import pytest
 from jsonschema import Draft202012Validator
 from sklearn.preprocessing import StandardScaler
@@ -205,3 +206,100 @@ def test_shared_rust_python_context_replay_fixture():
     np.testing.assert_equal(actual, np.array([step["expected"] for step in steps], dtype=float))
     from test_pipeline_spec_schema import VALIDATOR
     VALIDATOR.validate(fixture["pipeline"])
+
+
+def branching_context_spec():
+    raw = (fiml.FeatureExtractorSpec(capacity=5)
+           .field("btc", source="trade_price", id="price")
+           .context("btc", "high", id="high")
+           .context("__global__", "volume", id="volume"))
+    spec = fiml.PipelineSpec(raw)
+    shared = spec.add(spec.root(), fiml.ScalarStage()
+                      .sma("price", window=2, warmup=fiml.WarmupPolicy.FULL_WINDOW, output="mean")
+                      .identity("high"))
+    wider = spec.add(shared, fiml.ScalarStage()
+                     .standard_scale("mean", mean=5., scale=10., output="scaled")
+                     .identity("high").identity("mean"))
+    history = spec.add(shared, fiml.ScalarStage().lagged("high", lag_window=1, output="lag")
+                       .sma("mean", window=2, warmup=fiml.WarmupPolicy.FULL_WINDOW, output="mean2"))
+    spec.output("model_b", history)
+    spec.output("decision", spec.root())
+    spec.output("model_a", wider)
+    spec.output("shared", shared)
+    spec.output("alias", shared)
+    return spec
+
+
+@pytest.mark.parametrize("dtype", ["float32", "float64"])
+def test_branching_context_schedule_streaming_chunks_and_dataframe(dtype):
+    spec = branching_context_spec()
+    batch, manual, framed = [spec.build(dtype) for _ in range(3)]
+    data = {**events(batch), "kind": np.full(4, fiml.KIND_TRADE, dtype=np.uint8),
+            "volume": np.ones(4)}
+    schedule = {0: {"high": 100., "volume": 1000.}, 2: {"high": 300.}, 3: {"volume": None}}
+    expected = {
+        "model_b": [[np.nan, np.nan], [100., np.nan], [100., 20.], [300., 30.]],
+        "model_a": [[np.nan, 100., np.nan], [1., 100., 15.], [2., 300., 25.], [3., 300., 35.]],
+        "shared": [[np.nan, 100.], [15., 100.], [25., 300.], [35., 300.]],
+    }
+    expected["alias"] = expected["shared"]
+    raw_columns = dict(price=[10., 20., 30., 40.], high=[100., 100., 300., 300.],
+                       volume=[1000., 1000., 1000., np.nan])
+    expected["decision"] = np.column_stack([
+        raw_columns[name] for name in batch.output("decision").feature_names()
+    ])
+    actual = batch.transform(**data, context_updates=schedule)
+    assert list(actual) == batch.output_names()
+    for name, matrix in actual.items():
+        assert matrix.dtype == np.dtype(dtype)
+        np.testing.assert_equal(matrix, expected[name])
+    handle = manual.symbol("btc")
+    for row in range(4):
+        if row in schedule:
+            before = manual.output("model_b").values()
+            manual.update_context(schedule[row])
+            np.testing.assert_equal(manual.output("model_b").values(), before)
+        manual.update(fiml.KIND_TRADE, handle, row, price=data["price"][row], volume=1.)
+        for name in actual:
+            np.testing.assert_equal(manual.output(name).values(), actual[name][row])
+
+    batch.reset()
+    frame = pd.DataFrame(dict(market=["BTC", "btc", "BTC", "btc"], millis=data["timestamp"],
+                              px=data["price"], qty=data["volume"]),
+                         index=pd.Index([7, 2, 7, 0], name="event"))
+    for start, stop in [(0, 2), (2, 3), (3, 4)]:
+        chunk = batch.transform(**{key: values[start:stop] for key, values in data.items()},
+                                context_updates={0: schedule[start]})
+        framed.update_context(schedule[start])
+        frames = framed.compute_features(frame.iloc[start:stop], symbol="market", time="millis",
+                                         price="px", volume="qty")
+        assert list(chunk) == list(frames) == list(actual)
+        for name, result in frames.items():
+            pd.testing.assert_frame_equal(result[["market", "millis"]],
+                                          frame.iloc[start:stop][["market", "millis"]])
+            assert list(result.columns[2:]) == framed.output(name).feature_names()
+            assert all(column_dtype == np.dtype(dtype) for column_dtype in result.dtypes[2:])
+            np.testing.assert_equal(result.iloc[:, 2:].to_numpy(), actual[name][start:stop])
+            np.testing.assert_equal(chunk[name], actual[name][start:stop])
+
+
+@pytest.mark.parametrize("invalid", [{4: {}}, {2: {"missing": 2.}},
+                                    {2: {"price": 2.}}, {2: {"high": np.inf}}])
+def test_branching_context_prevalidation_preserves_all_outputs(invalid):
+    spec = branching_context_spec()
+    pipeline, reference = spec.build(), spec.build()
+    for runtime in [pipeline, reference]:
+        runtime.update_context({"high": 50.})
+        runtime.update(fiml.KIND_TRADE, runtime.symbol("btc"), -1, price=5., volume=1.)
+    data = {**events(pipeline), "kind": np.full(4, fiml.KIND_TRADE, dtype=np.uint8),
+            "volume": np.ones(4)}
+    with pytest.raises(ValueError):
+        pipeline.transform(**data, context_updates={0: {"high": 100.}, **invalid})
+    with pytest.raises(ValueError):
+        pipeline.update_context({"high": 200., "missing": 1.})
+    np.testing.assert_equal(pipeline.raw_values(), reference.raw_values())
+    for name in pipeline.output_names():
+        np.testing.assert_equal(pipeline.output(name).values(), reference.output(name).values())
+    actual, expected = pipeline.transform(**data), reference.transform(**data)
+    for name in actual:
+        np.testing.assert_equal(actual[name], expected[name])
