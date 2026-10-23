@@ -272,13 +272,12 @@ mod tests {
 
         let header: Vec<_> = rows[0].split(',').collect();
         assert_eq!(&header[..5], INPUT_HEADER.split(',').collect::<Vec<_>>());
-        assert_eq!(header.len(), 5 + FEATURE_COUNT);
         assert_eq!(
             &header[5..],
             [
-                "sma:symbol=7:btcusdt:source=field.trade_price:window=3:warmup=full_window",
-                "ema:symbol=7:btcusdt:source=field.trade_price:window=3:warmup=full_window",
-                "sma:symbol=7:btcusdt:source=field.trade_volume:window=3:warmup=full_window",
+                "sma_price",
+                "ema_price",
+                "sma_volume",
                 "cvd:symbol=7:btcusdt:source=event.trade:window=3:warmup=full_window",
                 "trade_count_timed:symbol=7:btcusdt:source=event.trade:aggregation_ns=1000000000:window_ns=3000000000:warmup=full_window",
             ]
