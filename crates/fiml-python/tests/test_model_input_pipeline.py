@@ -97,13 +97,47 @@ def test_invalid_output_names(name):
         spec.output(name, spec.root())
 
 
-def test_no_outputs_and_empty_root_are_rejected():
+@pytest.mark.parametrize("method", ["build", "to_json"])
+def test_no_outputs_and_empty_root_are_rejected(method):
     with pytest.raises(ValueError, match="at least one named output"):
-        fiml.PipelineSpec(raw_spec()).build()
+        getattr(fiml.PipelineSpec(raw_spec()), method)()
     spec = fiml.PipelineSpec(fiml.FeatureExtractorSpec())
     spec.output("empty", spec.root())
-    with pytest.raises(ValueError, match="output 'empty'.*active feature"):
-        spec.build()
+    with pytest.raises(ValueError, match=r"output ['\"]empty['\"].*active feature"):
+        getattr(spec, method)()
+
+
+def test_numeric_spec_export_does_not_construct_runtime(monkeypatch):
+    def unexpected_runtime(*args, **kwargs):
+        pytest.fail("exporting a specification must not allocate runtime histories")
+
+    monkeypatch.setattr(fiml, "_ModelInputPipeline", unexpected_runtime)
+    spec = fiml.PipelineSpec(raw_spec(), checksum="numeric-export")
+    for index in range(4):
+        node = spec.add(spec.root(), fiml.ScalarStage().rolling_std_timed(
+            "price", window="999998ms"))
+        spec.output(f"std{index}", node)
+    spec.output("alias", node)
+    spec.output("raw", spec.root())
+
+    artifact = spec.to_json()
+    document = json.loads(artifact)
+    assert document["version"] == "4.0"
+    assert document["checksum"] == "numeric-export"
+    assert len(document["nodes"]) == 5
+    assert [node["parent"] for node in document["nodes"][1:]] == [0] * 4
+    assert document["outputs"] == [
+        *[{"name": f"std{index}", "node": index + 1} for index in range(4)],
+        {"name": "alias", "node": 4},
+        {"name": "raw", "node": 0},
+    ]
+    assert spec.to_json() == artifact
+    assert fiml.PipelineSpec.from_json(artifact).to_json() == artifact
+
+
+def test_unfitted_spec_cannot_be_exported():
+    with pytest.raises(ValueError, match="not fitted"):
+        graph(learned=True).to_json()
 
 
 def test_fit_shares_estimator_and_keeps_output_handles(monkeypatch):
