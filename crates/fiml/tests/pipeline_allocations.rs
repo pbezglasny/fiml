@@ -372,6 +372,51 @@ fn returns_and_rolling_volatility_updates_do_not_allocate() {
 }
 
 #[test]
+fn sample_volatility_warmup_skips_and_cancellation_recovery_do_not_allocate() {
+    let symbol = Symbol::new("volatility-cancellation").unwrap();
+    let other = Symbol::new("volatility-unrelated").unwrap();
+    for warmup_policy in [WarmupPolicy::FirstValue, WarmupPolicy::FullWindow] {
+        let mut extractor = FeatureExtractorSpec::new([3, 1, 2].map(|window| {
+            FeatureDefinition::with_default_id(FeatureKey::Volatility {
+                symbol,
+                source: fiml::EventField::Price,
+                window,
+                warmup_policy,
+            })
+        }))
+        .unwrap()
+        .build(ArrayFeatureVector::<3>::new())
+        .unwrap();
+        let mut timestamp = 0;
+        for prices in [
+            &[8., 16., 0., -0., -2.][..],
+            &[
+                -4., -4., -4., -4., 100., 110., 99., 118.8, 118.8, 118.8, 118.8,
+            ],
+        ] {
+            assert_eq!(
+                count_allocations(|| {
+                    for &price in prices {
+                        for event in [
+                            Event::price(symbol, price, timestamp),
+                            Event::trade(symbol, price, 1., timestamp, None),
+                            Event::price(other, price, timestamp),
+                            Event::volume(symbol, 1., timestamp),
+                            Event::time(timestamp),
+                        ] {
+                            black_box(extractor.handle_event(event).unwrap());
+                        }
+                        timestamp += 1;
+                    }
+                }),
+                0
+            );
+        }
+        assert_eq!(extractor.feature_vector().values(), &[0.; 3]);
+    }
+}
+
+#[test]
 fn timed_indicator_updates_do_not_allocate_at_timestamp_extremes() {
     let symbol = Symbol::new("trade-volume-allocations").unwrap();
     for offset in [i64::MIN, 0, i64::MAX - 127] {

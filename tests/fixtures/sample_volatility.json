@@ -1,0 +1,147 @@
+{
+  "reference": "Literal population deviations calculated from exact rational returns and a 50-digit decimal square root; null denotes unavailable output.",
+  "spec": {
+    "version": "2.0",
+    "capacity": 7,
+    "length": 7,
+    "required_events": [
+      {
+        "symbol": "btc",
+        "event": "price"
+      },
+      {
+        "symbol": "btc",
+        "event": "trade"
+      },
+      {
+        "symbol": "eth",
+        "event": "price"
+      }
+    ],
+    "features": [
+      {
+        "symbol": "btc",
+        "indicators": [
+          {
+            "kind": "volatility",
+            "source": {
+              "type": "field",
+              "event": "price",
+              "field": "value"
+            },
+            "warmup_policy": "first_value",
+            "outputs": [
+              {
+                "window": 3
+              },
+              {
+                "window": 2
+              }
+            ]
+          },
+          {
+            "kind": "volatility",
+            "source": {
+              "type": "field",
+              "event": "price",
+              "field": "value"
+            },
+            "warmup_policy": "full_window",
+            "outputs": [
+              {
+                "window": 3
+              },
+              {
+                "window": 1
+              }
+            ]
+          },
+          {
+            "kind": "volatility",
+            "source": {
+              "type": "field",
+              "event": "trade",
+              "field": "price"
+            },
+            "warmup_policy": "full_window",
+            "outputs": [
+              {
+                "window": 2
+              },
+              {
+                "window": 1
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "symbol": "eth",
+        "indicators": [
+          {
+            "kind": "volatility",
+            "source": {
+              "type": "field",
+              "event": "price",
+              "field": "value"
+            },
+            "warmup_policy": "full_window",
+            "outputs": [
+              {
+                "window": 1
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "feature_ids": [
+    "volatility:symbol=3:btc:source=field.price:window=3:warmup=first_value",
+    "volatility:symbol=3:btc:source=field.price:window=2:warmup=first_value",
+    "volatility:symbol=3:btc:source=field.price:window=3:warmup=full_window",
+    "volatility:symbol=3:btc:source=field.price:window=1:warmup=full_window",
+    "volatility:symbol=3:btc:source=field.trade_price:window=2:warmup=full_window",
+    "volatility:symbol=3:btc:source=field.trade_price:window=1:warmup=full_window",
+    "volatility:symbol=3:eth:source=field.price:window=1:warmup=full_window"
+  ],
+  "steps": [
+    {"event": {"kind": "price", "timestamp": 0, "symbol": "btc", "price": 8}, "expected": [null, null, null, null, null, null, null]},
+    {"event": {"kind": "trade", "timestamp": 1, "symbol": "btc", "price": 100, "volume": 1}, "expected": [null, null, null, null, null, null, null]},
+    {"event": {"kind": "price", "timestamp": 2, "symbol": "eth", "price": 100}, "expected": [null, null, null, null, null, null, null]},
+    {"event": {"kind": "volume", "timestamp": 3, "symbol": "btc", "volume": 99}, "expected": [null, null, null, null, null, null, null]},
+    {"event": {"kind": "time", "timestamp": 4}, "expected": [null, null, null, null, null, null, null]},
+    {"event": {"kind": "price", "timestamp": 5, "symbol": "btc", "price": 16}, "expected": [0.0, 0.0, null, 0.0, null, null, null]},
+    {"event": {"kind": "trade", "timestamp": 6, "symbol": "btc", "price": 110, "volume": 1}, "expected": [0.0, 0.0, null, 0.0, null, 0.0, null]},
+    {"event": {"kind": "price", "timestamp": 7, "symbol": "other", "price": 999}, "expected": [0.0, 0.0, null, 0.0, null, 0.0, null]},
+    {"event": {"kind": "price", "timestamp": 8, "symbol": "btc", "price": 0}, "expected": [1.0, 1.0, null, 0.0, null, 0.0, null]},
+    {"event": {"kind": "price", "timestamp": 9, "symbol": "btc", "price": -0.0}, "expected": [1.0, 1.0, null, 0.0, null, 0.0, null]},
+    {"event": {"kind": "price", "timestamp": 10, "symbol": "btc", "price": -2}, "expected": [1.0, 1.0, null, 0.0, null, 0.0, null]},
+    {"event": {"kind": "trade", "timestamp": 11, "symbol": "btc", "price": 99, "volume": 1}, "expected": [1.0, 1.0, null, 0.0, 0.1, 0.0, null]},
+    {"event": {"kind": "price", "timestamp": 12, "symbol": "eth", "price": 50}, "expected": [1.0, 1.0, null, 0.0, 0.1, 0.0, 0.0]},
+    {"event": {"kind": "price", "timestamp": 13, "symbol": "btc", "price": -4}, "expected": [0.9428090415820634, 1.0, 0.9428090415820634, 0.0, 0.1, 0.0, 0.0]},
+    {"event": {"kind": "time", "timestamp": 14}, "expected": [0.9428090415820634, 1.0, 0.9428090415820634, 0.0, 0.1, 0.0, 0.0]},
+    {"event": {"kind": "trade", "timestamp": 15, "symbol": "btc", "price": 118.8, "volume": 1}, "expected": [0.9428090415820634, 1.0, 0.9428090415820634, 0.0, 0.15, 0.0, 0.0]},
+    {"event": {"kind": "price", "timestamp": 16, "symbol": "btc", "price": -4}, "expected": [0.816496580927726, 0.5, 0.816496580927726, 0.0, 0.15, 0.0, 0.0]},
+    {"event": {"kind": "price", "timestamp": 17, "symbol": "btc", "price": -4}, "expected": [0.4714045207910317, 0.0, 0.4714045207910317, 0.0, 0.15, 0.0, 0.0]},
+    {"event": {"kind": "price", "timestamp": 18, "symbol": "btc", "price": -4}, "expected": [0.0, 0.0, 0.0, 0.0, 0.15, 0.0, 0.0]},
+    {"event": {"kind": "trade", "timestamp": 19, "symbol": "btc", "price": 118.8, "volume": 1}, "expected": [0.0, 0.0, 0.0, 0.0, 0.1, 0.0, 0.0]},
+    {"event": {"kind": "trade", "timestamp": 20, "symbol": "btc", "price": 118.8, "volume": 1}, "expected": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]},
+    {"event": {"kind": "price", "timestamp": 21, "symbol": "eth", "price": 50}, "expected": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]},
+    {"event": {"kind": "trade", "timestamp": 22, "symbol": "eth", "price": 80, "volume": 1}, "expected": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]},
+    {"event": {"kind": "price", "timestamp": 23, "symbol": "btc", "price": 100}, "expected": [12.256517540566824, 13.0, 12.256517540566824, 0.0, 0.0, 0.0, 0.0]},
+    {"event": {"kind": "price", "timestamp": 24, "symbol": "btc", "price": 110}, "expected": [12.280155626954498, 13.05, 12.280155626954498, 0.0, 0.0, 0.0, 0.0]},
+    {"event": {"kind": "price", "timestamp": 25, "symbol": "btc", "price": 99}, "expected": [12.256789501696147, 0.1, 12.256789501696147, 0.0, 0.0, 0.0, 0.0]},
+    {"event": {"kind": "price", "timestamp": 26, "symbol": "btc", "price": 118.8}, "expected": [0.12472191289246472, 0.15, 0.12472191289246472, 0.0, 0.0, 0.0, 0.0]},
+    {"event": {"kind": "price", "timestamp": 27, "symbol": "btc", "price": 118.8}, "expected": [0.12472191289246472, 0.1, 0.12472191289246472, 0.0, 0.0, 0.0, 0.0]},
+    {"event": {"kind": "price", "timestamp": 28, "symbol": "btc", "price": 118.8}, "expected": [0.09428090415820634, 0.0, 0.09428090415820634, 0.0, 0.0, 0.0, 0.0]},
+    {"event": {"kind": "price", "timestamp": 29, "symbol": "btc", "price": 118.8}, "expected": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]},
+    {"event": {"kind": "price", "timestamp": 30, "symbol": "btc", "price": 0}, "expected": [0.4714045207910317, 0.5, 0.4714045207910317, 0.0, 0.0, 0.0, 0.0]},
+    {"event": {"kind": "price", "timestamp": 31, "symbol": "btc", "price": 2}, "expected": [0.4714045207910317, 0.5, 0.4714045207910317, 0.0, 0.0, 0.0, 0.0]},
+    {"event": {"kind": "volume", "timestamp": 32, "symbol": "btc", "volume": 99}, "expected": [0.4714045207910317, 0.5, 0.4714045207910317, 0.0, 0.0, 0.0, 0.0]},
+    {"event": {"kind": "time", "timestamp": 33}, "expected": [0.4714045207910317, 0.5, 0.4714045207910317, 0.0, 0.0, 0.0, 0.0]},
+    {"event": {"kind": "price", "timestamp": 34, "symbol": "btc", "price": 4}, "expected": [0.816496580927726, 1.0, 0.816496580927726, 0.0, 0.0, 0.0, 0.0]},
+    {"event": {"kind": "price", "timestamp": 35, "symbol": "btc", "price": 8}, "expected": [0.9428090415820634, 0.0, 0.9428090415820634, 0.0, 0.0, 0.0, 0.0]},
+    {"event": {"kind": "price", "timestamp": 36, "symbol": "btc", "price": 16}, "expected": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]}
+  ]
+}

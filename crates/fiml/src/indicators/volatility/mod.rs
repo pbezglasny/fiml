@@ -75,12 +75,26 @@ impl Moments {
 struct VolatilityWindow {
     period: usize,
     moments: Moments,
+    roundoff: f64,
 }
 
 /// Rolling population standard deviation of simple returns over sample windows.
 ///
-/// The first value establishes the return baseline. A zero previous value also
-/// establishes a new baseline because its percentage return is undefined.
+/// Each window retains its latest `period` valid one-step simple returns,
+/// `(current - previous) / previous`. Variance divides by the observed return
+/// count (population divisor); the output is not annualized.
+///
+/// The first value establishes the baseline. Either signed-zero previous value
+/// skips a return but advances that baseline, preserving existing observations
+/// and outputs. Finite negative values use ordinary arithmetic; a zero current
+/// value with a nonzero previous value contributes `-1`.
+///
+/// [`WarmupPolicy::FullWindow`] requires `period` valid returns, hence at least
+/// `period + 1` inputs. [`WarmupPolicy::FirstValue`] becomes ready at the first
+/// input but has no value until a valid return exists. One return has zero
+/// standard deviation. Readiness is monotonic; unavailable outputs are `None`
+/// from [`Self::value_at`] and NaN from [`Self::values`]. Callers select matching
+/// symbol/source inputs; all windows share one preallocated return buffer.
 pub struct RollingVolatility<R, const WINDOWS: usize>
 where
     R: RingBuffer<Item = f64>,
@@ -102,6 +116,7 @@ where
             windows: [const {
                 VolatilityWindow {
                     period: 0,
+                    roundoff: 0.0,
                     moments: Moments {
                         count: 0,
                         mean: 0.0,
@@ -148,6 +163,7 @@ where
         self.windows[self.window_count] = VolatilityWindow {
             period,
             moments: Moments::default(),
+            roundoff: 0.0,
         };
         self.window_count += 1;
         Ok(())
@@ -156,6 +172,8 @@ where
     /// Records a value and updates volatility using its simple return from the previous value.
     /// The first value, or a zero previous value, only establishes a new baseline.
     /// The caller must supply finite values.
+    /// Updates allocate nothing; numerical cancellation during eviction can
+    /// require an O(window) recalculation from the retained returns.
     pub fn update(&mut self, value: f64) {
         let Some(previous_value) = self.previous_value.replace(value) else {
             return;
@@ -173,7 +191,32 @@ where
             };
             window.moments.add_value(current_return);
             if let Some(&expired) = expired {
+                let previous_m2 = window.moments.m2;
+                let previous_mean = window.moments.mean;
+                // Keep prior rounding error until a rebuild, even after large returns expire.
+                window.roundoff += 64.0
+                    * f64::EPSILON
+                    * (previous_m2.abs() + previous_mean.abs() * previous_m2.abs().sqrt());
                 window.moments.remove_value(expired);
+                if window.moments.count == 1 {
+                    window.moments = Moments {
+                        count: 1,
+                        mean: current_return,
+                        m2: 0.0,
+                    };
+                    window.roundoff = 0.0;
+                } else if window.moments.m2 < 0.0
+                    || (window.roundoff > 0.0 && window.moments.m2 <= window.roundoff)
+                {
+                    // Rebuild after cancellation so evicted variance cannot pollute a flat window.
+                    window.moments = Moments::default();
+                    for offset in (0..window.period).rev() {
+                        window
+                            .moments
+                            .add_value(*self.data.peek_back_at(offset).unwrap());
+                    }
+                    window.roundoff = 0.0;
+                }
             }
         }
     }
@@ -585,6 +628,123 @@ mod tests {
 
     fn approx_eq(actual: f64, expected: f64) {
         assert!((actual - expected).abs() < 1e-12, "{actual} != {expected}");
+    }
+
+    fn check_sample_contract<R: RingBuffer<Item = f64>>(
+        mut volatility: RollingVolatility<R, 3>,
+        warmup: WarmupPolicy,
+    ) {
+        let windows = [3, 1, 2];
+        for window in windows {
+            volatility.add_window(window).unwrap();
+        }
+        assert!(!volatility.is_ready());
+        assert!(volatility.values().iter().all(|value| value.is_nan()));
+        assert_eq!(volatility.value_at(3), None);
+        assert!(!volatility.is_ready_at(3));
+
+        // Literal population deviations for returns 1, -1, (skip), (skip), 1, 0, 0, 0.
+        for (price, count, expected) in [
+            (8., 0, [0., 0., 0.]),
+            (16., 1, [0., 0., 0.]),
+            (0., 2, [1., 0., 1.]),
+            (-0., 2, [1., 0., 1.]),
+            (-2., 2, [1., 0., 1.]),
+            (-4., 3, [0.9428090415820634, 0., 1.]),
+            (-4., 4, [0.816496580927726, 0., 0.5]),
+            (-4., 5, [0.4714045207910317, 0., 0.]),
+            (-4., 6, [0., 0., 0.]),
+        ] {
+            volatility.update(price);
+            for (index, window) in windows.into_iter().enumerate() {
+                let ready = warmup == WarmupPolicy::FirstValue || count >= window;
+                assert_eq!(volatility.is_ready_at(index), ready);
+                let actual = volatility.value_at(index);
+                if ready && count > 0 {
+                    if expected[index] == 0. {
+                        assert_eq!(actual, Some(0.));
+                    } else {
+                        approx_eq(actual.unwrap(), expected[index]);
+                    }
+                } else {
+                    assert_eq!(actual, None);
+                }
+                assert_eq!(volatility.values()[index].is_nan(), actual.is_none());
+            }
+            assert_eq!(
+                volatility.is_ready(),
+                warmup == WarmupPolicy::FirstValue || count >= 3
+            );
+        }
+    }
+
+    #[test]
+    fn sample_windows_count_valid_returns_and_preserve_readiness() {
+        for warmup in [WarmupPolicy::FirstValue, WarmupPolicy::FullWindow] {
+            check_sample_contract(
+                RollingVolatility::<StackRingBuffer<3, f64>, 3>::new_stack(warmup),
+                warmup,
+            );
+            check_sample_contract(
+                RollingVolatility::<HeapRingBuffer<f64>, 3>::new_heap(3, warmup),
+                warmup,
+            );
+        }
+    }
+
+    fn check_sample_cancellation<R: RingBuffer<Item = f64>>(
+        mut volatility: RollingVolatility<R, 3>,
+    ) {
+        let windows = [3, 1, 2];
+        for window in windows {
+            volatility.add_window(window).unwrap();
+        }
+        for price in [100., 110., 99., 118.8, 118.8, 118.8, 118.8] {
+            volatility.update(price);
+        }
+        assert_eq!(volatility.values(), [0.; 3]);
+
+        let mut previous = 118.8;
+        let mut returns = Vec::new();
+        for index in 0..4096 {
+            // Nearly constant returns around -2 keep finite prices over many wraps.
+            let price = if index % 2 == 0 { 1. } else { -1. } * (1. + (index % 7) as f64 * 1e-8);
+            returns.push((price - previous) / previous);
+            previous = price;
+            volatility.update(price);
+            if returns.len() < 3 {
+                continue;
+            }
+            for (index, window) in windows.into_iter().enumerate() {
+                let values = &returns[returns.len() - window..];
+                let origin = values[0];
+                let mean = values.iter().map(|value| value - origin).sum::<f64>() / window as f64;
+                let expected = (values
+                    .iter()
+                    .map(|value| ((value - origin) - mean).powi(2))
+                    .sum::<f64>()
+                    / window as f64)
+                    .sqrt();
+                let actual = volatility.value_at(index).unwrap();
+                assert!((actual - expected).abs() < 1e-12, "{actual} != {expected}");
+            }
+        }
+        for index in 0..8 {
+            volatility.update(if index % 2 == 0 { 1. } else { -1. });
+        }
+        assert_eq!(volatility.values(), [0.; 3]); // Constant nonzero returns (-2).
+    }
+
+    #[test]
+    fn sample_eviction_preserves_zero_and_near_constant_variance() {
+        for warmup in [WarmupPolicy::FirstValue, WarmupPolicy::FullWindow] {
+            check_sample_cancellation(RollingVolatility::<StackRingBuffer<3, f64>, 3>::new_stack(
+                warmup,
+            ));
+            check_sample_cancellation(RollingVolatility::<HeapRingBuffer<f64>, 3>::new_heap(
+                3, warmup,
+            ));
+        }
     }
 
     #[test]
