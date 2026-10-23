@@ -1012,7 +1012,7 @@ def test_shared_fixture_matches_real_sklearn_training():
     fixture = json.loads((root / "tests/fixtures/sklearn_pipeline.json").read_text())
     assert fixture["price"] == data["price"].tolist()
     assert fixture["timestamp"] == data["timestamp"].tolist()
-    oracle = np.array(fixture["expected"], dtype=np.float64)
+    oracle = np.array(fixture["expected"][0]["values"], dtype=np.float64)
     np.testing.assert_allclose(expected, oracle, rtol=1e-10, atol=1e-12)
     restored = SingleOutput.from_json(json.dumps(fixture["pipeline"]))
     restored.symbol("BTCUSDT")

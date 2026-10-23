@@ -747,45 +747,88 @@ fn standalone_rust_replays_python_fitted_sklearn_fixture() {
         symbol: String,
         timestamp: Vec<i64>,
         price: Vec<f64>,
-        expected: Vec<Vec<Option<f64>>>,
+        volume: Vec<f64>,
+        fit_mask: Vec<bool>,
+        expected: Vec<ExpectedOutput>,
     }
 
-    let fixture: Fixture = serde_json::from_str(include_str!(
-        "../../../tests/fixtures/sklearn_pipeline.json"
-    ))
-    .unwrap();
-    let _raw = fixture.pipeline.raw_feature_extractor_spec();
-    let mut pipeline = fixture.pipeline.build().unwrap();
-    assert_eq!(fixture.timestamp.len(), fixture.price.len());
-    assert_eq!(fixture.price.len(), fixture.expected.len());
-    let symbol = Symbol::new(&fixture.symbol).unwrap();
-    for ((timestamp, price), expected) in fixture
-        .timestamp
-        .into_iter()
-        .zip(fixture.price)
-        .zip(fixture.expected)
-    {
-        pipeline
-            .handle_event(Event::trade(symbol, price, 1.0, timestamp, None))
-            .unwrap();
+    /// Ordered output layout and independently computed sklearn reference rows.
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct ExpectedOutput {
+        name: String,
+        feature_ids: Vec<String>,
+        values: Vec<Vec<Option<f64>>>,
+    }
+
+    for json in [
+        include_str!("../../../tests/fixtures/sklearn_pipeline.json"),
+        include_str!("../../../tests/fixtures/sklearn_multiple_outputs.json"),
+    ] {
+        let fixture: Fixture = serde_json::from_str(json).unwrap();
+        let mut pipeline = fixture.pipeline.build().unwrap();
+        assert_eq!(fixture.timestamp.len(), fixture.price.len());
+        assert_eq!(fixture.timestamp.len(), fixture.volume.len());
+        assert_eq!(fixture.timestamp.len(), fixture.fit_mask.len());
         assert_eq!(
-            pipeline.output("model").unwrap().values().len(),
-            expected.len()
+            pipeline.output_names().collect::<Vec<_>>(),
+            fixture
+                .expected
+                .iter()
+                .map(|output| output.name.as_str())
+                .collect::<Vec<_>>()
         );
-        for (&actual, expected) in pipeline
-            .output("model")
-            .unwrap()
-            .values()
-            .iter()
-            .zip(expected)
-        {
-            match expected {
-                Some(expected) => assert!(
-                    (actual - expected).abs() <= 1e-12 + 1e-10 * expected.abs(),
-                    "{actual} != {expected}"
-                ),
-                None => assert!(actual.is_nan()),
+        for expected in &fixture.expected {
+            let output = pipeline.output(&expected.name).unwrap();
+            assert_eq!(expected.values.len(), fixture.timestamp.len());
+            assert_eq!(
+                output
+                    .feature_ids()
+                    .iter()
+                    .map(|id| id.as_str())
+                    .collect::<Vec<_>>(),
+                expected.feature_ids
+            );
+        }
+        let symbol = Symbol::new(&fixture.symbol).unwrap();
+        for _ in 0..2 {
+            for expected in &fixture.expected {
+                assert!(
+                    pipeline
+                        .output(&expected.name)
+                        .unwrap()
+                        .values()
+                        .iter()
+                        .all(|value| value.is_nan())
+                );
             }
+            for (row, ((&timestamp, &price), &volume)) in fixture
+                .timestamp
+                .iter()
+                .zip(&fixture.price)
+                .zip(&fixture.volume)
+                .enumerate()
+            {
+                pipeline
+                    .handle_event(Event::trade(symbol, price, volume, timestamp, None))
+                    .unwrap();
+                for output in &fixture.expected {
+                    let actual = pipeline.output(&output.name).unwrap().values();
+                    assert_eq!(actual.len(), output.feature_ids.len());
+                    assert_eq!(actual.len(), output.values[row].len());
+                    for (&actual, expected) in actual.iter().zip(&output.values[row]) {
+                        match expected {
+                            Some(expected) => assert!(
+                                (actual - expected).abs() <= 1e-12 + 1e-10 * expected.abs(),
+                                "{}, row {row}: {actual} != {expected}",
+                                output.name
+                            ),
+                            None => assert!(actual.is_nan()),
+                        }
+                    }
+                }
+            }
+            pipeline.reset().unwrap();
         }
     }
 }
