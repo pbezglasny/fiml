@@ -8,7 +8,7 @@ use crate::{FimlError, InvalidArgumentError, Result};
 /// Formula used to compare the current value with a lagged sample.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ReturnKind {
-    /// Percentage change: `(current - previous) / previous`.
+    /// Fractional change: `(current - previous) / previous` (not multiplied by 100).
     Simple,
     /// Continuously compounded change: `ln(current) - ln(previous)`.
     Log,
@@ -16,9 +16,16 @@ pub enum ReturnKind {
 
 /// Streaming simple or logarithmic returns over several sample lags.
 ///
-/// One ring buffer is shared by every configured lag. An output becomes ready
-/// after `lag + 1` samples. Simple returns are unavailable for a zero lagged
-/// value; log returns are unavailable unless both values are positive.
+/// One ring buffer is shared by every configured lag. Each output becomes ready
+/// after exactly `lag + 1` calls to [`Self::update`]. Returns do not accept a
+/// [`crate::WarmupPolicy`]: the configured lag is never shortened during warm-up.
+/// Missing history yields `None` from [`Self::value_at`] and `NaN` in
+/// [`Self::values`]. Callers select which symbol/source samples to pass to `update`.
+///
+/// Simple returns are unavailable for either signed zero lagged value. Finite
+/// negative samples use ordinary arithmetic; a zero current value with a nonzero
+/// lagged value yields `-1`. These samples still advance history, and an undefined
+/// value does not undo readiness. Log returns require both values to be positive.
 pub struct SampleReturns<R, const LAGS: usize>
 where
     R: RingBuffer<Item = f64>,
@@ -171,6 +178,69 @@ mod tests {
         log.update(-1.0);
         log.update(1.0);
         assert_eq!(log.value_at(0), None);
+    }
+
+    #[test]
+    fn exact_lags_warm_up_independently_and_survive_wraparound() {
+        let mut returns: SampleReturns<StackRingBuffer<4, f64>, 2> =
+            SampleReturns::new_stack(ReturnKind::Simple);
+        returns.add_lag(3).unwrap();
+        returns.add_lag(1).unwrap();
+        assert!(!returns.is_ready());
+        assert_eq!(returns.value_at(0), None);
+        assert_eq!(returns.value_at(1), None);
+        for (index, (price, expected)) in [
+            (8., [None, None]),
+            (8., [None, Some(0.)]),
+            (16., [None, Some(1.)]),
+            (8., [Some(0.), Some(-0.5)]),
+            (4., [Some(-0.5), Some(-0.5)]),
+            (0., [Some(-1.), Some(-1.)]),
+            (2., [Some(-0.75), None]),
+            (-2., [Some(-1.5), Some(-2.)]),
+            (-4., [None, Some(1.)]),
+            (2., [Some(0.), Some(-1.5)]),
+            (4., [Some(-3.), Some(1.)]),
+            (8., [Some(-3.), Some(1.)]),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            returns.update(price);
+            assert_eq!(returns.is_ready_at(0), index >= 3);
+            assert_eq!(returns.is_ready_at(1), index >= 1);
+            assert_eq!(returns.is_ready(), index >= 3);
+            for (lag_index, expected) in expected.into_iter().enumerate() {
+                assert_eq!(returns.value_at(lag_index), expected);
+                let actual = returns.values()[lag_index];
+                assert!(expected.map_or(actual.is_nan(), |value| actual == value));
+            }
+        }
+        assert!(!returns.is_ready_at(2));
+        assert_eq!(returns.value_at(2), None);
+    }
+
+    #[test]
+    fn either_signed_zero_denominator_is_missing_without_resetting_readiness() {
+        for zero in [0., -0.] {
+            let mut returns: SampleReturns<HeapRingBuffer<f64>, 1> =
+                SampleReturns::new_heap(2, ReturnKind::Simple);
+            returns.add_lag(1).unwrap();
+            for (index, (price, expected)) in [
+                (-2., None),
+                (zero, Some(-1.)),
+                (2., None),
+                (-2., Some(-2.)),
+                (-4., Some(1.)),
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                returns.update(price);
+                assert_eq!(returns.value_at(0), expected);
+                assert_eq!(returns.is_ready(), index >= 1);
+            }
+        }
     }
 
     #[test]
