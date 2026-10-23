@@ -1,7 +1,8 @@
 # Shared multi-output replay oracle
 
-Issue #188's Rust integration test consumes these files. Issue #189 should use
-the same artifact, events, and expected results for Python parity.
+The Rust integration test `crates/fiml/tests/multiple_output_parity.rs` and Python
+test `crates/fiml-python/tests/test_multiple_output_parity.py` consume the same
+artifact, events, and expected results for issues #188 and #189.
 
 `pipeline_spec.json` is a canonical version 4.0 artifact. Node 0 extracts trade
 prices `p` from symbol `a` and `q` from symbol `b`, with two reserved cells.
@@ -23,7 +24,10 @@ Array coordinates follow that output's `feature_ids`; their count is its width.
 `raw_values` includes reserved cells, whereas named outputs never include them.
 Numeric `null` means NaN, and a timestamp `null` means no accepted event yet.
 Compare finite values with absolute tolerance `1e-12`, and check NaN positions,
-IDs, output order, observation flags, and timestamps exactly.
+IDs and output order exactly. Rust also checks observation flags and timestamps;
+Python does not expose these diagnostics. The Python test checks both output
+dtypes; all finite values here are exactly representable as float32, so the same
+absolute tolerance applies without allowing additional rounding error.
 
 These expectations are hand-derived, not recorded from pipeline execution:
 
@@ -43,7 +47,9 @@ These expectations are hand-derived, not recorded from pipeline execution:
   watermarks of `a`, `b`, and `__global__` (time events). Internal node clocks
   are tested through the timed output, without adding a public clock accessor.
 
-The Rust test also compares each transformed branch with an independent linear
-pipeline and replays the oracle after reset and serialization/reload. This fixture
-adds no new artifact format or runtime API. Context and order-book scenarios
-remain in their existing suites and the separate #189 acceptance work.
+Both tests compare each transformed branch with an independent linear pipeline
+and replay the oracle after reset and serialization/reload. Python also checks
+batch and chunked results, empty batches, and numeric prevalidation atomicity.
+This fixture adds no new artifact format or runtime API. Branching context and
+order-book scenarios remain in `test_context_features.py` and
+`test_order_book_replay.py`.
