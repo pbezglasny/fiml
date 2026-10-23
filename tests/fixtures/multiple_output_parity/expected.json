@@ -1,0 +1,217 @@
+{
+  "raw_capacity": 4,
+  "raw_feature_ids": ["p", "q"],
+  "outputs": [
+    {"name": "model_b", "feature_ids": ["mean"]},
+    {"name": "decision", "feature_ids": ["p", "q"]},
+    {"name": "shared", "feature_ids": ["mean", "q"]},
+    {"name": "model_a", "feature_ids": ["mean", "q"]},
+    {"name": "shared_alias", "feature_ids": ["mean", "q"]}
+  ],
+  "initial": {
+    "last_timestamp": null,
+    "symbol_timestamps": {"a": null, "b": null, "__global__": null},
+    "raw_values": [null, null, null, null],
+    "outputs": {
+      "model_b": {"values": [null], "observed": [false]},
+      "decision": {"values": [null, null], "observed": [false, false]},
+      "shared": {"values": [null, null], "observed": [false, false]},
+      "model_a": {"values": [null, null], "observed": [false, false]},
+      "shared_alias": {"values": [null, null], "observed": [false, false]}
+    }
+  },
+  "snapshots": [
+    {
+      "last_timestamp": 0,
+      "symbol_timestamps": {"a": 0, "b": null, "__global__": null},
+      "raw_values": [10.0, null, null, null],
+      "outputs": {
+        "model_b": {"values": [null], "observed": [true]},
+        "decision": {"values": [10.0, null], "observed": [true, false]},
+        "shared": {"values": [null, null], "observed": [true, false]},
+        "model_a": {"values": [null, null], "observed": [true, false]},
+        "shared_alias": {"values": [null, null], "observed": [true, false]}
+      }
+    },
+    {
+      "last_timestamp": 1000,
+      "symbol_timestamps": {"a": 0, "b": 1000, "__global__": null},
+      "raw_values": [10.0, 100.0, null, null],
+      "outputs": {
+        "model_b": {"values": [null], "observed": [false]},
+        "decision": {"values": [10.0, 100.0], "observed": [false, true]},
+        "shared": {"values": [null, 100.0], "observed": [false, true]},
+        "model_a": {"values": [null, 100.0], "observed": [false, true]},
+        "shared_alias": {"values": [null, 100.0], "observed": [false, true]}
+      }
+    },
+    {
+      "last_timestamp": 50,
+      "symbol_timestamps": {"a": 50, "b": 1000, "__global__": null},
+      "raw_values": [14.0, 100.0, null, null],
+      "outputs": {
+        "model_b": {"values": [null], "observed": [true]},
+        "decision": {"values": [14.0, 100.0], "observed": [true, false]},
+        "shared": {"values": [12.0, 100.0], "observed": [true, false]},
+        "model_a": {"values": [1.0, 100.0], "observed": [true, false]},
+        "shared_alias": {"values": [12.0, 100.0], "observed": [true, false]}
+      }
+    },
+    {
+      "last_timestamp": 50,
+      "symbol_timestamps": {"a": 50, "b": 1000, "__global__": null},
+      "raw_values": [18.0, 100.0, null, null],
+      "outputs": {
+        "model_b": {"values": [null], "observed": [true]},
+        "decision": {"values": [18.0, 100.0], "observed": [true, false]},
+        "shared": {"values": [16.0, 100.0], "observed": [true, false]},
+        "model_a": {"values": [3.0, 100.0], "observed": [true, false]},
+        "shared_alias": {"values": [16.0, 100.0], "observed": [true, false]}
+      }
+    },
+    {
+      "last_timestamp": 149,
+      "symbol_timestamps": {"a": 149, "b": 1000, "__global__": null},
+      "raw_values": [18.0, 100.0, null, null],
+      "outputs": {
+        "model_b": {"values": [null], "observed": [true]},
+        "decision": {"values": [18.0, 100.0], "observed": [false, false]},
+        "shared": {"values": [16.0, 100.0], "observed": [false, false]},
+        "model_a": {"values": [3.0, 100.0], "observed": [false, false]},
+        "shared_alias": {"values": [16.0, 100.0], "observed": [false, false]}
+      }
+    },
+    {
+      "last_timestamp": 150,
+      "symbol_timestamps": {"a": 150, "b": 1000, "__global__": null},
+      "raw_values": [18.0, 100.0, null, null],
+      "outputs": {
+        "model_b": {"values": [16.0], "observed": [true]},
+        "decision": {"values": [18.0, 100.0], "observed": [false, false]},
+        "shared": {"values": [16.0, 100.0], "observed": [false, false]},
+        "model_a": {"values": [3.0, 100.0], "observed": [false, false]},
+        "shared_alias": {"values": [16.0, 100.0], "observed": [false, false]}
+      }
+    },
+    {
+      "last_timestamp": 2000,
+      "symbol_timestamps": {"a": 150, "b": 1000, "__global__": 2000},
+      "raw_values": [18.0, 100.0, null, null],
+      "outputs": {
+        "model_b": {"values": [16.0], "observed": [false]},
+        "decision": {"values": [18.0, 100.0], "observed": [false, false]},
+        "shared": {"values": [16.0, 100.0], "observed": [false, false]},
+        "model_a": {"values": [3.0, 100.0], "observed": [false, false]},
+        "shared_alias": {"values": [16.0, 100.0], "observed": [false, false]}
+      }
+    },
+    {
+      "last_timestamp": 200,
+      "symbol_timestamps": {"a": 200, "b": 1000, "__global__": 2000},
+      "raw_values": [22.0, 100.0, null, null],
+      "outputs": {
+        "model_b": {"values": [16.0], "observed": [true]},
+        "decision": {"values": [22.0, 100.0], "observed": [true, false]},
+        "shared": {"values": [20.0, 100.0], "observed": [true, false]},
+        "model_a": {"values": [5.0, 100.0], "observed": [true, false]},
+        "shared_alias": {"values": [20.0, 100.0], "observed": [true, false]}
+      }
+    },
+    {
+      "last_timestamp": 1000,
+      "symbol_timestamps": {"a": 200, "b": 1000, "__global__": 2000},
+      "raw_values": [22.0, 120.0, null, null],
+      "outputs": {
+        "model_b": {"values": [16.0], "observed": [false]},
+        "decision": {"values": [22.0, 120.0], "observed": [false, true]},
+        "shared": {"values": [20.0, 120.0], "observed": [false, true]},
+        "model_a": {"values": [5.0, 120.0], "observed": [false, true]},
+        "shared_alias": {"values": [20.0, 120.0], "observed": [false, true]}
+      }
+    },
+    {
+      "last_timestamp": 250,
+      "symbol_timestamps": {"a": 250, "b": 1000, "__global__": 2000},
+      "raw_values": [26.0, 120.0, null, null],
+      "outputs": {
+        "model_b": {"values": [16.0], "observed": [true]},
+        "decision": {"values": [26.0, 120.0], "observed": [true, false]},
+        "shared": {"values": [24.0, 120.0], "observed": [true, false]},
+        "model_a": {"values": [7.0, 120.0], "observed": [true, false]},
+        "shared_alias": {"values": [24.0, 120.0], "observed": [true, false]}
+      }
+    },
+    {
+      "last_timestamp": 299,
+      "symbol_timestamps": {"a": 299, "b": 1000, "__global__": 2000},
+      "raw_values": [26.0, 120.0, null, null],
+      "outputs": {
+        "model_b": {"values": [16.0], "observed": [true]},
+        "decision": {"values": [26.0, 120.0], "observed": [false, false]},
+        "shared": {"values": [24.0, 120.0], "observed": [false, false]},
+        "model_a": {"values": [7.0, 120.0], "observed": [false, false]},
+        "shared_alias": {"values": [24.0, 120.0], "observed": [false, false]}
+      }
+    },
+    {
+      "last_timestamp": 300,
+      "symbol_timestamps": {"a": 300, "b": 1000, "__global__": 2000},
+      "raw_values": [26.0, 120.0, null, null],
+      "outputs": {
+        "model_b": {"values": [20.0], "observed": [true]},
+        "decision": {"values": [26.0, 120.0], "observed": [false, false]},
+        "shared": {"values": [24.0, 120.0], "observed": [false, false]},
+        "model_a": {"values": [7.0, 120.0], "observed": [false, false]},
+        "shared_alias": {"values": [24.0, 120.0], "observed": [false, false]}
+      }
+    },
+    {
+      "last_timestamp": 1100,
+      "symbol_timestamps": {"a": 300, "b": 1100, "__global__": 2000},
+      "raw_values": [26.0, 140.0, null, null],
+      "outputs": {
+        "model_b": {"values": [20.0], "observed": [false]},
+        "decision": {"values": [26.0, 140.0], "observed": [false, true]},
+        "shared": {"values": [24.0, 140.0], "observed": [false, true]},
+        "model_a": {"values": [7.0, 140.0], "observed": [false, true]},
+        "shared_alias": {"values": [24.0, 140.0], "observed": [false, true]}
+      }
+    },
+    {
+      "last_timestamp": 3000,
+      "symbol_timestamps": {"a": 300, "b": 1100, "__global__": 3000},
+      "raw_values": [26.0, 140.0, null, null],
+      "outputs": {
+        "model_b": {"values": [20.0], "observed": [false]},
+        "decision": {"values": [26.0, 140.0], "observed": [false, false]},
+        "shared": {"values": [24.0, 140.0], "observed": [false, false]},
+        "model_a": {"values": [7.0, 140.0], "observed": [false, false]},
+        "shared_alias": {"values": [24.0, 140.0], "observed": [false, false]}
+      }
+    },
+    {
+      "last_timestamp": 400,
+      "symbol_timestamps": {"a": 400, "b": 1100, "__global__": 3000},
+      "raw_values": [30.0, 140.0, null, null],
+      "outputs": {
+        "model_b": {"values": [24.0], "observed": [true]},
+        "decision": {"values": [30.0, 140.0], "observed": [true, false]},
+        "shared": {"values": [28.0, 140.0], "observed": [true, false]},
+        "model_a": {"values": [9.0, 140.0], "observed": [true, false]},
+        "shared_alias": {"values": [28.0, 140.0], "observed": [true, false]}
+      }
+    },
+    {
+      "last_timestamp": 500,
+      "symbol_timestamps": {"a": 500, "b": 1100, "__global__": 3000},
+      "raw_values": [30.0, 140.0, null, null],
+      "outputs": {
+        "model_b": {"values": [28.0], "observed": [true]},
+        "decision": {"values": [30.0, 140.0], "observed": [false, false]},
+        "shared": {"values": [28.0, 140.0], "observed": [false, false]},
+        "model_a": {"values": [9.0, 140.0], "observed": [false, false]},
+        "shared_alias": {"values": [28.0, 140.0], "observed": [false, false]}
+      }
+    }
+  ]
+}

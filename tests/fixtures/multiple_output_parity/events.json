@@ -1,0 +1,18 @@
+[
+  {"kind": "trade", "symbol": "a", "timestamp": 0, "price": 10.0, "volume": 1.0},
+  {"kind": "trade", "symbol": "b", "timestamp": 1000, "price": 100.0, "volume": 1.0},
+  {"kind": "trade", "symbol": "a", "timestamp": 50, "price": 14.0, "volume": 1.0},
+  {"kind": "trade", "symbol": "a", "timestamp": 50, "price": 18.0, "volume": 1.0},
+  {"kind": "volume", "symbol": "a", "timestamp": 149, "volume": 1.0},
+  {"kind": "volume", "symbol": "a", "timestamp": 150, "volume": 1.0},
+  {"kind": "time", "timestamp": 2000},
+  {"kind": "trade", "symbol": "a", "timestamp": 200, "price": 22.0, "volume": 1.0},
+  {"kind": "trade", "symbol": "b", "timestamp": 1000, "price": 120.0, "volume": 1.0},
+  {"kind": "trade", "symbol": "a", "timestamp": 250, "price": 26.0, "volume": 1.0},
+  {"kind": "volume", "symbol": "a", "timestamp": 299, "volume": 1.0},
+  {"kind": "volume", "symbol": "a", "timestamp": 300, "volume": 1.0},
+  {"kind": "trade", "symbol": "b", "timestamp": 1100, "price": 140.0, "volume": 1.0},
+  {"kind": "time", "timestamp": 3000},
+  {"kind": "trade", "symbol": "a", "timestamp": 400, "price": 30.0, "volume": 1.0},
+  {"kind": "volume", "symbol": "a", "timestamp": 500, "volume": 1.0}
+]
