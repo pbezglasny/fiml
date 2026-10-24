@@ -1,6 +1,8 @@
 Fiml
 ======
 
+[Русская документация](docs/ru/README.md)
+
 Description
 ---------
 

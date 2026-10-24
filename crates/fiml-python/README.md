@@ -1,5 +1,7 @@
 # fiml (Python bindings)
 
+[Русская документация](../../docs/ru/crates/fiml-python/README.md)
+
 Python bindings for the `fiml` indicator engine. They run the **exact** Rust
 feature extractor — features are produced by replaying events through the same
 dispatch path the live Rust environment uses — so feature generation on
