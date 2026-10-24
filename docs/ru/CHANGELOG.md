@@ -16,7 +16,7 @@
 
 <a id="030--unreleased"></a>
 
-## 0.3.0 — ещё не выпущено
+## 0.3.0 — 2026-10-24
 
 <a id="breaking-changes-and-migration"></a>
 
