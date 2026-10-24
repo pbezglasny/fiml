@@ -464,9 +464,23 @@ fn timed_indicator_updates_do_not_allocate_at_timestamp_extremes() {
                 window: Duration::from_millis(4),
                 warmup_policy: WarmupPolicy::FirstValue,
             }),
+            FeatureDefinition::with_default_id(FeatureKey::VolatilityTimed {
+                symbol,
+                source: fiml::EventField::TradePrice,
+                aggregation: Duration::from_millis(1),
+                window: Duration::from_millis(4),
+                warmup_policy: WarmupPolicy::FirstValue,
+            }),
+            FeatureDefinition::with_default_id(FeatureKey::VolatilityTimed {
+                symbol,
+                source: fiml::EventField::TradePrice,
+                aggregation: Duration::from_millis(1000),
+                window: Duration::from_millis(2000),
+                warmup_policy: WarmupPolicy::FirstValue,
+            }),
         ])
         .unwrap()
-        .build(ArrayFeatureVector::<7>::new())
+        .build(ArrayFeatureVector::<9>::new())
         .unwrap();
 
         assert_eq!(
@@ -489,7 +503,23 @@ fn timed_indicator_updates_do_not_allocate_at_timestamp_extremes() {
         );
         assert_eq!(
             extractor.feature_vector().values(),
-            &[0.0, 100.0, 4.0, 506.0, 996.0, 100.0, 100.0]
+            &[0.0, 100.0, 4.0, 0.0, 0.0, 506.0, 996.0, 100.0, 100.0]
+        );
+        assert_eq!(
+            count_allocations(|| {
+                black_box(
+                    extractor
+                        .handle_event(Event::volume(symbol, 1., i64::MAX))
+                        .unwrap(),
+                );
+            }),
+            0
+        );
+        assert_eq!(
+            extractor.feature_vector().values()[3..5]
+                .iter()
+                .all(|value| value.is_nan()),
+            offset != i64::MAX - 127
         );
     }
 }
