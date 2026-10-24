@@ -3,9 +3,9 @@ mod common;
 use std::time::Duration;
 
 use fiml::indicators::{
-    CountBucket, ObvBucket, OnBalanceVolumeTimed, RollingTradeVolumeTimed,
-    SimpleMovingAverageTimed, TradeCountTimed, TradeVolumeBucket, VolumeWeightedAveragePriceTimed,
-    VwapBucket,
+    CountBucket, ObvBucket, OnBalanceVolumeTimed, RollingTradeVolumeTimed, RollingVolatilityTimed,
+    SimpleMovingAverageTimed, TradeCountTimed, TradeVolumeBucket, VolatilityBucket,
+    VolumeWeightedAveragePriceTimed, VwapBucket,
 };
 use fiml::{
     ArrayFeatureVector, Event, EventField, FeatureDefinition, FeatureExtractorSpec, FeatureKey,
@@ -16,7 +16,7 @@ fn assert_values(actual: &[f64], expected: &[f64]) {
     assert_eq!(actual.len(), expected.len());
     for (actual, expected) in actual.iter().zip(expected) {
         assert!(
-            actual == expected || (actual.is_nan() && expected.is_nan()),
+            (actual - expected).abs() < 1e-12 || (actual.is_nan() && expected.is_nan()),
             "{actual:?} != {expected:?}"
         );
     }
@@ -67,10 +67,17 @@ fn timestamp_boundaries_match_in_standalone_extractor_and_pipeline() -> fiml::Re
                         window,
                         warmup_policy,
                     },
+                    FeatureKey::VolatilityTimed {
+                        symbol,
+                        source: EventField::TradePrice,
+                        aggregation,
+                        window,
+                        warmup_policy,
+                    },
                 ]
                 .map(FeatureDefinition::with_default_id),
             )?;
-            let mut extractor = raw.build(ArrayFeatureVector::<5>::new())?;
+            let mut extractor = raw.build(ArrayFeatureVector::<6>::new())?;
             let transformations = raw
                 .definitions()
                 .iter()
@@ -79,6 +86,19 @@ fn timestamp_boundaries_match_in_standalone_extractor_and_pipeline() -> fiml::Re
                 })
                 .collect::<Vec<_>>();
             let mut pipeline = common::linear_spec(raw, transformations, [], None)?.build()?;
+            assert_eq!(extractor.feature_ids(), pipeline.raw_feature_ids());
+            assert_eq!(
+                extractor.feature_ids(),
+                pipeline.output("model").unwrap().feature_ids()
+            );
+            let expected_id = fixture["volatility_id"].as_str().unwrap().replace(
+                "{warmup}",
+                match warmup_policy {
+                    WarmupPolicy::FirstValue => "first_value",
+                    WarmupPolicy::FullWindow => "full_window",
+                },
+            );
+            assert_eq!(extractor.feature_ids()[3].as_str(), expected_id);
             let mut sma = SimpleMovingAverageTimed::<StackRingBuffer<3, (i64, f64)>, 1>::new_stack(
                 aggregation,
                 warmup_policy,
@@ -108,7 +128,24 @@ fn timestamp_boundaries_match_in_standalone_extractor_and_pipeline() -> fiml::Re
             obv.add_window_with_periods(periods)?;
             volume.add_window_with_periods(periods)?;
             vwap.add_window_with_periods(periods)?;
+            let mut volatility_stack = RollingVolatilityTimed::<
+                StackRingBuffer<3, VolatilityBucket>,
+                1,
+            >::new_stack(aggregation, warmup_policy)?;
+            let mut volatility_heap =
+                RollingVolatilityTimed::<HeapRingBuffer<VolatilityBucket>, 1>::new_heap(
+                    aggregation,
+                    3,
+                    warmup_policy,
+                )?;
+            volatility_stack.add_window_with_periods(periods)?;
+            volatility_heap.add_window_with_duration(window)?;
+            assert!(!volatility_stack.is_ready());
+            assert!(!volatility_heap.is_ready());
+            assert_values(&volatility_stack.values(), &[f64::NAN]);
+            assert_values(&volatility_heap.values(), &[f64::NAN]);
 
+            let first_timestamp = fixture["steps"][0]["timestamp"].as_i64().unwrap();
             for step in fixture["steps"].as_array().unwrap() {
                 let timestamp = step["timestamp"].as_i64().unwrap();
                 if let Some(price) = step["price"].as_f64() {
@@ -118,12 +155,16 @@ fn timestamp_boundaries_match_in_standalone_extractor_and_pipeline() -> fiml::Re
                     count.update(timestamp);
                     volume.update(size, timestamp);
                     vwap.update(price, size, timestamp);
+                    volatility_stack.update(price, timestamp);
+                    volatility_heap.update(price, timestamp);
                 } else {
                     sma.observe(timestamp);
                     obv.observe(timestamp);
                     count.observe(timestamp);
                     volume.observe(timestamp);
                     vwap.observe(timestamp);
+                    volatility_stack.observe(timestamp);
+                    volatility_heap.observe(timestamp);
                 }
                 let event = || {
                     if let Some(price) = step["price"].as_f64() {
@@ -141,7 +182,8 @@ fn timestamp_boundaries_match_in_standalone_extractor_and_pipeline() -> fiml::Re
                 extractor.handle_event(event())?;
                 pipeline.handle_event(event())?;
                 let warming = warmup_policy == WarmupPolicy::FullWindow
-                    && i128::from(timestamp) - i128::from(i64::MIN) < window.as_millis() as i128;
+                    && i128::from(timestamp) - i128::from(first_timestamp)
+                        < window.as_millis() as i128;
                 let expected: Vec<_> = step["expected"]
                     .as_array()
                     .unwrap()
@@ -159,11 +201,18 @@ fn timestamp_boundaries_match_in_standalone_extractor_and_pipeline() -> fiml::Re
                         obv.window_value(0).unwrap_or(f64::NAN),
                         sma.value_at(0).unwrap_or(f64::NAN),
                         count.window_value().unwrap_or(f64::NAN),
+                        volatility_stack.value_at(0).unwrap_or(f64::NAN),
                         volume.window_value(0).unwrap_or(f64::NAN),
                         vwap.window_value(0).unwrap_or(f64::NAN),
                     ],
                     &expected,
                 );
+                assert_values(&volatility_stack.values(), &expected[3..4]);
+                assert_values(&volatility_heap.values(), &expected[3..4]);
+                assert_eq!(volatility_stack.is_ready_at(0), !warming);
+                assert_eq!(volatility_heap.is_ready_at(0), !warming);
+                assert!(!volatility_stack.observe(timestamp));
+                assert!(!volatility_heap.observe(timestamp));
                 assert_values(extractor.feature_vector().values(), &expected);
                 assert_values(pipeline.raw_values(), &expected);
                 assert_values(pipeline.output("model").unwrap().values(), &expected);

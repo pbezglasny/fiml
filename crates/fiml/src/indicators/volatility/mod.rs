@@ -286,7 +286,7 @@ impl<const WINDOWS: usize> RollingVolatility<HeapRingBuffer<f64>, WINDOWS> {
 /// One fixed-duration bucket of simple-return moments.
 #[derive(Clone, Copy)]
 pub struct VolatilityBucket {
-    timestamp: i64,
+    index: i64,
     moments: Moments,
 }
 
@@ -301,6 +301,8 @@ struct TimedVolatilityWindow {
 ///
 /// Returns within an aggregation bucket are represented by their exact count,
 /// mean and central moment, so updates require fixed memory and no allocation.
+/// Buckets align to multiples of the aggregation interval from epoch zero,
+/// including when a bucket boundary falls outside `i64` milliseconds.
 pub struct RollingVolatilityTimed<R, const WINDOWS: usize>
 where
     R: RingBuffer<Item = VolatilityBucket>,
@@ -449,10 +451,6 @@ where
         self.add_window_with_periods(periods)
     }
 
-    fn bucket_start(&self, timestamp: i64) -> i64 {
-        timestamp - timestamp.rem_euclid(self.aggregation_millis)
-    }
-
     fn update_readiness(&mut self, now: i64) {
         for window in &mut self.windows[..self.window_count] {
             if !window.ready {
@@ -482,7 +480,8 @@ where
                     .data
                     .peek_front_at(self.data.len() - window.bucket_count)
                     .unwrap();
-                if bucket.timestamp + window.duration > now {
+                let start = i128::from(bucket.index) * i128::from(self.aggregation_millis);
+                if start + i128::from(window.duration) > i128::from(now) {
                     break;
                 }
                 window.moments.remove(bucket.moments);
@@ -512,19 +511,20 @@ where
         }
 
         let current_return = (value - previous_value) / previous_value;
-        let bucket_start = self.bucket_start(timestamp);
+        let bucket_index = timestamp.div_euclid(self.aggregation_millis);
         if self
             .data
             .peek_back()
-            .is_some_and(|bucket| bucket.timestamp == bucket_start)
+            .is_some_and(|bucket| bucket.index == bucket_index)
         {
             let mut bucket = self.data.pop_back().unwrap();
             bucket.moments.add_value(current_return);
             self.data.push_back(bucket);
+            let start = i128::from(bucket_index) * i128::from(self.aggregation_millis);
             for window in &mut self.windows[..self.window_count] {
                 if window.bucket_count > 0 {
                     window.moments.add_value(current_return);
-                } else if bucket_start + window.duration > timestamp {
+                } else if start + i128::from(window.duration) > i128::from(timestamp) {
                     window.moments.add_value(current_return);
                     window.bucket_count = 1;
                 }
@@ -536,7 +536,7 @@ where
         moments.add_value(current_return);
         let len_before = self.data.len();
         let evicted = self.data.push_back(VolatilityBucket {
-            timestamp: bucket_start,
+            index: bucket_index,
             moments,
         });
         for window in &mut self.windows[..self.window_count] {

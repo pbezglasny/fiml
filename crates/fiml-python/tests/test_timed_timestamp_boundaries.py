@@ -23,12 +23,22 @@ def build_runtime(fixture, warmup, pipeline):
     raw.trade_count_timed("BTC", aggregation=aggregation, window=window, warmup=warmup)
     raw.trade_volume_timed("BTC", aggregation=aggregation, windows=[window], warmup=warmup)
     raw.vwap_timed("BTC", aggregation=aggregation, windows=[window], warmup=warmup)
+    raw.volatility_timed("BTC", aggregation=aggregation, windows=[window],
+                        source="trade_price", warmup=warmup)
+    feature_ids = raw.feature_ids()
+    warmup_name = "first_value" if warmup == fiml.WarmupPolicy.FIRST_VALUE else "full_window"
+    assert feature_ids[3] == fixture["volatility_id"].format(warmup=warmup_name)
     if not pipeline:
-        return fiml.FeatureExtractor(raw)
+        runtime = fiml.FeatureExtractor(raw)
+        assert runtime.feature_names() == feature_ids
+        return runtime
     model = LinearSpec(raw)
     for feature_id in raw.feature_ids():
         model.identity(feature_id)
-    return SingleOutput(model)
+    runtime = SingleOutput(model)
+    assert runtime.feature_names() == feature_ids
+    assert runtime.raw_feature_names() == feature_ids
+    return runtime
 
 
 @pytest.mark.parametrize("fixture", FIXTURES)
