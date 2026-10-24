@@ -41,9 +41,10 @@
 
 ## Выпуски
 
-- [Список проверок выпуска 0.2.0](release-check-list.md)
+- [Список проверок выпуска 0.3.0](release-check-list.md)
 - [Fiml 0.1.0](releases/v0.1.0.md)
 - [Fiml 0.2.0](releases/v0.2.0.md)
+- [Fiml 0.3.0](releases/v0.3.0.md)
 
 ## Разработка и исторические обзоры
 

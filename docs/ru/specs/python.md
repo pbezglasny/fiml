@@ -122,7 +122,7 @@ columns   = extractor.feature_names()
 | Цена | `KIND_PRICE` | `price` |
 | Объём | `KIND_VOLUME` | `volume` |
 | Сделка | `KIND_TRADE` | `price`, `volume` |
-| Стакан | `KIND_ORDERBOOK` | `bid`, `ask` |
+| Стакан | `KIND_ORDERBOOK` | отклоняется; используйте `OrderBookEvent` |
 | Время | `KIND_TIME` | — |
 
 Правила:
@@ -131,8 +131,9 @@ columns   = extractor.feature_names()
 - Переданный столбец имеет длину `kind`.
 - Обработка **по порядку массива**; это часть контракта.
 - Выход — **строка на событие** (см. [§7](#7-output-and-alignment)).
-- `KIND_ORDERBOOK` обрабатывается, но встроенных подписчиков пока нет, поэтому
-  сам по себе выход не меняет.
+- Скалярный `KIND_ORDERBOOK` вызывает ошибку миграции. Аргументы `bid` и `ask`
+  удалены из `update`, `transform` и `fit` / `fit_transform` конвейера,
+  даже если передано `None`.
 
 <a id="5b-update--single-event-livestreaming"></a>
 
@@ -144,6 +145,32 @@ columns   = extractor.feature_names()
 extractor.update(fiml.KIND_PRICE, btc, ts_ms, price=last_close)
 row = extractor.values()          # current feature vector, in feature_names() order
 ```
+
+<a id="5c-order-book-events"></a>
+
+### 5c. События стакана
+
+Настройте стакан и подпишитесь на его признаки перед созданием экстрактора.
+Цены и размеры задавайте десятичными строками; время — Unix в миллисекундах.
+
+```python
+raw = (fiml.FeatureExtractorSpec()
+       .configure_order_book("BTCUSDT", update_policy="contiguous", buffer_size=8)
+       .order_book_mid_price("BTCUSDT"))
+book = fiml.FeatureExtractor(raw)
+book.update_order_book(fiml.OrderBookEvent.snapshot(
+    "BTCUSDT", 1, 1, [("98", "2")], [("102", "2")]))
+rows = book.transform_order_book([
+    fiml.OrderBookEvent.delta("BTCUSDT", 2, 2, [("bid", "99", "3")]),
+])
+```
+
+`update_order_book(event)` применяет один снимок или дельту;
+`transform_order_book(events)` возвращает строку на принятое событие. Оба метода
+есть у экстракторов и конвейеров. Экстрактор возвращает матрицу, конвейер —
+словарь матриц в порядке регистрации выходов. Обработка последовательности,
+проверки и восстановление синхронизации описаны в
+[руководстве стакана](../crates/fiml-python/README.md#order-book-configuration-and-replay).
 
 <a id="6-compute_features--trade-dataframe-in-snapshots-out-"></a>
 
@@ -184,6 +211,14 @@ feats = extractor.compute_features(
   индексом и копиями символа/времени перед признаками. ✅
 - Порядок столбцов задаёт спецификация; `feature_names()` — имена,
   `n_features()` — число. ✅
+
+Эти матрицы и DataFrame относятся к `FeatureExtractor`.
+`ModelInputPipeline` использует `PipelineSpec.root/add/output/build` и именованные
+выходы: `transform`, `fit_transform`, `transform_order_book` возвращают словари
+матриц, а `compute_features` — словарь DataFrame в порядке регистрации выходов,
+даже если выход один. Текущие значения доступны через
+`pipeline.output(name).values()`, имена — через `pipeline.output_names()`.
+См. [API графа](../multiple_output.md).
 
 <a id="8-determinism-rules-must-hold-for-parity"></a>
 
