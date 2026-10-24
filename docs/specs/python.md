@@ -116,7 +116,7 @@ Per-kind payload columns:
 | price       | `KIND_PRICE`     | `price`            |
 | volume      | `KIND_VOLUME`    | `volume`           |
 | trade       | `KIND_TRADE`     | `price`, `volume`  |
-| order book  | `KIND_ORDERBOOK` | `bid`, `ask`       |
+| order book  | `KIND_ORDERBOOK` | rejected; use `OrderBookEvent` |
 | time        | `KIND_TIME`      | —                  |
 
 Rules:
@@ -124,8 +124,9 @@ Rules:
 - Any column you do pass must match the length of `kind`.
 - Rows are dispatched **in array order**; order is part of the contract.
 - Output is **one row per event** (see [§7](#7-output-and-alignment)).
-- `KIND_ORDERBOOK` dispatches today but no builtin feature subscribes to it yet,
-  so it does not change output on its own.
+- Scalar `KIND_ORDERBOOK` raises a migration error. `bid` and `ask` keywords
+  are removed from `update`, `transform`, and pipeline `fit` / `fit_transform`,
+  even when set to `None`.
 
 ### 5b. `update` — single event (live/streaming)
 
@@ -136,6 +137,30 @@ against `transform`.
 extractor.update(fiml.KIND_PRICE, btc, ts_ms, price=last_close)
 row = extractor.values()          # current feature vector, in feature_names() order
 ```
+
+### 5c. Order-book events
+
+Configure a book and subscribe to its features before building the extractor.
+Use decimal strings for prices and sizes; timestamps are Unix milliseconds.
+
+```python
+raw = (fiml.FeatureExtractorSpec()
+       .configure_order_book("BTCUSDT", update_policy="contiguous", buffer_size=8)
+       .order_book_mid_price("BTCUSDT"))
+book = fiml.FeatureExtractor(raw)
+book.update_order_book(fiml.OrderBookEvent.snapshot(
+    "BTCUSDT", 1, 1, [("98", "2")], [("102", "2")]))
+rows = book.transform_order_book([
+    fiml.OrderBookEvent.delta("BTCUSDT", 2, 2, [("bid", "99", "3")]),
+])
+```
+
+`update_order_book(event)` applies one snapshot or delta;
+`transform_order_book(events)` returns one row per accepted event. Both are
+available on extractors and pipelines. Extractors return a matrix; pipelines
+return a dictionary of matrices in output-registration order. See the
+[order-book guide](../../crates/fiml-python/README.md#order-book-configuration-and-replay)
+for sequence handling, validation, and resynchronization.
 
 ## 6. `compute_features` — Trade DataFrame in, snapshots out ✅
 
@@ -175,6 +200,14 @@ all-or-nothing. See the dated contract linked above for the complete rules.
   index, with copied symbol/timestamp metadata before the features. ✅
 - Column order is the feature-vector spec order; `extractor.feature_names()` gives the
   names, `extractor.n_features()` the count. ✅
+
+These matrix and DataFrame return types describe `FeatureExtractor`.
+`ModelInputPipeline` uses `PipelineSpec.root/add/output/build` and named outputs:
+`transform`, `fit_transform`, and `transform_order_book` return dictionaries of
+matrices, and `compute_features` returns a dictionary of DataFrames, in
+output-registration order, even with one output. Inspect live values with
+`pipeline.output(name).values()` and names with `pipeline.output_names()`.
+See the [graph API](../multiple_output.md).
 
 ## 8. Determinism rules (must hold for parity)
 

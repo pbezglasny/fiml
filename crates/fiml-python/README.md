@@ -16,7 +16,7 @@ train/serve skew.
 
 ## Install from PyPI
 
-Requires **CPython 3.12 or newer**. This guide targets **0.2.0**; until that
+Requires **CPython 3.12 or newer**. This guide targets **0.3.0**; until that
 version is published to PyPI, use [source installation](#install-from-source).
 
 ```bash
@@ -27,11 +27,11 @@ Activate it with `source .venv/bin/activate` on Linux or macOS, or
 `.\.venv\Scripts\Activate.ps1` in Windows PowerShell, then install:
 
 ```bash
-python -m pip install "fiml[pandas]>=0.2.0,<0.3"
+python -m pip install "fiml[pandas]>=0.3.0,<0.4"
 ```
 
 Omit `[pandas]` for the NumPy-only API. To also fit supported scikit-learn
-transformations, install `"fiml[pandas,sklearn]>=0.2.0,<0.3"` instead.
+transformations, install `"fiml[pandas,sklearn]>=0.3.0,<0.4"` instead.
 Installing a compatible wheel requires no Rust toolchain; building from
 source requires the tools listed below.
 
@@ -92,7 +92,7 @@ ways to get there:
 
 ```bash
 source .venv/bin/activate
-python -m pip install "fiml[pandas]>=0.2.0,<0.3" jupyterlab
+python -m pip install "fiml[pandas]>=0.3.0,<0.4" jupyterlab
 jupyter lab
 ```
 
@@ -100,7 +100,7 @@ jupyter lab
 
 ```bash
 source .venv/bin/activate
-python -m pip install "fiml[pandas]>=0.2.0,<0.3" ipykernel
+python -m pip install "fiml[pandas]>=0.3.0,<0.4" ipykernel
 python -m ipykernel install --user --name fiml --display-name "Python (fiml)"
 ```
 
@@ -108,7 +108,7 @@ then pick the *Python (fiml)* kernel in the notebook UI. Alternatively, install
 directly from a notebook cell into whatever kernel is running:
 
 ```python
-%pip install "fiml[pandas]>=0.2.0,<0.3"
+%pip install "fiml[pandas]>=0.3.0,<0.4"
 ```
 
 > **Note:** `fiml` is a compiled extension module. After rebuilding the Rust
@@ -456,7 +456,9 @@ predictors on the matrix returned by FIML to use the same arithmetic at inferenc
 
 For raw event arrays (mixed streams, custom sources), `transform` replays a
 full stream and returns one feature row **per event**; `update` steps a single
-event; `values()` reads the current vector.
+event. Read extractor values with `extractor.values()` or named pipeline values
+with `pipeline.output(name).values()`. Pipeline batch replay returns a dictionary
+of matrices in output-registration order, even with one output.
 
 ```python
 import numpy as np
@@ -490,7 +492,7 @@ are dispatched in array order. `update(...)` takes the same keyword payloads as
 scalars. The obsolete `KIND_ORDERBOOK` placeholder raises a migration error;
 use `OrderBookEvent` for real snapshots and deltas.
 
-Timed SMA, OBV, trade count, trade volume, and VWAP accept the full signed-int64
+Timed SMA, OBV, trade count, trade volume, VWAP, and volatility accept the full signed-int64
 timestamp range in both extractors and pipelines, for streaming and batch calls.
 Buckets align down to multiples of aggregation, including negative timestamps,
 and expire when `bucket_start + window <= timestamp`. Bucket starts and expiry
@@ -564,14 +566,16 @@ names, independent of numeric `symbol()` handles. Timestamps are signed int64
 milliseconds and update IDs are unsigned uint64.
 
 Both runtimes expose `update_order_book(event)` and
-`transform_order_book(events)`. The batch method returns one raw or model row
-per accepted event, using the configured output dtype. Constructors validate
+`transform_order_book(events)`. Extractors return a matrix; pipelines return a
+dictionary of matrices in output-registration order, even with one output. Each
+matrix contains one row per accepted event, using the configured output dtype. Constructors validate
 payloads; batch processing validates all configured symbols and timestamp order
 before any event applies. These errors leave the entire batch unapplied.
 Sequence gaps, stale snapshots, and history-capacity errors depend on book state:
 the batch stops with `row N:` context, keeps earlier accepted rows, and performs
 the rejected row's core synchronization transition. Later rows do not apply.
-Inspect `values()` (and pipeline `raw_values()`) and send a snapshot to
+Inspect `extractor.values()` or `pipeline.output(name).values()` (and pipeline
+`raw_values()`) and send a snapshot to
 resynchronize; do not blindly replay the accepted prefix. Rejected rows preserve
 raw/model outputs and the timestamp watermark. Buffered and stale delta events
 leave book outputs unchanged; accepted events still advance pipeline lag history.

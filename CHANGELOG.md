@@ -9,10 +9,23 @@ serialized configuration will be documented here with migration guidance.
 JSON format versions are independent of package versions; consumers must use
 a release that supports the format they load.
 
-## Unreleased
+## 0.3.0 — Unreleased
 
 ### Breaking changes and migration
 
+- Pipelines now use an append-only graph: construct `PipelineSpec` from the
+  extractor, connect stages with `root()` / `add(parent, stage)`, register named
+  outputs with `output(name, node)`, and `build()`. Replace pipeline-level
+  value/layout access with `pipeline.output(name)`; there is no implicit output.
+  Python batch methods return dictionaries in output-registration order,
+  including the single-output case; `compute_features` returns a dictionary of
+  DataFrames. Rust exposes borrowed `PipelineOutput` views and reusable `OutputId`
+  handles. See the [0.3.0 migration examples](docs/releases/v0.3.0.md#migration-from-020).
+- Pipeline JSON changes from `3.0` to `4.0`, with ordered `nodes` and `outputs`.
+  Recreate and re-export old configurations and fitted artifacts; changing only
+  the version string is insufficient. Nested extractor JSON remains `2.0`.
+  These format versions are independent of package version `0.3.0`. JSON stores
+  configuration and fitted parameters, not live history or context values.
 - Rust `FeatureKey::{Cvd, ObvTimed, Vpt, TradeCountTimed, TradeVolumeTimed,
   VwapTimed}` no longer take a `source`; they always consume trades.
   `FeatureKey::{Return, Volatility, SmaTimed, VolatilityTimed}` now take an
@@ -34,6 +47,20 @@ a release that supports the format they load.
   JSON formats, and numerical behavior are unchanged. See the
   [Rust migration example](docs/pipeline.md#scalar-definition-migration-rust).
 
+### Added
+
+- Shared pipeline stages with multiple named outputs and independently fitted
+  sklearn branches, using one training mask and cold replay. Shared nodes execute
+  once per accepted event within each replay; Rust output reads borrow buffers.
+- Scalar delta, simple/log return, and elapsed-time lag/change transformations;
+  rolling sample/timed std, min, max, and range; rolling trajectory measurements;
+  experimental time-augmented path signatures; streak and state-age transforms.
+- Order-book bid/ask added/removed volume features for directly applied deltas.
+- Completed sample-return and rolling return-volatility behavior and acceptance
+  coverage across standalone Rust, extractors, pipelines, and Python.
+- A fitted multiple-output example and shared Python/Rust replay fixtures.
+- Russian documentation and `just` build/test recipes.
+
 ### Fixed
 
 - Share checked UTC-offset parsing between JSON loading and Python builders.
@@ -41,6 +68,15 @@ a release that supports the format they load.
   errors instead of accepting incorrect offsets or panicking. Empty offsets
   are rejected; use `"UTC"` or `"+00:00"` for zero. Valid spellings and canonical
   JSON are unchanged.
+- Timed SMA, OBV, trade count, trade volume, VWAP, and rolling volatility avoid
+  timestamp overflow at signed-int64 boundaries. Bucket alignment and expiry
+  use widened arithmetic without restricting accepted timestamps.
+
+### Support
+
+- Rust 1.89+, CPython 3.12+, and the five existing wheel targets are unchanged.
+- Replay warm-up events and reapply context after loading an artifact. See the
+  [release checklist](docs/release-check-list.md) for validation evidence.
 
 ## 0.2.0 — 2026-10-02
 

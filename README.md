@@ -121,7 +121,7 @@ within each instrument and chronological dataset split.
 Installation
 --------
 
-These examples target **0.2.0**. Until that version is published to crates.io
+These examples target **0.3.0**. Until that version is published to crates.io
 and PyPI, install from source using the instructions below.
 
 ### Rust
@@ -130,7 +130,7 @@ Requires Rust **1.89 or newer** and a native linker for your platform.
 From your application's directory, add Fiml from crates.io:
 
 ```bash
-cargo add fiml@0.2.0 --features serde
+cargo add fiml@0.3.0 --features serde
 cargo add serde_json --features float_roundtrip
 ```
 
@@ -158,7 +158,7 @@ Activate it with `source .venv/bin/activate` on Linux or macOS, or
 `.\.venv\Scripts\Activate.ps1` in Windows PowerShell. Install from PyPI:
 
 ```bash
-python -m pip install "fiml[pandas]>=0.2.0,<0.3"
+python -m pip install "fiml[pandas]>=0.3.0,<0.4"
 ```
 
 Installing a compatible wheel requires no Rust toolchain. If pip builds from
@@ -170,7 +170,7 @@ when using only the NumPy API.
 To also fit supported scikit-learn transformations:
 
 ```bash
-python -m pip install "fiml[pandas,sklearn]>=0.2.0,<0.3"
+python -m pip install "fiml[pandas,sklearn]>=0.3.0,<0.4"
 ```
 
 The `sklearn` extra currently requires scikit-learn `>=1.9,<1.10`.
@@ -270,7 +270,7 @@ Behavior and limits
   extractor, timed windows advance on events for their own symbol. Global
   `Time` events do not advance other symbols' windows. Standalone timed
   indicators expose `observe(timestamp)` to advance time without adding data.
-  Timed SMA, OBV, trade count, trade volume, and VWAP support the full signed
+  Timed SMA, OBV, trade count, trade volume, VWAP, and volatility support the full signed
   `i64` timestamp range in standalone indicators, extractors, and pipelines.
   Buckets align down to multiples of aggregation, including negative times;
   they expire when `bucket_start + window <= timestamp`, even when the bucket
@@ -396,6 +396,8 @@ Other docs
   formats.
 * [0.2.0 migration guide](docs/sample-average-migration.md) — move sample
   averages into pipelines and re-export older JSON configurations.
+* [0.3.0 release and migration](docs/releases/v0.3.0.md) — named graph outputs,
+  Python result dictionaries, and pipeline JSON 4.0.
 
 Build the Rust API reference from the repository root:
 
