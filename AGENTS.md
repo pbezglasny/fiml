@@ -26,3 +26,10 @@ This is a financial library for machine learning prediction. It is intended for 
 - Apply clippy suggestions.
 - Do not suggest skipping or disabling CI checks
 - After adding new indicators, you need to update feature vector builder
+- When adding or updating documentation, also add or update the corresponding
+  Russian translation in `docs/ru/` in the same change. Mirror paths below `docs/`
+  directly in `docs/ru/`; mirror documentation elsewhere using its repository-relative
+  path (for example, `README.md` → `docs/ru/README.md` and
+  `crates/fiml-python/README.md` → `docs/ru/crates/fiml-python/README.md`).
+  Keep code examples, API identifiers, links, and section anchors consistent between
+  languages, and add new translations to `docs/ru/index.md`.
