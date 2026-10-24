@@ -45,14 +45,14 @@ manylinux 2.34; only the workflow establishes the required manylinux 2.17 builds
 
 ## Final validation record
 
-Record the final candidate SHA, CI and Release workflow URLs, artifact inventory,
-checksums, supported versions, and fresh-install results in the release PR body.
-Link that record here before freezing the candidate. Results for that exact SHA
+The [release PR #204](https://github.com/pbezglasny/fiml/pull/204#issue-0)
+records the final candidate SHA, CI and Release workflow URLs, artifact inventory,
+checksums, supported versions, and fresh-install results. Results for that exact SHA
 are authoritative; the checklist below is the procedure, not a claim of success.
 Keeping final run evidence in the PR avoids changing the tested commit merely
 to record its own SHA. Any subsequent commit requires a new validation record.
 
-- [ ] Push the candidate and open the release-preparation PR referencing #202.
+- [x] Push the candidate and open the release-preparation PR referencing #202.
 - [ ] Dispatch `ci.yml` on the candidate branch; verify the run's `head_sha`
   equals the intended commit and every existing check passes. Ordinary PR CI
   also remains required; its merge checkout is not exact-head evidence.
