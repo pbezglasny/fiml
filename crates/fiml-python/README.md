@@ -16,8 +16,7 @@ train/serve skew.
 
 ## Install from PyPI
 
-Requires **CPython 3.12 or newer**. This guide targets **0.3.0**; until that
-version is published to PyPI, use [source installation](#install-from-source).
+Requires **CPython 3.12 or newer**. This guide targets **0.4.0**.
 
 ```bash
 python3 -m venv .venv
@@ -27,11 +26,11 @@ Activate it with `source .venv/bin/activate` on Linux or macOS, or
 `.\.venv\Scripts\Activate.ps1` in Windows PowerShell, then install:
 
 ```bash
-python -m pip install "fiml[pandas]>=0.3.0,<0.4"
+python -m pip install "fiml[pandas]>=0.4.0,<0.5"
 ```
 
 Omit `[pandas]` for the NumPy-only API. To also fit supported scikit-learn
-transformations, install `"fiml[pandas,sklearn]>=0.3.0,<0.4"` instead.
+transformations, install `"fiml[pandas,sklearn]>=0.4.0,<0.5"` instead.
 Installing a compatible wheel requires no Rust toolchain; building from
 source requires the tools listed below.
 
@@ -92,7 +91,7 @@ ways to get there:
 
 ```bash
 source .venv/bin/activate
-python -m pip install "fiml[pandas]>=0.3.0,<0.4" jupyterlab
+python -m pip install "fiml[pandas]>=0.4.0,<0.5" jupyterlab
 jupyter lab
 ```
 
@@ -100,7 +99,7 @@ jupyter lab
 
 ```bash
 source .venv/bin/activate
-python -m pip install "fiml[pandas]>=0.3.0,<0.4" ipykernel
+python -m pip install "fiml[pandas]>=0.4.0,<0.5" ipykernel
 python -m ipykernel install --user --name fiml --display-name "Python (fiml)"
 ```
 
@@ -108,7 +107,7 @@ then pick the *Python (fiml)* kernel in the notebook UI. Alternatively, install
 directly from a notebook cell into whatever kernel is running:
 
 ```python
-%pip install "fiml[pandas]>=0.3.0,<0.4"
+%pip install "fiml[pandas]>=0.4.0,<0.5"
 ```
 
 > **Note:** `fiml` is a compiled extension module. After rebuilding the Rust
