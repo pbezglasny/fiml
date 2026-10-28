@@ -14,6 +14,22 @@
 конфигурации описываются здесь с инструкциями миграции. Версии JSON независимы от
 версий пакетов; используйте выпуск, поддерживающий загружаемый формат.
 
+<a id="unreleased"></a>
+
+## Не выпущено
+
+- Дельты стакана теперь покрывают включительные диапазоны ID. В Rust замените
+  прямой доступ к `OrderBookDelta.update_id` на `final_update_id`, а в литералах
+  структур задайте `first_update_id` и `final_update_id`. Существующие вызовы
+  `OrderBookDelta::new(id, changes)`, `OrderBookUpdate::new_delta(id, changes)`
+  и Python `OrderBookEvent.delta(...)` по-прежнему создают дельты с одним ID.
+  Для агрегированных обновлений используйте `OrderBookDelta::new_range`,
+  `OrderBookUpdate::new_delta_range` или Python `OrderBookEvent.delta_range`.
+  `Contiguous` принимает пересечения, покрывающие следующий требуемый ID,
+  в том числе при воспроизведении после снимка. Обратные границы возвращают
+  `OrderBookUpdateError::InvalidUpdateRange` (`ValueError` в Python).
+  Добавьте новый вариант в исчерпывающие сопоставления ошибок Rust.
+
 <a id="030--unreleased"></a>
 
 ## 0.3.0 — 2026-10-24

@@ -137,7 +137,8 @@
         "kind": "delta",
         "symbol": "btc",
         "timestamp": 0,
-        "update_id": 11,
+        "first_update_id": 11,
+        "final_update_id": 11,
         "changes": [
           [
             "bid",
@@ -213,7 +214,8 @@
         "kind": "delta",
         "symbol": "btc",
         "timestamp": 2,
-        "update_id": 12,
+        "first_update_id": 12,
+        "final_update_id": 12,
         "changes": [
           [
             "bid",
@@ -247,7 +249,8 @@
         "kind": "delta",
         "symbol": "btc",
         "timestamp": 3,
-        "update_id": 13,
+        "first_update_id": 13,
+        "final_update_id": 13,
         "changes": [
           [
             "bid",
@@ -281,7 +284,8 @@
         "kind": "delta",
         "symbol": "btc",
         "timestamp": 4,
-        "update_id": 14,
+        "first_update_id": 14,
+        "final_update_id": 14,
         "changes": [
           [
             "bid",
@@ -315,7 +319,8 @@
         "kind": "delta",
         "symbol": "btc",
         "timestamp": 5,
-        "update_id": 15,
+        "first_update_id": 15,
+        "final_update_id": 15,
         "changes": [
           [
             "bid",
@@ -349,7 +354,8 @@
         "kind": "delta",
         "symbol": "btc",
         "timestamp": 6,
-        "update_id": 16,
+        "first_update_id": 16,
+        "final_update_id": 16,
         "changes": [
           [
             "bid",
@@ -413,7 +419,8 @@
         "kind": "delta",
         "symbol": "btc",
         "timestamp": 7,
-        "update_id": 16,
+        "first_update_id": 16,
+        "final_update_id": 16,
         "changes": [
           [
             "bid",
@@ -442,7 +449,8 @@
         "kind": "delta",
         "symbol": "btc",
         "timestamp": 8,
-        "update_id": 17,
+        "first_update_id": 17,
+        "final_update_id": 17,
         "changes": [
           [
             "bid",
@@ -477,7 +485,8 @@
         "kind": "delta",
         "symbol": "btc",
         "timestamp": 8,
-        "update_id": 17,
+        "first_update_id": 17,
+        "final_update_id": 17,
         "changes": []
       },
       "raw": [
@@ -500,7 +509,8 @@
         "kind": "delta",
         "symbol": "btc",
         "timestamp": 9,
-        "update_id": 19,
+        "first_update_id": 19,
+        "final_update_id": 19,
         "changes": [
           [
             "bid",
@@ -534,7 +544,8 @@
         "kind": "delta",
         "symbol": "btc",
         "timestamp": 10,
-        "update_id": 20,
+        "first_update_id": 20,
+        "final_update_id": 20,
         "changes": [
           [
             "bid",
@@ -602,7 +613,8 @@
         "kind": "delta",
         "symbol": "btc",
         "timestamp": 12,
-        "update_id": 21,
+        "first_update_id": 21,
+        "final_update_id": 21,
         "changes": [
           [
             "bid",
@@ -694,7 +706,8 @@
         "kind": "delta",
         "symbol": "btc",
         "timestamp": 12,
-        "update_id": 22,
+        "first_update_id": 22,
+        "final_update_id": 22,
         "changes": [
           [
             "bid",
@@ -765,7 +778,8 @@
         "kind": "delta",
         "symbol": "btc",
         "timestamp": 15,
-        "update_id": 22,
+        "first_update_id": 22,
+        "final_update_id": 22,
         "changes": [
           [
             "bid",

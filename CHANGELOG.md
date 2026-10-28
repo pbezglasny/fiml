@@ -9,6 +9,19 @@ serialized configuration will be documented here with migration guidance.
 JSON format versions are independent of package versions; consumers must use
 a release that supports the format they load.
 
+## Unreleased
+
+- Order-book deltas now cover inclusive update-ID ranges. In Rust, replace direct
+  `OrderBookDelta.update_id` access with `final_update_id`, and supply both
+  `first_update_id` and `final_update_id` in struct literals. Existing
+  `OrderBookDelta::new(id, changes)`, `OrderBookUpdate::new_delta(id, changes)`,
+  and Python `OrderBookEvent.delta(...)` calls still create single-ID deltas.
+  Use `OrderBookDelta::new_range`, `OrderBookUpdate::new_delta_range`, or Python
+  `OrderBookEvent.delta_range` for aggregated updates. `Contiguous` accepts
+  overlaps covering the next required ID, including during snapshot replay;
+  malformed ranges return `OrderBookUpdateError::InvalidUpdateRange` (Python
+  `ValueError`). Update exhaustive Rust error matches for the new variant.
+
 ## 0.3.0 — 2026-10-24
 
 ### Breaking changes and migration

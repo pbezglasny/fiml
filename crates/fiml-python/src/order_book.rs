@@ -1,7 +1,8 @@
 //! Converts exact Python book payloads once before handing them to the core runtime.
 
 use fiml::order_book::{
-    OrderBookDelta, OrderBookLevel, OrderBookLevelUpdate, OrderBookSnapshot, OrderBookUpdate, Side,
+    OrderBookDelta, OrderBookLevel, OrderBookLevelUpdate, OrderBookSnapshot, OrderBookUpdate,
+    OrderBookUpdateError, Side,
 };
 use fiml::{Event, Symbol};
 use pyo3::{exceptions::PyValueError, prelude::*};
@@ -76,7 +77,7 @@ impl OrderBookEvent {
         })
     }
 
-    /// Builds a delta from (side, price, size) triples; zero sizes delete levels.
+    /// Builds a single-ID delta; both range bounds equal update_id. Zero sizes delete levels.
     #[staticmethod]
     fn delta(
         symbol: &str,
@@ -84,6 +85,28 @@ impl OrderBookEvent {
         update_id: u64,
         changes: Vec<[String; 3]>,
     ) -> PyResult<Self> {
+        Self::delta_range(symbol, timestamp, update_id, update_id, changes)
+    }
+
+    /// Builds one inclusive-range delta from (side, price, size) triples of absolute sizes.
+    /// Rejects first_update_id > final_update_id; zero sizes delete levels.
+    #[staticmethod]
+    fn delta_range(
+        symbol: &str,
+        timestamp: i64,
+        first_update_id: u64,
+        final_update_id: u64,
+        changes: Vec<[String; 3]>,
+    ) -> PyResult<Self> {
+        if first_update_id > final_update_id {
+            return Err(PyValueError::new_err(
+                OrderBookUpdateError::InvalidUpdateRange {
+                    first_update_id,
+                    final_update_id,
+                }
+                .to_string(),
+            ));
+        }
         let changes = changes
             .into_iter()
             .map(|[book_side, price, size]| {
@@ -97,7 +120,11 @@ impl OrderBookEvent {
         Ok(Self {
             symbol: super::intern_symbol(symbol)?,
             timestamp,
-            update: OrderBookUpdate::Delta(OrderBookDelta::new(update_id, changes)),
+            update: OrderBookUpdate::Delta(OrderBookDelta::new_range(
+                first_update_id,
+                final_update_id,
+                changes,
+            )),
         })
     }
 }

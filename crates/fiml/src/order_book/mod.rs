@@ -60,19 +60,35 @@ impl OrderBookLevelUpdate {
     }
 }
 
-/// Sequenced collection of absolute level-size changes.
+/// Absolute level-size changes covering an inclusive range of sequence IDs.
 #[derive(Clone)]
 pub struct OrderBookDelta {
-    /// Sequence ID of this delta.
-    pub update_id: OrderBookUpdateId,
+    /// First sequence ID included in this delta.
+    pub first_update_id: OrderBookUpdateId,
+    /// Final sequence ID included in this delta.
+    pub final_update_id: OrderBookUpdateId,
     /// Absolute level sizes to apply in order, not size increments.
     pub changes: Vec<OrderBookLevelUpdate>,
 }
 
 impl OrderBookDelta {
-    /// Creates a delta from a sequence ID and ordered level changes.
+    /// Creates a single-ID delta, setting both range bounds to `update_id`.
     pub fn new(update_id: OrderBookUpdateId, changes: Vec<OrderBookLevelUpdate>) -> Self {
-        Self { update_id, changes }
+        Self::new_range(update_id, update_id, changes)
+    }
+
+    /// Creates one delta covering both IDs and every ID between them.
+    /// The range and levels are validated when the update is applied.
+    pub fn new_range(
+        first_update_id: OrderBookUpdateId,
+        final_update_id: OrderBookUpdateId,
+        changes: Vec<OrderBookLevelUpdate>,
+    ) -> Self {
+        Self {
+            first_update_id,
+            final_update_id,
+            changes,
+        }
     }
 }
 
@@ -122,6 +138,19 @@ impl OrderBookUpdate {
     /// Creates a delta update without applying or validating its levels.
     pub fn new_delta(update_id: OrderBookUpdateId, changes: Vec<OrderBookLevelUpdate>) -> Self {
         OrderBookUpdate::Delta(OrderBookDelta::new(update_id, changes))
+    }
+
+    /// Creates an inclusive-range delta without applying or validating its range or levels.
+    pub fn new_delta_range(
+        first_update_id: OrderBookUpdateId,
+        final_update_id: OrderBookUpdateId,
+        changes: Vec<OrderBookLevelUpdate>,
+    ) -> Self {
+        OrderBookUpdate::Delta(OrderBookDelta::new_range(
+            first_update_id,
+            final_update_id,
+            changes,
+        ))
     }
 
     /// Creates a full snapshot update without applying or validating its levels.

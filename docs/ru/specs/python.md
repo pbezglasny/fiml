@@ -162,8 +162,14 @@ book.update_order_book(fiml.OrderBookEvent.snapshot(
     "BTCUSDT", 1, 1, [("98", "2")], [("102", "2")]))
 rows = book.transform_order_book([
     fiml.OrderBookEvent.delta("BTCUSDT", 2, 2, [("bid", "99", "3")]),
+    fiml.OrderBookEvent.delta_range("BTCUSDT", 3, 3, 7, [("bid", "99", "5")]),
 ])
 ```
+
+`delta` задаёт обе границы ID равными переданному ID; `delta_range` принимает
+включительную пару первого и конечного ID и отклоняет обратные границы до выдачи события.
+При `contiguous` диапазоны могут пересекаться, но обязаны покрывать следующий требуемый ID.
+Проверка устаревания и продвижение используют конечный ID, в том числе при воспроизведении после снимка.
 
 `update_order_book(event)` применяет один снимок или дельту;
 `transform_order_book(events)` возвращает строку на принятое событие. Оба метода

@@ -374,7 +374,8 @@
         "kind": "delta",
         "symbol": "btcusdt",
         "timestamp": 0,
-        "update_id": 2,
+        "first_update_id": 3,
+        "final_update_id": 10,
         "changes": [
           [
             "bid",
@@ -419,7 +420,7 @@
         "kind": "snapshot",
         "symbol": "btcusdt",
         "timestamp": 1,
-        "update_id": 1,
+        "update_id": 5,
         "bids": [
           [
             "98",
@@ -477,7 +478,8 @@
         "kind": "delta",
         "symbol": "btcusdt",
         "timestamp": 2,
-        "update_id": 2,
+        "first_update_id": 3,
+        "final_update_id": 10,
         "changes": [
           [
             "bid",
@@ -608,7 +610,8 @@
         "kind": "delta",
         "symbol": "btcusdt",
         "timestamp": 5,
-        "update_id": 4,
+        "first_update_id": 16,
+        "final_update_id": 20,
         "changes": [
           [
             "bid",
@@ -617,7 +620,7 @@
           ]
         ]
       },
-      "error": "expected update ID 3, received 4",
+      "error": "expected update ID 11, received 16",
       "raw": [
         100,
         4,
@@ -653,7 +656,8 @@
         "kind": "delta",
         "symbol": "btcusdt",
         "timestamp": 6,
-        "update_id": 5,
+        "first_update_id": 19,
+        "final_update_id": 25,
         "changes": [
           [
             "bid",
@@ -698,7 +702,7 @@
         "kind": "snapshot",
         "symbol": "btcusdt",
         "timestamp": 7,
-        "update_id": 3,
+        "update_id": 17,
         "bids": [
           [
             "98",
@@ -756,7 +760,7 @@
         "kind": "snapshot",
         "symbol": "btcusdt",
         "timestamp": 8,
-        "update_id": 6,
+        "update_id": 30,
         "bids": [
           [
             "98",
@@ -801,7 +805,8 @@
         "kind": "delta",
         "symbol": "btcusdt",
         "timestamp": 9,
-        "update_id": 7,
+        "first_update_id": 31,
+        "final_update_id": 35,
         "changes": [
           [
             "bid",
@@ -846,7 +851,7 @@
         "kind": "snapshot",
         "symbol": "btcusdt",
         "timestamp": 10,
-        "update_id": 6,
+        "update_id": 30,
         "bids": [
           [
             "98",
@@ -868,7 +873,7 @@
           ]
         ]
       },
-      "error": "snapshot 6 is not newer",
+      "error": "snapshot 30 is not newer",
       "raw": [
         null,
         null,
@@ -942,7 +947,8 @@
         "kind": "delta",
         "symbol": "ethusdt",
         "timestamp": 12,
-        "update_id": 100,
+        "first_update_id": 100,
+        "final_update_id": 100,
         "changes": [
           [
             "bid",

@@ -152,8 +152,14 @@ book.update_order_book(fiml.OrderBookEvent.snapshot(
     "BTCUSDT", 1, 1, [("98", "2")], [("102", "2")]))
 rows = book.transform_order_book([
     fiml.OrderBookEvent.delta("BTCUSDT", 2, 2, [("bid", "99", "3")]),
+    fiml.OrderBookEvent.delta_range("BTCUSDT", 3, 3, 7, [("bid", "99", "5")]),
 ])
 ```
+
+`delta` sets both update-ID bounds to the supplied ID; `delta_range` accepts an
+inclusive first/final pair and rejects reversed bounds before exposing the event.
+Contiguous ranges may overlap but must cover the next required ID. Stale detection
+and advancement use the final ID, including during snapshot replay.
 
 `update_order_book(event)` applies one snapshot or delta;
 `transform_order_book(events)` returns one row per accepted event. Both are

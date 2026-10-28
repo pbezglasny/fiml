@@ -26,9 +26,9 @@ with tempfile.TemporaryDirectory() as directory:
     pipeline = fiml.ModelInputPipeline.from_json(artifact.read_text())
 
 rows = pipeline.transform_order_book([
-    fiml.OrderBookEvent.snapshot("BTCUSDT", 1, 1,
+    fiml.OrderBookEvent.snapshot("BTCUSDT", 1, 100,
         [("98", "2"), ("97", "6")], [("102", "2"), ("103", "6")]),
-    fiml.OrderBookEvent.delta("BTCUSDT", 2, 2, [("bid", "98", "6")]),
+    fiml.OrderBookEvent.delta_range("BTCUSDT", 2, 101, 105, [("bid", "98", "6")]),
 ])
 np.testing.assert_equal(rows["model"], [[0, 0, np.nan], [0, 0.2, 2]])
 print(pipeline.output("model").feature_names())

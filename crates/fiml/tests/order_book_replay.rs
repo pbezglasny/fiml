@@ -16,7 +16,6 @@ fn event(value: &Value) -> Event {
     if value["kind"] == "price" {
         return Event::price(symbol, value["price"].as_f64().unwrap(), timestamp);
     }
-    let id = value["update_id"].as_u64().unwrap();
     let decimal = |value: &Value| Decimal::from_str_exact(value.as_str().unwrap()).unwrap();
     if value["kind"] == "snapshot" {
         let levels = |side: &str| {
@@ -30,7 +29,11 @@ fn event(value: &Value) -> Event {
         Event::order_book_snapshot(
             symbol,
             timestamp,
-            OrderBookSnapshot::new(id, levels("bids"), levels("asks")),
+            OrderBookSnapshot::new(
+                value["update_id"].as_u64().unwrap(),
+                levels("bids"),
+                levels("asks"),
+            ),
         )
     } else {
         let changes = value["changes"]
@@ -49,7 +52,15 @@ fn event(value: &Value) -> Event {
                 )
             })
             .collect();
-        Event::order_book_delta(symbol, timestamp, OrderBookDelta::new(id, changes))
+        Event::order_book_delta(
+            symbol,
+            timestamp,
+            OrderBookDelta::new_range(
+                value["first_update_id"].as_u64().unwrap(),
+                value["final_update_id"].as_u64().unwrap(),
+                changes,
+            ),
+        )
     }
 }
 
