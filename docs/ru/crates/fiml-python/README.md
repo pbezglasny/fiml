@@ -542,15 +542,15 @@ raw = (fiml.FeatureExtractorSpec()
        .order_book_best_bid_size("BTCUSDT"))
 extractor = fiml.FeatureExtractor.from_json(raw.to_json())
 rows = extractor.transform_order_book([
-    fiml.OrderBookEvent.snapshot("BTCUSDT", 1, 1,
+    fiml.OrderBookEvent.snapshot("BTCUSDT", 1, 100,
         [("98", "2"), ("97", "6")], [("102", "2"), ("103", "6")]),
-    fiml.OrderBookEvent.delta("BTCUSDT", 2, 2, [("bid", "98", "6")]),
+    fiml.OrderBookEvent.delta_range("BTCUSDT", 2, 101, 105, [("bid", "98", "6")]),
 ])
 ```
 
 `configure_order_book(symbol, *, update_policy, buffer_size)` сериализует только
-параметры создания. Политики: `contiguous` (последовательные ID) и `monotonic`
-(возрастающие ID с допустимыми пропусками). Повторные/глобальные символы запрещены;
+параметры создания. Политики: `contiguous` (диапазоны покрывают следующий требуемый ID)
+и `monotonic` (возрастающие конечные ID с допустимыми пропусками). Повторные/глобальные символы запрещены;
 недостающий стакан вызывает ошибку создания. После JSON выходы начинаются с `NaN`.
 Ёмкость буфера ограничивает сохранённые дельты; нулевая ёмкость сохраняет поведение
 ядра и вызывает ошибку ёмкости, когда дельту требуется сохранить.
@@ -576,6 +576,22 @@ rows = extractor.transform_order_book([
 пары `(price, size)`, дельты — тройки `(side, price, size)`; разрешены списки и
 кортежи. Нулевой объём удаляет уровень. Символы событий — имена, независимые от
 числовых дескрипторов `symbol()`. Время — знаковые int64 миллисекунды, ID — uint64.
+
+`OrderBookEvent.delta(symbol, timestamp, update_id, changes)` сохраняет создание
+дельты с одним ID: обе границы равны `update_id`. Для включительного диапазона,
+например `U`/`u` из Binance diff-depth, используйте
+`OrderBookEvent.delta_range(symbol, timestamp, first_update_id, final_update_id, changes)`.
+Диапазон остаётся одним событием с абсолютными объёмами уровней, занимает один слот
+буфера и не разбивается на отдельные ID. Обратный порядок границ вызывает `ValueError`
+при создании. Для продвигающих состояние диапазонов `contiguous` требует
+`first_update_id <= last_update_id + 1 <= final_update_id`: стакан с ID `100`
+принимает `[101, 105]`, как и стакан с ID `103`. Начало диапазона с `102` оставляет
+пропуск после `100` и требует восстановления синхронизации; `monotonic` допускает
+этот пропуск. Обе политики игнорируют диапазоны с конечным ID не выше последнего
+и при применении продвигают состояние до конечного ID. Проверка буфера и воспроизведение
+после снимка следуют тем же правилам: снимок внутри диапазона позволяет его применить,
+а отсутствующий диапазон отклоняет воспроизведение без изменения стакана. ID не
+переходят через ноль после `2**64 - 1`; последующие допустимые дельты устарели.
 
 Оба экземпляра имеют `update_order_book(event)` и `transform_order_book(events)`.
 Экстрактор возвращает матрицу, конвейер — словарь матриц в порядке регистрации,
@@ -687,8 +703,8 @@ uv run --with ./crates/fiml-python python crates/fiml-python/examples/binance_de
 [Частичная глубина Binance](https://github.com/binance/binance-spot-api-docs/blob/master/web-socket-streams.md#partial-book-depth-streams)
 `btcusdt@depth20@100ms` заменяет лучшие 20 уровней bid/ask при каждом обновлении.
 Признаки описывают только их. Пример использует снимки без буфера дельт. Для полного
-стакана нужны отдельный diff-depth поток, REST-снимок и проверка диапазонов `U`/`u`
-Binance до применения дельт.
+стакана нужны отдельный diff-depth поток, REST-снимок и `OrderBookEvent.delta_range`
+с границами Binance `U`/`u` при политике `contiguous`.
 
 <a id="determinism-rules-read-these"></a>
 

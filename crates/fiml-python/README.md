@@ -529,15 +529,15 @@ raw = (fiml.FeatureExtractorSpec()
        .order_book_best_bid_size("BTCUSDT"))
 extractor = fiml.FeatureExtractor.from_json(raw.to_json())
 rows = extractor.transform_order_book([
-    fiml.OrderBookEvent.snapshot("BTCUSDT", 1, 1,
+    fiml.OrderBookEvent.snapshot("BTCUSDT", 1, 100,
         [("98", "2"), ("97", "6")], [("102", "2"), ("103", "6")]),
-    fiml.OrderBookEvent.delta("BTCUSDT", 2, 2, [("bid", "98", "6")]),
+    fiml.OrderBookEvent.delta_range("BTCUSDT", 2, 101, 105, [("bid", "98", "6")]),
 ])
 ```
 
 `configure_order_book(symbol, *, update_policy, buffer_size)` serializes only
-construction parameters. Policies are `contiguous` (consecutive IDs) and
-`monotonic` (increasing IDs, gaps allowed). Duplicate/global symbols are rejected;
+construction parameters. Policies are `contiguous` (ranges cover the next required ID)
+and `monotonic` (increasing final IDs, gaps allowed). Duplicate/global symbols are rejected;
 missing books fail runtime construction. Rebuilding from JSON starts fresh with
 `NaN` outputs. Buffer capacity bounds retained deltas; zero capacity retains the
 core's behavior and raises a capacity error when a delta needs retention.
@@ -564,6 +564,21 @@ Snapshots accept `(price, size)` pairs; deltas accept `(side, price, size)` trip
 Both lists and tuples are accepted. Zero size deletes a level. Event symbols are
 names, independent of numeric `symbol()` handles. Timestamps are signed int64
 milliseconds and update IDs are unsigned uint64.
+
+`OrderBookEvent.delta(symbol, timestamp, update_id, changes)` remains the single-ID
+constructor: both bounds equal `update_id`. Use
+`OrderBookEvent.delta_range(symbol, timestamp, first_update_id, final_update_id, changes)`
+for an inclusive range, such as Binance diff-depth `U`/`u`. Each range is one event
+with absolute level sizes, consumes one buffer slot, and is never expanded per ID.
+Reversed bounds raise `ValueError` during construction. For advancing ranges,
+`contiguous` requires `first_update_id <= last_update_id + 1 <= final_update_id`:
+a book at `100` accepts `[101, 105]`, and a book at `103` also accepts that range.
+A range starting at `102` leaves a gap after `100` and requires resynchronization;
+`monotonic` permits that gap. Both policies ignore ranges ending at or below the
+last ID and advance to the final ID when applied. Buffered continuity and snapshot
+replay follow the same rules: a snapshot inside a range can bridge to it, while a
+missing range rejects replay without changing the book. IDs never wrap after
+`2**64 - 1`; subsequent valid deltas are stale.
 
 Both runtimes expose `update_order_book(event)` and
 `transform_order_book(events)`. Extractors return a matrix; pipelines return a
@@ -673,7 +688,7 @@ The [Binance partial-depth stream](https://github.com/binance/binance-spot-api-d
 `btcusdt@depth20@100ms` replaces the top 20 bids and asks on each update. Features
 therefore describe only those levels. This example uses snapshots with no delta
 buffer. Full-book replay requires the separate diff-depth stream, a REST snapshot,
-and validation of Binance's `U`/`u` update ranges before applying deltas.
+and `OrderBookEvent.delta_range` with Binance's `U`/`u` bounds under `contiguous`.
 
 ## Determinism rules (read these)
 

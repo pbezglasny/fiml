@@ -17,7 +17,8 @@ FLOW_FIXTURE = json.loads(
 
 def book_event(event):
     payload = {key: value for key, value in event.items() if key != "kind"}
-    return getattr(fiml.OrderBookEvent, event["kind"])(**payload)
+    constructor = "delta_range" if event["kind"] == "delta" else event["kind"]
+    return getattr(fiml.OrderBookEvent, constructor)(**payload)
 
 
 def snapshot(timestamp=1, update_id=1, size="2", symbol="btcusdt"):
@@ -208,6 +209,77 @@ def test_event_constructors_validate_ids_timestamps_and_sides():
     instance.update_order_book(snapshot(-2**63, 2**64-1))
     instance.update_order_book(delta(2**63-1, 2**64-1, "9"))
     np.testing.assert_equal(instance.values(), [2])
+
+
+@pytest.mark.parametrize("model", [False, True])
+def test_ranges_apply_once_overlap_and_replay_after_snapshot(model):
+    instance = runtime(model)
+    rows = instance.transform_order_book([
+        fiml.OrderBookEvent.delta_range("BTCUSDT", 0, 101, 105, [("bid", "98", "5")]),
+        snapshot(1, 103),
+        fiml.OrderBookEvent.delta_range(
+            symbol="BTCUSDT", timestamp=2, first_update_id=106, final_update_id=110,
+            changes=[("bid", "98", "7")]),
+        fiml.OrderBookEvent.delta_range("BTCUSDT", 3, 109, 115, [("bid", "98", "9")]),
+        fiml.OrderBookEvent.delta_range("BTCUSDT", 4, 101, 110, [("bid", "98", "99")]),
+        fiml.OrderBookEvent.delta_range("BTCUSDT", 5, 109, 115, [("bid", "98", "99")]),
+        snapshot(6, 108),
+        fiml.OrderBookEvent.delta("BTCUSDT", 7, 116, [("bid", "98", "11")]),
+    ])
+    np.testing.assert_equal(rows, [[np.nan], [5], [7], [9], [9], [9], [9], [11]])
+
+
+@pytest.mark.parametrize("model", [False, True])
+def test_range_gap_retains_delta_until_snapshot_covers_missing_history(model):
+    instance = runtime(model)
+    instance.update_order_book(snapshot(0, 100))
+    with pytest.raises(ValueError, match="expected update ID 101, received 102"):
+        instance.update_order_book(fiml.OrderBookEvent.delta_range(
+            "BTCUSDT", 1, 102, 105, [("bid", "98", "5")]))
+    np.testing.assert_equal(instance.values(), [2])
+    with pytest.raises(ValueError, match="expected update ID 106, received 107"):
+        instance.update_order_book(fiml.OrderBookEvent.delta_range(
+            "BTCUSDT", 2, 107, 110, [("bid", "98", "7")]))
+    with pytest.raises(ValueError, match="snapshot 103 requires update ID 106, received 107"):
+        instance.update_order_book(snapshot(3, 103))
+    np.testing.assert_equal(instance.values(), [2])
+    instance.update_order_book(snapshot(3, 108))
+    np.testing.assert_equal(instance.values(), [7])
+    instance.update_order_book(delta(4, 111, "9"))
+    np.testing.assert_equal(instance.values(), [9])
+
+
+@pytest.mark.parametrize("model", [False, True])
+def test_range_construction_rejects_invalid_ids_before_runtime_changes(model):
+    instance = runtime(model)
+    instance.update_order_book(snapshot(0, 100))
+    for first, final_id in [(106, 105), (101, 99), (2**64 - 1, 0)]:
+        with pytest.raises(ValueError, match="invalid update ID range"):
+            instance.update_order_book(fiml.OrderBookEvent.delta_range(
+                "BTCUSDT", 1, first, final_id, [("bid", "98", "99")]))
+    for first, final_id in [(-1, 0), (0, -1), (2**64, 2**64 - 1), (0, 2**64)]:
+        with pytest.raises(OverflowError):
+            fiml.OrderBookEvent.delta_range("BTCUSDT", 1, first, final_id, [])
+    np.testing.assert_equal(instance.values(), [2])
+    instance.update_order_book(fiml.OrderBookEvent.delta_range(
+        "BTCUSDT", 1, 101, 105, [("bid", "98", "5")]))
+    np.testing.assert_equal(instance.values(), [5])
+
+
+@pytest.mark.parametrize("model", [False, True])
+def test_range_replay_supports_maximum_ids(model):
+    instance = runtime(model)
+    maximum = 2**64 - 1
+    rows = instance.transform_order_book([
+        fiml.OrderBookEvent.delta_range("BTCUSDT", 0, maximum - 4, maximum,
+                                       [("bid", "98", "7")]),
+        snapshot(1, maximum - 2),
+        fiml.OrderBookEvent.delta_range("BTCUSDT", 2, 0, maximum,
+                                       [("bid", "98", "99")]),
+        snapshot(3, maximum, "3"),
+        delta(4, maximum, "99"),
+    ])
+    np.testing.assert_equal(rows, [[np.nan], [7], [7], [3], [3]])
 
 
 @pytest.mark.parametrize("model", [False, True])
