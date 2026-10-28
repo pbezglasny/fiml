@@ -121,8 +121,7 @@ within each instrument and chronological dataset split.
 Installation
 --------
 
-These examples target **0.3.0**. Until that version is published to crates.io
-and PyPI, install from source using the instructions below.
+These examples target **0.4.0**.
 
 ### Rust
 
@@ -130,7 +129,7 @@ Requires Rust **1.89 or newer** and a native linker for your platform.
 From your application's directory, add Fiml from crates.io:
 
 ```bash
-cargo add fiml@0.3.0 --features serde
+cargo add fiml@0.4.0 --features serde
 cargo add serde_json --features float_roundtrip
 ```
 
@@ -158,7 +157,7 @@ Activate it with `source .venv/bin/activate` on Linux or macOS, or
 `.\.venv\Scripts\Activate.ps1` in Windows PowerShell. Install from PyPI:
 
 ```bash
-python -m pip install "fiml[pandas]>=0.3.0,<0.4"
+python -m pip install "fiml[pandas]>=0.4.0,<0.5"
 ```
 
 Installing a compatible wheel requires no Rust toolchain. If pip builds from
@@ -170,7 +169,7 @@ when using only the NumPy API.
 To also fit supported scikit-learn transformations:
 
 ```bash
-python -m pip install "fiml[pandas,sklearn]>=0.3.0,<0.4"
+python -m pip install "fiml[pandas,sklearn]>=0.4.0,<0.5"
 ```
 
 The `sklearn` extra currently requires scikit-learn `>=1.9,<1.10`.
@@ -396,6 +395,7 @@ Other docs
   formats.
 * [0.2.0 migration guide](docs/sample-average-migration.md) — move sample
   averages into pipelines and re-export older JSON configurations.
+* [0.4.0 release and migration](docs/releases/v0.4.0.md) — order-book update-ID ranges.
 * [0.3.0 release and migration](docs/releases/v0.3.0.md) — named graph outputs,
   Python result dictionaries, and pipeline JSON 4.0.
 

@@ -9,7 +9,9 @@ serialized configuration will be documented here with migration guidance.
 JSON format versions are independent of package versions; consumers must use
 a release that supports the format they load.
 
-## Unreleased
+## 0.4.0 — 2026-10-28
+
+### Breaking changes and migration
 
 - Order-book deltas now cover inclusive update-ID ranges. In Rust, replace direct
   `OrderBookDelta.update_id` access with `final_update_id`, and supply both
@@ -21,6 +23,10 @@ a release that supports the format they load.
   overlaps covering the next required ID, including during snapshot replay;
   malformed ranges return `OrderBookUpdateError::InvalidUpdateRange` (Python
   `ValueError`). Update exhaustive Rust error matches for the new variant.
+
+See the [0.4.0 release notes and migration examples](docs/releases/v0.4.0.md).
+Extractor JSON `2.0`, pipeline JSON `4.0`, feature IDs, and supported platforms
+are unchanged from 0.3.0.
 
 ## 0.3.0 — 2026-10-24
 

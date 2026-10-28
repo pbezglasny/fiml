@@ -126,8 +126,7 @@ Python также предоставляет [`future_value`](crates/fiml-python
 
 ## Установка
 
-Примеры рассчитаны на **0.3.0**. Пока эта версия не опубликована в crates.io и PyPI,
-устанавливайте из исходников по инструкциям ниже.
+Примеры рассчитаны на **0.4.0**.
 
 <a id="rust"></a>
 
@@ -137,7 +136,7 @@ Python также предоставляет [`future_value`](crates/fiml-python
 Из каталога приложения добавьте Fiml из crates.io:
 
 ```bash
-cargo add fiml@0.3.0 --features serde
+cargo add fiml@0.4.0 --features serde
 cargo add serde_json --features float_roundtrip
 ```
 
@@ -166,7 +165,7 @@ python3 -m venv .venv
 `.\.venv\Scripts\Activate.ps1` в Windows PowerShell. Установите пакет из PyPI:
 
 ```bash
-python -m pip install "fiml[pandas]>=0.3.0,<0.4"
+python -m pip install "fiml[pandas]>=0.4.0,<0.5"
 ```
 
 Совместимый wheel не требует инструментов Rust. При сборке pip из исходников
@@ -177,7 +176,7 @@ python -m pip install "fiml[pandas]>=0.3.0,<0.4"
 Для обучения поддерживаемых преобразований scikit-learn:
 
 ```bash
-python -m pip install "fiml[pandas,sklearn]>=0.3.0,<0.4"
+python -m pip install "fiml[pandas,sklearn]>=0.4.0,<0.5"
 ```
 
 Набор `sklearn` сейчас требует scikit-learn `>=1.9,<1.10`.
@@ -406,6 +405,7 @@ cargo bench -p fiml --bench compiled_dispatch -- --test
   [JSON-схема конвейера](../pipeline-spec.schema.json) — форматы экспорта конфигурации.
 * [Миграция на 0.2.0](sample-average-migration.md) — перенос средних по отсчётам
   в конвейеры и повторный экспорт старых конфигураций JSON.
+* [Выпуск и миграция на 0.4.0](releases/v0.4.0.md) — диапазоны ID обновлений стакана.
 * [Выпуск и миграция на 0.3.0](releases/v0.3.0.md) — именованные выходы графа,
   словари результатов Python и JSON конвейера 4.0.
 

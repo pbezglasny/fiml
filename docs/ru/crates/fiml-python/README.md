@@ -18,8 +18,7 @@ pandas/TA-Lib и Rust) расходятся: EMA инициализируетс�
 
 ## Установка из PyPI
 
-Нужен **CPython 3.12 или новее**. Руководство рассчитано на **0.3.0**; до публикации
-в PyPI используйте [установку из исходников](#install-from-source).
+Нужен **CPython 3.12 или новее**. Руководство рассчитано на **0.4.0**.
 
 ```bash
 python3 -m venv .venv
@@ -29,11 +28,11 @@ python3 -m venv .venv
 `.\.venv\Scripts\Activate.ps1` в Windows PowerShell, затем установите пакет:
 
 ```bash
-python -m pip install "fiml[pandas]>=0.3.0,<0.4"
+python -m pip install "fiml[pandas]>=0.4.0,<0.5"
 ```
 
 Для API только на NumPy опустите `[pandas]`. Для обучения поддерживаемых
-преобразований scikit-learn установите `"fiml[pandas,sklearn]>=0.3.0,<0.4"`.
+преобразований scikit-learn установите `"fiml[pandas,sklearn]>=0.4.0,<0.5"`.
 Совместимый wheel не требует Rust; сборка из исходников требует инструментов ниже.
 
 <a id="install-from-source"></a>
@@ -100,7 +99,7 @@ python crates/fiml-python/examples/quickstart.py
 
 ```bash
 source .venv/bin/activate
-python -m pip install "fiml[pandas]>=0.3.0,<0.4" jupyterlab
+python -m pip install "fiml[pandas]>=0.4.0,<0.5" jupyterlab
 jupyter lab
 ```
 
@@ -108,7 +107,7 @@ jupyter lab
 
 ```bash
 source .venv/bin/activate
-python -m pip install "fiml[pandas]>=0.3.0,<0.4" ipykernel
+python -m pip install "fiml[pandas]>=0.4.0,<0.5" ipykernel
 python -m ipykernel install --user --name fiml --display-name "Python (fiml)"
 ```
 
@@ -116,7 +115,7 @@ python -m ipykernel install --user --name fiml --display-name "Python (fiml)"
 из ячейки в окружение текущего ядра:
 
 ```python
-%pip install "fiml[pandas]>=0.3.0,<0.4"
+%pip install "fiml[pandas]>=0.4.0,<0.5"
 ```
 
 > **Примечание:** `fiml` — скомпилированное расширение. После пересборки Rust
